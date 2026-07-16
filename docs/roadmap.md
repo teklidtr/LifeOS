@@ -100,3 +100,27 @@ Delivered release capabilities include canonical adaptive preferences,
 historical replay without outcome leakage, conservative schema migration,
 feedback-driven proposals, recovery testing, Obsidian keyboard paths, fixture
 histories, and versioned Python/plugin release checks.
+
+## Phase 12: Goal-to-plan copilot
+
+LifeOS helps the user turn a broad goal or emerging intention into reviewable
+medium-term plan options and a deliberately small set of near-term actions. The
+workflow is conversational, but canonical changes remain proposal-gated and
+rolling-wave planning prevents false precision.
+
+Planned capabilities:
+
+- deterministic goal-readiness diagnostics
+- bounded, previewable planning context packs
+- guided clarification that may conclude with plan, experiment, park, or no action
+- structured alternative plan options with visible assumptions and tradeoffs
+- milestone planning with only the current wave decomposed into tasks
+- portfolio capacity and conflict checks without a universal productivity score
+- provenance, explanations, comparisons, and counterfactuals
+- safe goal and plan proposals using existing validation and recovery
+- an Obsidian-native copilot workspace
+- goal review and rolling replanning linked to explicit execution evidence
+- provider-neutral adapters, deterministic fallback, end-to-end tests, and user-manual coverage
+
+Implementation begins with `LIFEOS-1200`. Downstream tasks `LIFEOS-1201` through
+`LIFEOS-1211` remain in backlog until the architecture contracts are accepted.

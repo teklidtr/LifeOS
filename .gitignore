@@ -14,3 +14,7 @@ build/
 .tokensave/
 
 .DS_Store
+
+# Local model-specific agent workspaces; AGENTS.md is the repository authority.
+.claude/
+CLAUDE.md
