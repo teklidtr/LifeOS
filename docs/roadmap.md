@@ -184,3 +184,7 @@ provider-neutral deterministic fallbacks, explainable hybrid ranking, duplicate
 suppression, protected-scope denial, canonical conversation branches, deterministic
 citation validation, stale evidence, proposal previews, index recovery, large-vault
 budgets, Obsidian keyboard paths, end-to-end fixtures, and manual-link validation.
+
+## Phase 15: Personal experiments
+
+LifeOS supports bounded, safety-aware personal experiments as canonical Markdown. The release includes protocol design warnings, explicit lifecycle and amendments, quantitative and qualitative observations, deterministic descriptive analysis, daily and weekly review integration, proposal-gated follow-up actions, rebuildable history, and an Obsidian-native workspace. See [Personal Experiment Architecture](personal-experiment-architecture.md).
