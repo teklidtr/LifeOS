@@ -1,16 +1,16 @@
 ---
-id: LIFEOS-1603
-title: Add meal exercise enrichment and safety
-status: ready
+id: LIFEOS-1604
+title: Integrate captures with LifeOS workflows
+status: completed
 phase: 16
 depends_on:
-  - LIFEOS-1602
+  - LIFEOS-1603
 risk: high
 ---
 
 # Goal
 
-Meal and exercise schemas, uncertainty, plan-versus-performance, provider-neutral enrichment, and conservative safety messages.
+Retrieval, conversations, reviews, experiments, linking, and proposal-based follow-up.
 
 # Scope
 
@@ -44,7 +44,10 @@ Meal and exercise schemas, uncertainty, plan-versus-performance, provider-neutra
 
 # Validation commands
 
-- Recorded at completion.
+- `PYTHONPATH=src python3 -m pytest -q --import-mode=importlib tests/captures tests/experiments/test_artifact.py` -> 34 passed.
+- `python3 -m compileall -q src/lifeos/captures` -> passed.
+- `git diff --check` -> passed.
+- Ruff and mypy were unavailable in the sandbox; locked dependency installation could not reach the package registry.
 
 # Relevant design decisions
 
