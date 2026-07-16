@@ -188,7 +188,9 @@ previewed context items, strict output schema, and resource limits. Adapters may
 be local, remote, fixture-based, or absent. Repository contracts never require a
 provider-specific file, field, environment variable, or instruction format.
 
-## Implementation sequence
+## Shipped implementation
+
+Phase 12 is complete:
 
 1. `LIFEOS-1201`: contracts and conservative parsing.
 2. `LIFEOS-1202`: readiness diagnostics and bounded context.
@@ -201,3 +203,9 @@ provider-specific file, field, environment variable, or instruction format.
 9. `LIFEOS-1209`: Obsidian workspace.
 10. `LIFEOS-1210`: reviews and replanning.
 11. `LIFEOS-1211`: end-to-end release validation and documentation.
+
+Release fixtures exercise deterministic and adapter-assisted paths, context
+privacy, stale and malformed inputs, proposal application and recovery, existing
+plan suppression, changed-evidence replanning, schema compatibility, large-vault
+budgets, and disposable-state removal. The user workflow is documented in
+[User Manual Chapter 9](user-manual/09-goal-to-plan-copilot.md).

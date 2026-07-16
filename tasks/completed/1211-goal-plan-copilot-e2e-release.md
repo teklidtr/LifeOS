@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1211
 title: Validate and release the goal-to-plan copilot
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1201
@@ -121,3 +121,11 @@ git diff --check
 - DD-023: Tasks stay with plans
 - DD-026: Exercise, diet, and hobbies are not merely productivity inputs
 - DD-036: Obsidian is the primary interface and Python is the sole business-rule engine
+
+# Release validation evidence
+
+- `python -m pytest --import-mode=importlib tests/copilot tests/attention tests/reviews tests/planning tests/planning_feedback tests/proposals tests/e2e -q`: 475 passed.
+- All non-optional Python suites: 1180 passed and 1 skipped. Five optional AI/MCP collection modules require the unavailable `pydantic_ai` and `mcp` extras.
+- Obsidian plugin lint, typecheck, 25 tests, and build passed.
+- `./scripts/validate-release.sh` passed, including 69 copilot release tests, package/protocol compatibility, plugin checks, manual-link validation, and `git diff --check`.
+- `ruff` and `mypy` were not installed in the execution image. Locked extra installation was attempted but the offline environment could not reach the package sources.

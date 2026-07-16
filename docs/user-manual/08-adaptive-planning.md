@@ -1,4 +1,4 @@
-[← Troubleshooting](07-troubleshooting.md) · [Manual home](README.md)
+[← Troubleshooting](07-troubleshooting.md) · [Manual home](README.md) · [Next: Goal-to-Plan Copilot →](09-goal-to-plan-copilot.md)
 
 # Adaptive Planning and Feedback
 
@@ -340,4 +340,4 @@ biased, inconsistent, or affected by unrecorded circumstances. It does not estab
 relationships. It cannot know whether a physical-world task happened when no outcome was
 recorded, though the attention engine can notice the missing page and ask.
 
-[← Troubleshooting](07-troubleshooting.md) · [Manual home](README.md)
+[← Troubleshooting](07-troubleshooting.md) · [Manual home](README.md) · [Next: Goal-to-Plan Copilot →](09-goal-to-plan-copilot.md)

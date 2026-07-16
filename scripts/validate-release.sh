@@ -29,7 +29,10 @@ assert f'RUNTIME_SCHEMA_VERSION = {DESKTOP_RUNTIME_SCHEMA_VERSION}' in protocol_
 assert DESKTOP_RUNTIME_SCHEMA_VERSION == 1
 print('Release versions, protocol, and runtime schema are compatible.')
 PY
+PYTHONPATH=src python3 -m pytest --import-mode=importlib \
+  tests/copilot tests/e2e/test_goal_plan_copilot.py -q
 npm --prefix packages/obsidian-plugin ci
+npm --prefix packages/obsidian-plugin run lint
 npm --prefix packages/obsidian-plugin run typecheck
 npm --prefix packages/obsidian-plugin test
 npm --prefix packages/obsidian-plugin run build

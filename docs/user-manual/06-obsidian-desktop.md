@@ -31,6 +31,16 @@ Attention cards explain their evidence and offer bounded actions. **Ask tomorrow
 an item; **Dismiss** hides that stable item; **Stop tracking** changes the routine rather
 than blaming the user. Optional background notifications use generic text by default.
 
+## Goal-to-plan copilot
+
+From an active goal note, run **Plan from Active Goal Note**, or open **Open
+Goal-to-Plan Copilot** from the command palette. The workspace lets you preview
+and redact context, answer one clarification at a time, compare plan options,
+edit rolling-wave actions, inspect capacity and provenance, and create a normal
+reviewable proposal. Existing active plans are surfaced before another plan is
+created. See [Goal-to-Plan Copilot](09-goal-to-plan-copilot.md) for the complete
+workflow and privacy controls.
+
 ## Reviews and proposals
 
 The review wizard saves progress and writes a readable note under `reviews/`. Generated

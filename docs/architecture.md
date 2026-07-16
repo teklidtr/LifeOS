@@ -170,3 +170,21 @@ are deterministic boundaries. Model adapters only create validated suggestions.
 The user previews context and edits drafts in Obsidian; canonical changes still
 use the existing proposal lifecycle. See
 [Goal-to-Plan Copilot Architecture](goal-to-plan-copilot-architecture.md).
+
+Planning sessions and replanning reviews live under disposable `.lifeos/`
+runtime state. Goals, plans, proposals, execution evidence, review notes, and
+applied decision lineage remain canonical Markdown. Removing the runtime state
+cannot remove or rewrite those canonical files, and rebuilding the index
+rediscovers them.
+
+Daily attention and weekly review may surface a planning or replanning prompt
+from explicit evidence. The review is recalculated from current canonical state,
+keeps the original decision lineage inspectable, suppresses only an unchanged
+rejected evidence fingerprint, and creates a proposal for every consequential
+change. Continue unchanged creates no proposal.
+
+The shipped bridge exposes versioned readiness, context, session, option,
+decomposition, capacity, explanation, proposal, and replanning capabilities.
+The Obsidian workspace is the primary interaction surface. Provider adapters are
+optional, provider-neutral, schema-bounded, and fail back to deterministic
+operation when missing, invalid, or timed out.

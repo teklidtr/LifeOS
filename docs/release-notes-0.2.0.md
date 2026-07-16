@@ -1,7 +1,7 @@
 # LifeOS 0.2.0
 
-LifeOS 0.2.0 ships the Obsidian-native daily interaction layer and the adaptive
-planning feedback loop.
+LifeOS 0.2.0 ships the Obsidian-native daily interaction layer, the adaptive
+planning feedback loop, and the goal-to-plan copilot.
 
 Highlights:
 
@@ -16,6 +16,14 @@ Highlights:
 - reviewable feedback-driven plan proposals using existing stale-write and
   recovery guarantees;
 - preference migration preview and conservative legacy migration to Shadow;
+- deterministic goal readiness, bounded context preview, resumable clarification,
+  and zero-to-three structured plan options;
+- rolling-wave decomposition, portfolio capacity checks, provenance,
+  counterfactuals, and safe proposal conversion;
+- an Obsidian goal-planning workspace with existing-plan suppression and living
+  replanning from explicit evidence;
+- provider-neutral optional adapters with deterministic fallback, large-vault
+  release budgets, and reversible disposable copilot state;
 - Python package and Obsidian plugin version 0.2.0 with protocol 1.x
   compatibility.
 
@@ -25,4 +33,6 @@ Limitations:
 - no mobile parity;
 - no cloud synchronization service;
 - adaptive evidence remains descriptive and noncausal;
+- the copilot cannot determine that a goal is objectively correct or infer
+  unrecorded constraints;
 - the system cannot know whether physical-world work occurred without a record.

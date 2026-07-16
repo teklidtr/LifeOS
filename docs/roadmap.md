@@ -108,7 +108,7 @@ medium-term plan options and a deliberately small set of near-term actions. The
 workflow is conversational, but canonical changes remain proposal-gated and
 rolling-wave planning prevents false precision.
 
-Planned capabilities:
+Shipped capabilities:
 
 - deterministic goal-readiness diagnostics
 - bounded, previewable planning context packs
@@ -122,5 +122,12 @@ Planned capabilities:
 - goal review and rolling replanning linked to explicit execution evidence
 - provider-neutral adapters, deterministic fallback, end-to-end tests, and user-manual coverage
 
-Implementation begins with `LIFEOS-1200`. Downstream tasks `LIFEOS-1201` through
-`LIFEOS-1211` remain in backlog until the architecture contracts are accepted.
+Phase 12 is shipped. The accepted architecture is documented in
+`docs/goal-to-plan-copilot-architecture.md`, and the complete user workflow is
+in `docs/user-manual/09-goal-to-plan-copilot.md`.
+
+Delivered release coverage includes deterministic-only and fixture-adapter
+flows, context denial and redaction, duplicate-plan suppression, baseline and
+adaptive capacity comparisons, proposal recovery, living replanning, large-vault
+budgets, schema compatibility, derived-state rebuild, plugin keyboard paths, and
+manual-link validation.

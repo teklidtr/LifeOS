@@ -240,3 +240,24 @@ review or material change.
 Planning sessions, model output, option drafts, and UI state cannot directly
 modify goals or plans. The final user-visible draft is converted into typed
 proposal operations with stale-write validation and recovery.
+
+## DD-052: Living replanning starts from current canonical state
+
+A replanning review compares current goals, plans, execution evidence, explicit
+corrections, and visible review answers. It never reapplies an old draft over a
+newer source. Consequential outcomes create proposals, while continue unchanged
+creates no proposal. Applied outcomes append inspectable decision lineage.
+
+## DD-053: Model adapters are optional and provider-neutral
+
+Core readiness, context, clarification, decomposition, capacity, explanation,
+proposal, and replanning behavior remains deterministic. Adapters receive only
+the previewed bounded request and must return the repository schema. Missing,
+timed-out, or invalid adapters cannot block ordinary vault use.
+
+## DD-054: Copilot runtime state is disposable
+
+Planning sessions, workspace drafts, indexes, and replanning caches may be
+deleted and rebuilt. Goals, plans, proposals, execution evidence, review notes,
+and applied decision lineage remain ordinary canonical Markdown and are never
+owned by disposable copilot state.
