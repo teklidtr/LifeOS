@@ -51,3 +51,13 @@ __all__ += [
     "DeterministicExperimentAssistance", "ImmediateSafetyMessage", "assist_design",
     "build_collection_windows", "classify_safety", "due_windows", "evaluate_design", "immediate_message",
 ]
+from .analysis import analyze_experiment, record_conclusion, save_analysis
+from .history import ExperimentIndexEntry, ExperimentIndexReport, compare_experiments, load_experiment_index, rebuild_experiment_index
+from .observations import create_observation
+from .visualization import build_visual_model
+
+__all__ += [
+    "ExperimentIndexEntry", "ExperimentIndexReport", "analyze_experiment", "build_visual_model",
+    "compare_experiments", "create_observation", "load_experiment_index", "rebuild_experiment_index",
+    "record_conclusion", "save_analysis",
+]
