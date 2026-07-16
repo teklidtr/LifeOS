@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1404
 title: Implement explainable hybrid retrieval and evaluation metrics
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1403

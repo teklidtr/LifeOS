@@ -24,8 +24,10 @@ from .contracts import (
 )
 from .chunking import chunk_markdown_file, reidentify_note
 from .index import INDEX_SCHEMA_VERSION, RetrievalIndex, StoredEmbedding
+from .evaluation import FixtureResult, RetrievalEvaluation, RetrievalFixture, evaluate_retrieval
 from .models import ChunkedNote, IndexedChunk, IndexedDocument
 from .policy import load_retrieval_policy
+from .search import HybridRetriever, RankingComponents, RetrievalEvidence, RetrievalResponse
 from .service import IndexHealth, IndexProgress, IndexResult, RetrievalIndexService
 from .providers import DeterministicEmbeddingProvider, DeterministicReranker, UnavailableEmbeddingProvider
 
@@ -44,16 +46,23 @@ __all__ = [
     "DeterministicReranker",
     "EmbeddingBatch",
     "EmbeddingProvider",
+    "FixtureResult",
     "GeneratedAnswer",
     "GeneratedParagraph",
+    "HybridRetriever",
     "ProviderCapabilities",
     "ProviderDisclosure",
     "ProviderError",
+    "RankingComponents",
     "RetrievalError",
+    "RetrievalEvaluation",
+    "RetrievalEvidence",
+    "RetrievalFixture",
     "RetrievalIndex",
     "RetrievalIndexService",
     "RetrievalPolicy",
     "RetrievalRequest",
+    "RetrievalResponse",
     "RetrievalScope",
     "RerankCandidate",
     "RerankResult",
@@ -63,6 +72,7 @@ __all__ = [
     "UnavailableEmbeddingProvider",
     "build_provider_disclosure",
     "chunk_markdown_file",
+    "evaluate_retrieval",
     "load_retrieval_policy",
     "reidentify_note",
     "scope_decision",
