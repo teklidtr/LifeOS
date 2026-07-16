@@ -29,7 +29,13 @@ from .models import ChunkedNote, IndexedChunk, IndexedDocument
 from .policy import load_retrieval_policy
 from .search import HybridRetriever, RankingComponents, RetrievalEvidence, RetrievalResponse
 from .service import IndexHealth, IndexProgress, IndexResult, RetrievalIndexService
-from .providers import DeterministicEmbeddingProvider, DeterministicReranker, UnavailableEmbeddingProvider
+from .providers import (
+    DeterministicAnswerProvider,
+    DeterministicEmbeddingProvider,
+    DeterministicReranker,
+    FailingAnswerProvider,
+    UnavailableEmbeddingProvider,
+)
 
 __all__ = [
     "AnswerEvidence",
@@ -42,8 +48,10 @@ __all__ = [
     "IndexResult",
     "IndexedChunk",
     "IndexedDocument",
+    "DeterministicAnswerProvider",
     "DeterministicEmbeddingProvider",
     "DeterministicReranker",
+    "FailingAnswerProvider",
     "EmbeddingBatch",
     "EmbeddingProvider",
     "FixtureResult",

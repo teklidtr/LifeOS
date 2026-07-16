@@ -121,3 +121,58 @@ def _normalize(vector: Sequence[float]) -> tuple[float, ...]:
     if norm == 0:
         return tuple(0.0 for _ in vector)
     return tuple(value / norm for value in vector)
+
+class DeterministicAnswerProvider:
+    """Configurable local answer adapter for deterministic fixtures and demos."""
+
+    def __init__(self, answer: "GeneratedAnswer", *, local_only: bool = True) -> None:
+        from lifeos.retrieval.contracts import GeneratedAnswer
+
+        if not isinstance(answer, GeneratedAnswer):
+            raise ProviderError("invalid_provider", "Deterministic answer must use GeneratedAnswer.")
+        self._answer = answer
+        self._capabilities = ProviderCapabilities(
+            "generation", "deterministic-fixture", "answer-map-v1", local_only, 64
+        )
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return self._capabilities
+
+    def generate(
+        self,
+        query: str,
+        evidence: Sequence["AnswerEvidence"],
+        *,
+        timeout_seconds: float | None,
+        cancellation: CancellationToken,
+    ) -> "GeneratedAnswer":
+        del query, evidence, timeout_seconds
+        cancellation.checkpoint()
+        return self._answer
+
+
+class FailingAnswerProvider:
+    """Deterministic provider failure adapter for timeout and malformed-state tests."""
+
+    def __init__(self, code: str = "timeout") -> None:
+        self.code = code
+        self._capabilities = ProviderCapabilities(
+            "generation", "deterministic-fixture", "failure-v1", True, 64
+        )
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return self._capabilities
+
+    def generate(
+        self,
+        query: str,
+        evidence: Sequence["AnswerEvidence"],
+        *,
+        timeout_seconds: float | None,
+        cancellation: CancellationToken,
+    ) -> "GeneratedAnswer":
+        del query, evidence, timeout_seconds
+        cancellation.checkpoint()
+        raise ProviderError(self.code, f"Deterministic provider failure: {self.code}.")

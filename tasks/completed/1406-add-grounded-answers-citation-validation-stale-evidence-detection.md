@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1406
 title: Add grounded answers, citation validation, and stale evidence detection
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1405
