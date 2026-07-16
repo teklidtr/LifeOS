@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1310
 title: Migrate and rebuild review artifacts
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1309

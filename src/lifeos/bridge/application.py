@@ -74,6 +74,9 @@ from lifeos.reviews import (
     open_daily_review,
     open_weekly_review,
     refresh_review_snapshot,
+    preview_review_migration,
+    apply_review_migration,
+    rebuild_review_state,
     build_review_workflow,
     save_progress,
     save_review_note,
@@ -878,6 +881,26 @@ class BridgeApplication:
                         idempotency_key=str(data["idempotency_key"]),
                     )
                     return _jsonable({"artifact": updated.to_dict(), "snapshot": snapshot.to_dict()})
+                if method == "review.artifact.migration.preview":
+                    strict_object(params, allowed=set())
+                    return preview_review_migration(
+                        vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir, actor_id=self.actor_id
+                    ).to_dict()
+                if method == "review.artifact.migration.apply":
+                    data = strict_object(params, allowed={"now", "idempotency_key", "expected_source_hashes"}, required={"now", "idempotency_key"})
+                    expected = data.get("expected_source_hashes")
+                    if expected is not None and (not isinstance(expected, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in expected.items())):
+                        raise ProtocolError("invalid_params", "expected_source_hashes must be an object of path-to-hash strings.")
+                    return apply_review_migration(
+                        vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir, actor_id=self.actor_id,
+                        now=_iso_datetime(data["now"], "now"), idempotency_key=str(data["idempotency_key"]),
+                        expected_source_hashes=expected,
+                    ).to_dict()
+                if method == "review.artifact.rebuild":
+                    strict_object(params, allowed=set())
+                    return rebuild_review_state(
+                        vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir, actor_id=self.actor_id
+                    ).to_dict()
                 if method == "review.artifact.history":
                     data = strict_object(params, allowed={"kind", "limit"})
                     kind = data.get("kind")

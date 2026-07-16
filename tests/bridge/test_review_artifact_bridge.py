@@ -76,3 +76,27 @@ def test_review_bridge_rejects_ambiguous_load_and_invalid_kind(tmp_path: Path) -
     with pytest.raises(ProtocolError) as caught:
         bridge.call("review.artifact.open", kind="monthly", day="2026-07-16", timezone="UTC", now="2026-07-16T08:00:00+00:00", idempotency_key="bad-kind")
     assert caught.value.code == "invalid_params"
+
+
+def test_review_migration_and_rebuild_are_explicit_bridge_actions(tmp_path: Path) -> None:
+    app, bridge = client(tmp_path)
+    reviews = app.daily.vault_root / "reviews"; reviews.mkdir()
+    source = reviews / "morning-2026-07-16.md"
+    source.write_text(
+        "---\ntype: review\nreview_kind: morning\ndate: 2026-07-16\nstatus: active\n---\n\n"
+        "# Morning review\n\n<!-- lifeos:managed:start facts -->\nOld facts\n<!-- lifeos:managed:end facts -->\n\n"
+        "## Reflection\n\nProtect the morning.\n",
+        encoding="utf-8",
+    )
+    preview = bridge.call("review.artifact.migration.preview")
+    assert preview["candidates"][0]["state"] == "ready"
+    expected = {item["path"]: item["content_hash"] for item in preview["candidates"][0]["sources"]}
+    applied = bridge.call(
+        "review.artifact.migration.apply", now="2026-07-16T12:00:00+03:00",
+        idempotency_key="bridge-migration", expected_source_hashes=expected,
+    )
+    assert applied["migrated"] == ["daily-2026-07-16"]
+    assert source.exists()
+    rebuilt = bridge.call("review.artifact.rebuild")
+    assert rebuilt["progress_entries"] == 1
+    assert rebuilt["history_entries"] == 1

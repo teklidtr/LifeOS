@@ -114,3 +114,20 @@ __all__ += [
     "WeeklyReviewDueState", "WeeklyReviewPrompt", "WeeklyReviewState",
     "complete_weekly_review", "open_weekly_review", "weekly_due_state",
 ]
+
+from lifeos.reviews.migration import (
+    LegacyReviewSource,
+    ReviewMigrationCandidate,
+    ReviewMigrationPreview,
+    ReviewMigrationResult,
+    ReviewRebuildResult,
+    apply_review_migration,
+    preview_review_migration,
+    rebuild_review_state,
+)
+
+__all__ += [
+    "LegacyReviewSource", "ReviewMigrationCandidate", "ReviewMigrationPreview",
+    "ReviewMigrationResult", "ReviewRebuildResult", "apply_review_migration",
+    "preview_review_migration", "rebuild_review_state",
+]

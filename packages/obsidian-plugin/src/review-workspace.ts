@@ -33,6 +33,11 @@ export interface ReviewProposalInput {
   taskId?: string;
 }
 export interface ReviewProposalResult { proposal_id: string; proposal_path: string; target_path: string; base_hash: string; }
+
+export interface ReviewMigrationCandidate { review_id: string; target_path: string; review_kind: ReviewKind; day: string; state: "ready" | "resumable" | "already_migrated" | "conflict" | "malformed"; diagnostics: string[]; sources: Array<{ path: string; kind: string; day: string; content_hash: string; reflection: string; diagnostics: string[] }>; }
+export interface ReviewMigrationPreview { candidates: ReviewMigrationCandidate[]; }
+export interface ReviewMigrationResult { migrated: string[]; already_migrated: string[]; conflicts: ReviewMigrationCandidate[]; preserved_sources: string[]; }
+export interface ReviewRebuildResult { artifacts: number; progress_entries: number; history_entries: number; invalid_paths: string[]; progress_index: string; history_index: string; }
 export interface ReviewWorkspaceState {
   stage: ReviewWorkspaceStage;
   origin: ReviewWorkspaceOrigin;
@@ -153,6 +158,23 @@ export class ReviewWorkspaceController {
       this.state = errorState(this.state, error);
       throw error;
     }
+  }
+
+  previewMigration(): Promise<ReviewMigrationPreview> {
+    return this.client.call<ReviewMigrationPreview>("review.artifact.migration.preview", {});
+  }
+
+  applyMigration(now: string, preview?: ReviewMigrationPreview): Promise<ReviewMigrationResult> {
+    const expectedSourceHashes: Record<string, string> = {};
+    for (const candidate of preview?.candidates ?? []) for (const source of candidate.sources) expectedSourceHashes[source.path] = source.content_hash;
+    return this.client.call<ReviewMigrationResult>("review.artifact.migration.apply", {
+      now, idempotency_key: key("review-migration"),
+      expected_source_hashes: preview ? expectedSourceHashes : undefined,
+    });
+  }
+
+  rebuildIndexes(): Promise<ReviewRebuildResult> {
+    return this.client.call<ReviewRebuildResult>("review.artifact.rebuild", {});
   }
 
   async loadHistory(kind?: ReviewKind, limit = 50): Promise<ReviewHistoryEntry[]> {

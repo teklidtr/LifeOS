@@ -52,6 +52,7 @@ class ReviewArtifactUpdate:
     snapshot_history: tuple[ReviewSnapshotRecord, ...] | None = None
     lifecycle_events: tuple[ReviewLifecycleEvent, ...] | None = None
     managed_blocks: Mapping[str, str] | None = None
+    human_body: str | None = None
 
     def fingerprint_payload(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -410,11 +411,26 @@ class ReviewArtifactService:
             # Validate the complete metadata before touching the file.
             frontmatter = _metadata_frontmatter(metadata)
             validate_review_metadata(frontmatter, path=current.path)
-            body = (
-                replace_managed_blocks(current.body, update.managed_blocks)
-                if update.managed_blocks
-                else current.body
-            )
+            if update.human_body is not None and update.managed_blocks:
+                raise DailyInteractionError(
+                    "invalid_review_update",
+                    "A review update cannot replace human Markdown and managed blocks at the same time.",
+                    "Split the update into explicit operations.",
+                )
+            if update.human_body is not None:
+                validate_managed_blocks(update.human_body)
+                for name in _MANAGED_NAMES:
+                    if extract_managed_block(update.human_body, name) != extract_managed_block(current.body, name):
+                        raise DailyInteractionError(
+                            "managed_content_changed",
+                            f"Human Markdown replacement changed managed block '{name}'.",
+                            "Preserve managed blocks exactly and retry.",
+                        )
+                body = update.human_body
+            elif update.managed_blocks:
+                body = replace_managed_blocks(current.body, update.managed_blocks)
+            else:
+                body = current.body
             document = _frontmatter_document(frontmatter, body)
             _atomic_write(
                 self.vault_root,

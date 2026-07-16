@@ -28,6 +28,9 @@ class FakeBridge implements BridgeClient {
     this.calls.push({ method, params });
     if (this.fail) throw this.fail;
     if (method === "review.artifact.history") return [{ review_id: artifact.metadata.review_id, path: artifact.path, review_kind: "daily", period_start: "2026-07-16", period_end: "2026-07-16", status: "open", updated_at: artifact.metadata.updated_at }] as T;
+    if (method === "review.artifact.migration.preview") return { candidates: [] } as T;
+    if (method === "review.artifact.migration.apply") return { migrated: [], already_migrated: [], conflicts: [], preserved_sources: [] } as T;
+    if (method === "review.artifact.rebuild") return { artifacts: 0, progress_entries: 0, history_entries: 0, invalid_paths: [], progress_index: "", history_index: "" } as T;
     if (method === "review.artifact.open") return { artifact, snapshot, prompts: [], required_sections: ["attention"], due: { state: "available", reason: "ready" }, next_section: "attention", active_phase: "morning" } as T;
     if (method === "review.artifact.load" || method === "review.artifact.refresh") return { artifact, snapshot } as T;
     if (method === "review.proposal.create") return { proposal_id: "proposal-1", proposal_path: "proposals/proposal-1", target_path: "plans/a.md", base_hash: "hash" } as T;
@@ -72,4 +75,15 @@ test("proposal handoff remains a separate draft action", async () => {
   }, "2026-07-16T08:10:00+03:00");
   assert.equal(proposal.proposal_id, "proposal-1");
   assert.equal(bridge.calls.at(-1)?.method, "review.proposal.create");
+});
+
+test("migration remains previewed and rebuild is explicit", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ReviewWorkspaceController(bridge);
+  const preview = await controller.previewMigration();
+  await controller.applyMigration("2026-07-16T12:00:00+03:00", preview);
+  await controller.rebuildIndexes();
+  assert.deepEqual(bridge.calls.slice(-3).map((item) => item.method), [
+    "review.artifact.migration.preview", "review.artifact.migration.apply", "review.artifact.rebuild",
+  ]);
 });
