@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1302
 title: Create and load canonical review artifacts
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1301
