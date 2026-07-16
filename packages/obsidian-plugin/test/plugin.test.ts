@@ -13,13 +13,13 @@ class FakeBridge implements BridgeClient {
 }
 
 class FakeHost implements ObsidianHost {
-  opened: string[] = []; disposers = 0;
+  opened: string[] = []; disposers = 0; commands = new Map<string, () => void>();
   addRibbonIcon(_i: string, _t: string, cb: () => void): () => void { this.ribbon = cb; return () => { this.disposers++; }; }
-  addCommand(_id: string, _name: string, cb: () => void): () => void { this.command = cb; return () => { this.disposers++; }; }
+  addCommand(id: string, _name: string, cb: () => void): () => void { this.commands.set(id, cb); return () => { this.disposers++; }; }
   registerView(_type: string, _factory: () => unknown): () => void { return () => { this.disposers++; }; }
   openView(type: string): void { this.opened.push(type); }
   async saveSettings(_settings: LifeOSSettings): Promise<void> {}
-  ribbon?: () => void; command?: () => void;
+  ribbon?: () => void;
 }
 
 const settings: LifeOSSettings = { configPath: "lifeos.yml", pythonPath: "python3", actorId: "me", startOnLoad: true, diagnostics: "normal" };
@@ -28,12 +28,12 @@ test("plugin loads, opens view, invalidates, and unloads cleanly", async () => {
   const host = new FakeHost(); const bridge = new FakeBridge(); const plugin = new LifeOSPlugin(host, bridge, settings);
   await plugin.load();
   assert.equal(plugin.connection.current, "connected");
-  host.ribbon?.(); host.command?.();
+  host.ribbon?.(); host.commands.get("lifeos-open-goal-plan")?.();
   assert.deepEqual(host.opened, [LifeOSPlugin.VIEW_TYPE, LifeOSPlugin.COPILOT_VIEW_TYPE]);
   bridge.notify("vault.changed");
   assert.equal(plugin.view.refreshCount, 1);
   await plugin.unload();
-  assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 8);
+  assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 13);
 });
 
 test("missing Python is actionable and non-destructive", async () => {

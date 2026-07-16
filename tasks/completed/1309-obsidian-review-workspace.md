@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1309
 title: Build the Obsidian review workspace
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1308

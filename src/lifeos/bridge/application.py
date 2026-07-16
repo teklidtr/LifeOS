@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 from datetime import datetime
 from datetime import date
 from pathlib import Path
@@ -62,7 +63,21 @@ from lifeos.daily import (
 
 from lifeos.daily.today import TodayInputs, build_today_dashboard
 from lifeos.study import StudySessionService
-from lifeos.reviews import build_review_workflow, save_progress, save_review_note
+from lifeos.reviews import (
+    ReviewArtifactService,
+    ReviewDecisionService,
+    ReviewProgressService,
+    ReviewProposalRequest,
+    build_review_snapshot,
+    create_review_proposal,
+    list_review_history,
+    open_daily_review,
+    open_weekly_review,
+    refresh_review_snapshot,
+    build_review_workflow,
+    save_progress,
+    save_review_note,
+)
 from lifeos.desktop import DesktopProposalService
 from lifeos.config import FeatureFlags, LifeOSConfig
 from lifeos.registry import Registry
@@ -98,6 +113,23 @@ def _iso_date(value: object, field: str) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise ProtocolError("invalid_params", f"{field} must be an ISO date.") from exc
+
+
+def _iso_datetime(value: object, field: str) -> datetime:
+    if not isinstance(value, str):
+        raise ProtocolError("invalid_params", f"{field} must be an ISO datetime.")
+    try:
+        result = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ProtocolError("invalid_params", f"{field} must be an ISO datetime.") from exc
+    if result.tzinfo is None:
+        raise ProtocolError("invalid_params", f"{field} must include a timezone.")
+    return result
+
+
+def _jsonable(value: object) -> object:
+    """Normalize dataclass/date-heavy service results for the JSON-RPC boundary."""
+    return json.loads(json.dumps(value, default=str))
 
 
 class BridgeApplication:
@@ -778,6 +810,118 @@ class BridgeApplication:
         if method == "system.status":
             strict_object(params, allowed=set())
             return asdict(collect_status(self.config, Registry(self.daily.runtime_dir / "registry.db")))
+        if method.startswith("review.artifact.") or method == "review.proposal.create":
+            artifacts = ReviewArtifactService(
+                vault_root=self.daily.vault_root,
+                runtime_dir=self.daily.runtime_dir,
+                actor_id=self.actor_id,
+            )
+            progress = ReviewProgressService(artifacts)
+            decisions = ReviewDecisionService(artifacts)
+            try:
+                if method == "review.artifact.open":
+                    data = strict_object(
+                        params,
+                        allowed={"kind", "day", "timezone", "now", "idempotency_key", "phase", "refresh"},
+                        required={"kind", "day", "timezone", "now", "idempotency_key"},
+                    )
+                    kind = data["kind"]
+                    if kind == "daily":
+                        state = open_daily_review(
+                            service=artifacts,
+                            runtime_dir=self.daily.runtime_dir,
+                            day=_iso_date(data["day"], "day"),
+                            timezone=str(data["timezone"]),
+                            now=_iso_datetime(data["now"], "now"),
+                            idempotency_key=str(data["idempotency_key"]),
+                            phase=str(data.get("phase", "morning")),
+                            refresh=bool(data.get("refresh", True)),
+                        )
+                    elif kind == "weekly":
+                        state = open_weekly_review(
+                            service=artifacts,
+                            runtime_dir=self.daily.runtime_dir,
+                            day=_iso_date(data["day"], "day"),
+                            timezone=str(data["timezone"]),
+                            now=_iso_datetime(data["now"], "now"),
+                            idempotency_key=str(data["idempotency_key"]),
+                            refresh=bool(data.get("refresh", True)),
+                        )
+                    else:
+                        raise ProtocolError("invalid_params", "kind must be daily or weekly.")
+                    return _jsonable(state.to_dict())
+                if method == "review.artifact.load":
+                    data = strict_object(params, allowed={"review_id", "path", "now"}, required={"now"})
+                    if bool(data.get("review_id")) == bool(data.get("path")):
+                        raise ProtocolError("invalid_params", "Provide exactly one of review_id or path.")
+                    artifact = (
+                        artifacts.load_id(str(data["review_id"]))
+                        if data.get("review_id")
+                        else artifacts.load_path(str(data["path"]))
+                    )
+                    snapshot = build_review_snapshot(
+                        vault_root=self.daily.vault_root,
+                        runtime_dir=self.daily.runtime_dir,
+                        kind=artifact.metadata.review_kind,
+                        day=artifact.metadata.period_start,
+                        generated_at=_iso_datetime(data["now"], "now"),
+                    )
+                    return _jsonable({"artifact": artifact.to_dict(), "snapshot": snapshot.to_dict()})
+                if method == "review.artifact.refresh":
+                    data = strict_object(params, allowed={"review_id", "expected_hash", "now", "idempotency_key"}, required={"review_id", "expected_hash", "now", "idempotency_key"})
+                    artifact = artifacts.load_id(str(data["review_id"]))
+                    if artifact.content_hash != data["expected_hash"]:
+                        raise ProtocolError("stale_write", "The review changed after it was opened.", {"actual_hash": artifact.content_hash, "path": artifact.path})
+                    updated, snapshot = refresh_review_snapshot(
+                        service=artifacts, artifact=artifact, runtime_dir=self.daily.runtime_dir,
+                        generated_at=_iso_datetime(data["now"], "now"),
+                        idempotency_key=str(data["idempotency_key"]),
+                    )
+                    return _jsonable({"artifact": updated.to_dict(), "snapshot": snapshot.to_dict()})
+                if method == "review.artifact.history":
+                    data = strict_object(params, allowed={"kind", "limit"})
+                    kind = data.get("kind")
+                    if kind is not None and kind not in {"daily", "weekly"}:
+                        raise ProtocolError("invalid_params", "kind must be daily or weekly.")
+                    limit = data.get("limit", 50)
+                    if not isinstance(limit, int) or limit < 1 or limit > 200:
+                        raise ProtocolError("invalid_params", "limit must be between 1 and 200.")
+                    return _jsonable([item.to_dict() for item in list_review_history(service=artifacts, kind=kind)[:limit]])
+                if method == "review.artifact.section":
+                    data = strict_object(params, allowed={"review_id", "phase_id", "section_id", "action", "expected_hash", "idempotency_key", "now"}, required={"review_id", "phase_id", "section_id", "action", "expected_hash", "idempotency_key", "now"})
+                    return _jsonable(progress.update_section(now=_iso_datetime(data.pop("now"), "now"), **data).to_dict())
+                if method == "review.artifact.phase":
+                    data = strict_object(params, allowed={"review_id", "phase_id", "action", "required_sections", "expected_hash", "idempotency_key", "now"}, required={"review_id", "phase_id", "action", "required_sections", "expected_hash", "idempotency_key", "now"})
+                    required = data.pop("required_sections")
+                    if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+                        raise ProtocolError("invalid_params", "required_sections must be a list of strings.")
+                    return _jsonable(progress.update_phase(required_sections=tuple(required), now=_iso_datetime(data.pop("now"), "now"), **data).to_dict())
+                if method == "review.artifact.answer":
+                    data = strict_object(params, allowed={"review_id", "prompt_id", "value", "phase_id", "expected_hash", "idempotency_key", "now"}, required={"review_id", "prompt_id", "value", "expected_hash", "idempotency_key", "now"})
+                    return _jsonable(progress.answer(now=_iso_datetime(data.pop("now"), "now"), **data).to_dict())
+                if method == "review.artifact.decide":
+                    data = strict_object(params, allowed={"review_id", "item_id", "evidence_fingerprint", "decision", "expected_hash", "idempotency_key", "now", "note", "proposal_id"}, required={"review_id", "item_id", "evidence_fingerprint", "decision", "expected_hash", "idempotency_key", "now"})
+                    return _jsonable(decisions.decide(now=_iso_datetime(data.pop("now"), "now"), **data).to_dict())
+                if method == "review.artifact.complete":
+                    data = strict_object(params, allowed={"review_id", "expected_hash", "idempotency_key", "now"}, required={"review_id", "expected_hash", "idempotency_key", "now"})
+                    return _jsonable(progress.complete_review(now=_iso_datetime(data.pop("now"), "now"), **data).to_dict())
+                if method == "review.artifact.skip":
+                    data = strict_object(params, allowed={"review_id", "expected_hash", "idempotency_key", "now", "note"}, required={"review_id", "expected_hash", "idempotency_key", "now"})
+                    return _jsonable(progress.skip_review(now=_iso_datetime(data.pop("now"), "now"), **data).to_dict())
+                if method == "review.artifact.reopen":
+                    data = strict_object(params, allowed={"review_id", "expected_hash", "idempotency_key", "now", "phase_id"}, required={"review_id", "expected_hash", "idempotency_key", "now"})
+                    return _jsonable(progress.reopen_review(now=_iso_datetime(data.pop("now"), "now"), **data).to_dict())
+                if method == "review.proposal.create":
+                    data = strict_object(params, allowed={"review_id", "item_id", "evidence_fingerprint", "target_path", "expected_target_hash", "action", "value", "rationale", "task_id", "now"}, required={"review_id", "item_id", "evidence_fingerprint", "target_path", "expected_target_hash", "action", "value", "rationale"})
+                    moment = _iso_datetime(data.pop("now"), "now") if data.get("now") is not None else None
+                    request = ReviewProposalRequest(**data)
+                    return create_review_proposal(vault_root=self.daily.vault_root, request=request, actor_id=self.actor_id, now=moment).to_dict()
+            except ProtocolError:
+                raise
+            except (DailyInteractionError, ValueError, TypeError) as exc:
+                code = getattr(exc, "code", "review_artifact_invalid")
+                data = getattr(exc, "data", None)
+                raise ProtocolError(code, str(exc), data) from exc
         if method == "review.build":
             data = strict_object(params, allowed={"kind", "day"}, required={"kind", "day"})
             data["day"] = _iso_date(data["day"], "day")
