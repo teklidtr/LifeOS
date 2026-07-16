@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1311
 title: Validate and document first-class reviews
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1310

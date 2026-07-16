@@ -16,7 +16,7 @@
 2. Stop the LifeOS plugin and optional background service.
 3. Replace the plugin files and update the Python package together.
 4. Re-enable the plugin and confirm the protocol versions match.
-5. Rebuild disposable registry, graph, or export state when prompted.
+5. Rebuild disposable registry, review, graph, or export state when prompted.
 
 A failed upgrade must not rewrite Markdown. Restore the previous plugin and Python package,
 then reopen the same vault.
@@ -24,8 +24,16 @@ then reopen the same vault.
 ## Disable or uninstall
 
 Disable the plugin in Obsidian and use **Uninstall background service** in LifeOS Settings.
-Removing `.lifeos/` deletes only disposable state. Do not delete `system/`, `proposals/`, or
-other canonical vault folders unless you intend to delete their contents.
+Removing `.lifeos/` deletes only disposable state. Review progress and history are rebuilt
+from `reviews/daily/` and `reviews/weekly/`. Do not delete `system/`, `reviews/`,
+`proposals/`, or other canonical vault folders unless you intend to delete their contents.
+
+## Review recovery
+
+Use the review workspace rebuild action after removing `.lifeos/`. A stale review must be
+reloaded before refresh. Duplicate identities, unsupported schemas, or damaged managed
+boundaries are blocked with a link to the canonical Markdown note. Legacy migration must
+be previewed again whenever a source hash changes.
 
 ## Recovery hatch
 

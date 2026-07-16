@@ -1,4 +1,4 @@
-[← Adaptive Planning](08-adaptive-planning.md) · [Manual home](README.md)
+[← Adaptive Planning](08-adaptive-planning.md) · [Manual home](README.md) · [Next: First-Class Reviews →](10-first-class-reviews.md)
 
 # Goal-to-Plan Copilot
 
@@ -300,4 +300,4 @@ invalid. Context relevance and model suggestions may be incomplete. Capacity
 checks depend on visible inputs. The workflow deliberately favors reversible,
 inspectable planning over autonomous optimization.
 
-[← Adaptive Planning](08-adaptive-planning.md) · [Manual home](README.md)
+[← Adaptive Planning](08-adaptive-planning.md) · [Manual home](README.md) · [Next: First-Class Reviews →](10-first-class-reviews.md)

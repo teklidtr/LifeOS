@@ -31,6 +31,7 @@ print('Release versions, protocol, and runtime schema are compatible.')
 PY
 PYTHONPATH=src python3 -m pytest --import-mode=importlib \
   tests/copilot tests/e2e/test_goal_plan_copilot.py -q
+./scripts/validate-first-class-reviews.sh
 npm --prefix packages/obsidian-plugin ci
 npm --prefix packages/obsidian-plugin run lint
 npm --prefix packages/obsidian-plugin run typecheck

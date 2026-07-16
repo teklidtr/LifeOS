@@ -200,7 +200,7 @@ intentionally rebuild the disposable registry.
 4. Optionally enable **Daily Notes**, **Templates**, **Backlinks**, and
    **Properties view**.
 
-No proprietary LifeOS Obsidian plugin is required for the core workflow.
+No proprietary LifeOS Obsidian plugin is required for the core workflow. The first-class review workspace and other desktop cockpit views require the bundled LifeOS plugin, while the canonical Markdown artifacts remain usable without it.
 
 ## 4.10 Verify the installation
 

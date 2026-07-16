@@ -43,11 +43,14 @@ workflow and privacy controls.
 
 ## Reviews and proposals
 
-The review wizard saves progress and writes a readable note under `reviews/`. Generated
-facts stay inside a managed block while your reflection remains human-owned.
+Use **Open Today's Review**, **Open This Week's Review**, **Open Active Review
+Artifact**, or **Open Review History**. Daily and weekly reviews are canonical
+Markdown notes with durable phases, answers, decisions, continuity, and human-owned
+reflection. Refresh replaces managed evidence only and rejects concurrent edits.
 
+Review suggestions that affect another canonical note create ordinary draft proposals.
 Proposal screens show exact operations and a Python-computed digest. **Approve** and
 **Apply** require separate explicit confirmations. A changed proposal invalidates the UI
-review immediately.
+review immediately. See [First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
 
 [← Workflow](05-workflow.md) · [Manual home](README.md) · [Next: Troubleshooting →](07-troubleshooting.md)

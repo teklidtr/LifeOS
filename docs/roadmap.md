@@ -139,7 +139,7 @@ durable, inspectable Markdown artifacts. A review can be opened, edited, resumed
 linked, completed, and revisited directly in Obsidian without depending on
 disposable runtime state.
 
-Planned capabilities:
+Shipped capabilities:
 
 - versioned daily and weekly review artifact contracts
 - one canonical daily artifact with morning and evening phases
@@ -153,5 +153,5 @@ Planned capabilities:
 - migration from legacy morning, evening, and weekly review notes
 - rebuild, recovery, release validation, and user-manual coverage
 
-Implementation proceeds through `LIFEOS-1300` to `LIFEOS-1311`.
+Phase 13 shipped through `LIFEOS-1300` to `LIFEOS-1311`, including release fixtures, migration, rebuild, Obsidian workspace coverage, and user documentation.
 

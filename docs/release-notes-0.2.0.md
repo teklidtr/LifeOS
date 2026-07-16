@@ -24,6 +24,9 @@ Highlights:
   replanning from explicit evidence;
 - provider-neutral optional adapters with deterministic fallback, large-vault
   release budgets, and reversible disposable copilot state;
+- canonical daily and weekly review artifacts with durable phases, reflection,
+  decisions, continuity, proposal handoff, Obsidian history, conservative legacy
+  migration, and rebuildable disposable indexes;
 - Python package and Obsidian plugin version 0.2.0 with protocol 1.x
   compatibility.
 

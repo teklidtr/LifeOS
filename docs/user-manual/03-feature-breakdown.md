@@ -511,6 +511,25 @@ verify active-generation integrity.
 Public exports fail closed: private, archived, malformed, ambiguous, or unsafe
 material is not silently assumed publishable.
 
+## 3.15 First-class review artifacts
+
+### What it is
+
+Daily and weekly reviews are durable Markdown notes rather than transient wizard
+state. Daily notes combine morning and evening phases. Weekly notes use ISO-week
+identity. Managed evidence is isolated from human reflection, and progress,
+decisions, continuity, and lifecycle state remain inspectable in frontmatter.
+
+### How it connects
+
+The review workspace reads deterministic snapshots from the Python bridge, links
+check-ins and task outcomes, carries exact evidence fingerprints forward, and
+creates draft proposals for changes outside the artifact. Legacy review notes can
+be previewed and migrated without deleting their sources. Disposable indexes can
+be rebuilt from Markdown after `.lifeos/` is removed. See
+[First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
+
+
 ---
 
 [← Previous: Executive Summary & Philosophy](02-executive-summary-and-philosophy.md) · [Manual home](README.md) · [Next: Setup & Installation →](04-setup-and-installation.md)

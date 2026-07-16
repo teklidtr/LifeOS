@@ -188,3 +188,26 @@ decomposition, capacity, explanation, proposal, and replanning capabilities.
 The Obsidian workspace is the primary interaction surface. Provider adapters are
 optional, provider-neutral, schema-bounded, and fail back to deterministic
 operation when missing, invalid, or timed out.
+
+
+## First-class review artifacts
+
+Daily and weekly reviews are canonical Markdown under `reviews/daily/` and
+`reviews/weekly/`. One daily artifact contains morning and evening phases; weekly
+artifacts use ISO-week identity and explicit period boundaries. Managed facts,
+items, continuity, and completion summaries are separated from human-owned
+reflection by validated managed blocks.
+
+Progress, prompt answers, item decisions, lifecycle events, proposal references,
+snapshot lineage, and migration lineage live in frontmatter. Runtime indexes under
+`.lifeos/reviews/` are disposable and rebuild from the artifacts. Review refreshes
+require optimistic concurrency and preserve human Markdown byte-for-byte outside
+managed blocks. External canonical changes remain draft proposals until the shared
+submit, approve, and apply lifecycle completes.
+
+The Obsidian review workspace is a thin typed client for Python bridge methods. It
+opens today, the current ISO week, active artifacts, and history; handles stale and
+blocked states; and exposes explicit migration preview and index rebuild actions.
+Legacy source files remain untouched after migration. See
+[Review Artifact Architecture](review-artifact-architecture.md) and
+[First-Class Daily and Weekly Reviews](user-manual/10-first-class-reviews.md).
