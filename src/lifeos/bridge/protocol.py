@@ -11,6 +11,7 @@ PROTOCOL_VERSION = DESKTOP_PROTOCOL_VERSION
 ENGINE_VERSION = PYTHON_PACKAGE_VERSION
 CAPABILITIES = (
     "system.health",
+    "copilot.note.inspect",
     "today.get",
     "scheduler.config.get",
     "scheduler.config.set",

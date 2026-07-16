@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from lifeos.attention import evaluate_attention, save_preference
+from lifeos.copilot import CopilotContractError, inspect_copilot_note
 from lifeos.bridge.protocol import CAPABILITIES, ENGINE_VERSION, PROTOCOL_VERSION, ProtocolError, strict_object
 from lifeos.daily import (
     CheckInRequest,
@@ -84,6 +85,15 @@ class BridgeApplication:
         return preferences, dataset, status, observations
 
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.note.inspect":
+            data = strict_object(params, allowed={"path"}, required={"path"})
+            path = data["path"]
+            if not isinstance(path, str) or not path.strip():
+                raise ProtocolError("invalid_params", "path must be a non-empty string.")
+            try:
+                return inspect_copilot_note(self.daily.vault_root, path)
+            except CopilotContractError as exc:
+                raise ProtocolError("copilot_contract_invalid", str(exc)) from exc
         if method == "system.handshake":
             data = strict_object(params, allowed={"protocol", "client_version"}, required={"protocol"})
             protocol = data["protocol"]

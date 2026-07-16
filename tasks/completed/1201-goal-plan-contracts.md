@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1201
 title: Define goal, plan, milestone, and planning-session contracts
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1200
