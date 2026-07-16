@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1407
 title: Convert conversation outcomes into reviewable proposals
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1406

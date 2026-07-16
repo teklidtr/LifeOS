@@ -1,6 +1,13 @@
 """Knowledge conversation artifacts and grounded conversation services."""
 
 from .artifact import ConversationArtifactService
+from .proposals import (
+    ConversationProposalAction,
+    ConversationProposalPreview,
+    ConversationProposalRequest,
+    ConversationProposalResult,
+    ConversationProposalService,
+)
 from .grounding import (
     KnowledgeConversationService,
     refresh_stale_flags,
@@ -26,6 +33,11 @@ __all__ = [
     "ConversationMetadata",
     "ConversationParagraph",
     "ConversationTurn",
+    "ConversationProposalAction",
+    "ConversationProposalPreview",
+    "ConversationProposalRequest",
+    "ConversationProposalResult",
+    "ConversationProposalService",
     "KnowledgeConversationService",
     "refresh_stale_flags",
     "stale_evidence",
