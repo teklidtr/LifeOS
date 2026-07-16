@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1405
 title: Create canonical knowledge conversation artifacts
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1401
