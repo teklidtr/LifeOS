@@ -23,6 +23,7 @@ from lifeos.reviews.contracts import (
     ReviewItemDecision,
     ReviewPhaseProgress,
     ReviewStatus,
+    ReviewSnapshotRecord,
     default_phases,
     review_identity,
     review_path,
@@ -47,6 +48,7 @@ class ReviewArtifactUpdate:
     migrated_from: tuple[str, ...] | None = None
     snapshot_id: str | None = None
     snapshot_hash: str | None = None
+    snapshot_history: tuple[ReviewSnapshotRecord, ...] | None = None
     managed_blocks: Mapping[str, str] | None = None
 
     def fingerprint_payload(self) -> dict[str, Any]:
@@ -82,6 +84,7 @@ def _metadata_frontmatter(metadata: ReviewArtifactMetadata) -> dict[str, Any]:
         "migrated_from": list(metadata.migrated_from),
         "snapshot_id": metadata.snapshot_id,
         "snapshot_hash": metadata.snapshot_hash,
+        "snapshot_history": [record.to_dict() for record in metadata.snapshot_history],
     }
 
 
@@ -394,6 +397,7 @@ class ReviewArtifactService:
                 "migrated_from",
                 "snapshot_id",
                 "snapshot_hash",
+                "snapshot_history",
             ):
                 value = getattr(update, key)
                 if value is not None:

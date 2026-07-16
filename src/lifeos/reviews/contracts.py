@@ -96,6 +96,16 @@ class ReviewSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewSnapshotRecord:
+    snapshot_id: str
+    content_hash: str
+    generated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewPhaseProgress:
     phase_id: PhaseId
     state: ProgressState = "pending"
@@ -153,6 +163,7 @@ class ReviewArtifactMetadata:
     migrated_from: tuple[str, ...] = ()
     snapshot_id: str | None = None
     snapshot_hash: str | None = None
+    snapshot_history: tuple[ReviewSnapshotRecord, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -346,6 +357,15 @@ def parse_answer(value: object, *, field: str = "answers") -> ReviewAnswer:
     )
 
 
+def parse_snapshot_record(value: object, *, field: str = "snapshot_history") -> ReviewSnapshotRecord:
+    raw = _mapping(value, field)
+    return ReviewSnapshotRecord(
+        snapshot_id=_string(raw.get("snapshot_id"), f"{field}.snapshot_id"),
+        content_hash=_hash(raw.get("content_hash"), f"{field}.content_hash"),
+        generated_at=_datetime(raw.get("generated_at"), f"{field}.generated_at"),
+    )
+
+
 def validate_review_metadata(
     frontmatter: Mapping[str, Any], *, path: str | None = None
 ) -> ReviewArtifactMetadata:
@@ -404,6 +424,12 @@ def validate_review_metadata(
         raise ReviewContractError("duplicate_answer", "answers contains duplicate prompt and phase pairs.", "answers")
     snapshot_hash = frontmatter.get("snapshot_hash")
     normalized_snapshot_hash = None if snapshot_hash is None else _hash(snapshot_hash, "snapshot_hash")
+    history_raw = frontmatter.get("snapshot_history", [])
+    if not isinstance(history_raw, Sequence) or isinstance(history_raw, (str, bytes)):
+        raise ReviewContractError("invalid_collection", "snapshot_history must be a list.", "snapshot_history")
+    history = tuple(parse_snapshot_record(value, field=f"snapshot_history[{index}]") for index, value in enumerate(history_raw))
+    if len({item.snapshot_id for item in history}) != len(history):
+        raise ReviewContractError("duplicate_snapshot", "snapshot_history contains duplicate snapshot IDs.", "snapshot_history")
     return ReviewArtifactMetadata(
         review_id=review_id,
         schema_version=schema,
@@ -424,4 +450,5 @@ def validate_review_metadata(
         migrated_from=tuple(_path(item, "migrated_from") for item in _string_tuple(frontmatter.get("migrated_from", []), "migrated_from")),
         snapshot_id=_optional_string(frontmatter.get("snapshot_id"), "snapshot_id"),
         snapshot_hash=normalized_snapshot_hash,
+        snapshot_history=history,
     )

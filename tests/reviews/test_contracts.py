@@ -30,6 +30,7 @@ def metadata(kind: str = "daily", day: date = date(2026, 7, 16)) -> dict[str, ob
         "answers": [],
         "proposal_refs": [],
         "migrated_from": [],
+        "snapshot_history": [],
     }
 
 

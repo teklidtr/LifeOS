@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1303
 title: Build deterministic review snapshots
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1302
