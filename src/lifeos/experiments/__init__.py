@@ -61,3 +61,7 @@ __all__ += [
     "compare_experiments", "create_observation", "load_experiment_index", "rebuild_experiment_index",
     "record_conclusion", "save_analysis",
 ]
+from .proposals import ExperimentProposalPreview, ExperimentProposalRequest, ExperimentProposalService
+__all__ += [
+    "ExperimentProposalPreview", "ExperimentProposalRequest", "ExperimentProposalService",
+]

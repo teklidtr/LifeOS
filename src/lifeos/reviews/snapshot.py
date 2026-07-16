@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from lifeos.daily import content_hash, load_execution_records
+from lifeos.experiments.reviews import daily_experiment_section, weekly_experiment_section
 from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate
 from lifeos.reviews.contracts import (
     ReviewArtifact,
@@ -207,9 +208,9 @@ def build_review_snapshot(
     generated = generated_at.isoformat()
     sections = tuple(_snapshot_section(vault_root, section, generated) for section in workflow.sections)
     if kind == "daily":
-        sections = (*sections, _daily_evidence_section(vault_root, day, generated))
+        sections = (*sections, _daily_evidence_section(vault_root, day, generated), daily_experiment_section(vault_root=vault_root, runtime_dir=runtime_dir, day=day, generated_at=generated_at))
     else:
-        sections = (*sections, *_weekly_evidence_sections(vault_root, runtime_dir, workflow.range_start, workflow.range_end, generated))
+        sections = (*sections, *_weekly_evidence_sections(vault_root, runtime_dir, workflow.range_start, workflow.range_end, generated), weekly_experiment_section(vault_root=vault_root, runtime_dir=runtime_dir, range_start=workflow.range_start, range_end=workflow.range_end, generated_at=generated_at))
     diagnostics = tuple(
         f"{section.section_id}: {section.diagnostic}"
         for section in sections
