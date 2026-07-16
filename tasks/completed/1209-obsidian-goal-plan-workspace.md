@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1209
 title: Build the Obsidian goal-to-plan copilot workspace
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1203

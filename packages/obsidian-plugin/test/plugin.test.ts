@@ -29,11 +29,11 @@ test("plugin loads, opens view, invalidates, and unloads cleanly", async () => {
   await plugin.load();
   assert.equal(plugin.connection.current, "connected");
   host.ribbon?.(); host.command?.();
-  assert.deepEqual(host.opened, [LifeOSPlugin.VIEW_TYPE, LifeOSPlugin.VIEW_TYPE]);
+  assert.deepEqual(host.opened, [LifeOSPlugin.VIEW_TYPE, LifeOSPlugin.COPILOT_VIEW_TYPE]);
   bridge.notify("vault.changed");
   assert.equal(plugin.view.refreshCount, 1);
   await plugin.unload();
-  assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 3);
+  assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 8);
 });
 
 test("missing Python is actionable and non-destructive", async () => {

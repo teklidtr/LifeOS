@@ -1,13 +1,15 @@
 import { ConnectionManager } from "./connection.js";
 import { BridgeClient, LifeOSSettings } from "./protocol.js";
 import { loadingState, ViewState } from "./ui-state.js";
+import { GoalPlanWorkspaceController, WorkspaceOrigin } from "./goal-plan-workspace.js";
 
 export interface ObsidianHost {
   addRibbonIcon(icon: string, title: string, callback: () => void): () => void;
   addCommand(id: string, name: string, callback: () => void): () => void;
-  registerView(type: string, factory: () => LifeOSView): () => void;
+  registerView(type: string, factory: () => unknown): () => void;
   openView(type: string): void;
   saveSettings(settings: LifeOSSettings): Promise<void>;
+  getActiveFilePath?(): string | undefined;
 }
 
 export class LifeOSView {
@@ -16,9 +18,18 @@ export class LifeOSView {
   refresh(): void { this.refreshCount += 1; }
 }
 
+export class GoalPlanWorkspaceView {
+  refreshCount = 0;
+  constructor(readonly controller: GoalPlanWorkspaceController) {}
+  refresh(): void { this.refreshCount += 1; }
+}
+
 export class LifeOSPlugin {
   static readonly VIEW_TYPE = "lifeos-today";
+  static readonly COPILOT_VIEW_TYPE = "lifeos-goal-plan";
   readonly view = new LifeOSView();
+  readonly copilot: GoalPlanWorkspaceController;
+  readonly copilotView: GoalPlanWorkspaceView;
   readonly connection: ConnectionManager;
   private disposers: Array<() => void> = [];
 
@@ -28,12 +39,26 @@ export class LifeOSPlugin {
     readonly settings: LifeOSSettings,
   ) {
     this.connection = new ConnectionManager(client, () => this.view.refresh());
+    this.copilot = new GoalPlanWorkspaceController(client);
+    this.copilotView = new GoalPlanWorkspaceView(this.copilot);
   }
 
   async load(): Promise<void> {
     this.disposers.push(this.host.registerView(LifeOSPlugin.VIEW_TYPE, () => this.view));
+    this.disposers.push(this.host.registerView(LifeOSPlugin.COPILOT_VIEW_TYPE, () => this.copilotView));
     this.disposers.push(this.host.addRibbonIcon("layout-dashboard", "Open LifeOS", () => this.openToday()));
     this.disposers.push(this.host.addCommand("lifeos-open-today", "Open LifeOS Today", () => this.openToday()));
+    this.disposers.push(this.host.addCommand("lifeos-open-goal-plan", "Open Goal-to-Plan Copilot", () => this.openGoalPlan("command-palette")));
+    this.disposers.push(this.host.addCommand("lifeos-plan-active-goal", "Plan from Active Goal Note", () => {
+      const path = this.host.getActiveFilePath?.();
+      this.openGoalPlan("goal-note");
+      if (path?.startsWith("goals/") && path.endsWith(".md")) {
+        const sessionId = `session-${path.replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/^-|-$/g, "")}`;
+        void this.copilot.startFromGoal(path, sessionId, "goal-note");
+      }
+    }));
+    this.disposers.push(this.host.addCommand("lifeos-plan-from-capture", "Continue Quick Capture into Goal Planning", () => this.openGoalPlan("quick-capture")));
+    this.disposers.push(this.host.addCommand("lifeos-plan-from-review", "Open Goal Planning from Review", () => this.openGoalPlan("goal-review")));
     this.disposers.push(this.connection.subscribe((state, detail) => {
       this.view.state = state === "connected"
         ? { kind: "ready", title: "LifeOS", detail: "Connected" }
@@ -47,6 +72,11 @@ export class LifeOSPlugin {
   }
 
   openToday(): void { this.host.openView(LifeOSPlugin.VIEW_TYPE); }
+
+  openGoalPlan(origin: WorkspaceOrigin): void {
+    this.copilot.state = { ...this.copilot.state, origin, focusTarget: "workspace-title" };
+    this.host.openView(LifeOSPlugin.COPILOT_VIEW_TYPE);
+  }
 
   async unload(): Promise<void> {
     for (const dispose of this.disposers.splice(0).reverse()) dispose();
@@ -66,3 +96,5 @@ export * from "./reviews.js";
 export * from "./proposals.js";
 export * from "./scheduler.js";
 export * from "./feedback.js";
+export * from "./goal-plan.js";
+export * from "./goal-plan-workspace.js";
