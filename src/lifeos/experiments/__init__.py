@@ -67,3 +67,21 @@ from .proposals import ExperimentProposalPreview, ExperimentProposalRequest, Exp
 __all__ += [
     "ExperimentProposalPreview", "ExperimentProposalRequest", "ExperimentProposalService",
 ]
+
+from .migration import (
+    ExperimentMigrationCandidate, ExperimentMigrationPreview, ExperimentMigrationResult,
+    LegacyExperimentSource, apply_experiment_migration, preview_experiment_migration,
+)
+from .privacy import (
+    PROTECTED_ROOTS, ExperimentContextItem, ExperimentContextOmission, ExperimentContextPreview,
+    preview_experiment_context,
+)
+from .recovery import ExperimentRecoveryReport, audit_experiment_recovery
+
+__all__ += [
+    "ExperimentMigrationCandidate", "ExperimentMigrationPreview", "ExperimentMigrationResult",
+    "LegacyExperimentSource", "apply_experiment_migration", "preview_experiment_migration",
+    "PROTECTED_ROOTS", "ExperimentContextItem", "ExperimentContextOmission",
+    "ExperimentContextPreview", "preview_experiment_context",
+    "ExperimentRecoveryReport", "audit_experiment_recovery",
+]

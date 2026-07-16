@@ -112,6 +112,10 @@ from lifeos.experiments import (
     rebuild_experiment_index,
     record_conclusion,
     save_analysis,
+    apply_experiment_migration,
+    audit_experiment_recovery,
+    preview_experiment_context,
+    preview_experiment_migration,
 )
 from lifeos.experiments.design import evaluate_design
 from lifeos.feedback import (
@@ -491,6 +495,57 @@ class BridgeApplication:
             if method == "experiment.history.load":
                 strict_object(params, allowed=set())
                 return load_experiment_index(runtime_dir=self.daily.runtime_dir).to_dict()
+            if method == "experiment.migration.preview":
+                strict_object(params, allowed=set())
+                return preview_experiment_migration(
+                    vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir
+                ).to_dict()
+            if method == "experiment.migration.apply":
+                data = strict_object(
+                    params,
+                    allowed={"expected_source_hashes", "interrupt_after"},
+                    required={"expected_source_hashes"},
+                )
+                hashes = data["expected_source_hashes"]
+                if not isinstance(hashes, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in hashes.items()):
+                    raise ProtocolError("invalid_params", "expected_source_hashes must map paths to hashes.")
+                return apply_experiment_migration(
+                    vault_root=self.daily.vault_root,
+                    runtime_dir=self.daily.runtime_dir,
+                    expected_source_hashes=hashes,
+                    interrupt_after=int(data["interrupt_after"]) if data.get("interrupt_after") is not None else None,
+                ).to_dict()
+            if method == "experiment.privacy.preview":
+                data = strict_object(
+                    params,
+                    allowed={"experiment_path", "selected_paths", "allowed_sensitive_roots", "redact_terms", "max_item_bytes", "max_total_bytes"},
+                    required={"experiment_path"},
+                )
+                for key in ("selected_paths", "allowed_sensitive_roots", "redact_terms"):
+                    raw = data.get(key, [])
+                    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+                        raise ProtocolError("invalid_params", f"{key} must be a list of strings.")
+                return preview_experiment_context(
+                    vault_root=self.daily.vault_root,
+                    runtime_dir=self.daily.runtime_dir,
+                    experiment_path=str(data["experiment_path"]),
+                    selected_paths=data.get("selected_paths", []),
+                    allowed_sensitive_roots=data.get("allowed_sensitive_roots", []),
+                    redact_terms=data.get("redact_terms", []),
+                    max_item_bytes=int(data.get("max_item_bytes", 8_000)),
+                    max_total_bytes=int(data.get("max_total_bytes", 24_000)),
+                ).to_dict()
+            if method == "experiment.recovery.audit":
+                data = strict_object(params, allowed={"rebuild", "interrupt_after"})
+                rebuild = data.get("rebuild", False)
+                if type(rebuild) is not bool:
+                    raise ProtocolError("invalid_params", "rebuild must be boolean.")
+                return audit_experiment_recovery(
+                    vault_root=self.daily.vault_root,
+                    runtime_dir=self.daily.runtime_dir,
+                    rebuild=rebuild,
+                    interrupt_after=int(data["interrupt_after"]) if data.get("interrupt_after") is not None else None,
+                ).to_dict()
             if method == "experiment.compare":
                 data = strict_object(params, allowed={"left_id", "right_id"}, required={"left_id", "right_id"})
                 report = load_experiment_index(runtime_dir=self.daily.runtime_dir)

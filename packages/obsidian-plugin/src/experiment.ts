@@ -201,3 +201,46 @@ export interface ExperimentProposalResult {
   proposal_path: string;
   preview: ExperimentProposalPreview;
 }
+
+export interface ExperimentMigrationCandidate {
+  source: { path: string; content_hash: string; title: string; source_type: string };
+  target_path?: string;
+  experiment_id?: string;
+  state: "ready" | "already-migrated" | "conflict" | "malformed";
+  diagnostics: string[];
+  planned_frontmatter?: Record<string, unknown>;
+}
+
+export interface ExperimentMigrationPreview {
+  candidates: ExperimentMigrationCandidate[];
+}
+
+export interface ExperimentMigrationResult {
+  state: string;
+  migrated: string[];
+  already_migrated: string[];
+  conflicts: ExperimentMigrationCandidate[];
+  preserved_sources: string[];
+  audit_path: string;
+}
+
+export interface ExperimentContextPreview {
+  experiment_path: string;
+  local_analysis_only: boolean;
+  provider_payload_paths: string[];
+  items: Array<{
+    path: string; content_hash: string; inclusion_reason: string; excerpt: string;
+    byte_count: number; included_bytes: number; truncated: boolean;
+    redactions: Array<{ label: string; occurrences: number }>;
+  }>;
+  omissions: Array<{ path: string; reason: string; detail: string }>;
+  total_bytes: number;
+  truncated: boolean;
+  disclosure: string;
+}
+
+export interface ExperimentRecoveryReport {
+  state: string;
+  index: ExperimentIndexReport;
+  diagnostics: Array<Record<string, unknown>>;
+}

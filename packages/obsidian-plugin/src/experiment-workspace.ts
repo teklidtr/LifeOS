@@ -7,6 +7,10 @@ import {
   ExperimentDueWindow,
   ExperimentIndexEntry,
   ExperimentIndexReport,
+  ExperimentMigrationPreview,
+  ExperimentMigrationResult,
+  ExperimentContextPreview,
+  ExperimentRecoveryReport,
   ExperimentObservation,
   ExperimentProtocol,
   ExperimentProposalPreview,
@@ -41,6 +45,9 @@ export interface ExperimentWorkspaceState {
   analysis?: AnalysisRecord;
   comparison?: ExperimentComparison;
   proposalPreview?: ExperimentProposalPreview;
+  migrationPreview?: ExperimentMigrationPreview;
+  contextPreview?: ExperimentContextPreview;
+  recoveryReport?: ExperimentRecoveryReport;
   focusTarget: string;
   statusAnnouncement: string;
   detail?: string;
@@ -399,6 +406,78 @@ export class ExperimentWorkspaceController {
         statusAnnouncement: "Proposal created. External canonical data remains unchanged.",
       };
       return result;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async previewMigration(): Promise<ExperimentMigrationPreview> {
+    try {
+      const preview = await this.client.call<ExperimentMigrationPreview>("experiment.migration.preview", {});
+      this.state = {
+        ...this.state, migrationPreview: preview,
+        stage: preview.candidates.some((item) => item.state === "ready") ? "migration-required" : this.state.stage,
+        focusTarget: "experiment-migration-preview",
+        statusAnnouncement: `${preview.candidates.length} legacy experiment candidates inspected.`,
+      };
+      return preview;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async applyMigration(preview = this.state.migrationPreview, interruptAfter?: number): Promise<ExperimentMigrationResult> {
+    if (!preview) throw new Error("Experiment migration preview is required.");
+    const expectedSourceHashes = Object.fromEntries(preview.candidates.map((item) => [item.source.path, item.source.content_hash]));
+    try {
+      const result = await this.client.call<ExperimentMigrationResult>("experiment.migration.apply", {
+        expected_source_hashes: expectedSourceHashes, interrupt_after: interruptAfter,
+      });
+      this.state = {
+        ...this.state,
+        stage: result.state === "interrupted" ? "rebuild-in-progress" : result.conflicts.length ? "conflicting-edits" : "ready",
+        detail: result.conflicts.length ? "Some legacy sources changed or conflicted; no unsafe overwrite occurred." : undefined,
+        recovery: result.state === "interrupted" ? "Run migration again to resume from the durable audit." : undefined,
+        focusTarget: "experiment-migration-result",
+        statusAnnouncement: result.state === "interrupted" ? "Experiment migration interrupted safely." : "Experiment migration completed.",
+      };
+      return result;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async previewProviderContext(input: {
+    selectedPaths?: string[]; allowedSensitiveRoots?: string[]; redactTerms?: string[];
+    maxItemBytes?: number; maxTotalBytes?: number;
+  } = {}): Promise<ExperimentContextPreview> {
+    const artifact = this.requireArtifact();
+    try {
+      const preview = await this.client.call<ExperimentContextPreview>("experiment.privacy.preview", {
+        experiment_path: artifact.path,
+        selected_paths: input.selectedPaths ?? [],
+        allowed_sensitive_roots: input.allowedSensitiveRoots ?? [],
+        redact_terms: input.redactTerms ?? [],
+        max_item_bytes: input.maxItemBytes,
+        max_total_bytes: input.maxTotalBytes,
+      });
+      this.state = {
+        ...this.state, contextPreview: preview, focusTarget: "experiment-provider-disclosure",
+        detail: preview.disclosure, statusAnnouncement: "External provider context preview is ready for inspection.",
+      };
+      return preview;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async auditRecovery(rebuild = false, interruptAfter?: number): Promise<ExperimentRecoveryReport> {
+    if (rebuild) this.state = { ...this.state, stage: "rebuild-in-progress", statusAnnouncement: "Experiment recovery rebuild started.", focusTarget: "experiment-recovery-status" };
+    try {
+      const report = await this.client.call<ExperimentRecoveryReport>("experiment.recovery.audit", { rebuild, interrupt_after: interruptAfter });
+      this.state = {
+        ...this.state,
+        recoveryReport: report,
+        history: report.index.entries,
+        stage: report.state === "interrupted" ? "rebuild-in-progress" : report.diagnostics.length ? "conflicting-edits" : "ready",
+        detail: report.diagnostics.length ? `${report.diagnostics.length} recovery diagnostics require inspection.` : undefined,
+        recovery: report.state === "interrupted" ? "Repeat recovery to rebuild from canonical Markdown." : undefined,
+        focusTarget: "experiment-recovery-report",
+        statusAnnouncement: report.state === "interrupted" ? "Experiment recovery interrupted safely." : "Experiment recovery audit complete.",
+      };
+      return report;
     } catch (error) { return this.fail(error); }
   }
 

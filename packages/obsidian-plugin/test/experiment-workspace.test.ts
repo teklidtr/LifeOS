@@ -74,6 +74,10 @@ class Client implements BridgeClient {
     if (method === "experiment.compare") return { left: {}, right: {}, compatible: false, warning: "Measures do not match." } as T;
     if (method === "experiment.proposal.preview") return { proposal_id: "prop-1", action: "create-tasks", target_path: "tasks/ready/x.md", operation: "create_file", source_experiment_id: "exp-123", source_experiment_hash: "sha256:abc", analysis_limitations: ["No causation."], included_actions: ["create task"], excluded_actions: ["change habit"] } as T;
     if (method === "experiment.proposal.create") return { proposal_id: "prop-1", proposal_path: "proposals/prop-1", preview: {} } as T;
+    if (method === "experiment.migration.preview") return { candidates: [{ source: { path: "tracking/legacy.md", content_hash: "abc", title: "Legacy", source_type: "experiment" }, target_path: "experiments/2026/legacy.md", experiment_id: "exp-legacy", state: "ready", diagnostics: [], planned_frontmatter: {} }] } as T;
+    if (method === "experiment.migration.apply") return { state: "ready", migrated: ["experiments/2026/legacy.md"], already_migrated: [], conflicts: [], preserved_sources: ["tracking/legacy.md"], audit_path: ".lifeos/experiments/migration-audit.json" } as T;
+    if (method === "experiment.privacy.preview") return { experiment_path: this.current.path, local_analysis_only: true, provider_payload_paths: [this.current.path], items: [], omissions: [{ path: "diary/x.md", reason: "protected-default-deny", detail: "denied" }], total_bytes: 100, truncated: false, disclosure: "Only listed excerpts are sent." } as T;
+    if (method === "experiment.recovery.audit") return { state: "ready", index: { state: "ready", entries: [], diagnostics: [] }, diagnostics: [] } as T;
     throw new Error(`unhandled ${method}`);
   }
   onNotification(_listener: (method: string, params: Record<string, unknown>) => void): () => void { return () => undefined; }
@@ -136,4 +140,19 @@ test("keyboard actions are accessible and never expose direct external mutation"
   assert.deepEqual(actions.map((item) => item.shortcut), ["C", "O", "P", "A", "N", "H", "R", "M"]);
   assert.equal(actions.some((item) => item.id === "apply"), false);
   assert.equal(actions.every((item) => item.ariaLabel.length > item.label.length), true);
+});
+
+
+test("migration, privacy disclosure, and recovery remain inspectable workspace actions", async () => {
+  const client = new Client(); const controller = new ExperimentWorkspaceController(client);
+  await controller.load("experiments/2026/morning-walk-exp-123.md");
+  const migration = await controller.previewMigration();
+  assert.equal(controller.state.stage, "migration-required");
+  await controller.applyMigration(migration);
+  const context = await controller.previewProviderContext({ selectedPaths: ["diary/x.md"] });
+  assert.equal(context.local_analysis_only, true);
+  assert.equal(context.omissions[0]?.reason, "protected-default-deny");
+  const recovery = await controller.auditRecovery(true);
+  assert.equal(recovery.state, "ready");
+  assert.equal(client.calls.some(([method]) => method === "experiment.migration.apply"), true);
 });

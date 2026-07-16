@@ -172,6 +172,18 @@ class ExperimentArtifactService:
         _atomic_write(self.vault_root, relative_path, _document(metadata, "## User annotations\n\n"), expected_hash=None, create=True)
         return self.load(relative_path)
 
+    def create_imported(self, metadata: ExperimentMetadata, human_body: str) -> ExperimentArtifact:
+        """Create one canonical artifact from a validated migration preview."""
+        relative_path = _path(metadata)
+        _atomic_write(
+            self.vault_root,
+            relative_path,
+            _document(metadata, human_body),
+            expected_hash=None,
+            create=True,
+        )
+        return self.load(relative_path)
+
     def load(self, relative_path: str) -> ExperimentArtifact:
         try:
             source = read_vault_markdown(self.vault_root, relative_path)

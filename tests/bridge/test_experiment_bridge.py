@@ -65,3 +65,60 @@ def test_bridge_rejects_extra_fields_stale_writes_and_unsafe_activation(tmp_path
     with pytest.raises(ProtocolError) as stale:
         bridge.call("experiment.transition", path=drafted["path"], target="baseline", expected_hash=created["content_hash"], now=NOW)
     assert stale.value.code in {"unsafe_experiment", "stale_artifact"}
+
+
+def test_experiment_migration_privacy_and_recovery_bridge_methods(tmp_path: Path) -> None:
+    bridge, vault = client(tmp_path)
+    handshake = bridge.call("system.handshake", protocol="1.2")
+    for capability in (
+        "experiment.migration.preview", "experiment.migration.apply",
+        "experiment.privacy.preview", "experiment.recovery.audit",
+    ):
+        assert capability in handshake["capabilities"]
+    created = bridge.call("experiment.create", title="Walk", protocol=protocol(), now=NOW)
+    (vault / "diary").mkdir()
+    (vault / "diary" / "day.md").write_text("PrivateName felt focused.")
+    denied = bridge.call(
+        "experiment.privacy.preview", experiment_path=created["path"],
+        selected_paths=["diary/day.md"], redact_terms=["PrivateName"],
+    )
+    assert denied["provider_payload_paths"] == [created["path"]]
+    assert denied["omissions"][0]["reason"] == "protected-default-deny"
+    allowed = bridge.call(
+        "experiment.privacy.preview", experiment_path=created["path"],
+        selected_paths=["diary/day.md"], allowed_sensitive_roots=["diary"],
+        redact_terms=["PrivateName"],
+    )
+    assert "PrivateName" not in next(item for item in allowed["items"] if item["path"] == "diary/day.md")["excerpt"]
+    recovery = bridge.call("experiment.recovery.audit", rebuild=True)
+    assert recovery["index"]["state"] == "ready"
+
+    (vault / "tracking").mkdir()
+    (vault / "tracking" / "legacy.md").write_text(
+        "---\ntype: personal-experiment-v0\ntitle: Legacy\ncreated_at: 2026-07-16T09:00:00+00:00\n"
+        "question: Does walking relate to focus?\nhypothesis: Focus is higher.\nintervention: Walk 20 minutes.\n"
+        "comparison: No-walk baseline.\nbaseline_requirements: Two days.\n"
+        "outcome_measures:\n  - measure_id: focus\n    display_name: Focus\n    kind: rating\n    role: primary\n    cadence: daily\n"
+        "phases:\n  - phase_id: base\n    name: Baseline\n    kind: baseline\n    start_date: 2026-07-16\n    end_date: 2026-07-17\n"
+        "adherence_expectation: Record it.\nconfounders: []\nrisks: []\nstop_rules: [Stop for pain]\n"
+        "success_criteria: [Higher]\nfailure_criteria: [Not higher]\ninconclusive_criteria: [Missing]\nschedule: {}\n---\n\nLegacy body.\n"
+    )
+    preview = bridge.call("experiment.migration.preview")
+    candidate = preview["candidates"][0]
+    applied = bridge.call(
+        "experiment.migration.apply",
+        expected_source_hashes={candidate["source"]["path"]: candidate["source"]["content_hash"]},
+    )
+    assert applied["state"] == "ready"
+    assert (vault / "tracking" / "legacy.md").exists()
+
+
+def test_experiment_privacy_bridge_rejects_unbounded_or_malformed_inputs(tmp_path: Path) -> None:
+    bridge, _ = client(tmp_path)
+    created = bridge.call("experiment.create", title="Walk", protocol=protocol(), now=NOW)
+    with pytest.raises(ProtocolError) as malformed:
+        bridge.call("experiment.privacy.preview", experiment_path=created["path"], selected_paths="diary/x.md")
+    assert malformed.value.code == "invalid_params"
+    with pytest.raises(ProtocolError) as budget:
+        bridge.call("experiment.privacy.preview", experiment_path=created["path"], max_total_bytes=0)
+    assert budget.value.code == "invalid_context_budget"
