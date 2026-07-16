@@ -1,3 +1,14 @@
+from lifeos.reviews.history import (
+    ReviewContinuity,
+    ReviewContinuityItem,
+    ReviewHistoryEntry,
+    adjacent_reviews,
+    apply_continuity_to_snapshot,
+    build_review_continuity,
+    link_review_history,
+    list_review_history,
+    render_review_continuity,
+)
 from lifeos.reviews.decisions import (
     DuplicateReviewProposal,
     ReviewDecisionService,
@@ -70,4 +81,10 @@ __all__ += [
     "DuplicateReviewProposal", "ReviewDecisionService", "ReviewProposalError",
     "ReviewProposalRequest", "ReviewProposalResult", "artifact_item_fingerprints",
     "create_review_proposal",
+]
+
+__all__ += [
+    "ReviewContinuity", "ReviewContinuityItem", "ReviewHistoryEntry",
+    "adjacent_reviews", "apply_continuity_to_snapshot", "build_review_continuity",
+    "link_review_history", "list_review_history", "render_review_continuity",
 ]

@@ -167,6 +167,15 @@ def refresh_review_snapshot(
         day=artifact.metadata.period_start,
         generated_at=generated_at,
     )
+    from lifeos.reviews.history import (
+        adjacent_reviews,
+        apply_continuity_to_snapshot,
+        build_review_continuity,
+        render_review_continuity,
+    )
+    previous, _ = adjacent_reviews(service=service, artifact=artifact)
+    continuity = build_review_continuity(current_snapshot=snapshot, previous=previous)
+    snapshot = apply_continuity_to_snapshot(snapshot, continuity)
     history = artifact.metadata.snapshot_history
     record = ReviewSnapshotRecord(snapshot.snapshot_id, snapshot.content_hash, snapshot.generated_at)
     if not history or history[-1].snapshot_id != record.snapshot_id:
@@ -180,9 +189,11 @@ def refresh_review_snapshot(
             snapshot_id=snapshot.snapshot_id,
             snapshot_hash=snapshot.content_hash,
             snapshot_history=history,
+            previous_review_id=continuity.previous_review_id,
             managed_blocks={
                 "facts": render_snapshot_facts(snapshot),
                 "items": render_snapshot_items(snapshot),
+                "continuity": render_review_continuity(continuity),
             },
         ),
     )

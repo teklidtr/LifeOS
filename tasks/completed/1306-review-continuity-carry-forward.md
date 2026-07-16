@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1306
 title: Add review continuity and carry-forward
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1305
