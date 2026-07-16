@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1307
 title: Make daily reviews first-class
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1306

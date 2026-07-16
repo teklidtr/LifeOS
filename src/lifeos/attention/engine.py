@@ -511,6 +511,35 @@ def evaluate_attention(
     except (ReplanningError, VaultAccessError) as exc:
         diagnostics.append(f"replanning: {exc}")
 
+    # First-class daily reviews are optional until created. Once present, an open
+    # phase can surface as a resumable loop without forcing review creation.
+    try:
+        review_path = f"reviews/daily/{day.isoformat()}.md"
+        review_source = read_vault_markdown(vault_root, review_path)
+        review_parsed = parse_markdown_note(review_source.path, content=review_source.content)
+        phases = review_parsed.frontmatter.get("phases", [])
+        if isinstance(phases, list):
+            phase_thresholds = {"morning": 11, "evening": 20}
+            for phase in phases:
+                if not isinstance(phase, dict):
+                    continue
+                phase_id = phase.get("phase_id")
+                state = phase.get("state", "pending")
+                threshold_hour = phase_thresholds.get(phase_id)
+                if threshold_hour is None or state != "pending" or as_of.hour < threshold_hour:
+                    continue
+                item_id = _stable_id("daily-review-phase", day.isoformat(), str(phase_id))
+                items.append(AttentionItem(
+                    item_id, "daily_review_phase", "attention", f"Resume {phase_id} review",
+                    f"The canonical daily review exists and its {phase_id} phase is still open.", day.isoformat(),
+                    (AttentionEvidence(review_path, f"{phase_id} phase is pending"),),
+                    (SuggestedAction("review", "Resume review"), SuggestedAction("snooze", "Ask later")),
+                    f"when the {phase_id} phase is completed or intentionally skipped",
+                ))
+    except VaultAccessError as exc:
+        if exc.code != "not-found":
+            diagnostics.append(f"daily-review: {exc}")
+
     snoozed = dict(prefs.snoozed_until)
     dismissed = set(prefs.dismissed)
     filtered: list[AttentionItem] = []
