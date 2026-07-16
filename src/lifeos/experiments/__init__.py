@@ -41,3 +41,13 @@ __all__ = [
     "protocol_hash",
     "validate_transition",
 ]
+from .assistance import AssistanceRequest, AssistanceResult, DeterministicExperimentAssistance, assist_design
+from .design import DesignWarning, evaluate_design
+from .safety import ImmediateSafetyMessage, classify_safety, immediate_message
+from .scheduling import CollectionWindow, build_collection_windows, due_windows
+
+__all__ += [
+    "AssistanceRequest", "AssistanceResult", "CollectionWindow", "DesignWarning",
+    "DeterministicExperimentAssistance", "ImmediateSafetyMessage", "assist_design",
+    "build_collection_windows", "classify_safety", "due_windows", "evaluate_design", "immediate_message",
+]
