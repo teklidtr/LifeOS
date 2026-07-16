@@ -261,3 +261,34 @@ Planning sessions, workspace drafts, indexes, and replanning caches may be
 deleted and rebuilt. Goals, plans, proposals, execution evidence, review notes,
 and applied decision lineage remain ordinary canonical Markdown and are never
 owned by disposable copilot state.
+
+## DD-055: Reviews are canonical artifacts, not completed wizard sessions
+
+Daily and weekly reviews are ordinary Markdown notes with stable identity,
+lifecycle, durable progress, decisions, and human-owned reflection. Plugin and
+runtime state may accelerate the workflow but cannot be the only home of review
+progress.
+
+## DD-056: One daily artifact contains morning and evening phases
+
+Morning orientation and evening reconciliation belong to one calendar-day
+artifact. Either phase may be completed, skipped, or reopened independently.
+Separate legacy morning and evening notes migrate conservatively.
+
+## DD-057: Review refresh replaces managed snapshots only
+
+Deterministic facts, item snapshots, continuity, and completion summaries live in
+named managed blocks. Human reflection and user-created headings are never
+replaced by refresh. Missing or ambiguous boundaries fail closed.
+
+## DD-058: Review decisions are evidence-fingerprint scoped
+
+A decision applies to the exact evidence fingerprint shown in that review.
+Changed evidence creates a new decision context. Carry-forward is explicit, and
+unchanged dismissed items remain suppressed until evidence changes.
+
+## DD-059: Reviews may propose external changes but cannot apply them directly
+
+Review completion and item decisions cannot silently mutate goals, plans, tasks,
+experiments, captures, or other canonical notes. Consequential changes use the
+existing durable proposal lifecycle and recovery machinery.

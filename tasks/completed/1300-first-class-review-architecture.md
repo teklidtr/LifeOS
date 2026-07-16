@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1300
 title: Define first-class review artifact architecture
-status: ready
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1009
