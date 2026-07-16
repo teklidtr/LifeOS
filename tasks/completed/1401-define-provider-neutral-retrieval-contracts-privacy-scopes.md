@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1401
 title: Define provider-neutral retrieval contracts and privacy scopes
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1400

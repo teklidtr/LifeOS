@@ -1,0 +1,53 @@
+"""Semantic retrieval and evidence-grounded knowledge conversation primitives."""
+
+from .contracts import (
+    AnswerEvidence,
+    AnswerProvider,
+    CancellationToken,
+    EmbeddingBatch,
+    EmbeddingProvider,
+    GeneratedAnswer,
+    GeneratedParagraph,
+    ProviderCapabilities,
+    ProviderDisclosure,
+    ProviderError,
+    RetrievalError,
+    RetrievalPolicy,
+    RetrievalRequest,
+    RetrievalScope,
+    RerankCandidate,
+    RerankResult,
+    RerankingProvider,
+    ScopeDecision,
+    build_provider_disclosure,
+    scope_decision,
+)
+from .policy import load_retrieval_policy
+from .providers import DeterministicEmbeddingProvider, DeterministicReranker, UnavailableEmbeddingProvider
+
+__all__ = [
+    "AnswerEvidence",
+    "AnswerProvider",
+    "CancellationToken",
+    "DeterministicEmbeddingProvider",
+    "DeterministicReranker",
+    "EmbeddingBatch",
+    "EmbeddingProvider",
+    "GeneratedAnswer",
+    "GeneratedParagraph",
+    "ProviderCapabilities",
+    "ProviderDisclosure",
+    "ProviderError",
+    "RetrievalError",
+    "RetrievalPolicy",
+    "RetrievalRequest",
+    "RetrievalScope",
+    "RerankCandidate",
+    "RerankResult",
+    "RerankingProvider",
+    "ScopeDecision",
+    "UnavailableEmbeddingProvider",
+    "build_provider_disclosure",
+    "load_retrieval_policy",
+    "scope_decision",
+]
