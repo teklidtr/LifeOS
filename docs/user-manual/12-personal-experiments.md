@@ -165,6 +165,20 @@ observations, protocol state, warnings, or analysis readiness materially change.
 Choosing not to show an experiment on a review surface does not create repeated
 nagging.
 
+
+## Rich captures as observations
+
+Meal, exercise, and attachment captures can be linked as contextual evidence. A
+derived capture field becomes an experiment measurement only after an explicit
+field-to-measure mapping and a `confirmed` or `corrected` decision. The resulting
+observation preserves the capture path and hash, event time, original source
+category, and decision status. Suggested or unknown values are rejected rather
+than silently converted into measurements.
+
+The schema-level experiment exclusion is enforced by the mapping helper, but the
+standard Rich Capture controller does not yet expose a dedicated exclusion toggle
+or a one-click mapping action. See [Rich Capture](13-rich-capture.md).
+
 ## Deterministic analysis
 
 Analysis works locally without a language model. Depending on the measure and

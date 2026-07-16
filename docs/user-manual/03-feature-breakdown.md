@@ -564,6 +564,30 @@ to another canonical artifact goes through proposals. See
 [Personal Experiments](12-personal-experiments.md).
 
 
+## 3.18 Rich capture for meals, exercise, and attachments
+
+### What it is
+
+Rich capture stores a real-world observation as canonical Markdown and preserves
+original attachment bytes through content-addressed, vault-relative storage. It
+keeps user statements, local extraction, provider suggestions, confirmations,
+and disposable views in separate layers.
+
+### How it connects
+
+The Python bridge owns stable identities, lifecycle validation, attachment
+hashing and deduplication, local extraction, inference decisions, links, merge
+and split, privacy previews, proposal creation, migration, and recovery. Daily
+and weekly reviews can surface capture evidence; semantic retrieval and
+knowledge conversations can use approved text; experiments require explicit
+mapping and confirmation before a capture value becomes a measurement.
+
+The standard plugin currently registers ribbon and command-palette capture, meal
+and exercise quick capture, selected-text capture, and active-capture loading.
+Other controller origins, provider-backed OCR or transcription, exclusion
+toggles, destructive deletion, and several bulk actions need additional UI or
+host wiring. See [Rich Capture for Meals, Exercise, and Attachments](13-rich-capture.md).
+
 ---
 
 [← Previous: Executive Summary & Philosophy](02-executive-summary-and-philosophy.md) · [Manual home](README.md) · [Next: Setup & Installation →](04-setup-and-installation.md)

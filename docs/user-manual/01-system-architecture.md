@@ -16,6 +16,8 @@ graph TD
         Plans["goals and plans"]
         Cards["flashcards"]
         Patterns["metrics, patterns, reviews"]
+        Captures["rich capture Markdown and manifests"]
+        Originals["original attachment bytes"]
         Proposals["proposals"]
         Ownership["system/generated-ownership.json"]
         Instructions["system/instructions.yml"]
@@ -32,6 +34,7 @@ graph TD
         Study["Study workload planner"]
         Planning["Adaptive daily planner"]
         Observation["Personal-pattern analysis"]
+        CaptureEngine["Rich capture, hashing, extraction, and recovery"]
         Graph["Graph view builder"]
         Exports["Export builder"]
     end
@@ -54,6 +57,7 @@ graph TD
         RecoveryState["recovery transactions"]
         GraphState["graph generations"]
         ExportState["export generations"]
+        CaptureState["capture jobs, extraction, indexes, and views"]
     end
 
     User --> Obsidian
@@ -71,6 +75,8 @@ graph TD
     Vault --> Plans
     Vault --> Cards
     Vault --> Patterns
+    Vault --> Captures
+    Vault --> Originals
     Vault --> Proposals
     Vault --> Ownership
     Vault --> Instructions
@@ -87,6 +93,10 @@ graph TD
     Plans --> Planning
     Journal --> Observation
     Patterns --> Observation
+    Captures --> CaptureEngine
+    Originals --> CaptureEngine
+    CaptureEngine --> CaptureState
+    CaptureEngine --> ProposalEngine
 
     Vault --> Graph
     Vault --> Exports
@@ -122,7 +132,9 @@ The diagram separates LifeOS into five responsibility zones:
 4. **Safety modules** require explicit authorization and apply consequential
    changes through a recoverable state machine.
 5. **Runtime state** lives under `.lifeos/` and can be rebuilt from canonical
-   files.
+   files. Rich-capture extraction results, processing jobs, indexes, galleries,
+   and chart models belong here, while capture Markdown, manifests, and original
+   bytes remain canonical.
 
 The most important rule is that arrows flowing *from* an AI or derived view do
 not grant authority. AI output becomes durable only through the proposal,

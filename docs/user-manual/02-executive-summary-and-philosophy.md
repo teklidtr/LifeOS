@@ -3,8 +3,9 @@
 # 2. Executive Summary & Philosophy
 
 LifeOS is a private, local-first system for managing knowledge, study, plans,
-journals, personal observations, and AI-assisted changes inside an
-Obsidian-compatible Markdown vault.
+journals, personal observations, real-world evidence such as meal photos and
+workout records, and AI-assisted changes inside an Obsidian-compatible Markdown
+vault.
 
 Its central principle is:
 
@@ -18,7 +19,8 @@ It is designed to help you understand:
 - which actions fit your current energy and motivation;
 - which study material needs attention;
 - what patterns may exist in your habits and personal metrics;
-- where an idea came from;
+- where an idea or attachment came from;
+- which values are original, extracted, estimated, confirmed, or still unknown;
 - what an AI agent wants to change before you authorize it.
 
 ## Productivity philosophy
@@ -71,14 +73,16 @@ notebook.
 AI may:
 
 - analyze a source;
+- suggest interpretations of explicitly selected capture text or attachments;
 - suggest a wiki page;
 - generate a proposal;
 - identify possible relationships;
 - help decompose a goal;
 - create candidate flashcards or explanations.
 
-AI may not silently rewrite important canonical material. Submission, approval,
-and application are separate lifecycle steps. Consequential tools use a trusted
+AI may not silently rewrite important canonical material or turn an uncertain
+meal, exercise, OCR, or transcript estimate into a confirmed fact. Submission,
+approval, and application are separate lifecycle steps. Consequential tools use a trusted
 authorizer, and agent-controlled input cannot manufacture approval identity or
 bypass validation.
 

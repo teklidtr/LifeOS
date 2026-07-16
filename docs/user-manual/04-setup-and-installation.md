@@ -27,6 +27,7 @@ integration are optional.
 - An AI provider account and API key for `lifeos ingest`
 - An MCP-compatible agent client
 - Graph and export features enabled in configuration
+- A compatible local `pypdf` installation for PDF text extraction
 
 ## 4.2 Clone the repository
 
@@ -70,6 +71,13 @@ uv sync --extra dev
 uv sync --extra ai
 uv sync --extra mcp
 ```
+
+Rich capture itself needs only the core installation. The repository currently
+does not declare `pypdf` in `pyproject.toml` or `uv.lock`. PDF files are still
+preserved without it, but local text extraction reports `unavailable`. Add and
+lock a compatible parser in the same environment before relying on PDF
+extraction. OCR, transcription, and model-based image or nutrition analysis are
+not installed by any current extra.
 
 Verify the command:
 

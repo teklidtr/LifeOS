@@ -110,6 +110,23 @@ presented as current support.
 Reload or rerun retrieval to create a new grounded turn. LifeOS never rewrites an
 old answer to disguise changed evidence.
 
+
+## Rich captures as retrieval evidence
+
+A rich-capture representation can include the title, original description,
+confirmed or corrected derived values, and current approved extracted text. Raw
+binary files, suggested values, and rejected values are not indexed as evidence.
+Representation kinds, attachment IDs, capture hash, and stale state remain
+visible to the conversation workspace.
+
+This integration is currently an explicit helper rather than an automatic
+full-vault capture ingestion hook. The `exclude_from_semantic` flag is enforced
+when a representation is built, but the standard Rich Capture controller does
+not expose the exclusion toggle. Also, `privacy_scope: protected` controls
+external processing and does not automatically set semantic exclusion. Apply
+both policies deliberately when a protected capture should never enter the
+retrieval index. See [Rich Capture](13-rich-capture.md).
+
 ## Continue, branch, and revisit
 
 Follow-up questions retain the selected scope and provenance. You may pin useful

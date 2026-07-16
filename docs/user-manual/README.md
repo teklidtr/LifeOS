@@ -23,9 +23,14 @@ observation, and agent-assisted reflection.
 ## Suggested reading path
 
 New users should read Chapters 2, 4, and 5 first. Read Chapter 9 before using
-the goal-to-plan copilot, Chapter 10 before migrating or rebuilding reviews, Chapter 11 before building the semantic index or saving knowledge conversations, Chapter 12 before designing or tracking personal experiments, and Chapter 13 before importing media or using meal and exercise capture. Chapter 1 is useful when you want to understand the
-system boundaries, while Chapter 3 is the reference
-chapter for individual modules.
+the goal-to-plan copilot, Chapter 10 before migrating or rebuilding reviews,
+Chapter 11 before building the semantic index or saving knowledge conversations,
+Chapter 12 before designing or tracking personal experiments, and Chapter 13
+before importing media or using meal and exercise capture. Chapter 13 also
+identifies which rich-capture capabilities are fully wired in the standard plugin,
+which depend on a host renderer, and which remain provider-ready contracts.
+Chapter 1 is useful when you want to understand the system boundaries, while
+Chapter 3 is the reference chapter for individual modules.
 
 ## Navigation
 

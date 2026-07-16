@@ -77,4 +77,22 @@ proposals, migration, and recovery. Safety blocks and stale edits are explicit. 
 [Personal Experiments](12-personal-experiments.md).
 
 
+## Rich capture
+
+Use the camera ribbon icon or the commands **Open Rich Capture**, **Quick Capture
+Meal**, **Quick Capture Exercise**, **Capture Selected Text**, and **Open Active
+Rich Capture**. The standard controller can save and edit canonical capture
+Markdown, import and audit original files, run local extraction jobs, decide
+suggestions, link records, merge or split, preview provider context, create
+proposals, and rebuild derived state.
+
+The codebase also defines paste, drag-and-drop, folder-drop, mobile-share, review,
+experiment, conversation, goal, plan, task, habit, and diary origins. These are
+not all registered as platform handlers in the standard plugin. Likewise, the
+controller defines timeline, gallery, queue, chart, mobile, focus, and shortcut
+state, but a host renderer must turn those models into visible controls. Provider
+OCR, transcription, and nutrition or image enrichment are not wired to the
+standard processing button, which currently runs local extraction. See [Rich
+Capture](13-rich-capture.md) for the exact current surface.
+
 [← Workflow](05-workflow.md) · [Manual home](README.md) · [Next: Troubleshooting →](07-troubleshooting.md)

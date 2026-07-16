@@ -72,4 +72,31 @@ journals. It does not remove experiment Markdown, observations, amendments,
 conclusions, or human annotations.
 
 
+## Rich capture recovery
+
+- **Stale capture or merge preview:** reload the canonical Markdown and rebuild
+  the preview before applying a write.
+- **Missing attachment:** locate the original or deliberately remove the broken
+  reference. LifeOS does not invent replacement bytes.
+- **Changed attachment:** review and re-import or relink it; extraction and
+  embeddings based on the old hash are stale.
+- **Unsupported or oversized extraction:** keep the original and continue without
+  processing. The default text and PDF extraction limit is 2,000,000 bytes.
+- **PDF extraction unavailable:** the repository does not currently lock
+  `pypdf`; install and lock it in the LifeOS environment or preserve the PDF
+  without extraction.
+- **Cancelled processing:** retry the recorded job. The capture may remain in the
+  `processing` lifecycle state until a retry or explicit transition finishes it.
+- **Protected content blocked:** inspect the privacy preview and grant exact
+  per-operation scope, or stay local-only.
+- **Runtime corruption or deletion:** rebuild `.lifeos/captures/` from capture
+  Markdown, manifests, and original bytes.
+- **Orphan files or manifests:** review the rebuild diagnostics before deleting
+  anything. The standard workspace removes references but does not expose
+  destructive original-file deletion.
+
+Archive remains the normal safe alternative to deleting a canonical capture.
+See [Rich Capture](13-rich-capture.md) for lifecycle, storage, and current UI
+limits.
+
 [← Obsidian Desktop](06-obsidian-desktop.md) · [Manual home](README.md) · [Next: Adaptive Planning →](08-adaptive-planning.md)

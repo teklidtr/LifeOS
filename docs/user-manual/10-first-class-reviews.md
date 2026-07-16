@@ -138,6 +138,20 @@ A blocked state usually means one of these conditions:
 Open the linked Markdown file and follow the diagnostic. LifeOS fails closed
 rather than guessing how to merge an ambiguous artifact.
 
+
+## Rich-capture evidence in reviews
+
+Daily review snapshots may include each non-excluded capture whose event date
+matches the review day. They show capture type, review-needed or failed state,
+processing issues, and unconfirmed suggestions. Weekly snapshots summarize
+meal, exercise, attachment, and mixed counts, pending review, and extraction
+issues without inventing meal-quality or exercise-quality scores.
+
+These items use the same evidence fingerprints and dismissal behavior as other
+review findings. The rich-capture schema supports review exclusion, although the
+standard Rich Capture controller does not yet expose a dedicated toggle. See
+[Rich Capture](13-rich-capture.md).
+
 ## Legacy review migration
 
 Legacy files are detected at these paths:

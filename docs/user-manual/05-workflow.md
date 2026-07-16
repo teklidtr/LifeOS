@@ -40,6 +40,27 @@ This chapter explains how to operate LifeOS across three timeframes:
 5. Save the note and return to what you were doing. Do not stop to perfect the
    ontology during capture.
 
+
+### Capture a meal, workout, or file
+
+Use the camera ribbon icon or one of the Rich Capture commands when the original
+evidence matters or when a record should participate in reviews, retrieval, or
+experiments.
+
+1. Choose **Open Rich Capture**, **Quick Capture Meal**, or **Quick Capture
+   Exercise**.
+2. Enter a sentence and correct the event time when needed.
+3. Save the canonical note before adding optional processing.
+4. Attach regular files, then run local extraction when useful.
+5. Confirm, correct, or reject suggestions and add explicit links.
+6. Use a proposal for any change to a task, plan, habit, goal, note, reminder, or
+   calendar artifact.
+
+Use `raw/` for a lightweight thought that needs no file manifest or rich-capture
+lifecycle. Use `captures/` when preserving original bytes, provenance, uncertain
+values, attachment integrity, or cross-workflow evidence matters. See
+[Rich Capture](13-rich-capture.md) for current plugin availability and limits.
+
 ### Capture a task
 
 Tasks should normally live inside the relevant plan.
@@ -257,7 +278,11 @@ For each task touched today:
 
 Do not preserve zombie tasks merely because deleting them feels impolite.
 
-### 3. Process important raw captures
+### 3. Process important captures
+
+Review both lightweight notes under `raw/` and canonical rich captures under
+`captures/`. Rich captures may also need attachment audits, failed extraction
+review, suggestion decisions, linking, merge or split, or archive.
 
 A raw capture may become:
 
@@ -330,7 +355,10 @@ Review recent files under `raw/` and decide whether each should be deleted,
 journaled, promoted to wiki or study material, converted to a flashcard, attached
 to a plan, turned into an experiment, or kept as a tentative pattern candidate.
 
-Change `status: inbox` only after making the decision.
+Also inspect `captures/` for `needs-review` or `failed` states, unconfirmed
+suggestions, missing or changed attachments, and extraction issues. Archive a
+rich capture rather than deleting its evidence casually. Change `status: inbox`
+on raw notes only after making the decision.
 
 ### 3. Review goals
 
