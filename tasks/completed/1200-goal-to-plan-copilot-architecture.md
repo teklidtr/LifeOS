@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1200
 title: Define the goal-to-plan copilot architecture
-status: ready
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1109

@@ -211,3 +211,32 @@ Adaptive evidence may create a draft proposal with exact evidence, alternatives,
 confidence, target hash, and typed patch. It may not directly rewrite a plan.
 Submission, approval, application, interruption recovery, and stale-target
 handling remain identical to other proposals.
+
+## DD-047: Goal readiness is deterministic and may result in no plan
+
+The copilot checks explicit goal facts before model use. Missing information is
+represented as unknown or a question. Clarify, experiment, link, park, pause,
+decline, and no-plan are valid outcomes.
+
+## DD-048: Goal-to-plan context is minimized, previewed, and explicitly scoped
+
+Only bounded, traceable context is model-bound. Sensitive scopes require policy
+permission plus explicit user inclusion. Redaction occurs before invocation.
+
+## DD-049: Plan options are bounded alternatives, not automatic decisions
+
+A session produces zero to three meaningfully different options. Assumptions,
+tradeoffs, risks, missing evidence, and reasons an option may not fit remain
+visible and editable.
+
+## DD-050: Copilot decomposition uses rolling-wave depth
+
+Only the current review wave becomes actionable tasks. Distant work remains as
+coarse outcomes and is decomposed again from current canonical state after a
+review or material change.
+
+## DD-051: Copilot drafts reach Markdown only through proposals
+
+Planning sessions, model output, option drafts, and UI state cannot directly
+modify goals or plans. The final user-visible draft is converted into typed
+proposal operations with stale-write validation and recovery.

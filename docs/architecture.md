@@ -160,3 +160,13 @@ migrates to Shadow rather than Active. Unsupported future schemas fail closed.
 Plan-improvement findings become ordinary Git-tracked proposals and reuse the
 same validation, stale-write, authorization, application, and recovery state
 machine as every other consequential change.
+
+## Goal-to-plan copilot
+
+The optional goal-to-plan copilot turns an explicitly selected direction into
+clarification, experiment, link, park, or reviewable plan options. Readiness,
+context inclusion, rolling-wave depth, portfolio fit, and proposal application
+are deterministic boundaries. Model adapters only create validated suggestions.
+The user previews context and edits drafts in Obsidian; canonical changes still
+use the existing proposal lifecycle. See
+[Goal-to-Plan Copilot Architecture](goal-to-plan-copilot-architecture.md).
