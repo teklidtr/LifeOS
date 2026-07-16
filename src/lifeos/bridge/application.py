@@ -97,6 +97,23 @@ from lifeos.conversations import (
 )
 from lifeos.retrieval import RetrievalError, RetrievalRequest
 from lifeos.conversations.contracts import scope_from_dict
+from lifeos.experiments import (
+    ExperimentArtifactService,
+    ExperimentError,
+    ExperimentProposalRequest,
+    ExperimentProposalService,
+    analyze_experiment,
+    classify_safety,
+    compare_experiments,
+    create_observation,
+    due_windows,
+    load_experiment_index,
+    protocol_from_dict,
+    rebuild_experiment_index,
+    record_conclusion,
+    save_analysis,
+)
+from lifeos.experiments.design import evaluate_design
 from lifeos.feedback import (
     FeedbackControlService,
     FeedbackProposalRequest,
@@ -157,6 +174,10 @@ class BridgeApplication:
         self.feedback_controls = FeedbackControlService(vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id)
         self.knowledge = KnowledgeConversationService(vault_root=vault_root, runtime_dir=runtime_dir)
         self.conversation_proposals = ConversationProposalService(
+            vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id
+        )
+        self.experiments = ExperimentArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
+        self.experiment_proposals = ExperimentProposalService(
             vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id
         )
         self.config = LifeOSConfig(vault_root, runtime_dir, FeatureFlags(graphify=True, exports=True))
@@ -368,9 +389,138 @@ class BridgeApplication:
             ) from exc
         raise ProtocolError("method_not_found", "The requested bridge method is not allowlisted.", {"method": method})
 
+    def _dispatch_experiment(self, method: str, params: object) -> object:
+        try:
+            if method == "experiment.create":
+                data = strict_object(params, allowed={"title", "description", "category", "protocol", "origins", "now"}, required={"title", "protocol"})
+                if not isinstance(data["protocol"], dict):
+                    raise ProtocolError("invalid_params", "protocol must be an object.")
+                protocol = protocol_from_dict(data["protocol"])
+                origins_raw = data.get("origins", [])
+                if not isinstance(origins_raw, list):
+                    raise ProtocolError("invalid_params", "origins must be a list.")
+                from lifeos.experiments.contracts import source_from_dict
+                origins = tuple(source_from_dict(dict(item)) for item in origins_raw)
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.experiments.create(
+                    title=str(data["title"]), description=str(data.get("description", "")),
+                    category=str(data.get("category", "other")), protocol=protocol, origins=origins,
+                    safety=classify_safety(protocol), now=moment,
+                ).to_dict()
+            if method == "experiment.list":
+                data = strict_object(params, allowed={"states"})
+                raw = data.get("states")
+                if raw is not None and (not isinstance(raw, list) or not all(isinstance(item, str) for item in raw)):
+                    raise ProtocolError("invalid_params", "states must be a list of strings.")
+                states = frozenset(raw) if raw is not None else None
+                return [item.to_dict() for item in self.experiments.list(states=states)]
+            if method == "experiment.load":
+                data = strict_object(params, allowed={"path"}, required={"path"})
+                return self.experiments.load(str(data["path"])).to_dict()
+            if method in {"experiment.design.evaluate", "experiment.safety.classify"}:
+                data = strict_object(params, allowed={"protocol", "current_experiment_id"}, required={"protocol"})
+                if not isinstance(data["protocol"], dict):
+                    raise ProtocolError("invalid_params", "protocol must be an object.")
+                protocol = protocol_from_dict(data["protocol"])
+                if method.endswith("classify"):
+                    return classify_safety(protocol).to_dict()
+                active = self.experiments.list(states=frozenset({"baseline", "scheduled", "active", "paused"}))
+                return [item.to_dict() for item in evaluate_design(protocol, active_experiments=active, current_experiment_id=str(data["current_experiment_id"]) if data.get("current_experiment_id") else None)]
+            if method == "experiment.transition":
+                data = strict_object(params, allowed={"path", "target", "expected_hash", "reason", "now"}, required={"path", "target", "expected_hash"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.experiments.transition(str(data["path"]), str(data["target"]), expected_hash=str(data["expected_hash"]), reason=str(data.get("reason", "")), now=moment).to_dict()
+            if method == "experiment.protocol.update":
+                data = strict_object(params, allowed={"path", "protocol", "expected_hash", "now"}, required={"path", "protocol", "expected_hash"})
+                if not isinstance(data["protocol"], dict):
+                    raise ProtocolError("invalid_params", "protocol must be an object.")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.experiments.update_protocol(str(data["path"]), protocol_from_dict(data["protocol"]), expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "experiment.amendment.add":
+                data = strict_object(params, allowed={"path", "protocol", "reason", "changes", "expected_hash", "now"}, required={"path", "protocol", "reason", "changes", "expected_hash"})
+                if not isinstance(data["protocol"], dict) or not isinstance(data["changes"], list):
+                    raise ProtocolError("invalid_params", "protocol must be an object and changes must be a list.")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.experiments.amend_protocol(str(data["path"]), protocol_from_dict(data["protocol"]), reason=str(data["reason"]), changes=tuple(str(item) for item in data["changes"]), expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "experiment.observation.record":
+                data = strict_object(params, allowed={"path", "measure_id", "phase_id", "observed_at", "state", "value", "note", "context", "source_refs", "observation_id", "expected_hash", "now"}, required={"path", "measure_id", "phase_id", "observed_at", "state", "expected_hash"})
+                artifact = self.experiments.load(str(data["path"]))
+                context = data.get("context", [])
+                sources = data.get("source_refs", [])
+                if not isinstance(context, list) or not isinstance(sources, list):
+                    raise ProtocolError("invalid_params", "context and source_refs must be lists.")
+                from lifeos.experiments.contracts import source_from_dict
+                observation = create_observation(
+                    artifact.metadata, measure_id=str(data["measure_id"]), phase_id=str(data["phase_id"]),
+                    observed_at=_iso_datetime(data["observed_at"], "observed_at"), state=str(data["state"]),
+                    value=data.get("value"), note=str(data.get("note", "")), context=tuple(str(item) for item in context),
+                    source_refs=tuple(source_from_dict(dict(item)) for item in sources),
+                    observation_id=str(data["observation_id"]) if data.get("observation_id") else None,
+                )
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.experiments.append_observation(artifact.path, observation, expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "experiment.schedule.due":
+                data = strict_object(params, allowed={"path", "now"}, required={"path", "now"})
+                artifact = self.experiments.load(str(data["path"]))
+                return [item.to_dict() for item in due_windows(artifact.metadata, now=_iso_datetime(data["now"], "now"))]
+            if method == "experiment.analysis.run":
+                data = strict_object(params, allowed={"path", "expected_hash", "now", "save"}, required={"path", "expected_hash"})
+                artifact = self.experiments.load(str(data["path"]))
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                save = data.get("save", True)
+                if type(save) is not bool:
+                    raise ProtocolError("invalid_params", "save must be boolean.")
+                if not save:
+                    return analyze_experiment(artifact, now=moment).to_dict()
+                return save_analysis(self.experiments, artifact, expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "experiment.conclusion.record":
+                data = strict_object(params, allowed={"path", "conclusion", "notes", "follow_up_decisions", "expected_hash", "now"}, required={"path", "conclusion", "expected_hash"})
+                decisions = data.get("follow_up_decisions", ())
+                if not isinstance(decisions, list):
+                    raise ProtocolError("invalid_params", "follow_up_decisions must be a list.")
+                artifact = self.experiments.load(str(data["path"]))
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return record_conclusion(self.experiments, artifact, conclusion=str(data["conclusion"]), notes=str(data.get("notes", "")), follow_up_decisions=tuple(str(item) for item in decisions), expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "experiment.clone":
+                data = strict_object(params, allowed={"path", "title", "now"}, required={"path"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.experiments.clone(str(data["path"]), title=str(data["title"]) if data.get("title") else None, now=moment).to_dict()
+            if method == "experiment.history.rebuild":
+                data = strict_object(params, allowed={"batch_size", "interrupt_after"})
+                return rebuild_experiment_index(vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir, batch_size=int(data.get("batch_size", 100)), interrupt_after=int(data["interrupt_after"]) if data.get("interrupt_after") is not None else None).to_dict()
+            if method == "experiment.history.load":
+                strict_object(params, allowed=set())
+                return load_experiment_index(runtime_dir=self.daily.runtime_dir).to_dict()
+            if method == "experiment.compare":
+                data = strict_object(params, allowed={"left_id", "right_id"}, required={"left_id", "right_id"})
+                report = load_experiment_index(runtime_dir=self.daily.runtime_dir)
+                return compare_experiments(report.entries, str(data["left_id"]), str(data["right_id"]))
+            if method in {"experiment.proposal.preview", "experiment.proposal.create"}:
+                data = strict_object(params, allowed={"experiment_path", "action", "target_path", "content", "create_target", "included_actions", "excluded_actions", "now"}, required={"experiment_path", "action", "target_path", "content", "create_target"})
+                for key in ("included_actions", "excluded_actions"):
+                    raw = data.get(key, [])
+                    if not isinstance(raw, list):
+                        raise ProtocolError("invalid_params", f"{key} must be a list.")
+                    data[key] = tuple(str(item) for item in raw)
+                if type(data["create_target"]) is not bool:
+                    raise ProtocolError("invalid_params", "create_target must be boolean.")
+                moment = _iso_datetime(data.pop("now"), "now") if data.get("now") is not None else None
+                request = ExperimentProposalRequest(**data)
+                if method.endswith("preview"):
+                    preview, _, _ = self.experiment_proposals.preview(request, now=moment)
+                    return preview.to_dict()
+                return self.experiment_proposals.publish(request, now=moment)
+        except ProtocolError:
+            raise
+        except (ExperimentError, TypeError, ValueError) as exc:
+            raise ProtocolError(getattr(exc, "code", "experiment_invalid"), getattr(exc, "message", str(exc)), getattr(exc, "data", None)) from exc
+        raise ProtocolError("method_not_found", "The requested experiment method is not allowlisted.", {"method": method})
+
     def dispatch(self, method: str, params: object) -> object:
         if method.startswith("retrieval.") or method.startswith("conversation."):
             return self._dispatch_knowledge(method, params)
+        if method.startswith("experiment."):
+            return self._dispatch_experiment(method, params)
         if method == "copilot.replanning.scan":
             data = strict_object(params, allowed={"as_of"}, required={"as_of"})
             try:

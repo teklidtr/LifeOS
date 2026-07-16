@@ -18,6 +18,7 @@ from .contracts import (
     SafetyClassification,
     SourceReference,
     validate_transition,
+    protocol_from_dict,
 )
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "parse_experiment",
     "protocol_hash",
     "validate_transition",
+    "protocol_from_dict",
 ]
 from .assistance import AssistanceRequest, AssistanceResult, DeterministicExperimentAssistance, assist_design
 from .design import DesignWarning, evaluate_design

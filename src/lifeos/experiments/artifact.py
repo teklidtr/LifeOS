@@ -255,8 +255,9 @@ class ExperimentArtifactService:
                 {"state": artifact.metadata.state},
             )
         moment = utc_now(now)
+        from .safety import classify_safety
         return self.save(
-            artifact, replace(artifact.metadata, protocol=protocol, updated_at=moment.isoformat()), expected_hash=expected_hash
+            artifact, replace(artifact.metadata, protocol=protocol, safety=classify_safety(protocol), updated_at=moment.isoformat()), expected_hash=expected_hash
         )
 
     def amend_protocol(
@@ -279,6 +280,7 @@ class ExperimentArtifactService:
         metadata = replace(
             artifact.metadata,
             protocol=protocol,
+            safety=__import__("lifeos.experiments.safety", fromlist=["classify_safety"]).classify_safety(protocol),
             amendments=(*artifact.metadata.amendments, amendment),
             updated_at=moment.isoformat(),
         )
