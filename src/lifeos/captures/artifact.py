@@ -221,12 +221,16 @@ class AttachmentManifestService:
 
     def list(self) -> tuple[AttachmentManifestArtifact, ...]:
         try:
-            sources = iter_vault_markdown(self.vault_root, roots=("attachments/manifests",))
+            sources = iter_vault_markdown(self.vault_root, roots=("attachments",))
         except VaultAccessError as exc:
             if exc.code == "not-found":
                 return ()
             raise CaptureError(exc.code, str(exc)) from exc
-        return tuple(parse_manifest(item.path, item.relative_path, item.content) for item in sources)
+        return tuple(
+            parse_manifest(item.path, item.relative_path, item.content)
+            for item in sources
+            if item.relative_path.startswith("attachments/manifests/")
+        )
 
     def save(self, artifact: AttachmentManifestArtifact, metadata: AttachmentManifest, *, expected_hash: str) -> AttachmentManifestArtifact:
         current = self.load(artifact.path)
