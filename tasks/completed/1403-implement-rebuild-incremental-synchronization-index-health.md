@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1403
 title: Implement rebuild, incremental synchronization, and index health
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1402

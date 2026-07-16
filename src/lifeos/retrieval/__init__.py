@@ -26,6 +26,7 @@ from .chunking import chunk_markdown_file, reidentify_note
 from .index import INDEX_SCHEMA_VERSION, RetrievalIndex, StoredEmbedding
 from .models import ChunkedNote, IndexedChunk, IndexedDocument
 from .policy import load_retrieval_policy
+from .service import IndexHealth, IndexProgress, IndexResult, RetrievalIndexService
 from .providers import DeterministicEmbeddingProvider, DeterministicReranker, UnavailableEmbeddingProvider
 
 __all__ = [
@@ -34,6 +35,9 @@ __all__ = [
     "ChunkedNote",
     "CancellationToken",
     "INDEX_SCHEMA_VERSION",
+    "IndexHealth",
+    "IndexProgress",
+    "IndexResult",
     "IndexedChunk",
     "IndexedDocument",
     "DeterministicEmbeddingProvider",
@@ -47,6 +51,7 @@ __all__ = [
     "ProviderError",
     "RetrievalError",
     "RetrievalIndex",
+    "RetrievalIndexService",
     "RetrievalPolicy",
     "RetrievalRequest",
     "RetrievalScope",
