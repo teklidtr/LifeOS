@@ -1,0 +1,162 @@
+# LifeOS Architecture
+
+## System layers
+
+### Markdown vault
+
+The vault is canonical human-readable state.
+
+Typical domains:
+
+```text
+journal/
+raw/
+study/
+wiki/
+flashcards/
+patterns/
+profile/
+goals/
+plans/
+experiments/
+metrics/
+reviews/
+system/
+```
+
+### Deterministic layer
+
+Scripts establish facts:
+
+- file discovery and hashes
+- stable IDs and provenance
+- generated-file ownership
+- proposal application
+- task extraction
+- index generation
+- link and citation validation
+- graph dirty-state tracking
+- structural lint
+
+### Agent layer
+
+Agents interpret meaning:
+
+- classify and synthesize sources
+- decompose goals
+- propose wiki edits
+- create flashcards
+- interpret repeated avoidance
+- identify candidate patterns and contradictions
+- explain evidence coverage
+
+Agents do not silently promote interpretations into truth.
+
+### Human layer
+
+The user controls goals, proposal approval, personal interpretations, policy changes, pattern promotion, and archival decisions.
+
+## Proposal engine
+
+Consequential changes are stored under:
+
+```text
+.lifeos/proposals/<proposal-id>/
+  proposal.md
+  patches/
+```
+
+A deterministic tool applies only explicitly approved items whose target hashes still match.
+
+## Registry
+
+The registry stores file hashes, source versions, derived outputs, proposal state, generated ownership, task records, graph state, and migrations.
+
+It does not replace Markdown content.
+
+## Managed content
+
+```md
+<!-- lifeos:managed:start block-name -->
+Generated content
+<!-- lifeos:managed:end block-name -->
+```
+
+Markers must be unique, non-nested, and paired. Creation or deletion requires proposal approval.
+
+## Adaptive planning
+
+Tasks stay close to plans and are globally indexed by scripts.
+
+```text
+long-term goal    broad direction
+medium-term plan  clear outcome and milestones
+near-term actions detailed one or two weeks ahead
+today menu        selected from eligible actions
+```
+
+The planner proposes a menu rather than issuing commands.
+
+## Adaptive feedback layer
+
+Explicit execution outcomes are normalized into a deterministic, rebuildable
+evidence dataset. Cautious duration calibration, separate energy and motivation
+fit, and repeated-avoidance hypotheses may adjust the daily recommendation only
+through an optional bounded policy. The original planner remains visible as the
+baseline, and plan changes require proposals. See
+[Adaptive-Planning Feedback Architecture](adaptive-feedback-architecture.md).
+
+## Graph layer
+
+Graphify is an optional helper behind a LifeOS skill.
+
+```text
+.lifeos/graphify/
+  knowledge/
+  provenance/
+  personal-patterns/
+  system/
+```
+
+Graphify supplies paths, communities, bridge nodes, and visualization. LifeOS controls inputs, stable IDs, evidence classes, validation, and proposal generation.
+
+## Context packs
+
+A context pack assembles applicable policies, the question, source excerpts, graph-discovered candidate paths, recent context, evidence gaps, and omissions.
+
+## Optional exports
+
+Purpose-specific bundles may be generated under `.lifeos/exports/`, such as a public wiki, biology study bundle, trusted-agent bundle, or personal-review bundle. They are optional products, not mirrors of the vault.
+
+## Obsidian desktop interaction
+
+Obsidian is the primary human interface. A thin TypeScript plugin launches a vault-scoped
+Python bridge over versioned JSON-RPC/STDIO. Python remains the sole implementation of
+business rules and canonical writes. Direct UI writes use expected content hashes and
+idempotency keys. Consequential agent-generated changes remain proposals with trusted
+interactive authorization. See [Obsidian Desktop Architecture](obsidian-desktop-architecture.md).
+
+## Adaptive feedback release architecture
+
+Adaptive planning is shipped as a bounded layer above the baseline planner.
+Canonical execution events, corrections, exclusions, mode preferences, diagnosis
+dismissals, and reset boundaries remain in the Markdown vault. The normalized
+evidence dataset and historical replay results are disposable.
+
+The Obsidian Today view reads `system/adaptive-planning.yml` by default. An
+explicit request may temporarily override the mode, but it does not rewrite the
+canonical preference. Off returns the baseline menu, Shadow computes the
+adaptive candidate while returning baseline, and Active may return the adaptive
+candidate. All modes preserve baseline output for comparison.
+
+Historical replay is read-only and prevents outcome leakage by using only events
+strictly earlier than each replayed planning day. Evaluation reports separate
+measures such as unused time, overflow, missing outcomes, completion fraction,
+estimate error, and explanation coverage. It never combines them into a hidden
+user score.
+
+Legacy adaptive preferences require an explicit migration. Legacy enabled state
+migrates to Shadow rather than Active. Unsupported future schemas fail closed.
+Plan-improvement findings become ordinary Git-tracked proposals and reuse the
+same validation, stale-write, authorization, application, and recovery state
+machine as every other consequential change.

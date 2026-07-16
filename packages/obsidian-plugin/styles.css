@@ -1,0 +1,3 @@
+.lifeos-state { padding: 1rem; }
+.lifeos-state[data-kind="blocked"], .lifeos-state[data-kind="error"] { border-left: 3px solid var(--text-error); }
+.lifeos-state[data-kind="stale"] { border-left: 3px solid var(--text-warning); }

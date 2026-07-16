@@ -1,0 +1,23 @@
+class ToolFacadeError(RuntimeError):
+    pass
+
+class ToolValidationError(ToolFacadeError):
+    pass
+
+class ToolNotFoundError(ToolFacadeError):
+    pass
+
+class ToolConflictError(ToolFacadeError):
+    pass
+
+class ToolUnavailableError(ToolFacadeError):
+    pass
+
+class ToolRecoveryRequiredError(ToolUnavailableError):
+    pass
+
+class ToolAuthorizationError(ToolFacadeError):
+    pass
+
+class ToolExecutionError(ToolFacadeError):
+    pass

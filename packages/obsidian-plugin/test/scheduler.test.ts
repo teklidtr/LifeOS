@@ -1,0 +1,3 @@
+import assert from"node:assert/strict";import test from"node:test";import{BridgeClient,HandshakeResult,LifeOSSettings,SchedulerController}from"../src/index.js";
+class Client implements BridgeClient{calls:string[]=[];async start(_s:LifeOSSettings):Promise<HandshakeResult>{throw Error();}async call<T>(m:string):Promise<T>{this.calls.push(m);return{installed:false}as T;}onNotification():()=>void{return()=>{};}async stop():Promise<void>{}}
+test("scheduler installation is opt-in and reversible",async()=>{const client=new Client();const c=new SchedulerController(client);await c.status();await c.install(["lifeos-background"]);await c.uninstall();assert.deepEqual(client.calls,["scheduler.service.status","scheduler.service.install","scheduler.service.uninstall"]);});

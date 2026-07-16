@@ -1,0 +1,9 @@
+{
+  "id": "lifeos",
+  "name": "LifeOS",
+  "version": "0.2.0",
+  "minAppVersion": "1.5.0",
+  "description": "Obsidian-native LifeOS cockpit",
+  "author": "LifeOS",
+  "isDesktopOnly": true
+}

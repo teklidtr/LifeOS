@@ -1,0 +1,1 @@
+{"scenario":"missing-malformed","events":[{"event_id":"m1","date":"2026-07-01","outcome":"unaccounted"},{"event_id":"m2","date":"not-a-date","outcome":"done","actual_minutes":20},{"event_id":"m3","date":"2026-07-03","outcome":"partial"}]}

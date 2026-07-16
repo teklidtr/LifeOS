@@ -1,0 +1,1 @@
+{"scenario":"corrected-retracted","events":[{"event_id":"r1","date":"2026-07-01","outcome":"skipped"},{"event_id":"r2","date":"2026-07-01","outcome":"done","actual_minutes":25,"corrects_event_id":"r1"},{"event_id":"r3","date":"2026-07-02","outcome":"done","actual_minutes":30},{"event_id":"r4","date":"2026-07-03","outcome":"cancelled","retracts_event_id":"r3"}]}

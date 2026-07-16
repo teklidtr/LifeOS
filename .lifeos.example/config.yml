@@ -1,0 +1,9 @@
+# Relative vault paths are resolved from this configuration file's directory.
+vault_root: ..
+
+# Relative runtime paths are resolved from the vault root.
+runtime_dir: .lifeos
+
+features:
+  graphify: false
+  exports: false

@@ -1,0 +1,14 @@
+{
+  "name": "lifeos-obsidian-plugin",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf dist build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "compile": "tsc -p tsconfig.json",
+    "test": "npm run compile && node --test dist-test/test/*.test.js",
+    "build": "npm run compile && mkdir -p build && cp dist-test/src/index.js build/main.js && cp manifest.json build/manifest.json && cp styles.css build/styles.css"
+  }
+}

@@ -1,0 +1,1 @@
+{"scenario":"long-inactivity","events":[{"event_id":"l1","date":"2025-01-01","outcome":"done","planned_minutes":30,"actual_minutes":90},{"event_id":"l2","date":"2025-01-03","outcome":"done","planned_minutes":30,"actual_minutes":80},{"event_id":"l3","date":"2026-07-15","outcome":"done","planned_minutes":30,"actual_minutes":30}]}

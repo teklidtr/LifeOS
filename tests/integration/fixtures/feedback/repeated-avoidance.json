@@ -1,0 +1,1 @@
+{"scenario":"repeated-avoidance","events":[{"event_id":"a1","date":"2026-07-01","outcome":"skipped","reason":"next action is unclear"},{"event_id":"a2","date":"2026-07-04","outcome":"deferred","reason":"still vague"},{"event_id":"a3","date":"2026-07-08","outcome":"partial","actual_minutes":15,"completion_fraction":0.2,"reason":"scope not defined"}]}
