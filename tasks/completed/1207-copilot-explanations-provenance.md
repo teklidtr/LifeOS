@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1207
 title: Add plan-option explanations, provenance, and comparison
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1204

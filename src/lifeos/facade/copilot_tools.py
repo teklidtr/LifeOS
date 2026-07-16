@@ -110,3 +110,52 @@ def inspect_portfolio_capacity(
         recurring_workloads=request.recurring_workloads,
         adaptive_durations=request.adaptive_durations,
     )
+
+from lifeos.copilot.explanations import (
+    CounterfactualResult,
+    PlanExplanation,
+    PlanOptionComparison,
+    compare_plan_options,
+    explain_plan_option,
+    recompute_capacity_counterfactual,
+)
+
+COPILOT_EXPLAIN_DESCRIPTOR = ToolDescriptor(
+    name="copilot.explain",
+    description="Explain one draft option using inspectable provenance and omissions.",
+    effect=ToolEffect.READ_ONLY,
+)
+COPILOT_COMPARE_DESCRIPTOR = ToolDescriptor(
+    name="copilot.compare",
+    description="Compare up to three options across explicit planning dimensions.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+
+def explain_copilot_option(
+    *, option: PlanOption, decomposition: DecompositionResult,
+    capacity: PortfolioCapacityReport, context: PlanningContextPack,
+) -> PlanExplanation:
+    return explain_plan_option(
+        option=option, decomposition=decomposition, capacity=capacity, context=context
+    )
+
+
+def compare_copilot_options(
+    *, options: tuple[PlanOption, ...],
+    decompositions: Mapping[str, DecompositionResult],
+    capacity_reports: Mapping[str, PortfolioCapacityReport],
+) -> PlanOptionComparison:
+    return compare_plan_options(
+        options=options, decompositions=decompositions, capacity_reports=capacity_reports
+    )
+
+
+def counterfactual_capacity(
+    *, vault_root: Path, option: PlanOption, decomposition: DecompositionResult,
+    before: PortfolioCapacityReport, as_of: date, available_minutes: int | None,
+) -> CounterfactualResult:
+    return recompute_capacity_counterfactual(
+        option=option, decomposition=decomposition, index=build_copilot_index(vault_root),
+        before=before, as_of=as_of, available_minutes=available_minutes,
+    )

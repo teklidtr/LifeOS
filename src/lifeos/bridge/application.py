@@ -26,6 +26,10 @@ from lifeos.copilot import (
     CapacityError,
     RecurringWorkload,
     check_portfolio_capacity,
+    ExplanationError,
+    compare_plan_options,
+    explain_plan_option,
+    recompute_capacity_counterfactual,
 )
 from lifeos.facade.copilot_tools import (
     CopilotContextRequest,
@@ -111,7 +115,75 @@ class BridgeApplication:
         observations = apply_preferences(dataset.observations, preferences)
         return preferences, dataset, status, observations
 
+    def _copilot_bundle(self, *, session_id: str, option_id: str, as_of: date, available_minutes: int | None = None):
+        snapshot = self.planning_sessions.get(session_id)
+        session = snapshot.envelope.session
+        source = read_vault_markdown(self.daily.vault_root, session.goal_ref)
+        goal = parse_goal_note(path=session.goal_ref, content=source.content)
+        index = build_copilot_index(self.daily.vault_root)
+        context = build_planning_context(
+            vault_root=self.daily.vault_root, goal=goal, index=index,
+            include_paths=session.selected_context_refs, exclude_paths=session.excluded_context_refs,
+        )
+        option_set = generate_plan_options(
+            goal=goal, session=session, readiness=snapshot.envelope.readiness,
+            context=context, index=index, as_of=as_of,
+        )
+        option = next((item for item in option_set.options if item.option_id == option_id), None)
+        if option is None:
+            raise ExplanationError("selected option was not found")
+        decomposition = decompose_plan_option(option=option, horizon=goal.horizon)
+        capacity = check_portfolio_capacity(
+            option=option, decomposition=decomposition, index=index, as_of=as_of,
+            available_minutes=available_minutes,
+        )
+        return goal, index, context, option_set, option, decomposition, capacity
+
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.explain":
+            data = strict_object(params, allowed={"session_id", "option_id", "as_of", "available_minutes"}, required={"session_id", "option_id", "as_of"})
+            as_of = _iso_date(data["as_of"], "as_of")
+            available = data.get("available_minutes")
+            if available is not None and (type(available) is not int or available < 0):
+                raise ProtocolError("invalid_params", "available_minutes must be non-negative or null.")
+            try:
+                _, _, context, _, option, decomposition, capacity = self._copilot_bundle(
+                    session_id=data["session_id"], option_id=data["option_id"], as_of=as_of, available_minutes=available
+                )
+                return explain_plan_option(option=option, decomposition=decomposition, capacity=capacity, context=context).to_dict()
+            except (ExplanationError, CapacityError, DecompositionError, PlanOptionError, PlanningSessionError, CopilotContractError, PlanningContextError, VaultAccessError) as exc:
+                raise ProtocolError("copilot_explanation_invalid", str(exc)) from exc
+        if method == "copilot.compare":
+            data = strict_object(params, allowed={"session_id", "option_ids", "as_of", "available_minutes"}, required={"session_id", "option_ids", "as_of"})
+            option_ids = data["option_ids"]
+            if not isinstance(option_ids, list) or not all(isinstance(item, str) for item in option_ids):
+                raise ProtocolError("invalid_params", "option_ids must be a list of strings.")
+            as_of = _iso_date(data["as_of"], "as_of")
+            available = data.get("available_minutes")
+            try:
+                bundles = [self._copilot_bundle(session_id=data["session_id"], option_id=option_id, as_of=as_of, available_minutes=available) for option_id in option_ids]
+                return compare_plan_options(
+                    options=tuple(bundle[4] for bundle in bundles),
+                    decompositions={bundle[4].option_id: bundle[5] for bundle in bundles},
+                    capacity_reports={bundle[4].option_id: bundle[6] for bundle in bundles},
+                ).to_dict()
+            except (ExplanationError, CapacityError, DecompositionError, PlanOptionError, PlanningSessionError, CopilotContractError, PlanningContextError, VaultAccessError) as exc:
+                raise ProtocolError("copilot_comparison_invalid", str(exc)) from exc
+        if method == "copilot.counterfactual":
+            data = strict_object(params, allowed={"session_id", "option_id", "as_of", "before_available_minutes", "available_minutes"}, required={"session_id", "option_id", "as_of", "available_minutes"})
+            as_of = _iso_date(data["as_of"], "as_of")
+            before_available = data.get("before_available_minutes")
+            available = data.get("available_minutes")
+            try:
+                _, index, _, _, option, decomposition, before = self._copilot_bundle(
+                    session_id=data["session_id"], option_id=data["option_id"], as_of=as_of, available_minutes=before_available
+                )
+                return recompute_capacity_counterfactual(
+                    option=option, decomposition=decomposition, index=index, before=before,
+                    as_of=as_of, available_minutes=available,
+                ).to_dict()
+            except (ExplanationError, CapacityError, DecompositionError, PlanOptionError, PlanningSessionError, CopilotContractError, PlanningContextError, VaultAccessError) as exc:
+                raise ProtocolError("copilot_counterfactual_invalid", str(exc)) from exc
         if method == "copilot.capacity.check":
             data = strict_object(
                 params,

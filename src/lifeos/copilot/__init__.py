@@ -153,3 +153,33 @@ __all__ += [
     "RecurringWorkload",
     "check_portfolio_capacity",
 ]
+
+from .explanations import (
+    ComparisonDimension,
+    ContradictionSummary,
+    CounterfactualResult,
+    ExplanationError,
+    ItemExplanation,
+    OmissionSummary,
+    PlanExplanation,
+    PlanOptionComparison,
+    ProvenanceEntry,
+    compare_plan_options,
+    explain_plan_option,
+    recompute_capacity_counterfactual,
+)
+
+__all__ += [
+    "ComparisonDimension",
+    "ContradictionSummary",
+    "CounterfactualResult",
+    "ExplanationError",
+    "ItemExplanation",
+    "OmissionSummary",
+    "PlanExplanation",
+    "PlanOptionComparison",
+    "ProvenanceEntry",
+    "compare_plan_options",
+    "explain_plan_option",
+    "recompute_capacity_counterfactual",
+]
