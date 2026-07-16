@@ -1,3 +1,27 @@
 .lifeos-state { padding: 1rem; }
 .lifeos-state[data-kind="blocked"], .lifeos-state[data-kind="error"] { border-left: 3px solid var(--text-error); }
 .lifeos-state[data-kind="stale"] { border-left: 3px solid var(--text-warning); }
+
+.lifeos-knowledge-conversation {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.8fr) minmax(20rem, 1.4fr);
+  gap: var(--size-4-4);
+}
+.lifeos-knowledge-conversation__scope,
+.lifeos-knowledge-conversation__evidence,
+.lifeos-knowledge-conversation__answer {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3);
+}
+.lifeos-knowledge-conversation__evidence [data-stale="true"] {
+  border-inline-start: 3px solid var(--text-warning);
+  padding-inline-start: var(--size-4-2);
+}
+.lifeos-knowledge-conversation__support {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+@media (max-width: 720px) {
+  .lifeos-knowledge-conversation { grid-template-columns: 1fr; }
+}

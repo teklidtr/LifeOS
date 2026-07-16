@@ -3,6 +3,8 @@ import { BridgeClient, LifeOSSettings } from "./protocol.js";
 import { loadingState, ViewState } from "./ui-state.js";
 import { GoalPlanWorkspaceController, WorkspaceOrigin } from "./goal-plan-workspace.js";
 import { ReviewWorkspaceController, ReviewWorkspaceOrigin } from "./review-workspace.js";
+import { KnowledgeConversationOrigin, KnowledgeConversationWorkspaceController } from "./knowledge-conversation-workspace.js";
+import { emptyScope } from "./knowledge-conversation.js";
 
 export interface ObsidianHost {
   addRibbonIcon(icon: string, title: string, callback: () => void): () => void;
@@ -11,6 +13,9 @@ export interface ObsidianHost {
   openView(type: string): void;
   saveSettings(settings: LifeOSSettings): Promise<void>;
   getActiveFilePath?(): string | undefined;
+  getSelectedText?(): string | undefined;
+  getActiveFolderPath?(): string | undefined;
+  getActiveTag?(): string | undefined;
   openFilePath?(path: string): void;
 }
 
@@ -26,6 +31,12 @@ export class GoalPlanWorkspaceView {
   refresh(): void { this.refreshCount += 1; }
 }
 
+export class KnowledgeConversationWorkspaceView {
+  refreshCount = 0;
+  constructor(readonly controller: KnowledgeConversationWorkspaceController) {}
+  refresh(): void { this.refreshCount += 1; }
+}
+
 export class ReviewWorkspaceView {
   refreshCount = 0;
   constructor(readonly controller: ReviewWorkspaceController) {}
@@ -36,11 +47,14 @@ export class LifeOSPlugin {
   static readonly VIEW_TYPE = "lifeos-today";
   static readonly COPILOT_VIEW_TYPE = "lifeos-goal-plan";
   static readonly REVIEW_VIEW_TYPE = "lifeos-reviews";
+  static readonly KNOWLEDGE_CONVERSATION_VIEW_TYPE = "lifeos-knowledge-conversation";
   readonly view = new LifeOSView();
   readonly copilot: GoalPlanWorkspaceController;
   readonly copilotView: GoalPlanWorkspaceView;
   readonly reviews: ReviewWorkspaceController;
   readonly reviewView: ReviewWorkspaceView;
+  readonly knowledgeConversations: KnowledgeConversationWorkspaceController;
+  readonly knowledgeConversationView: KnowledgeConversationWorkspaceView;
   readonly connection: ConnectionManager;
   private disposers: Array<() => void> = [];
 
@@ -54,13 +68,17 @@ export class LifeOSPlugin {
     this.copilotView = new GoalPlanWorkspaceView(this.copilot);
     this.reviews = new ReviewWorkspaceController(client, (path) => this.host.openFilePath?.(path));
     this.reviewView = new ReviewWorkspaceView(this.reviews);
+    this.knowledgeConversations = new KnowledgeConversationWorkspaceController(client, (path) => this.host.openFilePath?.(path));
+    this.knowledgeConversationView = new KnowledgeConversationWorkspaceView(this.knowledgeConversations);
   }
 
   async load(): Promise<void> {
     this.disposers.push(this.host.registerView(LifeOSPlugin.VIEW_TYPE, () => this.view));
     this.disposers.push(this.host.registerView(LifeOSPlugin.COPILOT_VIEW_TYPE, () => this.copilotView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.REVIEW_VIEW_TYPE, () => this.reviewView));
+    this.disposers.push(this.host.registerView(LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE, () => this.knowledgeConversationView));
     this.disposers.push(this.host.addRibbonIcon("layout-dashboard", "Open LifeOS", () => this.openToday()));
+    this.disposers.push(this.host.addRibbonIcon("messages-square", "Open Knowledge Conversation", () => this.openKnowledgeConversation("ribbon")));
     this.disposers.push(this.host.addCommand("lifeos-open-today", "Open LifeOS Today", () => this.openToday()));
     this.disposers.push(this.host.addCommand("lifeos-open-goal-plan", "Open Goal-to-Plan Copilot", () => this.openGoalPlan("command-palette")));
     this.disposers.push(this.host.addCommand("lifeos-plan-active-goal", "Plan from Active Goal Note", () => {
@@ -88,6 +106,23 @@ export class LifeOSPlugin {
     this.disposers.push(this.host.addCommand("lifeos-open-review-history", "Open Review History", () => {
       this.openReviews("history"); void this.reviews.loadHistory();
     }));
+    this.disposers.push(this.host.addCommand("lifeos-open-knowledge-conversation", "Open Knowledge Conversation", () => this.openKnowledgeConversation("command-palette")));
+    this.disposers.push(this.host.addCommand("lifeos-ask-active-note", "Ask About Active Note", () => {
+      const path = this.host.getActiveFilePath?.();
+      this.openKnowledgeConversation("active-note", path ? { paths: [path] } : {});
+    }));
+    this.disposers.push(this.host.addCommand("lifeos-ask-selection", "Ask About Selected Text", () => {
+      const path = this.host.getActiveFilePath?.(); const query = this.host.getSelectedText?.() ?? "";
+      this.openKnowledgeConversation("selection", path ? { paths: [path] } : {}, query);
+    }));
+    this.disposers.push(this.host.addCommand("lifeos-ask-folder", "Ask Within Active Folder", () => {
+      const folder = this.host.getActiveFolderPath?.();
+      this.openKnowledgeConversation("folder", folder ? { folders: [folder] } : {});
+    }));
+    this.disposers.push(this.host.addCommand("lifeos-ask-tag", "Ask Within Active Tag", () => {
+      const tag = this.host.getActiveTag?.();
+      this.openKnowledgeConversation("tag", tag ? { tags: [tag] } : {});
+    }));
     this.disposers.push(this.connection.subscribe((state, detail) => {
       this.view.state = state === "connected"
         ? { kind: "ready", title: "LifeOS", detail: "Connected" }
@@ -105,6 +140,12 @@ export class LifeOSPlugin {
   openGoalPlan(origin: WorkspaceOrigin): void {
     this.copilot.state = { ...this.copilot.state, origin, focusTarget: "workspace-title" };
     this.host.openView(LifeOSPlugin.COPILOT_VIEW_TYPE);
+  }
+
+
+  openKnowledgeConversation(origin: KnowledgeConversationOrigin, scope: Record<string, unknown> = {}, query = ""): void {
+    this.knowledgeConversations.prepare(origin, { ...emptyScope(), ...scope }, query);
+    this.host.openView(LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE);
   }
 
   openReviews(origin: ReviewWorkspaceOrigin): void {
@@ -145,3 +186,5 @@ export * from "./goal-plan-workspace.js";
 
 export * from "./review-artifact.js";
 export * from "./review-workspace.js";
+export * from "./knowledge-conversation.js";
+export * from "./knowledge-conversation-workspace.js";

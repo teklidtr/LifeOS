@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1409
 title: Build the Obsidian knowledge conversation workspace
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1408

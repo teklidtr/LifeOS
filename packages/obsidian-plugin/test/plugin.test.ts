@@ -28,12 +28,12 @@ test("plugin loads, opens view, invalidates, and unloads cleanly", async () => {
   const host = new FakeHost(); const bridge = new FakeBridge(); const plugin = new LifeOSPlugin(host, bridge, settings);
   await plugin.load();
   assert.equal(plugin.connection.current, "connected");
-  host.ribbon?.(); host.commands.get("lifeos-open-goal-plan")?.();
-  assert.deepEqual(host.opened, [LifeOSPlugin.VIEW_TYPE, LifeOSPlugin.COPILOT_VIEW_TYPE]);
+  plugin.openToday(); host.commands.get("lifeos-open-goal-plan")?.(); host.commands.get("lifeos-open-knowledge-conversation")?.();
+  assert.deepEqual(host.opened, [LifeOSPlugin.VIEW_TYPE, LifeOSPlugin.COPILOT_VIEW_TYPE, LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE]);
   bridge.notify("vault.changed");
   assert.equal(plugin.view.refreshCount, 1);
   await plugin.unload();
-  assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 13);
+  assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 20);
 });
 
 test("missing Python is actionable and non-destructive", async () => {
