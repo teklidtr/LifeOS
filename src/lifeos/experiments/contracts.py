@@ -18,7 +18,9 @@ ExperimentState = Literal[
     "analyzed",
     "archived",
 ]
-MeasureKind = Literal["count", "duration", "rating", "percentage", "continuous", "completion", "qualitative"]
+MeasureKind = Literal[
+    "count", "duration", "rating", "percentage", "continuous", "completion", "qualitative"
+]
 MeasureRole = Literal["primary", "secondary", "adherence", "contextual"]
 ObservationState = Literal["measured", "not-measured", "not-applicable", "skipped", "unavailable"]
 SafetyLevel = Literal["ordinary", "caution", "informational-only", "blocked", "emergency"]
@@ -61,7 +63,9 @@ class ExperimentError(ValueError):
 def _nonblank(value: str, field_name: str) -> str:
     result = value.strip()
     if not result:
-        raise ExperimentError("invalid_field", f"{field_name} must not be blank.", {"field": field_name})
+        raise ExperimentError(
+            "invalid_field", f"{field_name} must not be blank.", {"field": field_name}
+        )
     return result
 
 
@@ -72,7 +76,11 @@ def validate_transition(current: ExperimentState, target: ExperimentState) -> No
         raise ExperimentError(
             "invalid_transition",
             f"Experiment cannot transition from {current} to {target}.",
-            {"current": current, "target": target, "allowed": sorted(_ALLOWED_TRANSITIONS[current])},
+            {
+                "current": current,
+                "target": target,
+                "allowed": sorted(_ALLOWED_TRANSITIONS[current]),
+            },
         )
 
 
@@ -112,10 +120,16 @@ class MeasureDefinition:
         _nonblank(self.display_name, "display_name")
         _nonblank(self.cadence, "cadence")
         _nonblank(self.source, "source")
-        if self.valid_min is not None and self.valid_max is not None and self.valid_min > self.valid_max:
+        if (
+            self.valid_min is not None
+            and self.valid_max is not None
+            and self.valid_min > self.valid_max
+        ):
             raise ExperimentError("invalid_measure", "Measure valid_min cannot exceed valid_max.")
         if self.kind == "qualitative" and self.aggregation != "none":
-            raise ExperimentError("invalid_measure", "Qualitative measures must use aggregation=none.")
+            raise ExperimentError(
+                "invalid_measure", "Qualitative measures must use aggregation=none."
+            )
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -134,7 +148,9 @@ class ExperimentPhase:
         _nonblank(self.phase_id, "phase_id")
         _nonblank(self.name, "phase name")
         if self.end_date < self.start_date:
-            raise ExperimentError("invalid_phase", "Experiment phase end date precedes its start date.")
+            raise ExperimentError(
+                "invalid_phase", "Experiment phase end date precedes its start date."
+            )
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -185,7 +201,9 @@ class ProtocolAmendment:
         _nonblank(self.amendment_id, "amendment_id")
         _nonblank(self.reason, "amendment reason")
         if not self.changes:
-            raise ExperimentError("invalid_amendment", "An amendment must describe at least one change.")
+            raise ExperimentError(
+                "invalid_amendment", "An amendment must describe at least one change."
+            )
         if not self.prior_protocol_hash.startswith("sha256:"):
             raise ExperimentError("invalid_amendment", "Amendment prior protocol hash is invalid.")
 
@@ -217,7 +235,11 @@ class SafetyClassification:
         return self.level not in {"informational-only", "blocked", "emergency"}
 
     def to_dict(self) -> dict[str, object]:
-        return {**asdict(self), "codes": list(self.codes), "allows_activation": self.allows_activation}
+        return {
+            **asdict(self),
+            "codes": list(self.codes),
+            "allows_activation": self.allows_activation,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,7 +268,9 @@ class ExperimentProtocol:
         _nonblank(self.intervention, "intervention")
         measure_ids = [item.measure_id for item in self.outcome_measures]
         if len(measure_ids) != len(set(measure_ids)):
-            raise ExperimentError("duplicate_measure", "Experiment measure identities must be unique.")
+            raise ExperimentError(
+                "duplicate_measure", "Experiment measure identities must be unique."
+            )
         phase_ids = [item.phase_id for item in self.phases]
         if len(phase_ids) != len(set(phase_ids)):
             raise ExperimentError("duplicate_phase", "Experiment phase identities must be unique.")
@@ -337,11 +361,19 @@ class ExperimentMetadata:
         known_measures = {item.measure_id for item in self.protocol.outcome_measures}
         unknown_measures = sorted({item.measure_id for item in self.observations} - known_measures)
         if unknown_measures:
-            raise ExperimentError("unknown_measure", "Observations reference unknown measures.", {"measure_ids": unknown_measures})
+            raise ExperimentError(
+                "unknown_measure",
+                "Observations reference unknown measures.",
+                {"measure_ids": unknown_measures},
+            )
         known_phases = {item.phase_id for item in self.protocol.phases}
         unknown_phases = sorted({item.phase_id for item in self.observations} - known_phases)
         if unknown_phases:
-            raise ExperimentError("unknown_phase", "Observations reference unknown phases.", {"phase_ids": unknown_phases})
+            raise ExperimentError(
+                "unknown_phase",
+                "Observations reference unknown phases.",
+                {"phase_ids": unknown_phases},
+            )
 
     def to_frontmatter(self) -> dict[str, object]:
         return {
@@ -401,7 +433,11 @@ def _tuple_strings(value: object) -> tuple[str, ...]:
 
 
 def source_from_dict(value: Mapping[str, Any]) -> SourceReference:
-    return SourceReference(str(value["path"]), str(value.get("relation", "source")), str(value["content_hash"]) if value.get("content_hash") else None)
+    return SourceReference(
+        str(value["path"]),
+        str(value.get("relation", "source")),
+        str(value["content_hash"]) if value.get("content_hash") else None,
+    )
 
 
 def measure_from_dict(value: Mapping[str, Any]) -> MeasureDefinition:
@@ -423,19 +459,29 @@ def measure_from_dict(value: Mapping[str, Any]) -> MeasureDefinition:
 
 def phase_from_dict(value: Mapping[str, Any]) -> ExperimentPhase:
     return ExperimentPhase(
-        str(value["phase_id"]), str(value["name"]), str(value["kind"]),  # type: ignore[arg-type]
-        str(value["start_date"]), str(value["end_date"]), str(value.get("intervention", "")),
+        str(value["phase_id"]),
+        str(value["name"]),
+        str(value["kind"]),  # type: ignore[arg-type]
+        str(value["start_date"]),
+        str(value["end_date"]),
+        str(value.get("intervention", "")),
     )
 
 
 def observation_from_dict(value: Mapping[str, Any]) -> Observation:
+    raw_value = value.get("value")
+    if raw_value is not None and not isinstance(raw_value, (str, int, float, bool)):
+        raise ExperimentError(
+            "invalid_observation",
+            "Observation values must be text, numeric, boolean, or null.",
+        )
     return Observation(
         observation_id=str(value["observation_id"]),
         measure_id=str(value["measure_id"]),
         observed_at=str(value["observed_at"]),
         phase_id=str(value["phase_id"]),
         state=str(value["state"]),  # type: ignore[arg-type]
-        value=value.get("value"),  # type: ignore[arg-type]
+        value=raw_value,
         note=str(value.get("note", "")),
         source_refs=tuple(source_from_dict(dict(item)) for item in value.get("source_refs", ())),
         context=_tuple_strings(value.get("context")),
@@ -451,7 +497,9 @@ def protocol_from_dict(value: Mapping[str, Any]) -> ExperimentProtocol:
         constants=_tuple_strings(value.get("constants")),
         comparison=str(value.get("comparison", "")),
         baseline_requirements=str(value.get("baseline_requirements", "")),
-        outcome_measures=tuple(measure_from_dict(dict(item)) for item in value.get("outcome_measures", ())),
+        outcome_measures=tuple(
+            measure_from_dict(dict(item)) for item in value.get("outcome_measures", ())
+        ),
         phases=tuple(phase_from_dict(dict(item)) for item in value.get("phases", ())),
         adherence_expectation=str(value.get("adherence_expectation", "")),
         confounders=_tuple_strings(value.get("confounders")),
@@ -478,11 +526,18 @@ def metadata_from_dict(value: Mapping[str, Any]) -> ExperimentMetadata:
     try:
         schema = int(value.get("experiment_schema", 0))
         if schema != EXPERIMENT_SCHEMA_VERSION:
-            raise ExperimentError("unsupported_schema", "Experiment schema version is unsupported.", {"schema": schema})
+            raise ExperimentError(
+                "unsupported_schema",
+                "Experiment schema version is unsupported.",
+                {"schema": schema},
+            )
         amendments = tuple(
             ProtocolAmendment(
-                str(item["amendment_id"]), str(item["created_at"]), str(item["reason"]),
-                _tuple_strings(item.get("changes")), str(item["prior_protocol_hash"]),
+                str(item["amendment_id"]),
+                str(item["created_at"]),
+                str(item["reason"]),
+                _tuple_strings(item.get("changes")),
+                str(item["prior_protocol_hash"]),
             )
             for item in (dict(raw) for raw in value.get("amendments", ()))
         )
@@ -491,17 +546,27 @@ def metadata_from_dict(value: Mapping[str, Any]) -> ExperimentMetadata:
                 str(item["event_id"]),
                 str(item["from_state"]) if item.get("from_state") is not None else None,  # type: ignore[arg-type]
                 str(item["to_state"]),  # type: ignore[arg-type]
-                str(item["occurred_at"]), str(item.get("reason", "")),
+                str(item["occurred_at"]),
+                str(item.get("reason", "")),
             )
             for item in (dict(raw) for raw in value.get("lifecycle", ()))
         )
         analyses = tuple(
             AnalysisRecord(
-                str(item["analysis_id"]), str(item["created_at"]), str(item["status"]),  # type: ignore[arg-type]
+                str(item["analysis_id"]),
+                str(item["created_at"]),
+                str(item["status"]),  # type: ignore[arg-type]
                 tuple(dict(summary) for summary in item.get("summaries", ())),
-                _tuple_strings(item.get("observation_ids")), _tuple_strings(item.get("assumptions")),
-                str(item.get("missing_data_treatment", "Explicit missing states excluded from numeric summaries.")),
-                _tuple_strings(item.get("limitations")), str(item.get("evidence_kind", "descriptive")),  # type: ignore[arg-type]
+                _tuple_strings(item.get("observation_ids")),
+                _tuple_strings(item.get("assumptions")),
+                str(
+                    item.get(
+                        "missing_data_treatment",
+                        "Explicit missing states excluded from numeric summaries.",
+                    )
+                ),
+                _tuple_strings(item.get("limitations")),
+                str(item.get("evidence_kind", "descriptive")),  # type: ignore[arg-type]
             )
             for item in (dict(raw) for raw in value.get("analyses", ()))
         )
@@ -514,7 +579,9 @@ def metadata_from_dict(value: Mapping[str, Any]) -> ExperimentMetadata:
             created_at=str(value["created_at"]),
             updated_at=str(value["updated_at"]),
             protocol=protocol_from_dict(dict(value["protocol"])),
-            safety=safety_from_dict(value.get("safety") if isinstance(value.get("safety"), Mapping) else None),
+            safety=safety_from_dict(
+                value.get("safety") if isinstance(value.get("safety"), Mapping) else None
+            ),
             origins=tuple(source_from_dict(dict(item)) for item in value.get("origins", ())),
             linked_habits=_tuple_strings(value.get("linked_habits")),
             linked_metrics=_tuple_strings(value.get("linked_metrics")),
@@ -522,16 +589,24 @@ def metadata_from_dict(value: Mapping[str, Any]) -> ExperimentMetadata:
             linked_diary=_tuple_strings(value.get("linked_diary")),
             linked_checkins=_tuple_strings(value.get("linked_checkins")),
             linked_reviews=_tuple_strings(value.get("linked_reviews")),
-            source_refs=tuple(source_from_dict(dict(item)) for item in value.get("source_refs", ())),
-            observations=tuple(observation_from_dict(dict(item)) for item in value.get("observations", ())),
+            source_refs=tuple(
+                source_from_dict(dict(item)) for item in value.get("source_refs", ())
+            ),
+            observations=tuple(
+                observation_from_dict(dict(item)) for item in value.get("observations", ())
+            ),
             amendments=amendments,
             lifecycle=lifecycle,
             analyses=analyses,
             conclusion=str(value["conclusion"]) if value.get("conclusion") else None,  # type: ignore[arg-type]
             conclusion_notes=str(value.get("conclusion_notes", "")),
             follow_up_decisions=_tuple_strings(value.get("follow_up_decisions")),
-            parent_experiment_id=str(value["parent_experiment_id"]) if value.get("parent_experiment_id") else None,
-            repeated_from_experiment_id=str(value["repeated_from_experiment_id"]) if value.get("repeated_from_experiment_id") else None,
+            parent_experiment_id=str(value["parent_experiment_id"])
+            if value.get("parent_experiment_id")
+            else None,
+            repeated_from_experiment_id=str(value["repeated_from_experiment_id"])
+            if value.get("repeated_from_experiment_id")
+            else None,
             schema_version=schema,
         )
     except (KeyError, TypeError, ValueError) as exc:

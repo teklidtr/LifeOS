@@ -55,4 +55,21 @@ next rebuild recreates derived chunks and ranking state from Markdown.
 The vault remains ordinary Markdown when the plugin is unavailable. You may edit notes in
 Obsidian normally and use the CLI only for diagnosis, rebuilding, or recovery.
 
+## Personal experiment recovery
+
+- **Missing index:** rebuild `.lifeos/experiments/` from canonical experiment Markdown.
+- **Interrupted rebuild:** resume from the checkpoint; canonical artifacts are unchanged.
+- **Malformed or unsupported artifact:** open the linked Markdown and preserve it until a compatible repair is available.
+- **Duplicate identity:** keep both files untouched and resolve the duplicate before rebuilding.
+- **Stale artifact:** reload before applying a lifecycle, observation, amendment, or conclusion write.
+- **Unsafe protocol:** read the displayed safety classification; blocked protocols cannot be activated.
+- **Insufficient evidence:** collect more observations or record an inconclusive conclusion.
+- **Provider unavailable:** continue with local design, tracking, analysis, reviews, and proposals.
+- **Migration source changed:** create a new preview so the stable source hash can be verified.
+
+Deleting `.lifeos/experiments/` removes only disposable indexes and rebuild
+journals. It does not remove experiment Markdown, observations, amendments,
+conclusions, or human annotations.
+
+
 [← Obsidian Desktop](06-obsidian-desktop.md) · [Manual home](README.md) · [Next: Adaptive Planning →](08-adaptive-planning.md)

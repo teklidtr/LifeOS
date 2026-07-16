@@ -30,15 +30,23 @@ def protocol() -> ExperimentProtocol:
         comparison="No-walk baseline.",
         baseline_requirements="Two baseline days.",
         outcome_measures=(
-            MeasureDefinition("focus", "Focus rating", "rating", "primary", "daily", valid_min=1, valid_max=5),
-            MeasureDefinition("walked", "Walk completed", "completion", "adherence", "daily", aggregation="rate"),
+            MeasureDefinition(
+                "focus", "Focus rating", "rating", "primary", "daily", valid_min=1, valid_max=5
+            ),
+            MeasureDefinition(
+                "walked", "Walk completed", "completion", "adherence", "daily", aggregation="rate"
+            ),
         ),
         phases=(
             ExperimentPhase("base", "Baseline", "baseline", "2026-07-16", "2026-07-17"),
-            ExperimentPhase("walk", "Walk", "intervention", "2026-07-18", "2026-07-21", "Morning walk"),
+            ExperimentPhase(
+                "walk", "Walk", "intervention", "2026-07-18", "2026-07-21", "Morning walk"
+            ),
         ),
         adherence_expectation="Record whether the walk occurred.",
-        confounders=("sleep",), risks=(), stop_rules=("Stop for pain.",),
+        confounders=("sleep",),
+        risks=(),
+        stop_rules=("Stop for pain.",),
         success_criteria=("Intervention average is higher.",),
         failure_criteria=("No improvement.",),
         inconclusive_criteria=("Fewer than four focus ratings.",),
@@ -95,10 +103,13 @@ Human legacy observations stay here.
 
 
 def test_migration_preview_apply_resume_and_source_hash_safety(tmp_path: Path) -> None:
-    vault = tmp_path / "vault"; runtime = tmp_path / "runtime"
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
     (vault / "tracking").mkdir(parents=True)
-    first = vault / "tracking" / "walk-a.md"; second = vault / "tracking" / "walk-b.md"
-    first.write_text(legacy("Walk A", "2026-07-16")); second.write_text(legacy("Walk B", "2026-07-17"))
+    first = vault / "tracking" / "walk-a.md"
+    second = vault / "tracking" / "walk-b.md"
+    first.write_text(legacy("Walk A", "2026-07-16"))
+    second.write_text(legacy("Walk B", "2026-07-17"))
     preview = preview_experiment_migration(vault_root=vault, runtime_dir=runtime)
     assert [item.state for item in preview.candidates] == ["ready", "ready"]
     hashes = {item.source.path: item.source.content_hash for item in preview.candidates}
@@ -108,22 +119,30 @@ def test_migration_preview_apply_resume_and_source_hash_safety(tmp_path: Path) -
     assert interrupted.state == "interrupted"
     assert len(interrupted.migrated) == 1
     assert first.exists() and second.exists()
-    resumed = apply_experiment_migration(vault_root=vault, runtime_dir=runtime, expected_source_hashes=hashes)
+    resumed = apply_experiment_migration(
+        vault_root=vault, runtime_dir=runtime, expected_source_hashes=hashes
+    )
     assert resumed.state == "ready"
     assert len(resumed.already_migrated) == 1
     assert len(resumed.migrated) == 1
     after = preview_experiment_migration(vault_root=vault, runtime_dir=runtime)
     assert all(item.state == "already-migrated" for item in after.candidates)
-    migrated = ExperimentArtifactService(vault_root=vault, runtime_dir=runtime).load(after.candidates[0].target_path or "")
+    migrated = ExperimentArtifactService(vault_root=vault, runtime_dir=runtime).load(
+        after.candidates[0].target_path or ""
+    )
     assert "Human legacy observations stay here." in migrated.human_body
     assert migrated.metadata.origins[0].relation == "migrated-from"
 
-    third = vault / "tracking" / "walk-c.md"; third.write_text(legacy("Walk C", "2026-07-18"))
+    third = vault / "tracking" / "walk-c.md"
+    third.write_text(legacy("Walk C", "2026-07-18"))
     changed_preview = preview_experiment_migration(vault_root=vault, runtime_dir=runtime)
-    candidate = next(item for item in changed_preview.candidates if item.source.path.endswith("walk-c.md"))
+    candidate = next(
+        item for item in changed_preview.candidates if item.source.path.endswith("walk-c.md")
+    )
     third.write_text(third.read_text() + "\nChanged after preview.\n")
     result = apply_experiment_migration(
-        vault_root=vault, runtime_dir=runtime,
+        vault_root=vault,
+        runtime_dir=runtime,
         expected_source_hashes={candidate.source.path: candidate.source.content_hash},
     )
     assert result.state == "conflict"
@@ -131,27 +150,42 @@ def test_migration_preview_apply_resume_and_source_hash_safety(tmp_path: Path) -
 
 
 def test_privacy_is_default_deny_redacted_bounded_and_inspectable(tmp_path: Path) -> None:
-    vault = tmp_path / "vault"; runtime = tmp_path / "runtime"
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
     vault.mkdir()
     service = ExperimentArtifactService(vault_root=vault, runtime_dir=runtime)
     artifact = service.create(
-        title="Walk", description="", category="focus", protocol=protocol(),
-        origins=(SourceReference("diary/private-day.md", "context"),), now=NOW,
+        title="Walk",
+        description="",
+        category="focus",
+        protocol=protocol(),
+        origins=(SourceReference("diary/private-day.md", "context"),),
+        now=NOW,
     )
     (vault / "diary").mkdir(parents=True)
     (vault / "diary" / "private-day.md").write_text("SecretName slept well. " + "x" * 200)
     denied = preview_experiment_context(
-        vault_root=vault, runtime_dir=runtime, experiment_path=artifact.path,
-        selected_paths=("diary/private-day.md",), redact_terms=("SecretName",), max_item_bytes=120, max_total_bytes=180,
+        vault_root=vault,
+        runtime_dir=runtime,
+        experiment_path=artifact.path,
+        selected_paths=("diary/private-day.md",),
+        redact_terms=("SecretName",),
+        max_item_bytes=120,
+        max_total_bytes=180,
     )
     assert denied.local_analysis_only is True
     assert denied.provider_payload_paths == (artifact.path,)
     assert denied.omissions[0].reason == "protected-default-deny"
     assert "not followed automatically" in denied.disclosure
     allowed = preview_experiment_context(
-        vault_root=vault, runtime_dir=runtime, experiment_path=artifact.path,
-        selected_paths=("diary/private-day.md",), allowed_sensitive_roots=("diary",),
-        redact_terms=("SecretName",), max_item_bytes=120, max_total_bytes=240,
+        vault_root=vault,
+        runtime_dir=runtime,
+        experiment_path=artifact.path,
+        selected_paths=("diary/private-day.md",),
+        allowed_sensitive_roots=("diary",),
+        redact_terms=("SecretName",),
+        max_item_bytes=120,
+        max_total_bytes=240,
     )
     diary_item = next(item for item in allowed.items if item.path.startswith("diary/"))
     assert "SecretName" not in diary_item.excerpt
@@ -161,13 +195,20 @@ def test_privacy_is_default_deny_redacted_bounded_and_inspectable(tmp_path: Path
     assert allowed.truncated is True
 
 
-def test_recovery_reports_moves_duplicates_missing_sources_orphans_and_interruptions(tmp_path: Path) -> None:
-    vault = tmp_path / "vault"; runtime = tmp_path / "runtime"
+def test_recovery_reports_moves_duplicates_missing_sources_orphans_and_interruptions(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
     vault.mkdir()
     service = ExperimentArtifactService(vault_root=vault, runtime_dir=runtime)
     artifact = service.create(
-        title="Walk", description="", category="focus", protocol=protocol(),
-        origins=(SourceReference("captures/missing.md", "origin"),), now=NOW,
+        title="Walk",
+        description="",
+        category="focus",
+        protocol=protocol(),
+        origins=(SourceReference("captures/missing.md", "origin"),),
+        now=NOW,
     )
     initial = rebuild_experiment_index(vault_root=vault, runtime_dir=runtime)
     assert len(initial.entries) == 1
@@ -175,7 +216,9 @@ def test_recovery_reports_moves_duplicates_missing_sources_orphans_and_interrupt
     (vault / moved_path).parent.mkdir(parents=True, exist_ok=True)
     (vault / artifact.path).rename(vault / moved_path)
     (vault / "observations").mkdir(parents=True)
-    (vault / "observations" / "orphan.md").write_text("---\ntype: experiment-observation\nexperiment_id: exp-missing\n---\n")
+    (vault / "observations" / "orphan.md").write_text(
+        "---\ntype: experiment-observation\nexperiment_id: exp-missing\n---\n"
+    )
     report = audit_experiment_recovery(vault_root=vault, runtime_dir=runtime)
     codes = {item["code"] for item in report.diagnostics}
     assert {"moved_artifact", "missing_linked_source", "orphaned_observation"} <= codes
@@ -195,12 +238,16 @@ def test_recovery_reports_moves_duplicates_missing_sources_orphans_and_interrupt
 
 
 def test_large_history_rebuild_is_deterministic_and_disposable(tmp_path: Path) -> None:
-    vault = tmp_path / "vault"; runtime = tmp_path / "runtime"
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
     vault.mkdir()
     service = ExperimentArtifactService(vault_root=vault, runtime_dir=runtime)
     for offset in range(60):
         service.create(
-            title=f"Experiment {offset}", description="", category="scale", protocol=protocol(),
+            title=f"Experiment {offset}",
+            description="",
+            category="scale",
+            protocol=protocol(),
             now=NOW + timedelta(seconds=offset),
         )
     first = rebuild_experiment_index(vault_root=vault, runtime_dir=runtime, batch_size=7)
@@ -208,18 +255,24 @@ def test_large_history_rebuild_is_deterministic_and_disposable(tmp_path: Path) -
     index_path = runtime / "experiments" / "index.json"
     index_path.unlink()
     rebuilt = rebuild_experiment_index(vault_root=vault, runtime_dir=runtime, batch_size=11)
-    assert [item.experiment_id for item in rebuilt.entries] == [item.experiment_id for item in first.entries]
+    assert [item.experiment_id for item in rebuilt.entries] == [
+        item.experiment_id for item in first.entries
+    ]
     assert not (runtime / "experiments" / "rebuild-checkpoint.json").exists()
 
 
 def test_malformed_legacy_source_fails_closed(tmp_path: Path) -> None:
-    vault = tmp_path / "vault"; runtime = tmp_path / "runtime"
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
     (vault / "tracking").mkdir(parents=True)
-    (vault / "tracking" / "bad.md").write_text("---\ntype: personal-experiment-v0\ntitle: Bad\n---\n")
+    (vault / "tracking" / "bad.md").write_text(
+        "---\ntype: personal-experiment-v0\ntitle: Bad\n---\n"
+    )
     preview = preview_experiment_migration(vault_root=vault, runtime_dir=runtime)
     assert preview.candidates[0].state == "malformed"
     result = apply_experiment_migration(
-        vault_root=vault, runtime_dir=runtime,
+        vault_root=vault,
+        runtime_dir=runtime,
         expected_source_hashes={preview.candidates[0].source.path: "wrong"},
     )
     assert result.state == "conflict"

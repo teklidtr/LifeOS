@@ -28,6 +28,8 @@ def build_visual_model(artifact: ExperimentArtifact, *, now: datetime) -> dict[s
         "observations": observations,
         "observation_calendar": windows,
         "amendment_markers": [item.to_dict() for item in artifact.metadata.amendments],
-        "missing_indicators": [item["observation_id"] for item in observations if item["state"] != "measured"],
+        "missing_indicators": [
+            item["observation_id"] for item in observations if item["state"] != "measured"
+        ],
         "render_fallback": "Open the canonical experiment note to inspect raw phases, observations, amendments, and analysis.",
     }

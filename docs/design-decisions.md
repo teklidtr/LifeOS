@@ -334,3 +334,46 @@ the existing proposal lifecycle.
 Embedding, reranking, and generation adapters expose provider-neutral capability,
 timeout, cancellation, and bounded-batch contracts. Missing or invalid providers
 cannot disable local retrieval or evidence-only conversation use.
+
+## DD-067: Experiments are canonical artifacts distinct from goals, habits, tasks, and metrics
+
+An experiment owns a bounded protocol, phases, observations, amendments, analysis,
+and conclusion. It links to existing planning and tracking artifacts rather than
+creating a duplicate habit or metric subsystem.
+
+## DD-068: Material protocol changes after baseline are amendments
+
+Once baseline begins, direct protocol replacement is rejected. A dated amendment
+stores the reason, changed fields, prior protocol hash, and replacement protocol so
+results cannot quietly redefine their own success conditions.
+
+## DD-069: Missing observation states remain distinct and analysis is descriptive
+
+Not measured, not applicable, intentionally skipped, unavailable, and zero are
+semantically different. Deterministic summaries use only actual measured values,
+name their assumptions and limitations, and never generate a causal claim.
+
+## DD-070: Experiment safety fails closed before activation or scheduling
+
+Deterministic user-visible safety classifications block medication changes,
+severe or emergency symptoms, dangerous restriction, deprivation, overtraining,
+self-harm, eating-disorder, pregnancy, substance-misuse, and illegal-activity
+protocols. A blocked item may remain informational but cannot enter collection.
+
+## DD-071: Experiment provider access is optional, bounded, and default deny
+
+All core workflows operate locally. External assistance receives only explicitly
+selected, inspectable, bounded excerpts after protected-scope checks and optional
+redaction. Provider-specific fields do not enter canonical or bridge contracts.
+
+## DD-072: Experiment results produce proposals, never silent routine changes
+
+Adopting a behavior, modifying a goal or plan, creating a habit or task, or writing
+to another note uses exact patches and the shared proposal approval lifecycle with
+source experiment hashes and stale-target checks.
+
+## DD-073: Experiment runtime state and migrations are recoverable and source guarded
+
+Indexes, schedules, charts, and rebuild journals are disposable. Legacy migration
+preserves sources, previews changes, records stable hashes, resumes from an audit
+trail, and fails closed when a source changes or an identity conflicts.

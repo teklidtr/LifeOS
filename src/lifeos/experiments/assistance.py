@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Protocol, Sequence
 
 from lifeos.retrieval.contracts import CancellationToken, ProviderCapabilities, ProviderError
@@ -53,13 +53,21 @@ class ExperimentAssistanceProvider(Protocol):
 class DeterministicExperimentAssistance:
     def __init__(self, suggestions: Sequence[str] = ()) -> None:
         self._suggestions = tuple(suggestions)
-        self._capabilities = ProviderCapabilities("generation", "deterministic-fixture", "experiment-design-v1", True, 1)
+        self._capabilities = ProviderCapabilities(
+            "generation", "deterministic-fixture", "experiment-design-v1", True, 1
+        )
 
     @property
     def capabilities(self) -> ProviderCapabilities:
         return self._capabilities
 
-    def assist(self, request: AssistanceRequest, *, timeout_seconds: float | None, cancellation: CancellationToken) -> Sequence[str]:
+    def assist(
+        self,
+        request: AssistanceRequest,
+        *,
+        timeout_seconds: float | None,
+        cancellation: CancellationToken,
+    ) -> Sequence[str]:
         del request, timeout_seconds
         cancellation.checkpoint()
         return self._suggestions
@@ -85,12 +93,24 @@ def assist_design(
         "redactions": list(request.redactions),
     }
     try:
-        suggestions = tuple(str(item).strip() for item in provider.assist(request, timeout_seconds=timeout_seconds, cancellation=token) if str(item).strip())
+        suggestions = tuple(
+            str(item).strip()
+            for item in provider.assist(
+                request, timeout_seconds=timeout_seconds, cancellation=token
+            )
+            if str(item).strip()
+        )
     except ProviderError as exc:
         state = "timeout" if exc.code == "timeout" else "provider-unavailable"
         return AssistanceResult(state, (), warnings, disclosure, (str(exc),))
     except (TypeError, ValueError) as exc:
         return AssistanceResult("malformed-output", (), warnings, disclosure, (str(exc),))
     if any(len(item) > 2000 for item in suggestions):
-        return AssistanceResult("malformed-output", (), warnings, disclosure, ("Provider suggestion exceeded the bounded output size.",))
+        return AssistanceResult(
+            "malformed-output",
+            (),
+            warnings,
+            disclosure,
+            ("Provider suggestion exceeded the bounded output size.",),
+        )
     return AssistanceResult("ready", suggestions, warnings, disclosure)

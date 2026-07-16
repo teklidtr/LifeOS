@@ -15,7 +15,7 @@ The engine provides disciplined self-observation, not diagnosis or causal proof.
 ```text
 experiments/
   YYYY/
-    exp-<stable-id>.md
+    <title>-exp-<stable-id>.md
 ```
 
 Each artifact contains versioned frontmatter plus managed Markdown views and human-owned sections. The protocol, lifecycle, measure definitions, observations, amendments, safety classification, analysis, conclusion, lineage, and timestamps are canonical. Runtime state under `.lifeos/experiments/` is rebuildable.
@@ -98,3 +98,21 @@ The plugin is a thin typed client. Ribbon and contextual commands open graphical
 | LIFEOS-1506 | Obsidian experiment workspace and accessible entry points |
 | LIFEOS-1507 | Migration, privacy, recovery, performance, and deterministic fixtures |
 | LIFEOS-1508 | Documentation, end-to-end validation, reports, and release packaging |
+
+
+## Bridge protocol surface
+
+The versioned bridge advertises typed capabilities for creation, listing, loading,
+design review, safety review, lifecycle transitions, protocol updates, amendments,
+observation capture, due schedules, deterministic analysis, conclusions, cloning,
+history rebuild and comparison, proposal preview and creation, migration preview
+and application, privacy preview, and recovery audit. Calls use canonical paths,
+strict payloads, expected content hashes for mutations, and stable error codes for
+stale, unsafe, malformed, unsupported, and missing states.
+
+## Schema compatibility
+
+Direction 6 uses experiment schema version 1 and derived index schema version 1.
+Unsupported canonical schema versions fail closed without rewriting the file. A
+derived index version mismatch requires a rebuild, not a canonical migration.
+Provider-specific names or fields are excluded from the public schema and bridge.

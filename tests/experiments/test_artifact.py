@@ -28,10 +28,16 @@ def protocol() -> ExperimentProtocol:
         constants=("same study block",),
         comparison="Seven-day no-walk baseline.",
         baseline_requirements="Record focus for seven days.",
-        outcome_measures=(MeasureDefinition("focus", "Focus", "rating", "primary", "daily", valid_min=1, valid_max=10),),
+        outcome_measures=(
+            MeasureDefinition(
+                "focus", "Focus", "rating", "primary", "daily", valid_min=1, valid_max=10
+            ),
+        ),
         phases=(
             ExperimentPhase("baseline", "Baseline", "baseline", "2026-07-16", "2026-07-22"),
-            ExperimentPhase("walk", "Morning walk", "intervention", "2026-07-23", "2026-07-29", "20 minute walk"),
+            ExperimentPhase(
+                "walk", "Morning walk", "intervention", "2026-07-23", "2026-07-29", "20 minute walk"
+            ),
         ),
         adherence_expectation="At least five of seven intervention days.",
         confounders=("sleep",),
@@ -49,7 +55,13 @@ def service(tmp_path: Path) -> ExperimentArtifactService:
 
 def test_create_round_trip_and_preserve_human_annotations(tmp_path: Path) -> None:
     api = service(tmp_path)
-    created = api.create(title="Morning walk", description="Small focus experiment", category="productivity", protocol=protocol(), now=NOW)
+    created = api.create(
+        title="Morning walk",
+        description="Small focus experiment",
+        category="productivity",
+        protocol=protocol(),
+        now=NOW,
+    )
     assert created.metadata.state == "idea"
     assert created.path.startswith("experiments/2026/")
     path = tmp_path / created.path
@@ -62,7 +74,19 @@ def test_create_round_trip_and_preserve_human_annotations(tmp_path: Path) -> Non
 
 def test_invalid_transition_and_unsafe_activation_fail_closed(tmp_path: Path) -> None:
     api = service(tmp_path)
-    created = api.create(title="Blocked", description="", category="health", protocol=protocol(), safety=SafetyClassification("blocked", ("medication-change",), "Prescription medication changes require professional guidance.", True), now=NOW)
+    created = api.create(
+        title="Blocked",
+        description="",
+        category="health",
+        protocol=protocol(),
+        safety=SafetyClassification(
+            "blocked",
+            ("medication-change",),
+            "Prescription medication changes require professional guidance.",
+            True,
+        ),
+        now=NOW,
+    )
     with pytest.raises(ExperimentError, match="cannot transition") as invalid:
         api.transition(created.path, "active", expected_hash=created.content_hash, now=NOW)
     assert invalid.value.code == "invalid_transition"
@@ -82,7 +106,14 @@ def test_protocol_changes_require_amendment_after_baseline(tmp_path: Path) -> No
     with pytest.raises(ExperimentError) as required:
         api.update_protocol(item.path, protocol(), expected_hash=item.content_hash, now=NOW)
     assert required.value.code == "amendment_required"
-    amended = api.amend_protocol(item.path, protocol(), reason="Return to tolerable duration", changes=("Intervention changed from 25 to 20 minutes.",), expected_hash=item.content_hash, now=NOW)
+    amended = api.amend_protocol(
+        item.path,
+        protocol(),
+        reason="Return to tolerable duration",
+        changes=("Intervention changed from 25 to 20 minutes.",),
+        expected_hash=item.content_hash,
+        now=NOW,
+    )
     assert amended.metadata.amendments[0].prior_protocol_hash.startswith("sha256:")
 
 

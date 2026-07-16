@@ -34,7 +34,8 @@ Audit the repository and define the complete Direction 6 task sequence, ownershi
 
 # Required tests
 
-- Architecture and task-convention checks.\n- Dependency, duplication, privacy, migration, accessibility, and performance review.
+- Architecture and task-convention checks.
+- Dependency, duplication, privacy, migration, accessibility, and performance review.
 
 # Acceptance criteria
 
@@ -44,8 +45,8 @@ Audit the repository and define the complete Direction 6 task sequence, ownershi
 
 # Validation commands
 
-
-tbd during implementation
+- Repository architecture, roadmap, task conventions, canonical artifact ownership, proposal safety, provider neutrality, migration, privacy, accessibility, and performance risks were audited before implementation.
+- `git diff --check`: passed.
 
 # Relevant design decisions
 

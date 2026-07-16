@@ -29,3 +29,23 @@ Policy and instruction changes require explicit proposal approval.
 - managed markers remain valid
 - source references resolve
 - proposal is explicitly approved
+
+## Personal experiment safety and ownership
+
+Experiment protocols, observations, amendments, user annotations, conclusions,
+and lineage are canonical Markdown. Managed refreshes may update only their named
+blocks and require expected hashes. Runtime indexes, schedules, summaries, and
+charts are disposable.
+
+Safety policy is deterministic and user visible. LifeOS does not diagnose,
+recommend prescription medication changes, encourage dangerous restriction,
+deprivation, overtraining, substance misuse, self-harm, or illegal activity, or
+interpret descriptive association as medical evidence. High-risk protocols are
+blocked from scheduling and activation; emergency language ends the workflow with
+an immediate-safety message.
+
+Optional providers receive no linked content automatically. Protected scopes are
+default deny, source selection is inspectable and bounded, and redaction may be
+applied before transmission. Core experiment workflows remain local. Any result
+that would change another canonical artifact becomes a proposal with exact patches,
+evidence, limitations, and stale-target checks.

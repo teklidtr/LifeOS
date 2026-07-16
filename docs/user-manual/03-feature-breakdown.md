@@ -547,6 +547,23 @@ removing `.lifeos/retrieval/` triggers a rebuild rather than knowledge loss. See
 [Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md).
 
 
+## 3.17 Personal experiments
+
+### What it is
+
+A canonical experiment artifact keeps a bounded question, protocol, baseline,
+intervention phases, measures, observations, amendments, safety classification,
+descriptive analysis, conclusion, and lineage together.
+
+### How it connects
+
+The Obsidian workspace guides design and tracking while Python validates lifecycle,
+safety, schedules, missing-data semantics, analysis, history, migration, privacy,
+and recovery. Review surfaces use evidence fingerprints, and every follow-up change
+to another canonical artifact goes through proposals. See
+[Personal Experiments](12-personal-experiments.md).
+
+
 ---
 
 [← Previous: Executive Summary & Philosophy](02-executive-summary-and-philosophy.md) · [Manual home](README.md) · [Next: Setup & Installation →](04-setup-and-installation.md)

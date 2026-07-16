@@ -1,4 +1,4 @@
-[← First-Class Reviews](10-first-class-reviews.md) · [Manual home](README.md)
+[← First-Class Reviews](10-first-class-reviews.md) · [Manual home](README.md) · [Personal Experiments →](12-personal-experiments.md)
 
 # Semantic Retrieval and Knowledge Conversations
 
@@ -184,4 +184,4 @@ scope. Graph hints improve discovery but never replace opening and citing the
 source note. LifeOS does not store hidden reasoning or claim that retrieval
 proves a conclusion beyond the displayed evidence.
 
-[← First-Class Reviews](10-first-class-reviews.md) · [Manual home](README.md)
+[← First-Class Reviews](10-first-class-reviews.md) · [Manual home](README.md) · [Personal Experiments →](12-personal-experiments.md)

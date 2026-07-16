@@ -7,19 +7,60 @@ from dataclasses import dataclass
 from .contracts import ExperimentProtocol, SafetyClassification
 
 _EMERGENCY = (
-    "chest pain", "cannot breathe", "can't breathe", "severe bleeding", "suicidal", "kill myself",
-    "loss of consciousness", "fainting repeatedly", "stroke symptoms",
+    "chest pain",
+    "cannot breathe",
+    "can't breathe",
+    "severe bleeding",
+    "suicidal",
+    "kill myself",
+    "loss of consciousness",
+    "fainting repeatedly",
+    "stroke symptoms",
 )
 _BLOCKED: dict[str, tuple[str, ...]] = {
-    "prescription-medication": ("prescription", "dose", "taper", "stop medication", "start medication", "combine medication"),
-    "dangerous-restriction": ("starve", "fast for days", "no water", "dehydrate", "extreme calorie", "purge"),
-    "sleep-deprivation": ("sleep deprivation", "stay awake", "all-nighter every", "sleep less than 4"),
-    "substance-misuse": ("overdose", "binge drinking", "illegal drug", "recreational drug experiment"),
+    "prescription-medication": (
+        "prescription",
+        "dose",
+        "taper",
+        "stop medication",
+        "start medication",
+        "combine medication",
+    ),
+    "dangerous-restriction": (
+        "starve",
+        "fast for days",
+        "no water",
+        "dehydrate",
+        "extreme calorie",
+        "purge",
+    ),
+    "sleep-deprivation": (
+        "sleep deprivation",
+        "stay awake",
+        "all-nighter every",
+        "sleep less than 4",
+    ),
+    "substance-misuse": (
+        "overdose",
+        "binge drinking",
+        "illegal drug",
+        "recreational drug experiment",
+    ),
     "self-harm": ("self harm", "self-harm", "cut myself"),
     "pregnancy": ("pregnant", "pregnancy"),
     "eating-disorder": ("anorexia", "bulimia", "eating disorder"),
-    "dangerous-target": ("dangerously low blood pressure", "extreme heart rate", "overtraining", "train through injury"),
-    "severe-symptoms": ("severe symptom", "severe pain", "blood in stool", "unexplained weight loss"),
+    "dangerous-target": (
+        "dangerously low blood pressure",
+        "extreme heart rate",
+        "overtraining",
+        "train through injury",
+    ),
+    "severe-symptoms": (
+        "severe symptom",
+        "severe pain",
+        "blood in stool",
+        "unexplained weight loss",
+    ),
     "illegal-activity": ("illegal activity",),
 }
 _CAUTION = ("supplement", "pain", "dizziness", "dietary restriction", "high intensity", "medical")
@@ -32,7 +73,11 @@ class ImmediateSafetyMessage:
     continue_workflow: bool = False
 
     def to_dict(self) -> dict[str, object]:
-        return {"title": self.title, "message": self.message, "continue_workflow": self.continue_workflow}
+        return {
+            "title": self.title,
+            "message": self.message,
+            "continue_workflow": self.continue_workflow,
+        }
 
 
 def classify_safety(protocol: ExperimentProtocol) -> SafetyClassification:
@@ -49,10 +94,14 @@ def classify_safety(protocol: ExperimentProtocol) -> SafetyClassification:
     emergency_codes = tuple(keyword for keyword in _EMERGENCY if keyword in text)
     if emergency_codes:
         return SafetyClassification(
-            "emergency", ("emergency-or-severe-symptom",),
-            "The description may involve an emergency or severe symptom. The experiment workflow must stop and immediate professional or emergency help should be considered.", True,
+            "emergency",
+            ("emergency-or-severe-symptom",),
+            "The description may involve an emergency or severe symptom. The experiment workflow must stop and immediate professional or emergency help should be considered.",
+            True,
         )
-    blocked = tuple(code for code, keywords in _BLOCKED.items() if any(keyword in text for keyword in keywords))
+    blocked = tuple(
+        code for code, keywords in _BLOCKED.items() if any(keyword in text for keyword in keywords)
+    )
     if blocked:
         return SafetyClassification(
             "informational-only" if blocked == ("pregnancy",) else "blocked",
@@ -62,8 +111,10 @@ def classify_safety(protocol: ExperimentProtocol) -> SafetyClassification:
         )
     if any(keyword in text for keyword in _CAUTION):
         return SafetyClassification(
-            "caution", ("extra-care",),
-            "The protocol may involve health or physical risk. Use conservative stop rules and consider professional guidance.", True,
+            "caution",
+            ("extra-care",),
+            "The protocol may involve health or physical risk. Use conservative stop rules and consider professional guidance.",
+            True,
         )
     return SafetyClassification()
 

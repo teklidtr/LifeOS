@@ -483,6 +483,15 @@ plot twists.
 The system should leave you with greater clarity, not the feeling that your
 hobbies have formed a middle-management department.
 
+### 14. Run a personal experiment
+
+Open **Personal Experiments**, turn one question into a small protocol, inspect the
+warning list, collect a baseline, and record observations without converting missing
+values into zero. After collection, inspect the raw evidence and deterministic
+descriptive analysis before recording a conclusion. Follow-up actions remain
+reviewable proposals. See [Personal Experiments](12-personal-experiments.md).
+
+
 ---
 
 [← Previous: Setup & Installation](04-setup-and-installation.md) · [Manual home](README.md) · [Next: Obsidian Desktop →](06-obsidian-desktop.md)

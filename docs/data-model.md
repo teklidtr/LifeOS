@@ -146,3 +146,86 @@ diagnostics. Evidence stores path, heading, line range, source and chunk hashes,
 excerpt, ranking signals, and stale state. Hidden chain-of-thought is not stored.
 The managed turn block and human-owned annotations are distinct preservation
 zones.
+
+## Personal experiment (canonical)
+
+```yaml
+experiment_schema: 1
+experiment_id:
+title:
+description:
+category:
+state: idea | drafting | baseline | scheduled | active | paused | completed | abandoned | analyzed | archived
+created_at:
+updated_at:
+origin:
+  kind: scratch | goal | plan | task | review | conversation | capture
+  path:
+protocol:
+  question:
+  hypothesis:
+  rationale:
+  intervention:
+  constants: []
+  comparison:
+  baseline_requirements:
+  outcome_measures:
+    - measure_id:
+      display_name:
+      kind: count | duration | rating | percentage | continuous | completion | qualitative
+      unit:
+      cadence:
+      source:
+      direction: increase | decrease | target | neutral
+      valid_min:
+      valid_max:
+      missing_behavior:
+      aggregation:
+      role: primary | secondary | adherence | contextual
+  phases:
+    - phase_id:
+      name:
+      kind: baseline | intervention | washout
+      start_date:
+      end_date:
+      intervention:
+  adherence_expectation:
+  confounders: []
+  risks: []
+  stop_rules: []
+  success_criteria: []
+  failure_criteria: []
+  inconclusive_criteria: []
+  schedule:
+    timezone:
+    cadence:
+    days: []
+    time:
+    window_minutes:
+    grace_minutes:
+safety:
+  level: ordinary | caution | informational-only | blocked | emergency
+  explanations: []
+observations: []
+amendments: []
+lifecycle_history: []
+analyses: []
+conclusion:
+conclusion_notes:
+follow_up_decisions: []
+parent_experiment_id:
+lineage: []
+links: []
+source_references: []
+```
+
+Every observation has a stable ID, measure and phase identity, observed timestamp,
+state (`measured`, `not-measured`, `not-applicable`, `skipped`, or `unavailable`),
+optional value, note, context links, source, and creation timestamp. Only measured
+observations may contain values. Analyses record the exact observation IDs used,
+missing-data treatment, assumptions, limitations, descriptive/inferential label,
+and generated results. Protocol amendments preserve the prior protocol hash and
+a dated replacement rather than rewriting the original active protocol.
+
+Derived indexes, due windows, chart models, and analysis caches live under
+`.lifeos/experiments/` and are rebuildable from these artifacts.

@@ -67,4 +67,14 @@ Proposal screens show exact operations and a Python-computed digest. **Approve**
 **Apply** require separate explicit confirmations. A changed proposal invalidates the UI
 review immediately. See [First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
 
+## Personal experiments
+
+Open **Personal Experiments** from the ribbon, command palette, or a relevant goal,
+plan, task, capture, review, conversation, or experiment note. The workspace covers
+design, warning acknowledgment, baseline and active tracking, observations, pause
+and resume, amendments, deterministic analysis, evidence inspection, history,
+proposals, migration, and recovery. Safety blocks and stale edits are explicit. See
+[Personal Experiments](12-personal-experiments.md).
+
+
 [← Workflow](05-workflow.md) · [Manual home](README.md) · [Next: Troubleshooting →](07-troubleshooting.md)

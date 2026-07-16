@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -102,13 +101,20 @@ def preview_experiment_context(
     max_total_bytes: int = 24_000,
 ) -> ExperimentContextPreview:
     if max_item_bytes < 1 or max_total_bytes < 1:
-        raise ExperimentError("invalid_context_budget", "Experiment context byte limits must be positive.")
+        raise ExperimentError(
+            "invalid_context_budget", "Experiment context byte limits must be positive."
+        )
     service = ExperimentArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
     artifact = service.load(experiment_path)
     allowed = frozenset(str(item).strip() for item in allowed_sensitive_roots if str(item).strip())
     redactions = tuple(sorted({str(item).strip() for item in redact_terms if str(item).strip()}))
-    selected = tuple(dict.fromkeys(str(item).strip() for item in selected_paths if str(item).strip()))
-    candidates = ((artifact.path, "canonical experiment explicitly opened"), *[(path, "user-selected source") for path in selected])
+    selected = tuple(
+        dict.fromkeys(str(item).strip() for item in selected_paths if str(item).strip())
+    )
+    candidates = (
+        (artifact.path, "canonical experiment explicitly opened"),
+        *[(path, "user-selected source") for path in selected],
+    )
     remaining = max_total_bytes
     items: list[ExperimentContextItem] = []
     omissions: list[ExperimentContextOmission] = []
@@ -116,10 +122,13 @@ def preview_experiment_context(
     for path, reason in candidates:
         root = path.split("/", 1)[0]
         if path != artifact.path and root in PROTECTED_ROOTS and root not in allowed:
-            omissions.append(ExperimentContextOmission(
-                path, "protected-default-deny",
-                "Protected content is excluded unless the user explicitly permits its root for this request.",
-            ))
+            omissions.append(
+                ExperimentContextOmission(
+                    path,
+                    "protected-default-deny",
+                    "Protected content is excluded unless the user explicitly permits its root for this request.",
+                )
+            )
             continue
         try:
             source = read_vault_markdown(vault_root, path)
@@ -130,21 +139,27 @@ def preview_experiment_context(
         raw_bytes = len(visible.encode("utf-8"))
         allowance = min(max_item_bytes, remaining)
         if allowance <= 0:
-            omissions.append(ExperimentContextOmission(path, "context-budget-exhausted", "The bounded context budget was reached."))
+            omissions.append(
+                ExperimentContextOmission(
+                    path, "context-budget-exhausted", "The bounded context budget was reached."
+                )
+            )
             truncated = True
             continue
         excerpt, included_bytes, item_truncated = _truncate(visible, allowance)
         truncated = truncated or item_truncated
-        items.append(ExperimentContextItem(
-            path=path,
-            content_hash="sha256:" + content_hash(source.content),
-            inclusion_reason=reason,
-            excerpt=excerpt,
-            byte_count=raw_bytes,
-            included_bytes=included_bytes,
-            truncated=item_truncated,
-            redactions=applied,
-        ))
+        items.append(
+            ExperimentContextItem(
+                path=path,
+                content_hash="sha256:" + content_hash(source.content),
+                inclusion_reason=reason,
+                excerpt=excerpt,
+                byte_count=raw_bytes,
+                included_bytes=included_bytes,
+                truncated=item_truncated,
+                redactions=applied,
+            )
+        )
         remaining -= included_bytes
     payload_paths = tuple(item.path for item in items)
     disclosure = (

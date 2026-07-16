@@ -44,8 +44,8 @@ Implement explicit missing-state observations, deterministic descriptive analysi
 
 # Validation commands
 
-....                                                                     [100%]
-4 passed in 5.62s
+- `PYTHONPATH=src python3 -m pytest -q tests/experiments/test_analysis_history.py`: 4 passed.
+- `git diff --check`: passed.
 
 # Relevant design decisions
 

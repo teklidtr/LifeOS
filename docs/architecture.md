@@ -237,3 +237,26 @@ Conversation outcomes create ordinary proposals with exact targets, patches,
 evidence, and stale-target hashes. They never mutate another note directly. See
 [Semantic Retrieval and Knowledge Conversation Architecture](semantic-retrieval-conversation-architecture.md)
 and [Semantic Retrieval and Knowledge Conversations](user-manual/11-semantic-retrieval-and-knowledge-conversations.md).
+
+## Personal experiments
+
+Personal experiments are canonical Markdown artifacts under `experiments/YYYY/`.
+The experiment application service owns schema validation, lifecycle transitions,
+protocol amendments, explicit missing-data states, deterministic safety policy,
+timezone-aware schedules, observations, descriptive analysis, lineage, migration,
+privacy previews, and recovery audits. Human annotations remain outside managed
+blocks and expected content hashes protect every write after a workspace load.
+
+The derived experiment index and rebuild journal live under
+`.lifeos/experiments/`. They can be deleted and rebuilt from Markdown. Daily and
+weekly review adapters produce evidence-fingerprinted contextual items. Analysis
+and history views are derived. Changes to goals, plans, tasks, habits, metrics,
+notes, reminders, or calendar-like structures use the shared proposal engine.
+
+The bridge exposes typed `experiment.*` capabilities, while the Obsidian plugin
+remains a thin graphical client for design, tracking, analysis, evidence, history,
+proposals, migration, and recovery. Local creation, tracking, analysis, and review
+integration require no model. Optional assistance uses provider-neutral contracts
+and bounded, inspectable source selection. See
+[Personal Experiment Architecture](personal-experiment-architecture.md) and
+[Personal Experiments](user-manual/12-personal-experiments.md).

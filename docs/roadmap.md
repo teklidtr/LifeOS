@@ -187,4 +187,22 @@ budgets, Obsidian keyboard paths, end-to-end fixtures, and manual-link validatio
 
 ## Phase 15: Personal experiments
 
-LifeOS supports bounded, safety-aware personal experiments as canonical Markdown. The release includes protocol design warnings, explicit lifecycle and amendments, quantitative and qualitative observations, deterministic descriptive analysis, daily and weekly review integration, proposal-gated follow-up actions, rebuildable history, and an Obsidian-native workspace. See [Personal Experiment Architecture](personal-experiment-architecture.md).
+LifeOS supports bounded, safety-aware personal experiments as canonical Markdown.
+Shipped delivery through `LIFEOS-1500` to `LIFEOS-1508` includes:
+
+- versioned protocols, explicit lifecycle, stable identity, and dated amendments
+- quantitative and qualitative observations with five distinct missing states
+- inspectable design and confounder warnings without an opaque quality score
+- deterministic safety blocking before scheduling or activation
+- timezone-safe, pause-aware observation schedules
+- local descriptive analysis with raw evidence, assumptions, and limitations
+- daily and weekly review integration using evidence fingerprints
+- proposal-gated follow-up changes to goals, plans, habits, tasks, and notes
+- rebuildable history, comparison warnings, cloning, and repeated-experiment lineage
+- provider-neutral optional assistance with protected-scope default denial
+- conservative legacy migration, recovery audits, and runtime deletion/rebuild
+- an accessible Obsidian-native design, tracking, analysis, history, and recovery workspace
+
+Phase 15 is shipped. The accepted architecture is documented in
+`docs/personal-experiment-architecture.md`, and the complete workflow is in
+`docs/user-manual/12-personal-experiments.md`.

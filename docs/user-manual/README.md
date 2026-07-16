@@ -17,11 +17,12 @@ observation, and agent-assisted reflection.
 9. [Goal-to-Plan Copilot](09-goal-to-plan-copilot.md)
 10. [First-Class Daily and Weekly Reviews](10-first-class-reviews.md)
 11. [Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md)
+12. [Personal Experiments](12-personal-experiments.md)
 
 ## Suggested reading path
 
 New users should read Chapters 2, 4, and 5 first. Read Chapter 9 before using
-the goal-to-plan copilot, Chapter 10 before migrating or rebuilding reviews, and Chapter 11 before building the semantic index or saving knowledge conversations. Chapter 1 is useful when you want to understand the
+the goal-to-plan copilot, Chapter 10 before migrating or rebuilding reviews, Chapter 11 before building the semantic index or saving knowledge conversations, and Chapter 12 before designing or tracking personal experiments. Chapter 1 is useful when you want to understand the
 system boundaries, while Chapter 3 is the reference
 chapter for individual modules.
 

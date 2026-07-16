@@ -169,3 +169,19 @@ packages/obsidian-plugin/src/knowledge-conversation.ts
 packages/obsidian-plugin/src/knowledge-conversation-workspace.ts
 tests/retrieval/ tests/conversations/ tests/e2e/test_semantic_retrieval_conversations.py
 ```
+
+## Personal experiment workspace
+
+The experiment workspace is opened from the ribbon, command palette, and relevant
+artifact contexts. It is a thin client over typed `experiment.*` bridge methods and
+contains design, tracking, analysis, history, proposal, migration, and recovery
+surfaces. The plugin never reimplements lifecycle, safety, missing-data, analysis,
+or proposal rules.
+
+The controller exposes explicit loading, empty, no-active-experiment, malformed,
+stale, unsupported-schema, missing-index, rebuild, provider-unavailable,
+provider-timeout, unsafe-blocked, insufficient-evidence, conflicting-edit,
+proposal-created, proposal-stale, and migration-required states. Controls have
+accessible names, predictable focus restoration, keyboard activation, and live
+status announcements. Raw observations and textual summaries remain usable when
+visual rendering fails.
