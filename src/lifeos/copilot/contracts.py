@@ -324,7 +324,7 @@ class PlanningSession:
         _ensure_unique((item.decision_id for item in self.decisions), "decision IDs")
         _validate_text_list(self.selected_context_refs, "selected_context_refs")
         _validate_text_list(self.excluded_context_refs, "excluded_context_refs")
-        _validate_id_list(self.proposal_ids, "proposal_ids")
+        _validate_proposal_ids(self.proposal_ids)
         if set(self.selected_context_refs) & set(self.excluded_context_refs):
             raise CopilotContractError("a context reference cannot be included and excluded")
         if type(self.source_revision) is not int or self.source_revision < 1:
@@ -751,6 +751,14 @@ def _validate_text(value: str, name: str) -> None:
     if not isinstance(value, str) or not value.strip() or value != value.strip():
         raise CopilotContractError(f"{name} must be a non-empty trimmed string")
 
+
+
+def _validate_proposal_ids(values: Iterable[str]) -> None:
+    materialized = tuple(values)
+    for value in materialized:
+        if not isinstance(value, str) or not re.fullmatch(r"prop-\d{8}T\d{6}Z-[a-f0-9]{8}", value):
+            raise CopilotContractError("proposal_ids must contain valid durable proposal IDs")
+    _ensure_unique(materialized, "proposal_ids")
 
 def _validate_text_list(values: Iterable[str], name: str) -> None:
     materialized = tuple(values)

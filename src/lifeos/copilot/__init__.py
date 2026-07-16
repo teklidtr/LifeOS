@@ -183,3 +183,19 @@ __all__ += [
     "explain_plan_option",
     "recompute_capacity_counterfactual",
 ]
+
+from .proposals import (
+    ConflictPlanEdit,
+    CopilotProposalError,
+    CopilotProposalRequest,
+    CopilotProposalResult,
+    create_copilot_plan_proposal,
+)
+
+__all__ += [
+    "ConflictPlanEdit",
+    "CopilotProposalError",
+    "CopilotProposalRequest",
+    "CopilotProposalResult",
+    "create_copilot_plan_proposal",
+]

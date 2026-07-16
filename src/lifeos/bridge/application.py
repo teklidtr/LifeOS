@@ -30,6 +30,10 @@ from lifeos.copilot import (
     compare_plan_options,
     explain_plan_option,
     recompute_capacity_counterfactual,
+    ConflictPlanEdit,
+    CopilotProposalError,
+    CopilotProposalRequest,
+    create_copilot_plan_proposal,
 )
 from lifeos.facade.copilot_tools import (
     CopilotContextRequest,
@@ -140,6 +144,72 @@ class BridgeApplication:
         return goal, index, context, option_set, option, decomposition, capacity
 
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.proposal.create":
+            data = strict_object(
+                params,
+                allowed={
+                    "session_id", "option_id", "as_of", "expected_revision",
+                    "plan_id", "plan_path", "plan_title", "desired_outcome",
+                    "included_milestone_ids", "included_action_ids",
+                    "milestone_edits", "action_edits", "goal_updates",
+                    "link_goal", "conflict_edits",
+                },
+                required={
+                    "session_id", "option_id", "as_of", "expected_revision",
+                    "plan_id", "plan_path", "plan_title", "desired_outcome",
+                    "included_milestone_ids", "included_action_ids",
+                },
+            )
+            as_of = _iso_date(data["as_of"], "as_of")
+            for key in ("included_milestone_ids", "included_action_ids"):
+                value = data[key]
+                if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                    raise ProtocolError("invalid_params", f"{key} must be a list of strings.")
+            for key in ("milestone_edits", "action_edits", "goal_updates"):
+                value = data.get(key, {})
+                if not isinstance(value, dict):
+                    raise ProtocolError("invalid_params", f"{key} must be an object.")
+                data[key] = value
+            raw_conflicts = data.get("conflict_edits", [])
+            if not isinstance(raw_conflicts, list) or not all(isinstance(item, dict) for item in raw_conflicts):
+                raise ProtocolError("invalid_params", "conflict_edits must be a list of objects.")
+            try:
+                conflicts = tuple(ConflictPlanEdit(**strict_object(
+                    item, allowed={"target_path", "action"}, required={"target_path", "action"}
+                )) for item in raw_conflicts)
+                goal, index, _, _, option, decomposition, _ = self._copilot_bundle(
+                    session_id=data["session_id"], option_id=data["option_id"], as_of=as_of
+                )
+                request = CopilotProposalRequest(
+                    session_id=data["session_id"],
+                    expected_session_revision=data["expected_revision"],
+                    goal_path=goal.path,
+                    expected_goal_hash=goal.content_hash,
+                    plan_id=data["plan_id"],
+                    plan_path=data["plan_path"],
+                    plan_title=data["plan_title"],
+                    desired_outcome=data["desired_outcome"],
+                    included_milestone_ids=tuple(data["included_milestone_ids"]),
+                    included_action_ids=tuple(data["included_action_ids"]),
+                    milestone_edits=data["milestone_edits"],
+                    action_edits=data["action_edits"],
+                    goal_updates=data["goal_updates"],
+                    link_goal=data.get("link_goal", True),
+                    conflict_edits=conflicts,
+                )
+                return create_copilot_plan_proposal(
+                    vault_root=self.daily.vault_root, option=option, decomposition=decomposition,
+                    index=index, request=request, actor_id=self.actor_id,
+                    session_service=self.planning_sessions,
+                ).to_dict()
+            except (
+                CopilotProposalError, ExplanationError, CapacityError, DecompositionError,
+                PlanOptionError, PlanningSessionError, SessionConflictError, CopilotContractError,
+                PlanningContextError, VaultAccessError, TypeError, ProtocolError
+            ) as exc:
+                if isinstance(exc, ProtocolError):
+                    raise
+                raise ProtocolError("copilot_proposal_invalid", str(exc)) from exc
         if method == "copilot.explain":
             data = strict_object(params, allowed={"session_id", "option_id", "as_of", "available_minutes"}, required={"session_id", "option_id", "as_of"})
             as_of = _iso_date(data["as_of"], "as_of")

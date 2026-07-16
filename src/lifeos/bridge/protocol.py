@@ -24,6 +24,7 @@ CAPABILITIES = (
     "copilot.explain",
     "copilot.compare",
     "copilot.counterfactual",
+    "copilot.proposal.create",
     "today.get",
     "scheduler.config.get",
     "scheduler.config.set",

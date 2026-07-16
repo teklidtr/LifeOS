@@ -341,6 +341,47 @@ class PlanningSessionService:
         self._save(updated)
         return self._snapshot(updated)
 
+    def attach_proposal(
+        self,
+        *,
+        session_id: str,
+        proposal_id: str,
+        selected_option_id: str,
+        expected_revision: int,
+    ) -> SessionSnapshot:
+        envelope = self._load(session_id)
+        session = envelope.session
+        if session.source_revision != expected_revision:
+            raise SessionConflictError(
+                f"session revision is stale: expected {expected_revision}, current {session.source_revision}"
+            )
+        proposal_ids = session.proposal_ids
+        if proposal_id not in proposal_ids:
+            proposal_ids = (*proposal_ids, proposal_id)
+        updated_session = PlanningSession(
+            schema_version=session.schema_version,
+            session_id=session.session_id,
+            goal_ref=session.goal_ref,
+            goal_hash=session.goal_hash,
+            status="proposal-created",
+            answers=session.answers,
+            selected_context_refs=session.selected_context_refs,
+            excluded_context_refs=session.excluded_context_refs,
+            decisions=session.decisions,
+            selected_option_id=selected_option_id,
+            proposal_ids=proposal_ids,
+            source_revision=session.source_revision + 1,
+        )
+        updated = SessionEnvelope(
+            session=updated_session,
+            readiness=envelope.readiness,
+            question_history=envelope.question_history,
+            current_question=None,
+            adapter_diagnostics=envelope.adapter_diagnostics,
+        )
+        self._save(updated)
+        return self._snapshot(updated)
+
     def _next_question(
         self,
         *,

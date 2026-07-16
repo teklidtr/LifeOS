@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1208
 title: Convert approved copilot drafts into safe goal and plan proposals
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1205
