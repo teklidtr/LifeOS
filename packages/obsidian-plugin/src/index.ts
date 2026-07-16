@@ -6,6 +6,8 @@ import { ReviewWorkspaceController, ReviewWorkspaceOrigin } from "./review-works
 import { KnowledgeConversationOrigin, KnowledgeConversationWorkspaceController } from "./knowledge-conversation-workspace.js";
 import { emptyScope } from "./knowledge-conversation.js";
 import { ExperimentWorkspaceController, ExperimentWorkspaceOrigin } from "./experiment-workspace.js";
+import { RichCaptureOrigin, RichCaptureWorkspaceController } from "./rich-capture-workspace.js";
+import { CaptureType } from "./rich-capture.js";
 
 export interface ObsidianHost {
   addRibbonIcon(icon: string, title: string, callback: () => void): () => void;
@@ -50,12 +52,19 @@ export class ExperimentWorkspaceView {
   refresh(): void { this.refreshCount += 1; }
 }
 
+export class RichCaptureWorkspaceView {
+  refreshCount = 0;
+  constructor(readonly controller: RichCaptureWorkspaceController) {}
+  refresh(): void { this.refreshCount += 1; }
+}
+
 export class LifeOSPlugin {
   static readonly VIEW_TYPE = "lifeos-today";
   static readonly COPILOT_VIEW_TYPE = "lifeos-goal-plan";
   static readonly REVIEW_VIEW_TYPE = "lifeos-reviews";
   static readonly KNOWLEDGE_CONVERSATION_VIEW_TYPE = "lifeos-knowledge-conversation";
   static readonly EXPERIMENT_VIEW_TYPE = "lifeos-experiments";
+  static readonly RICH_CAPTURE_VIEW_TYPE = "lifeos-rich-capture";
   readonly view = new LifeOSView();
   readonly copilot: GoalPlanWorkspaceController;
   readonly copilotView: GoalPlanWorkspaceView;
@@ -65,6 +74,8 @@ export class LifeOSPlugin {
   readonly knowledgeConversationView: KnowledgeConversationWorkspaceView;
   readonly experiments: ExperimentWorkspaceController;
   readonly experimentView: ExperimentWorkspaceView;
+  readonly richCaptures: RichCaptureWorkspaceController;
+  readonly richCaptureView: RichCaptureWorkspaceView;
   readonly connection: ConnectionManager;
   private disposers: Array<() => void> = [];
 
@@ -82,6 +93,8 @@ export class LifeOSPlugin {
     this.knowledgeConversationView = new KnowledgeConversationWorkspaceView(this.knowledgeConversations);
     this.experiments = new ExperimentWorkspaceController(client, (path) => this.host.openFilePath?.(path));
     this.experimentView = new ExperimentWorkspaceView(this.experiments);
+    this.richCaptures = new RichCaptureWorkspaceController(client, (path) => this.host.openFilePath?.(path));
+    this.richCaptureView = new RichCaptureWorkspaceView(this.richCaptures);
   }
 
   async load(): Promise<void> {
@@ -90,9 +103,11 @@ export class LifeOSPlugin {
     this.disposers.push(this.host.registerView(LifeOSPlugin.REVIEW_VIEW_TYPE, () => this.reviewView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE, () => this.knowledgeConversationView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.EXPERIMENT_VIEW_TYPE, () => this.experimentView));
+    this.disposers.push(this.host.registerView(LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE, () => this.richCaptureView));
     this.disposers.push(this.host.addRibbonIcon("layout-dashboard", "Open LifeOS", () => this.openToday()));
     this.disposers.push(this.host.addRibbonIcon("messages-square", "Open Knowledge Conversation", () => this.openKnowledgeConversation("ribbon")));
     this.disposers.push(this.host.addRibbonIcon("flask-conical", "Open Personal Experiments", () => this.openExperiments("ribbon")));
+    this.disposers.push(this.host.addRibbonIcon("camera", "Open Rich Capture", () => this.openRichCapture("ribbon")));
     this.disposers.push(this.host.addCommand("lifeos-open-today", "Open LifeOS Today", () => this.openToday()));
     this.disposers.push(this.host.addCommand("lifeos-open-goal-plan", "Open Goal-to-Plan Copilot", () => this.openGoalPlan("command-palette")));
     this.disposers.push(this.host.addCommand("lifeos-plan-active-goal", "Plan from Active Goal Note", () => {
@@ -150,6 +165,18 @@ export class LifeOSPlugin {
     this.disposers.push(this.host.addCommand("lifeos-open-experiment-history", "Open Experiment History", () => {
       this.openExperiments("history"); void this.experiments.loadHistory();
     }));
+    this.disposers.push(this.host.addCommand("lifeos-open-rich-capture", "Open Rich Capture", () => this.openRichCapture("command-palette")));
+    this.disposers.push(this.host.addCommand("lifeos-quick-capture-meal", "Quick Capture Meal", () => this.openRichCapture("command-palette", "meal")));
+    this.disposers.push(this.host.addCommand("lifeos-quick-capture-exercise", "Quick Capture Exercise", () => this.openRichCapture("command-palette", "exercise")));
+    this.disposers.push(this.host.addCommand("lifeos-capture-selection", "Capture Selected Text", () => {
+      const path = this.host.getActiveFilePath?.();
+      this.openRichCapture("selection", "attachment", this.host.getSelectedText?.() ?? "", path);
+    }));
+    this.disposers.push(this.host.addCommand("lifeos-open-active-capture", "Open Active Rich Capture", () => {
+      const path = this.host.getActiveFilePath?.();
+      this.openRichCapture("active-note", "attachment", "", path);
+      if (path?.startsWith("captures/") && path.endsWith(".md")) void this.richCaptures.load(path, "active-note");
+    }));
     this.disposers.push(this.connection.subscribe((state, detail) => {
       this.view.state = state === "connected"
         ? { kind: "ready", title: "LifeOS", detail: "Connected" }
@@ -183,6 +210,11 @@ export class LifeOSPlugin {
   openExperiments(origin: ExperimentWorkspaceOrigin, sourcePath?: string): void {
     this.experiments.prepare(origin, sourcePath);
     this.host.openView(LifeOSPlugin.EXPERIMENT_VIEW_TYPE);
+  }
+
+  openRichCapture(origin: RichCaptureOrigin, captureType: CaptureType = "attachment", description = "", sourcePath?: string): void {
+    this.richCaptures.prepare(origin, captureType, description, sourcePath);
+    this.host.openView(LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE);
   }
 
   private experimentOrigin(path?: string): ExperimentWorkspaceOrigin {
@@ -235,3 +267,5 @@ export * from "./knowledge-conversation.js";
 export * from "./knowledge-conversation-workspace.js";
 export * from "./experiment.js";
 export * from "./experiment-workspace.js";
+export * from "./rich-capture.js";
+export * from "./rich-capture-workspace.js";

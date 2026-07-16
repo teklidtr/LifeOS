@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1606
 title: Build Obsidian rich capture workspace
-status: ready
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1605
@@ -44,7 +44,11 @@ Quick capture, review, gallery, timeline, queue, mobile, drag/drop, clipboard, a
 
 # Validation commands
 
-- Recorded at completion.
+- `npm --prefix packages/obsidian-plugin test` -> 43 passed.
+- `npm --prefix packages/obsidian-plugin run typecheck` -> passed.
+- `npm --prefix packages/obsidian-plugin run lint` -> passed.
+- `npm --prefix packages/obsidian-plugin run build` -> passed.
+- `git diff --check` -> passed.
 
 # Relevant design decisions
 
