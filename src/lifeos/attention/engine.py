@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from lifeos.daily.errors import DailyInteractionError
+from lifeos.copilot.replanning import ReplanningError, scan_replanning_triggers
 from lifeos.daily.execution import load_execution_records
 from lifeos.feedback import build_evidence_dataset, diagnose_repeated_avoidance
 from lifeos.markdown.parser import parse_markdown_note
@@ -289,7 +290,7 @@ def evaluate_attention(
                         day.isoformat(),
                         (AttentionEvidence(path, "No active unblocked task"),),
                         (
-                            SuggestedAction("open", "Review plan"),
+                            SuggestedAction("replan", "Review with copilot"),
                             SuggestedAction("dismiss", "Dismiss"),
                         ),
                     )
@@ -470,6 +471,45 @@ def evaluate_attention(
                 )
     except VaultAccessError as exc:
         diagnostics.append(f"inbox: {exc}")
+
+    try:
+        replanning = scan_replanning_triggers(
+            vault_root=vault_root, runtime_dir=runtime_dir, as_of=day
+        )
+        existing_paths = {
+            evidence.path
+            for item in items
+            if item.kind in {"plan_no_next_action", "repeated_avoidance"}
+            for evidence in item.evidence
+        }
+        severity_map = {"information": "info", "attention": "attention", "important": "important"}
+        for trigger in replanning:
+            if trigger.target_path in existing_paths and trigger.code in {
+                "plan-no-feasible-next-action", "repeated-avoidance"
+            }:
+                continue
+            items.append(
+                AttentionItem(
+                    trigger.trigger_id,
+                    "replanning_review",
+                    severity_map[trigger.severity],
+                    trigger.title,
+                    trigger.detail,
+                    day.isoformat(),
+                    tuple(
+                        AttentionEvidence(trigger.target_path, reference)
+                        for reference in trigger.evidence_refs
+                    ) or (AttentionEvidence(trigger.target_path, trigger.code),),
+                    (
+                        SuggestedAction("replan", "Review with copilot"),
+                        SuggestedAction("continue", "Continue unchanged"),
+                        SuggestedAction("dismiss", "Dismiss until evidence changes"),
+                    ),
+                    "when the evidence fingerprint changes or the review is resolved",
+                )
+            )
+    except (ReplanningError, VaultAccessError) as exc:
+        diagnostics.append(f"replanning: {exc}")
 
     snoozed = dict(prefs.snoozed_until)
     dismissed = set(prefs.dismissed)

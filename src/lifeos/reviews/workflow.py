@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from lifeos.attention import evaluate_attention
+from lifeos.copilot.replanning import ReplanningError, scan_replanning_triggers
 from lifeos.daily import DailyInteractionService, ReviewNoteRequest, content_hash, load_execution_records
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.feedback import build_feedback_review_summary
@@ -176,6 +177,41 @@ def build_review_workflow(
         sections.append(ReviewSection("plans", "Active plans and actions", False, "unavailable", (), str(exc)))
 
     if kind == "weekly":
+        try:
+            replanning_items = tuple(
+                _stable_item(
+                    "goal-plan-reviews",
+                    trigger.trigger_id,
+                    trigger.title,
+                    trigger.detail,
+                    trigger.target_path,
+                    "replan",
+                )
+                for trigger in scan_replanning_triggers(
+                    vault_root=vault_root, runtime_dir=runtime_dir, as_of=day
+                )
+            )
+            sections.append(
+                ReviewSection(
+                    "goal-plan-reviews",
+                    "Goal and plan reviews",
+                    True,
+                    "ready" if replanning_items else "empty",
+                    replanning_items,
+                )
+            )
+        except (ReplanningError, VaultAccessError) as exc:
+            sections.append(
+                ReviewSection(
+                    "goal-plan-reviews",
+                    "Goal and plan reviews",
+                    True,
+                    "unavailable",
+                    (),
+                    str(exc),
+                )
+            )
+
         try:
             feedback_items = tuple(
                 _stable_item(

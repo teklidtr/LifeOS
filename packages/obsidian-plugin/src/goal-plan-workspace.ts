@@ -10,6 +10,7 @@ export type WorkspaceStage =
   | "option-review"
   | "draft-edit"
   | "proposal-created"
+  | "replanning-review"
   | "parked"
   | "abandoned"
   | "error";
@@ -111,6 +112,55 @@ export interface Explanation {
   contradictions: unknown[];
 }
 
+
+export interface ReplanningTrigger {
+  trigger_id: string;
+  code: string;
+  severity: "information" | "attention" | "important";
+  target_kind: "goal" | "plan";
+  target_id: string;
+  target_path: string;
+  title: string;
+  detail: string;
+  evidence_refs: string[];
+  evidence_fingerprint: string;
+  possible_outcomes: string[];
+}
+
+export interface ReplanningEvidence {
+  evidence_id: string;
+  kind: "execution" | "correction" | "review-answer" | "canonical-change" | "deterministic-fact";
+  statement: string;
+  source_ref?: string;
+  observed_at?: string;
+}
+
+export interface ReplanningReview {
+  schema_version: number;
+  review_id: string;
+  target_kind: "goal" | "plan";
+  target_id: string;
+  target_path: string;
+  target_hash: string;
+  triggers: ReplanningTrigger[];
+  comparisons: Array<{ dimension: string; original_value: string; current_value: string; evidence_refs: string[] }>;
+  evidence: ReplanningEvidence[];
+  outcomes: string[];
+  recommended_outcomes: string[];
+  questions: string[];
+  lineage: string[];
+  generated_as_of: string;
+}
+
+export interface ReplanningProposalResult {
+  proposal_id?: string;
+  proposal_path?: string;
+  target_path?: string;
+  base_hash?: string;
+  outcome: string;
+  proposal_created?: false;
+}
+
 export interface ProposalResult {
   proposal_id: string;
   proposal_path: string;
@@ -146,6 +196,9 @@ export interface WorkspaceState {
   explanation?: Explanation;
   draft?: EditablePlanDraft;
   proposal?: ProposalResult;
+  replanningTriggers?: ReplanningTrigger[];
+  replanningReview?: ReplanningReview;
+  replanningProposal?: ReplanningProposalResult;
   error?: { kind: WorkspaceErrorKind; title: string; detail: string; retryable: boolean };
   focusTarget: string;
   dirty: boolean;
@@ -429,6 +482,74 @@ export class GoalPlanWorkspaceController {
       this.state = { ...this.state, stage: "proposal-created", proposal, dirty: false, focusTarget: "proposal-handoff" };
       await this.persistence.clear(session.session.session_id);
       return proposal;
+    });
+  }
+
+  async scanReplanning(asOf: string): Promise<ReplanningTrigger[]> {
+    return this.run(async () => {
+      const triggers = await this.client.call<ReplanningTrigger[]>("copilot.replanning.scan", { as_of: asOf });
+      this.state = { ...this.state, replanningTriggers: triggers, focusTarget: "replanning-triggers" };
+      return triggers;
+    });
+  }
+
+  async openReplanningReview(
+    targetPath: string,
+    asOf: string,
+    options: { expectedHash?: string; corrections?: ReplanningEvidence[]; recentAnswers?: ReplanningEvidence[] } = {},
+  ): Promise<ReplanningReview> {
+    return this.run(async () => {
+      const review = await this.client.call<ReplanningReview>("copilot.replanning.review", {
+        target_path: targetPath,
+        as_of: asOf,
+        expected_hash: options.expectedHash,
+        corrections: options.corrections ?? [],
+        recent_answers: options.recentAnswers ?? [],
+      });
+      this.state = { ...this.state, stage: "replanning-review", replanningReview: review, goalPath: review.target_kind === "goal" ? targetPath : this.state.goalPath, focusTarget: "replanning-comparison" };
+      return review;
+    });
+  }
+
+  async suppressReplanning(trigger: ReplanningTrigger): Promise<void> {
+    await this.run(async () => {
+      await this.client.call<Record<string, unknown>>("copilot.replanning.suppress", {
+        trigger_id: trigger.trigger_id,
+        evidence_fingerprint: trigger.evidence_fingerprint,
+      });
+      this.state = {
+        ...this.state,
+        replanningTriggers: (this.state.replanningTriggers ?? []).filter((item) => item.trigger_id !== trigger.trigger_id),
+        focusTarget: "replanning-triggers",
+      };
+    });
+  }
+
+  async createReplanningProposal(
+    outcome: string,
+    rationale: string,
+    changes: Record<string, unknown> = {},
+  ): Promise<ReplanningProposalResult> {
+    const review = this.state.replanningReview;
+    if (!review) throw new Error("No replanning review is open.");
+    const evidenceFingerprint = review.triggers[0]?.evidence_fingerprint ?? `sha256:${review.target_hash.replace(/^sha256:/, "")}`;
+    return this.run(async () => {
+      const result = await this.client.call<ReplanningProposalResult>("copilot.replanning.proposal.create", {
+        review_id: review.review_id,
+        target_path: review.target_path,
+        expected_hash: review.target_hash,
+        outcome,
+        rationale,
+        evidence_fingerprint: evidenceFingerprint,
+        changes,
+      });
+      this.state = {
+        ...this.state,
+        stage: result.proposal_id ? "proposal-created" : "replanning-review",
+        replanningProposal: result,
+        focusTarget: result.proposal_id ? "proposal-handoff" : "replanning-comparison",
+      };
+      return result;
     });
   }
 

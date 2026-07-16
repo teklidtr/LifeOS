@@ -159,3 +159,70 @@ def counterfactual_capacity(
         option=option, decomposition=decomposition, index=build_copilot_index(vault_root),
         before=before, as_of=as_of, available_minutes=available_minutes,
     )
+
+
+from lifeos.copilot.replanning import (
+    ReplanningProposalRequest,
+    ReplanningProposalResult,
+    ReplanningReview,
+    ReplanningTrigger,
+    ReviewEvidence,
+    build_replanning_review,
+    create_replanning_proposal,
+    scan_replanning_triggers,
+)
+
+COPILOT_REPLANNING_SCAN_DESCRIPTOR = ToolDescriptor(
+    name="copilot.replanning_scan",
+    description="Find evidence-backed goal and plan review entry points.",
+    effect=ToolEffect.READ_ONLY,
+)
+COPILOT_REPLANNING_REVIEW_DESCRIPTOR = ToolDescriptor(
+    name="copilot.replanning_review",
+    description="Compare current canonical planning state with explicit review evidence.",
+    effect=ToolEffect.READ_ONLY,
+)
+COPILOT_REPLANNING_PROPOSAL_DESCRIPTOR = ToolDescriptor(
+    name="copilot.replanning_proposal",
+    description="Create a reviewable proposal for a selected replanning outcome.",
+    effect=ToolEffect.PROPOSAL_PRODUCING,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CopilotReplanningReviewRequest:
+    target_path: str
+    as_of: date
+    expected_hash: str | None = None
+    corrections: tuple[ReviewEvidence, ...] = ()
+    recent_answers: tuple[ReviewEvidence, ...] = ()
+
+
+def scan_copilot_replanning(
+    *, vault_root: Path, runtime_dir: Path, as_of: date
+) -> tuple[ReplanningTrigger, ...]:
+    return scan_replanning_triggers(
+        vault_root=vault_root, runtime_dir=runtime_dir, as_of=as_of
+    )
+
+
+def inspect_copilot_replanning(
+    *, vault_root: Path, runtime_dir: Path, request: CopilotReplanningReviewRequest
+) -> ReplanningReview:
+    return build_replanning_review(
+        vault_root=vault_root,
+        runtime_dir=runtime_dir,
+        target_path=request.target_path,
+        as_of=request.as_of,
+        expected_hash=request.expected_hash,
+        corrections=request.corrections,
+        recent_answers=request.recent_answers,
+    )
+
+
+def propose_copilot_replanning(
+    *, vault_root: Path, request: ReplanningProposalRequest, actor_id: str
+) -> ReplanningProposalResult | None:
+    return create_replanning_proposal(
+        vault_root=vault_root, request=request, actor_id=actor_id
+    )

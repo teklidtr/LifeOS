@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1210
 title: Integrate the copilot with goal reviews and rolling replanning
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1108

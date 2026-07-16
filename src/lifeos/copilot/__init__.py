@@ -199,3 +199,31 @@ __all__ += [
     "CopilotProposalResult",
     "create_copilot_plan_proposal",
 ]
+
+from .replanning import (
+    ReplanningComparison,
+    ReplanningError,
+    ReplanningProposalRequest,
+    ReplanningProposalResult,
+    ReplanningReview,
+    ReplanningTrigger,
+    ReviewEvidence,
+    build_replanning_review,
+    create_replanning_proposal,
+    scan_replanning_triggers,
+    suppress_replanning_suggestion,
+)
+
+__all__ += [
+    "ReplanningComparison",
+    "ReplanningError",
+    "ReplanningProposalRequest",
+    "ReplanningProposalResult",
+    "ReplanningReview",
+    "ReplanningTrigger",
+    "ReviewEvidence",
+    "build_replanning_review",
+    "create_replanning_proposal",
+    "scan_replanning_triggers",
+    "suppress_replanning_suggestion",
+]

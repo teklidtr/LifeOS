@@ -35,6 +35,15 @@ from lifeos.copilot import (
     CopilotProposalRequest,
     create_copilot_plan_proposal,
 )
+from lifeos.copilot.replanning import (
+    ReplanningError,
+    ReplanningProposalRequest,
+    ReviewEvidence,
+    build_replanning_review,
+    create_replanning_proposal,
+    scan_replanning_triggers,
+    suppress_replanning_suggestion,
+)
 from lifeos.facade.copilot_tools import (
     CopilotContextRequest,
     CopilotReadinessRequest,
@@ -144,6 +153,93 @@ class BridgeApplication:
         return goal, index, context, option_set, option, decomposition, capacity
 
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.replanning.scan":
+            data = strict_object(params, allowed={"as_of"}, required={"as_of"})
+            try:
+                return [item.to_dict() for item in scan_replanning_triggers(
+                    vault_root=self.daily.vault_root,
+                    runtime_dir=self.daily.runtime_dir,
+                    as_of=_iso_date(data["as_of"], "as_of"),
+                )]
+            except (ReplanningError, CopilotContractError, VaultAccessError) as exc:
+                raise ProtocolError("copilot_replanning_invalid", str(exc)) from exc
+        if method == "copilot.replanning.review":
+            data = strict_object(
+                params,
+                allowed={"target_path", "as_of", "expected_hash", "corrections", "recent_answers"},
+                required={"target_path", "as_of"},
+            )
+            def evidence_values(key: str) -> tuple[ReviewEvidence, ...]:
+                raw = data.get(key, [])
+                if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+                    raise ProtocolError("invalid_params", f"{key} must be a list of evidence objects.")
+                values: list[ReviewEvidence] = []
+                for item in raw:
+                    value = strict_object(
+                        item,
+                        allowed={"evidence_id", "kind", "statement", "source_ref", "observed_at"},
+                        required={"evidence_id", "kind", "statement"},
+                    )
+                    observed = value.get("observed_at")
+                    if observed is not None:
+                        value["observed_at"] = _iso_date(observed, "observed_at")
+                    values.append(ReviewEvidence(**value))
+                return tuple(values)
+            try:
+                return build_replanning_review(
+                    vault_root=self.daily.vault_root,
+                    runtime_dir=self.daily.runtime_dir,
+                    target_path=data["target_path"],
+                    as_of=_iso_date(data["as_of"], "as_of"),
+                    expected_hash=data.get("expected_hash"),
+                    corrections=evidence_values("corrections"),
+                    recent_answers=evidence_values("recent_answers"),
+                ).to_dict()
+            except (ReplanningError, CopilotContractError, VaultAccessError, TypeError) as exc:
+                raise ProtocolError("copilot_replanning_invalid", str(exc)) from exc
+        if method == "copilot.replanning.suppress":
+            data = strict_object(
+                params,
+                allowed={"trigger_id", "evidence_fingerprint"},
+                required={"trigger_id", "evidence_fingerprint"},
+            )
+            try:
+                suppress_replanning_suggestion(
+                    runtime_dir=self.daily.runtime_dir,
+                    trigger_id=data["trigger_id"],
+                    evidence_fingerprint=data["evidence_fingerprint"],
+                )
+                return {"suppressed": True, **data}
+            except (ReplanningError, TypeError) as exc:
+                raise ProtocolError("copilot_replanning_invalid", str(exc)) from exc
+        if method == "copilot.replanning.proposal.create":
+            data = strict_object(
+                params,
+                allowed={"review_id", "target_path", "expected_hash", "outcome", "rationale", "evidence_fingerprint", "changes"},
+                required={"review_id", "target_path", "expected_hash", "outcome", "rationale", "evidence_fingerprint"},
+            )
+            changes = data.get("changes", {})
+            if not isinstance(changes, dict):
+                raise ProtocolError("invalid_params", "changes must be an object.")
+            try:
+                result = create_replanning_proposal(
+                    vault_root=self.daily.vault_root,
+                    request=ReplanningProposalRequest(
+                        review_id=data["review_id"],
+                        target_path=data["target_path"],
+                        expected_hash=data["expected_hash"],
+                        outcome=data["outcome"],
+                        rationale=data["rationale"],
+                        evidence_fingerprint=data["evidence_fingerprint"],
+                        changes=changes,
+                    ),
+                    actor_id=self.actor_id,
+                )
+                return result.to_dict() if result is not None else {
+                    "proposal_created": False, "outcome": "continue-unchanged"
+                }
+            except (ReplanningError, TypeError) as exc:
+                raise ProtocolError("copilot_replanning_invalid", str(exc)) from exc
         if method == "copilot.proposal.create":
             data = strict_object(
                 params,

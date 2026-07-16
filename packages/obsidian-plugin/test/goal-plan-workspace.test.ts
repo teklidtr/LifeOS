@@ -39,6 +39,26 @@ class Client implements BridgeClient {
     if (method === "copilot.explain") return { option_id: "option-cell", summary: "Visible evidence", items: [], omissions: [], contradictions: [] } as T;
     if (method === "copilot.compare") return { dimensions: [] } as T;
     if (method === "copilot.proposal.create") return { proposal_id: "prop-x", proposal_path: "proposals/prop-x", plan_path: "plans/cell.md" } as T;
+    if (method === "copilot.replanning.scan") return [{
+      trigger_id: "replan:cell", code: "plan-no-feasible-next-action", severity: "attention",
+      target_kind: "plan", target_id: "plan-cell", target_path: "plans/cell.md",
+      title: "Plan needs a next wave", detail: "No feasible next action", evidence_refs: ["sha256:a"],
+      evidence_fingerprint: "sha256:feed", possible_outcomes: ["continue-unchanged", "adjust-next-wave"],
+    }] as T;
+    if (method === "copilot.replanning.review") return {
+      schema_version: 1, review_id: "replan-review", target_kind: "plan", target_id: "plan-cell",
+      target_path: "plans/cell.md", target_hash: "sha256:a", triggers: [{
+        trigger_id: "replan:cell", code: "plan-no-feasible-next-action", severity: "attention",
+        target_kind: "plan", target_id: "plan-cell", target_path: "plans/cell.md",
+        title: "Plan needs a next wave", detail: "No feasible next action", evidence_refs: ["sha256:a"],
+        evidence_fingerprint: "sha256:feed", possible_outcomes: ["continue-unchanged", "adjust-next-wave"],
+      }], comparisons: [], evidence: [], outcomes: ["continue-unchanged", "pause"],
+      recommended_outcomes: ["continue-unchanged"], questions: [], lineage: [], generated_as_of: "2026-07-16",
+    } as T;
+    if (method === "copilot.replanning.suppress") return { suppressed: true } as T;
+    if (method === "copilot.replanning.proposal.create") return params.outcome === "continue-unchanged"
+      ? { proposal_created: false, outcome: "continue-unchanged" } as T
+      : { proposal_id: "prop-replan", proposal_path: "proposals/prop-replan", target_path: "plans/cell.md", base_hash: "sha256:a", outcome: params.outcome } as T;
     throw new Error(`unsupported ${method}`);
   }
   onNotification(): () => void { return () => {}; }
@@ -120,4 +140,29 @@ test("keyboard-only actions have explicit accessible labels and never apply a pr
   assert.deepEqual(actions.map((item) => item.shortcut), ["Enter", "P", "C", "S", "K", "A", "G"]);
   assert.equal(actions.every((item) => item.ariaLabel.length > item.label.length), true);
   assert.equal(actions.some((item) => item.id === "apply"), false);
+});
+
+test("living review scans, suppresses exact evidence, and creates proposals without applying", async () => {
+  const client = new Client();
+  const controller = new GoalPlanWorkspaceController(client);
+  const triggers = await controller.scanReplanning("2026-07-16");
+  assert.equal(triggers.length, 1);
+  const review = await controller.openReplanningReview("plans/cell.md", "2026-07-16", {
+    corrections: [{ evidence_id: "correction-1", kind: "correction", statement: "Capacity changed" }],
+  });
+  assert.equal(controller.state.stage, "replanning-review");
+  const unchanged = await controller.createReplanningProposal("continue-unchanged", "The plan still fits.");
+  assert.equal(unchanged.proposal_created, false);
+  const proposal = await controller.createReplanningProposal("pause", "Protect capacity while prerequisites change.");
+  assert.equal(proposal.proposal_id, "prop-replan");
+  assert.equal(controller.state.stage, "proposal-created");
+  await controller.suppressReplanning(review.triggers[0]!);
+  assert.equal(controller.state.replanningTriggers?.length, 0);
+  assert.deepEqual(client.calls.slice(-4).map((item) => item[0]), [
+    "copilot.replanning.review",
+    "copilot.replanning.proposal.create",
+    "copilot.replanning.proposal.create",
+    "copilot.replanning.suppress",
+  ]);
+  assert.equal(client.calls.some((item) => item[0].includes("apply")), false);
 });
