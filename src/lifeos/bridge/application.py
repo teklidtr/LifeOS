@@ -16,6 +16,8 @@ from lifeos.copilot import (
     PlanningSessionService,
     PlanOptionError,
     build_copilot_index,
+    decompose_plan_option,
+    DecompositionError,
     build_planning_context,
     generate_plan_options,
     parse_goal_note,
@@ -107,6 +109,41 @@ class BridgeApplication:
         return preferences, dataset, status, observations
 
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.option.decompose":
+            data = strict_object(
+                params,
+                allowed={"session_id", "option_id", "as_of", "existing_task_ids"},
+                required={"session_id", "option_id", "as_of"},
+            )
+            existing = data.get("existing_task_ids", [])
+            if not isinstance(existing, list) or not all(isinstance(item, str) for item in existing):
+                raise ProtocolError("invalid_params", "existing_task_ids must be a list of strings.")
+            as_of = _iso_date(data["as_of"], "as_of")
+            try:
+                snapshot = self.planning_sessions.get(data["session_id"])
+                session = snapshot.envelope.session
+                source = read_vault_markdown(self.daily.vault_root, session.goal_ref)
+                goal = parse_goal_note(path=session.goal_ref, content=source.content)
+                index = build_copilot_index(self.daily.vault_root)
+                context = build_planning_context(
+                    vault_root=self.daily.vault_root, goal=goal, index=index,
+                    include_paths=session.selected_context_refs, exclude_paths=session.excluded_context_refs,
+                )
+                options = generate_plan_options(
+                    goal=goal, session=session, readiness=snapshot.envelope.readiness,
+                    context=context, index=index, as_of=as_of,
+                )
+                option = next((item for item in options.options if item.option_id == data["option_id"]), None)
+                if option is None:
+                    raise DecompositionError("selected option was not found")
+                return decompose_plan_option(
+                    option=option, horizon=goal.horizon, existing_task_ids=tuple(existing)
+                ).to_dict()
+            except (
+                DecompositionError, PlanOptionError, PlanningSessionError, CopilotContractError,
+                PlanningContextError, VaultAccessError
+            ) as exc:
+                raise ProtocolError("copilot_decomposition_invalid", str(exc)) from exc
         if method == "copilot.options.generate":
             data = strict_object(params, allowed={"session_id", "as_of"}, required={"session_id", "as_of"})
             as_of = _iso_date(data["as_of"], "as_of")

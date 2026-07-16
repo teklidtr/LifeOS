@@ -113,3 +113,25 @@ __all__ += [
     "PlanOptionSet",
     "generate_plan_options",
 ]
+
+from .decomposition import (
+    ActionSuggestion,
+    DecompositionError,
+    DecompositionFinding,
+    DecompositionPolicy,
+    DecompositionResult,
+    GeneratedAction,
+    RollingWaveAdapter,
+    decompose_plan_option,
+)
+
+__all__ += [
+    "ActionSuggestion",
+    "DecompositionError",
+    "DecompositionFinding",
+    "DecompositionPolicy",
+    "DecompositionResult",
+    "GeneratedAction",
+    "RollingWaveAdapter",
+    "decompose_plan_option",
+]

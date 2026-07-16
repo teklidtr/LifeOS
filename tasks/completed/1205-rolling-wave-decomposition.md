@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1205
 title: Decompose selected plans with rolling-wave depth
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1204
