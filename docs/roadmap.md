@@ -206,3 +206,22 @@ Shipped delivery through `LIFEOS-1500` to `LIFEOS-1508` includes:
 Phase 15 is shipped. The accepted architecture is documented in
 `docs/personal-experiment-architecture.md`, and the complete workflow is in
 `docs/user-manual/12-personal-experiments.md`.
+
+## Phase 16: Rich capture for meals, exercise, and attachments
+
+LifeOS makes real-world capture quick without forcing immediate enrichment. Canonical Markdown records and original files preserve what the user supplied, while optional local or provider-neutral processing creates inspectable, correctable derived information.
+
+Planned delivery through `LIFEOS-1600` to `LIFEOS-1608` includes:
+
+- versioned capture and attachment-manifest contracts
+- deterministic content-addressed storage, hashing, deduplication, and safe references
+- resumable extraction and enrichment with no-provider fallbacks
+- meal and exercise records that preserve uncertainty and plan-versus-performance distinctions
+- protected-scope default denial, payload disclosure, redaction, and bounded context
+- semantic retrieval and knowledge-conversation evidence with representation provenance
+- daily, weekly, and personal-experiment integration
+- proposal-gated capture-to-action workflows
+- an accessible Obsidian quick-capture, review, gallery, timeline, and recovery workspace
+- migration, rebuild, large-library fixtures, end-to-end validation, and user documentation
+
+The accepted architecture is documented in `docs/rich-capture-architecture.md`.

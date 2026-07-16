@@ -377,3 +377,23 @@ source experiment hashes and stale-target checks.
 Indexes, schedules, charts, and rebuild journals are disposable. Legacy migration
 preserves sources, previews changes, records stable hashes, resumes from an audit
 trail, and fails closed when a source changes or an identity conflicts.
+
+## DD-074: Rich captures and original attachment bytes are canonical evidence
+
+Capture metadata and human annotations live in portable Markdown. Original attachment bytes are preserved at deterministic vault-relative paths. Binary content is never embedded into frontmatter, and derived previews, extraction, OCR, transcripts, estimates, indexes, and embeddings remain disposable.
+
+## DD-075: Inferred capture values remain separate until confirmed
+
+User-entered and reliable structured values are distinguishable from label, database, recipe, image, language-model, OCR, transcript, or other inferred values. Unknown remains unknown, estimates may be ranges, and no inferred value becomes a canonical confirmed fact without explicit acceptance or correction.
+
+## DD-076: Attachment processing is explicit, bounded, and default deny for protected scopes
+
+Saving an attachment does not authorize external upload, OCR, transcription, semantic indexing, or neighboring-note traversal. Provider operations disclose the exact bounded payload, respect protected and excluded scopes, support redaction and cancellation, and keep provider-specific details behind adapters.
+
+## DD-077: Captures integrate through links and proposals rather than parallel subsystems
+
+Meal, exercise, and general captures link to diary, reviews, goals, plans, tasks, habits, metrics, experiments, knowledge notes, and conversations. Changes outside the capture use the existing proposal lifecycle with exact patches, source hashes, and stale-target checks.
+
+## DD-078: Attachment identity is content based and derived state is recoverable
+
+SHA-256 identifies exact binary duplicates independently of filenames. Same-name different-content files remain distinct. Canonical manifests preserve references and lineage; changed bytes invalidate dependent results. Runtime indexes, previews, extractions, embeddings, galleries, and timelines can be deleted and rebuilt.
