@@ -98,3 +98,5 @@ export * from "./scheduler.js";
 export * from "./feedback.js";
 export * from "./goal-plan.js";
 export * from "./goal-plan-workspace.js";
+
+export * from "./review-artifact.js";

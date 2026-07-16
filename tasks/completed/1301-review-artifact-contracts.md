@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1301
 title: Add versioned review artifact contracts
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1300
