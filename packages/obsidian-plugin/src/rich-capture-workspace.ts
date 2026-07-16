@@ -13,6 +13,7 @@ import {
   CaptureProposalResult,
   CaptureState,
   CaptureType,
+  CaptureVisualization,
   PrivacyScope,
   ProcessingJob,
 } from "./rich-capture.js";
@@ -63,6 +64,7 @@ export interface RichCaptureWorkspaceState {
   contextPreview?: CaptureContextPreview;
   migrationPreview?: CaptureMigrationPreview;
   recoveryReport?: CaptureRecoveryReport;
+  visualization?: CaptureVisualization;
   focusTarget: string;
   statusAnnouncement: string;
   detail?: string;
@@ -209,6 +211,33 @@ export class RichCaptureWorkspaceController {
         statusAnnouncement: captures.length ? `${captures.length} captures loaded.` : "No captures found.",
       };
       return captures;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async buildVisualization(input: {
+    captureTypes?: CaptureType[]; states?: CaptureState[]; start?: string; end?: string; maxPoints?: number;
+  } = {}): Promise<CaptureVisualization> {
+    this.loading("Building inspectable capture visualizations.");
+    try {
+      const visualization = await this.client.call<CaptureVisualization>("capture.visualization.build", {
+        capture_types: input.captureTypes,
+        states: input.states,
+        start: input.start,
+        end: input.end,
+        max_points: input.maxPoints,
+      });
+      this.state = {
+        ...this.state,
+        visualization,
+        stage: visualization.timeline.length ? "ready" : "empty",
+        detail: visualization.warnings.join(" ") || undefined,
+        recovery: visualization.timeline.length ? undefined : "Change filters or create a capture.",
+        focusTarget: "rich-capture-visualization",
+        statusAnnouncement: visualization.timeline.length
+          ? `Visualization built from ${visualization.timeline.length} canonical captures.`
+          : "No capture data is available for this visualization.",
+      };
+      return visualization;
     } catch (error) { return this.fail(error); }
   }
 

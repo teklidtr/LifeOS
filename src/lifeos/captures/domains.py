@@ -8,7 +8,9 @@ from typing import Literal
 from .contracts import CaptureError, Confidence, DerivedValue, ValueSource
 
 MealType = Literal["breakfast", "lunch", "dinner", "snack", "drink", "other", "unknown"]
-WorkoutOutcome = Literal["planned", "performed", "partial", "skipped", "modified", "imported", "inferred"]
+WorkoutOutcome = Literal[
+    "planned", "performed", "partial", "skipped", "modified", "imported", "inferred"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +26,9 @@ class FoodComponent:
         if not self.name.strip():
             raise CaptureError("invalid_meal", "Food component name must not be blank.")
         if self.source in {"image-estimate", "model-estimate"} and self.confirmed:
-            raise CaptureError("invalid_meal", "Estimated food components must remain unconfirmed until accepted.")
+            raise CaptureError(
+                "invalid_meal", "Estimated food components must remain unconfirmed until accepted."
+            )
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -42,11 +46,18 @@ class MealDetails:
     nutrition: tuple[DerivedValue, ...] = ()
 
     def __post_init__(self) -> None:
-        for name, value in (("hunger_before", self.hunger_before), ("fullness_after", self.fullness_after), ("satisfaction", self.satisfaction)):
+        for name, value in (
+            ("hunger_before", self.hunger_before),
+            ("fullness_after", self.fullness_after),
+            ("satisfaction", self.satisfaction),
+        ):
             if value is not None and (type(value) is not int or not 0 <= value <= 10):
                 raise CaptureError("invalid_meal", f"{name} must be between 0 and 10 or unknown.")
-        for value in self.nutrition:
-            if value.status == "confirmed" and value.source in {"image-estimate", "model-estimate"}:
+        for nutrition_value in self.nutrition:
+            if nutrition_value.status == "confirmed" and nutrition_value.source in {
+                "image-estimate",
+                "model-estimate",
+            }:
                 # Source is deliberately retained even when the user confirms it.
                 continue
 
@@ -79,7 +90,10 @@ class ExerciseSet:
     def __post_init__(self) -> None:
         if not self.exercise.strip():
             raise CaptureError("invalid_exercise", "Exercise name must not be blank.")
-        for name, value in (("repetitions", self.repetitions), ("duration_seconds", self.duration_seconds)):
+        for name, value in (
+            ("repetitions", self.repetitions),
+            ("duration_seconds", self.duration_seconds),
+        ):
             if value is not None and (type(value) is not int or value < 0):
                 raise CaptureError("invalid_exercise", f"{name} must be non-negative or unknown.")
         if self.load is not None and self.load < 0:
@@ -87,7 +101,10 @@ class ExerciseSet:
         if self.perceived_exertion is not None and not 0 <= self.perceived_exertion <= 10:
             raise CaptureError("invalid_exercise", "perceived_exertion must be between 0 and 10.")
         if self.source in {"model-estimate", "image-estimate"} and self.confirmed:
-            raise CaptureError("invalid_exercise", "Inferred exercise fields must remain unconfirmed until accepted.")
+            raise CaptureError(
+                "invalid_exercise",
+                "Inferred exercise fields must remain unconfirmed until accepted.",
+            )
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -115,12 +132,22 @@ class ExerciseDetails:
     def __post_init__(self) -> None:
         if not self.activity_type.strip():
             raise CaptureError("invalid_exercise", "activity_type must not be blank.")
-        if self.outcome in {"performed", "partial", "modified"} and self.duration_minutes is not None and self.duration_minutes < 0:
+        if (
+            self.outcome in {"performed", "partial", "modified"}
+            and self.duration_minutes is not None
+            and self.duration_minutes < 0
+        ):
             raise CaptureError("invalid_exercise", "duration_minutes must be non-negative.")
-        if self.outcome == "planned" and any((self.start_at, self.end_at, self.duration_minutes, self.sequence)):
+        if self.outcome == "planned" and any(
+            (self.start_at, self.end_at, self.duration_minutes, self.sequence)
+        ):
             # Planned details may exist, but they are not evidence of completion.
             pass
-        for name, value in (("perceived_exertion", self.perceived_exertion), ("energy", self.energy), ("enjoyment", self.enjoyment)):
+        for name, value in (
+            ("perceived_exertion", self.perceived_exertion),
+            ("energy", self.energy),
+            ("enjoyment", self.enjoyment),
+        ):
             if value is not None and (type(value) is not int or not 0 <= value <= 10):
                 raise CaptureError("invalid_exercise", f"{name} must be between 0 and 10.")
 

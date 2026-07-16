@@ -83,8 +83,8 @@ export interface CaptureArtifact {
 export interface AttachmentImportResult {
   reference: AttachmentReference;
   manifest_path: string;
-  duplicate_detected: boolean;
-  reused_existing: boolean;
+  duplicate: boolean;
+  reused_original: boolean;
 }
 
 export interface AttachmentAudit {
@@ -187,4 +187,22 @@ export interface CaptureRecoveryReport {
   };
   diagnostics: Array<Record<string, unknown>>;
   rebuilt_manifests: string[];
+}
+
+export interface CaptureVisualization {
+  timeline: Array<{
+    capture_id: string; path: string; event_at: string; title: string; capture_type: string;
+    state: string; attachment_count: number; confirmed_value_count: number; suggested_value_count: number;
+  }>;
+  counts_by_type: Record<string, number>;
+  counts_by_state: Record<string, number>;
+  activity_calendar: Record<string, number>;
+  processing_status: Record<string, number>;
+  exercise_trends: Array<{
+    capture_id: string; path: string; event_at: string; outcome: string;
+    duration_minutes?: number; distance?: number; distance_unit?: string; missing_fields: string[];
+  }>;
+  experiment_linked: Array<Record<string, unknown>>;
+  missing_data: Record<string, number>;
+  warnings: string[];
 }

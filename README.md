@@ -11,6 +11,8 @@ Its purpose is to help the user understand how they work, not merely maximize ta
 - [Complete User Manual](docs/user-manual/README.md)
 - [System architecture](docs/architecture.md)
 - [Design decisions](docs/design-decisions.md)
+- [Rich capture architecture](docs/rich-capture-architecture.md)
+- [Rich capture user manual](docs/user-manual/13-rich-capture.md)
 
 ## Start here
 

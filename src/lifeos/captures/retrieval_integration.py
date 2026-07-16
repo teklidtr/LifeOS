@@ -61,21 +61,29 @@ def build_capture_representation(
     for value in capture.metadata.derived_values:
         if not include_derived or value.status not in {"confirmed", "corrected"}:
             continue
-        lines.append(f"Confirmed field {value.field_name}: {value.value} {value.unit or ''} (source: {value.source}).")
+        lines.append(
+            f"Confirmed field {value.field_name}: {value.value} {value.unit or ''} (source: {value.source})."
+        )
         kinds.append(f"confirmed:{value.source}")
     stale = False
     approved_ids = {item.attachment_id for item in capture.metadata.attachments}
     for result in extractions:
         if result.attachment_id not in approved_ids:
             continue
-        if result.source_hash != next(item.content_hash for item in capture.metadata.attachments if item.attachment_id == result.attachment_id):
+        if result.source_hash != next(
+            item.content_hash
+            for item in capture.metadata.attachments
+            if item.attachment_id == result.attachment_id
+        ):
             stale = True
             continue
         if result.status == "stale":
             stale = True
             continue
         if result.status == "completed" and result.text:
-            lines.append(f"[{result.method} extracted text from {result.attachment_id}]\n{result.text}")
+            lines.append(
+                f"[{result.method} extracted text from {result.attachment_id}]\n{result.text}"
+            )
             kinds.append(result.method)
     return CaptureTextRepresentation(
         capture.metadata.capture_id,
@@ -90,12 +98,16 @@ def build_capture_representation(
             "event_at": capture.metadata.event_at,
             "privacy_scope": capture.metadata.privacy_scope,
             "attachment_types": sorted({item.media_type for item in capture.metadata.attachments}),
-            "linked_artifact_types": sorted({item.artifact_type for item in capture.metadata.links}),
+            "linked_artifact_types": sorted(
+                {item.artifact_type for item in capture.metadata.links}
+            ),
         },
     )
 
 
-def chunk_capture_representation(representation: CaptureTextRepresentation, *, indexed_at: datetime | None = None) -> ChunkedNote:
+def chunk_capture_representation(
+    representation: CaptureTextRepresentation, *, indexed_at: datetime | None = None
+) -> ChunkedNote:
     frontmatter = {
         "id": representation.capture_id,
         "type": "rich-capture-evidence",
@@ -109,7 +121,9 @@ def chunk_capture_representation(representation: CaptureTextRepresentation, *, i
         "stale": representation.stale,
     }
     content = f"---\n{yaml.safe_dump(frontmatter, sort_keys=False).rstrip()}\n---\n\n# Approved capture evidence\n\n{representation.text}\n"
-    source = VaultMarkdownFile(representation.capture_path, Path(representation.capture_path), content, content.encode())
+    source = VaultMarkdownFile(
+        representation.capture_path, Path(representation.capture_path), content, content.encode()
+    )
     return chunk_markdown_file(source, indexed_at=indexed_at or datetime.now(timezone.utc))
 
 

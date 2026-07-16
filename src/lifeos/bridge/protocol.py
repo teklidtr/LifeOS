@@ -129,6 +129,7 @@ CAPABILITIES = (
     "capture.transition",
     "capture.list",
     "capture.filter",
+    "capture.visualization.build",
     "capture.attachment.add",
     "capture.attachment.remove",
     "capture.attachment.audit",
@@ -159,7 +160,9 @@ class ProtocolError(Exception):
     data: dict[str, Any] | None = None
 
 
-def strict_object(value: object, *, allowed: set[str], required: set[str] = frozenset()) -> dict[str, Any]:
+def strict_object(
+    value: object, *, allowed: set[str], required: set[str] = frozenset()
+) -> dict[str, Any]:
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise ProtocolError("invalid_request", "Expected a JSON object.")
     unknown = sorted(set(value) - allowed)
@@ -172,7 +175,12 @@ def strict_object(value: object, *, allowed: set[str], required: set[str] = froz
 
 
 def success_frame(request_id: str | int | None, result: object) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "result": result, "meta": {"protocol": PROTOCOL_VERSION}}
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": result,
+        "meta": {"protocol": PROTOCOL_VERSION},
+    }
 
 
 def error_frame(request_id: str | int | None, error: ProtocolError) -> dict[str, Any]:

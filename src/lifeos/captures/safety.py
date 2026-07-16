@@ -44,7 +44,14 @@ _EXERCISE_URGENT = (
     "loss of feeling",
     "severe injury",
 )
-_EXERCISE_CAUTION = ("sharp pain", "severe pain", "numbness", "tingling", "dizziness", "joint gave way")
+_EXERCISE_CAUTION = (
+    "sharp pain",
+    "severe pain",
+    "numbness",
+    "tingling",
+    "dizziness",
+    "joint gave way",
+)
 
 
 def evaluate_capture_safety(domain: SafetyDomain, text: str) -> tuple[CaptureSafetyMessage, ...]:
@@ -64,5 +71,7 @@ def evaluate_capture_safety(domain: SafetyDomain, text: str) -> tuple[CaptureSaf
             if domain == "meal"
             else "The entry describes pain or neurological symptoms. Do not train through severe or worsening symptoms; consider professional assessment."
         )
-        return (CaptureSafetyMessage(domain, "caution", f"{domain}_caution_symptoms", message, False),)
+        return (
+            CaptureSafetyMessage(domain, "caution", f"{domain}_caution_symptoms", message, False),
+        )
     return ()

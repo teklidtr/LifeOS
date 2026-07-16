@@ -20,7 +20,15 @@ CaptureState = Literal[
 ]
 AttachmentKind = Literal["original", "user-edited", "generated-derivative"]
 ProcessingState = Literal[
-    "not-requested", "queued", "processing", "completed", "failed", "cancelled", "stale"
+    "not-requested",
+    "queued",
+    "processing",
+    "completed",
+    "needs-review",
+    "unavailable",
+    "failed",
+    "cancelled",
+    "stale",
 ]
 PrivacyScope = Literal["standard", "private", "protected"]
 ValueSource = Literal[
@@ -38,11 +46,19 @@ ValueSource = Literal[
 Confidence = Literal["high", "medium", "low", "unknown"]
 
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
-    "captured": frozenset({"processing", "needs-review", "enriched", "linked", "completed", "failed", "archived"}),
+    "captured": frozenset(
+        {"processing", "needs-review", "enriched", "linked", "completed", "failed", "archived"}
+    ),
     "processing": frozenset({"needs-review", "enriched", "failed", "captured"}),
-    "needs-review": frozenset({"processing", "enriched", "linked", "completed", "failed", "archived"}),
-    "enriched": frozenset({"processing", "needs-review", "linked", "completed", "failed", "archived"}),
-    "linked": frozenset({"processing", "needs-review", "enriched", "completed", "failed", "archived"}),
+    "needs-review": frozenset(
+        {"processing", "enriched", "linked", "completed", "failed", "archived"}
+    ),
+    "enriched": frozenset(
+        {"processing", "needs-review", "linked", "completed", "failed", "archived"}
+    ),
+    "linked": frozenset(
+        {"processing", "needs-review", "enriched", "completed", "failed", "archived"}
+    ),
     "completed": frozenset({"needs-review", "linked", "archived"}),
     "failed": frozenset({"processing", "needs-review", "captured", "archived"}),
     "archived": frozenset({"needs-review"}),
@@ -77,7 +93,11 @@ def validate_transition(current: CaptureState, target: CaptureState) -> None:
         raise CaptureError(
             "invalid_transition",
             f"Capture cannot transition from {current} to {target}.",
-            {"current": current, "target": target, "allowed": sorted(_ALLOWED_TRANSITIONS[current])},
+            {
+                "current": current,
+                "target": target,
+                "allowed": sorted(_ALLOWED_TRANSITIONS[current]),
+            },
         )
 
 
@@ -175,11 +195,20 @@ class DerivedValue:
 
     def __post_init__(self) -> None:
         _nonblank(self.field_name, "derived field_name")
-        if self.range_low is not None and self.range_high is not None and self.range_low > self.range_high:
+        if (
+            self.range_low is not None
+            and self.range_high is not None
+            and self.range_low > self.range_high
+        ):
             raise CaptureError("invalid_range", "range_low must not exceed range_high.")
         if self.source == "unknown" and self.value is not None:
             raise CaptureError("invalid_value", "Unknown values must not carry a value.")
-        if self.status == "confirmed" and self.source in {"image-estimate", "model-estimate", "ocr", "transcript"}:
+        if self.status == "confirmed" and self.source in {
+            "image-estimate",
+            "model-estimate",
+            "ocr",
+            "transcript",
+        }:
             # Confirmation is allowed, but source remains visible and never changes to user-entered.
             pass
 
@@ -224,13 +253,22 @@ class CaptureMetadata:
         if not self.capture_id.startswith("cap-"):
             raise CaptureError("invalid_capture", "Capture ID is malformed.")
         _nonblank(self.title, "title")
-        for name, value in (("captured_at", self.captured_at), ("event_at", self.event_at), ("timezone", self.timezone), ("source_entry_point", self.source_entry_point), ("created_at", self.created_at), ("updated_at", self.updated_at)):
+        for name, value in (
+            ("captured_at", self.captured_at),
+            ("event_at", self.event_at),
+            ("timezone", self.timezone),
+            ("source_entry_point", self.source_entry_point),
+            ("created_at", self.created_at),
+            ("updated_at", self.updated_at),
+        ):
             _nonblank(value, name)
         if self.schema_version != CAPTURE_SCHEMA_VERSION:
             raise CaptureError("unsupported_schema", "Capture schema version is unsupported.")
         ids = [item.attachment_id for item in self.attachments]
         if len(ids) != len(set(ids)):
-            raise CaptureError("duplicate_attachment_reference", "Capture has duplicate attachment references.")
+            raise CaptureError(
+                "duplicate_attachment_reference", "Capture has duplicate attachment references."
+            )
 
     def to_frontmatter(self) -> dict[str, object]:
         return {
@@ -360,57 +398,104 @@ def _mapping(value: object, name: str) -> Mapping[str, Any]:
 def capture_metadata_from_dict(data: Mapping[str, Any]) -> CaptureMetadata:
     version = int(data.get("schema_version", 0))
     if version != CAPTURE_SCHEMA_VERSION:
-        raise CaptureError("unsupported_schema", "Capture schema version is unsupported.", {"schema_version": version})
-    attachments = tuple(AttachmentReference(**dict(_mapping(item, "attachment"))) for item in _sequence(data.get("attachments"), "attachments"))
-    links = tuple(ArtifactLink(**dict(_mapping(item, "link"))) for item in _sequence(data.get("links"), "links"))
+        raise CaptureError(
+            "unsupported_schema",
+            "Capture schema version is unsupported.",
+            {"schema_version": version},
+        )
+    attachments = tuple(
+        AttachmentReference(**dict(_mapping(item, "attachment")))
+        for item in _sequence(data.get("attachments"), "attachments")
+    )
+    links = tuple(
+        ArtifactLink(**dict(_mapping(item, "link")))
+        for item in _sequence(data.get("links"), "links")
+    )
     derived = []
     for item in _sequence(data.get("derived_values"), "derived_values"):
         raw = dict(_mapping(item, "derived value"))
         raw["assumptions"] = tuple(raw.get("assumptions", ()))
         raw["evidence_refs"] = tuple(raw.get("evidence_refs", ()))
         derived.append(DerivedValue(**raw))
-    provenance = tuple(ProvenanceRecord(**dict(_mapping(item, "provenance"))) for item in _sequence(data.get("provenance"), "provenance"))
-    lifecycle = tuple(LifecycleEvent(**dict(_mapping(item, "lifecycle"))) for item in _sequence(data.get("lifecycle"), "lifecycle"))
+    provenance = tuple(
+        ProvenanceRecord(**dict(_mapping(item, "provenance")))
+        for item in _sequence(data.get("provenance"), "provenance")
+    )
+    lifecycle = tuple(
+        LifecycleEvent(**dict(_mapping(item, "lifecycle")))
+        for item in _sequence(data.get("lifecycle"), "lifecycle")
+    )
     return CaptureMetadata(
-        capture_id=str(data.get("id", "")), title=str(data.get("title", "")),
-        description=str(data.get("description", "")), capture_type=str(data.get("capture_type", "attachment")),  # type: ignore[arg-type]
+        capture_id=str(data.get("id", "")),
+        title=str(data.get("title", "")),
+        description=str(data.get("description", "")),
+        capture_type=str(data.get("capture_type", "attachment")),  # type: ignore[arg-type]
         state=str(data.get("state", "captured")),  # type: ignore[arg-type]
-        captured_at=str(data.get("captured_at", "")), event_at=str(data.get("event_at", "")),
-        timezone=str(data.get("timezone", "")), source_entry_point=str(data.get("source_entry_point", "")),
+        captured_at=str(data.get("captured_at", "")),
+        event_at=str(data.get("event_at", "")),
+        timezone=str(data.get("timezone", "")),
+        source_entry_point=str(data.get("source_entry_point", "")),
         privacy_scope=str(data.get("privacy_scope", "standard")),  # type: ignore[arg-type]
-        sensitive=bool(data.get("sensitive", False)), location=str(data["location"]) if data.get("location") is not None else None,
-        tags=tuple(str(item) for item in _sequence(data.get("tags"), "tags")), attachments=attachments, links=links,
-        derived_values=tuple(derived), domain_data=dict(_mapping(data.get("domain_data", {}), "domain_data")), extraction_status=str(data.get("extraction_status", "not-requested")),  # type: ignore[arg-type]
+        sensitive=bool(data.get("sensitive", False)),
+        location=str(data["location"]) if data.get("location") is not None else None,
+        tags=tuple(str(item) for item in _sequence(data.get("tags"), "tags")),
+        attachments=attachments,
+        links=links,
+        derived_values=tuple(derived),
+        domain_data=dict(_mapping(data.get("domain_data", {}), "domain_data")),
+        extraction_status=str(data.get("extraction_status", "not-requested")),  # type: ignore[arg-type]
         enrichment_status=str(data.get("enrichment_status", "not-requested")),  # type: ignore[arg-type]
         exclude_from_semantic=bool(data.get("exclude_from_semantic", False)),
         exclude_from_conversations=bool(data.get("exclude_from_conversations", False)),
         exclude_from_reviews=bool(data.get("exclude_from_reviews", False)),
         exclude_from_experiments=bool(data.get("exclude_from_experiments", False)),
-        provenance=provenance, lifecycle=lifecycle,
+        provenance=provenance,
+        lifecycle=lifecycle,
         merged_from=tuple(str(item) for item in _sequence(data.get("merged_from"), "merged_from")),
         split_from=str(data["split_from"]) if data.get("split_from") is not None else None,
-        created_at=str(data.get("created_at", "")), updated_at=str(data.get("updated_at", "")), schema_version=version,
+        created_at=str(data.get("created_at", "")),
+        updated_at=str(data.get("updated_at", "")),
+        schema_version=version,
     )
 
 
 def attachment_manifest_from_dict(data: Mapping[str, Any]) -> AttachmentManifest:
     version = int(data.get("schema_version", 0))
     if version != ATTACHMENT_SCHEMA_VERSION:
-        raise CaptureError("unsupported_schema", "Attachment schema version is unsupported.", {"schema_version": version})
+        raise CaptureError(
+            "unsupported_schema",
+            "Attachment schema version is unsupported.",
+            {"schema_version": version},
+        )
     return AttachmentManifest(
-        attachment_id=str(data.get("id", "")), content_hash=str(data.get("content_hash", "")),
-        original_filename=str(data.get("original_filename", "")), canonical_path=str(data.get("canonical_path", "")),
-        media_type=str(data.get("media_type", "application/octet-stream")), byte_size=int(data.get("byte_size", -1)),
-        capture_source=str(data.get("capture_source", "")), imported_at=str(data.get("imported_at", "")),
+        attachment_id=str(data.get("id", "")),
+        content_hash=str(data.get("content_hash", "")),
+        original_filename=str(data.get("original_filename", "")),
+        canonical_path=str(data.get("canonical_path", "")),
+        media_type=str(data.get("media_type", "application/octet-stream")),
+        byte_size=int(data.get("byte_size", -1)),
+        capture_source=str(data.get("capture_source", "")),
+        imported_at=str(data.get("imported_at", "")),
         kind=str(data.get("kind", "original")),  # type: ignore[arg-type]
         extraction_status=str(data.get("extraction_status", "not-requested")),  # type: ignore[arg-type]
         preview_status=str(data.get("preview_status", "not-requested")),  # type: ignore[arg-type]
         transcript_status=str(data.get("transcript_status", "not-requested")),  # type: ignore[arg-type]
-        parent_capture_ids=tuple(str(item) for item in _sequence(data.get("parent_capture_ids"), "parent_capture_ids")),
+        parent_capture_ids=tuple(
+            str(item) for item in _sequence(data.get("parent_capture_ids"), "parent_capture_ids")
+        ),
         duplicate_of=str(data["duplicate_of"]) if data.get("duplicate_of") is not None else None,
-        derived_artifacts=tuple(str(item) for item in _sequence(data.get("derived_artifacts"), "derived_artifacts")),
-        provider_processing_disclosures=tuple(dict(_mapping(item, "disclosure")) for item in _sequence(data.get("provider_processing_disclosures"), "provider_processing_disclosures")),
+        derived_artifacts=tuple(
+            str(item) for item in _sequence(data.get("derived_artifacts"), "derived_artifacts")
+        ),
+        provider_processing_disclosures=tuple(
+            dict(_mapping(item, "disclosure"))
+            for item in _sequence(
+                data.get("provider_processing_disclosures"), "provider_processing_disclosures"
+            )
+        ),
         redaction_state=str(data.get("redaction_state", "none")),  # type: ignore[arg-type]
-        source_modified_ns=int(data["source_modified_ns"]) if data.get("source_modified_ns") is not None else None,
+        source_modified_ns=int(data["source_modified_ns"])
+        if data.get("source_modified_ns") is not None
+        else None,
         schema_version=version,
     )

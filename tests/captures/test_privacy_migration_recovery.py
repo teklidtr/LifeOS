@@ -156,7 +156,9 @@ def test_migration_is_an_audited_no_op_when_no_legacy_schema_exists(tmp_path: Pa
     assert exc.value.code == "unknown_legacy_source"
 
 
-def test_recovery_rebuilds_index_and_missing_manifest_from_canonical_sources(tmp_path: Path) -> None:
+def test_recovery_rebuilds_index_and_missing_manifest_from_canonical_sources(
+    tmp_path: Path,
+) -> None:
     vault, runtime, _, _, capture, reference = attached_capture(tmp_path)
     (vault / reference.manifest_path).unlink()
     initial = audit_capture_recovery(vault_root=vault, runtime_dir=runtime, rebuild=True)
@@ -169,10 +171,14 @@ def test_recovery_rebuilds_index_and_missing_manifest_from_canonical_sources(tmp
     )
     assert reference.manifest_path in repaired.rebuilt_manifests
     assert (vault / reference.manifest_path).exists()
-    assert load_capture_index(runtime_dir=runtime).entries[0].capture_id == capture.metadata.capture_id
+    assert (
+        load_capture_index(runtime_dir=runtime).entries[0].capture_id == capture.metadata.capture_id
+    )
 
 
-def test_recovery_detects_moves_duplicates_missing_changed_stale_and_orphans(tmp_path: Path) -> None:
+def test_recovery_detects_moves_duplicates_missing_changed_stale_and_orphans(
+    tmp_path: Path,
+) -> None:
     vault, runtime, _, store, capture, reference = attached_capture(tmp_path)
     rebuild_capture_index(vault_root=vault, runtime_dir=runtime)
     moved = vault / "archive" / "moved-capture.md"
@@ -199,7 +205,13 @@ def test_recovery_detects_moves_duplicates_missing_changed_stale_and_orphans(tmp
     orphan.write_bytes(b"orphan")
     report = audit_capture_recovery(vault_root=vault, runtime_dir=runtime, rebuild=True)
     codes = {item["code"] for item in report.diagnostics}
-    assert {"moved_artifact", "duplicate_identity", "attachment_changed", "stale_extraction", "orphan_original"} <= codes
+    assert {
+        "moved_artifact",
+        "duplicate_identity",
+        "attachment_changed",
+        "stale_extraction",
+        "orphan_original",
+    } <= codes
     assert store.audit(reference.attachment_id).status == "changed"
 
 

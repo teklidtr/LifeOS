@@ -37,3 +37,20 @@ migration interruption and stale-source fixtures, runtime deletion/rebuild,
 unsafe blocking, missing-data behavior, and clean-tree/provider-file checks. The
 canonical Markdown is also opened directly in tests to verify plugin-independent
 portability and human annotation preservation.
+
+## Direction 7: rich capture
+
+Direction 7 is delivered as nine separate commits: architecture and task design;
+canonical captures and manifests; storage, extraction, lifecycle, merge and split;
+meal and exercise semantics, enrichment, and safety; retrieval, conversation,
+review, experiment, and proposal integration; bridge capabilities; Obsidian
+workspace; privacy, migration, and recovery; and final visualizations,
+documentation, validation, reports, and packaging.
+
+The release gate validates canonical portability, original-byte preservation,
+hash deduplication, same-name different-content handling, local and unavailable
+extraction, no-provider and timeout behavior, protected-scope denial, nutrition
+uncertainty, plan-versus-performance semantics, retrieval and conversation
+provenance, review and experiment integration, stale proposal protection,
+runtime deletion and rebuild, manual links, bridge capabilities, plugin tests,
+type checking, linting, and production build.

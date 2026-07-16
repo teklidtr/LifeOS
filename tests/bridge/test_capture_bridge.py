@@ -23,6 +23,7 @@ def test_capture_bridge_vertical_slice_and_capabilities(tmp_path: Path) -> None:
     for capability in (
         "capture.create",
         "capture.attachment.add",
+        "capture.visualization.build",
         "capture.enrichment.start",
         "capture.inference.decide",
         "capture.merge.preview",
@@ -61,7 +62,9 @@ def test_capture_bridge_vertical_slice_and_capabilities(tmp_path: Path) -> None:
     )
     capture = attached["capture"]
     attachment_id = attached["attachment"]["reference"]["attachment_id"]
-    assert (vault / attached["attachment"]["reference"]["canonical_path"]).read_text() == "Receipt text"
+    assert (
+        vault / attached["attachment"]["reference"]["canonical_path"]
+    ).read_text() == "Receipt text"
     assert bridge.call("capture.attachment.audit", attachment_id=attachment_id)["status"] == "ok"
 
     job = bridge.call(
@@ -74,6 +77,11 @@ def test_capture_bridge_vertical_slice_and_capabilities(tmp_path: Path) -> None:
     assert completed["state"] == "completed"
     listed = bridge.call("capture.filter", capture_types=["meal"], states=["enriched"])
     assert len(listed) == 1
+    visualization = bridge.call(
+        "capture.visualization.build", capture_types=["meal"], max_points=10
+    )
+    assert visualization["counts_by_type"] == {"meal": 1}
+    assert visualization["timeline"][0]["path"] == capture["path"]
 
 
 def test_capture_bridge_links_merges_and_proposals_are_guarded(tmp_path: Path) -> None:
@@ -125,7 +133,12 @@ def test_capture_bridge_rejects_extra_fields_stale_writes_and_bad_shapes(tmp_pat
         )
     assert stale.value.code == "stale_capture"
     with pytest.raises(ProtocolError) as malformed:
-        bridge.call("capture.split", path=created["path"], expected_hash=created["content_hash"], groups="bad")
+        bridge.call(
+            "capture.split",
+            path=created["path"],
+            expected_hash=created["content_hash"],
+            groups="bad",
+        )
     assert malformed.value.code == "invalid_params"
 
 

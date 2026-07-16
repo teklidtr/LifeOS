@@ -49,3 +49,25 @@ default deny, source selection is inspectable and bounded, and redaction may be
 applied before transmission. Core experiment workflows remain local. Any result
 that would change another canonical artifact becomes a proposal with exact patches,
 evidence, limitations, and stale-target checks.
+
+## Rich capture safety, privacy, and ownership
+
+The user description, annotations, confirmations, corrections, capture links,
+lifecycle, manifest metadata, and original attachment bytes are canonical.
+Managed refreshes preserve human-owned Markdown and require expected hashes.
+Derived extraction, OCR, transcripts, image descriptions, nutrition estimates,
+visualizations, and embeddings are disposable and must retain source and
+uncertainty.
+
+Protected captures and sensitive folders default deny external processing.
+Each external operation requires explicit intent and an inspectable bounded
+payload preview. Attaching a file does not authorize upload, and linking does not
+authorize traversal into nearby diary or health notes. Logs and telemetry omit
+full attachment contents.
+
+Meal processing does not diagnose allergies, deficiencies, intolerances, eating
+disorders, or disease and does not encourage restriction, purging, dehydration,
+fasting, or medication changes. Exercise processing does not diagnose injury or
+prescribe treatment and stops ordinary enrichment for urgent symptom language.
+External changes generated from a capture remain proposals until separately
+reviewed, approved, and applied.

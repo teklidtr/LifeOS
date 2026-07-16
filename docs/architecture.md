@@ -260,3 +260,21 @@ integration require no model. Optional assistance uses provider-neutral contract
 and bounded, inspectable source selection. See
 [Personal Experiment Architecture](personal-experiment-architecture.md) and
 [Personal Experiments](user-manual/12-personal-experiments.md).
+
+## Rich capture
+
+Rich captures are canonical Markdown under `captures/YYYY/`, with canonical
+attachment manifests under `attachments/manifests/` and original bytes under
+content-addressed `attachments/originals/` paths. Python owns lifecycle,
+optimistic writes, hashes, deduplication, extraction, inference decisions,
+privacy previews, linking, merge and split, retrieval representations, review
+adapters, experiment mappings, proposals, migration, recovery, and visualization
+models. The Obsidian plugin is a thin UI client over additive `capture.*` bridge
+capabilities.
+
+Runtime state under `.lifeos/captures/` is disposable. It includes extraction
+results, processing jobs, indexes, checkpoints, previews, embeddings, galleries,
+timelines, and charts. Deleting it cannot delete canonical Markdown or original
+files. See [Rich Capture Architecture](rich-capture-architecture.md),
+[Rich Capture Protocol](rich-capture-protocol.md), and
+[Rich Capture User Manual](user-manual/13-rich-capture.md).

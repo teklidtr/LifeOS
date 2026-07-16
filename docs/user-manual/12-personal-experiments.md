@@ -1,4 +1,4 @@
-[← Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md) · [Manual home](README.md)
+[← Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md) · [Manual home](README.md) · [Rich Capture →](13-rich-capture.md)
 
 # Personal Experiments
 
@@ -305,4 +305,4 @@ friendly live regions and are expressed in text rather than color alone. Tables,
 raw observations, warnings, and recovery messages remain available when charts
 or providers are unavailable.
 
-[← Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md) · [Manual home](README.md)
+[← Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md) · [Manual home](README.md) · [Rich Capture →](13-rich-capture.md)

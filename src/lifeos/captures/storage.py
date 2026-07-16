@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from .artifact import AttachmentManifestService, CaptureArtifactService, manifest_path, utc_now
-from .contracts import AttachmentManifest, AttachmentReference, CaptureError
+from .contracts import AttachmentManifest, AttachmentReference, CaptureArtifact, CaptureError
 
 _CHUNK_SIZE = 1024 * 1024
 
@@ -64,7 +64,9 @@ def _hash_path(path: Path) -> tuple[str, int, int]:
     try:
         fd = os.open(path, flags)
     except OSError as exc:
-        raise CaptureError("attachment_open_failed", f"Attachment could not be opened: {exc}") from exc
+        raise CaptureError(
+            "attachment_open_failed", f"Attachment could not be opened: {exc}"
+        ) from exc
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
@@ -110,7 +112,11 @@ class AttachmentStore:
         digest, byte_size, modified_ns = _hash_path(source)
         content_hash = "sha256:" + digest
         existing = next(
-            (item for item in self.manifests.list() if item.metadata.content_hash == content_hash and item.metadata.kind == "original"),
+            (
+                item
+                for item in self.manifests.list()
+                if item.metadata.content_hash == content_hash and item.metadata.kind == "original"
+            ),
             None,
         )
         if existing is not None and not independent_copy:
@@ -118,7 +124,9 @@ class AttachmentStore:
             parents = metadata.parent_capture_ids
             if parent_capture_id and parent_capture_id not in parents:
                 updated = replace(metadata, parent_capture_ids=(*parents, parent_capture_id))
-                existing = self.manifests.save(existing, updated, expected_hash=existing.content_hash)
+                existing = self.manifests.save(
+                    existing, updated, expected_hash=existing.content_hash
+                )
                 metadata = existing.metadata
             return AttachmentImportResult(self._reference(metadata), existing.path, True, True)
 
@@ -132,8 +140,12 @@ class AttachmentStore:
         actual, actual_size, _ = _hash_path(target)
         if actual != digest or actual_size != byte_size:
             target.unlink(missing_ok=True)
-            raise CaptureError("storage_verification_failed", "Stored attachment did not match the original bytes.")
-        attachment_id = f"att-{digest[:16]}" if not independent_copy else f"att-{secrets.token_hex(8)}"
+            raise CaptureError(
+                "storage_verification_failed", "Stored attachment did not match the original bytes."
+            )
+        attachment_id = (
+            f"att-{digest[:16]}" if not independent_copy else f"att-{secrets.token_hex(8)}"
+        )
         metadata = AttachmentManifest(
             attachment_id=attachment_id,
             content_hash=content_hash,
@@ -148,13 +160,22 @@ class AttachmentStore:
             source_modified_ns=modified_ns,
         )
         artifact = self.manifests.create(metadata)
-        return AttachmentImportResult(self._reference(metadata), artifact.path, existing is not None, False)
+        return AttachmentImportResult(
+            self._reference(metadata), artifact.path, existing is not None, False
+        )
 
     def attach_to_capture(
-        self, capture_path_value: str, reference: AttachmentReference, *, expected_hash: str, now: datetime | None = None
+        self,
+        capture_path_value: str,
+        reference: AttachmentReference,
+        *,
+        expected_hash: str,
+        now: datetime | None = None,
     ) -> CaptureArtifact:
         artifact = self.captures.load(capture_path_value)
-        if any(item.attachment_id == reference.attachment_id for item in artifact.metadata.attachments):
+        if any(
+            item.attachment_id == reference.attachment_id for item in artifact.metadata.attachments
+        ):
             return artifact
         moment = utc_now(now)
         metadata = replace(
@@ -165,10 +186,17 @@ class AttachmentStore:
         return self.captures.save(artifact, metadata, expected_hash=expected_hash)
 
     def remove_from_capture(
-        self, capture_path_value: str, attachment_id: str, *, expected_hash: str, now: datetime | None = None
+        self,
+        capture_path_value: str,
+        attachment_id: str,
+        *,
+        expected_hash: str,
+        now: datetime | None = None,
     ) -> CaptureArtifact:
         artifact = self.captures.load(capture_path_value)
-        selected = tuple(item for item in artifact.metadata.attachments if item.attachment_id != attachment_id)
+        selected = tuple(
+            item for item in artifact.metadata.attachments if item.attachment_id != attachment_id
+        )
         if len(selected) == len(artifact.metadata.attachments):
             raise CaptureError("attachment_not_linked", "Attachment is not linked to this capture.")
         moment = utc_now(now)
@@ -183,7 +211,11 @@ class AttachmentStore:
             if any(ref.attachment_id == attachment_id for ref in item.metadata.attachments)
         ]
         if references:
-            raise CaptureError("attachment_referenced", "Attachment is still referenced.", {"capture_ids": references})
+            raise CaptureError(
+                "attachment_referenced",
+                "Attachment is still referenced.",
+                {"capture_ids": references},
+            )
         original = self.vault_root / manifest.metadata.canonical_path
         original.unlink(missing_ok=True)
         return True
@@ -192,15 +224,40 @@ class AttachmentStore:
         manifest = self.manifests.load(manifest_path(attachment_id))
         original = self.vault_root / manifest.metadata.canonical_path
         if not original.exists():
-            return AttachmentAudit(attachment_id, "missing", manifest.metadata.canonical_path, manifest.metadata.content_hash, details="Original file is missing.")
+            return AttachmentAudit(
+                attachment_id,
+                "missing",
+                manifest.metadata.canonical_path,
+                manifest.metadata.content_hash,
+                details="Original file is missing.",
+            )
         try:
             digest, size, _ = _hash_path(original)
         except CaptureError as exc:
-            return AttachmentAudit(attachment_id, exc.code, manifest.metadata.canonical_path, manifest.metadata.content_hash, details=exc.message)
+            return AttachmentAudit(
+                attachment_id,
+                exc.code,
+                manifest.metadata.canonical_path,
+                manifest.metadata.content_hash,
+                details=exc.message,
+            )
         actual = "sha256:" + digest
         if actual != manifest.metadata.content_hash or size != manifest.metadata.byte_size:
-            return AttachmentAudit(attachment_id, "changed", manifest.metadata.canonical_path, manifest.metadata.content_hash, actual, "Original bytes changed; derivatives are stale.")
-        return AttachmentAudit(attachment_id, "ok", manifest.metadata.canonical_path, manifest.metadata.content_hash, actual)
+            return AttachmentAudit(
+                attachment_id,
+                "changed",
+                manifest.metadata.canonical_path,
+                manifest.metadata.content_hash,
+                actual,
+                "Original bytes changed; derivatives are stale.",
+            )
+        return AttachmentAudit(
+            attachment_id,
+            "ok",
+            manifest.metadata.canonical_path,
+            manifest.metadata.content_hash,
+            actual,
+        )
 
     @staticmethod
     def _reference(metadata: AttachmentManifest) -> AttachmentReference:
@@ -222,7 +279,9 @@ class AttachmentStore:
         source_fd = -1
         try:
             source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-            temp_fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644, dir_fd=directory_fd)
+            temp_fd = os.open(
+                temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644, dir_fd=directory_fd
+            )
             while True:
                 chunk = os.read(source_fd, _CHUNK_SIZE)
                 if not chunk:
@@ -240,7 +299,9 @@ class AttachmentStore:
                 os.unlink(temp_name, dir_fd=directory_fd)
             except OSError:
                 pass
-            raise CaptureError("storage_write_failure", f"Attachment could not be stored: {exc}") from exc
+            raise CaptureError(
+                "storage_write_failure", f"Attachment could not be stored: {exc}"
+            ) from exc
         finally:
             if temp_fd >= 0:
                 os.close(temp_fd)

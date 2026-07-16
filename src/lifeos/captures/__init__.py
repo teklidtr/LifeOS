@@ -1,6 +1,7 @@
 """Rich capture domain."""
 
 from .artifact import AttachmentManifestService, CaptureArtifactService
+from .visualization import CaptureVisualization, build_capture_visualization
 from .contracts import (
     ATTACHMENT_SCHEMA_VERSION,
     CAPTURE_SCHEMA_VERSION,
@@ -25,4 +26,6 @@ __all__ = [
     "CaptureError",
     "CaptureMetadata",
     "DerivedValue",
+    "CaptureVisualization",
+    "build_capture_visualization",
 ]

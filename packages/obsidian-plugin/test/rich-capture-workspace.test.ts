@@ -62,6 +62,7 @@ class Client implements BridgeClient {
       return this.current as T;
     }
     if (method === "capture.filter") return [this.current] as T;
+    if (method === "capture.visualization.build") return { timeline: [{ capture_id: "cap-123", path: this.current.path, event_at: this.current.metadata.event_at, title: "Lunch", capture_type: "meal", state: "captured", attachment_count: 0, confirmed_value_count: 0, suggested_value_count: 0 }], counts_by_type: { meal: 1 }, counts_by_state: { captured: 1 }, activity_calendar: { "2026-07-16": 1 }, processing_status: { "extraction:not-requested": 1, "enrichment:not-requested": 1 }, exercise_trends: [], experiment_linked: [], missing_data: {}, warnings: [] } as T;
     if (method === "capture.attachment.add") {
       this.current = {
         ...this.current,
@@ -76,7 +77,7 @@ class Client implements BridgeClient {
           }],
         },
       };
-      return { capture: this.current, attachment: { reference: this.current.metadata.attachments[0], manifest_path: "attachments/manifests/att-1.md", duplicate_detected: false, reused_existing: false } } as T;
+      return { capture: this.current, attachment: { reference: this.current.metadata.attachments[0], manifest_path: "attachments/manifests/att-1.md", duplicate: false, reused_original: false } } as T;
     }
     if (method === "capture.attachment.audit") return { attachment_id: "att-1", status: "ok", canonical_path: "attachments/originals/meal.png", expected_hash: "sha256:file", details: "" } as T;
     if (method === "capture.enrichment.start") return { job_id: "job-1", capture_path: this.current.path, attachment_ids: ["att-1"], state: "queued", completed_attachment_ids: [], failed_attachment_ids: [], created_at: "now", updated_at: "now" } as T;
@@ -168,4 +169,14 @@ test("privacy disclosure, no-op migration, and recovery are inspectable", async 
   const recovery = await controller.rebuild({ deleteRuntime: true, rebuildManifests: true });
   assert.equal(recovery.index.state, "ready");
   assert.equal(client.calls.some(([method]) => method === "capture.privacy.preview"), true);
+});
+
+
+test("visualizations expose canonical paths and missing-data-safe summaries", async () => {
+  const client = new Client(); const controller = new RichCaptureWorkspaceController(client);
+  const view = await controller.buildVisualization({ captureTypes: ["meal"], maxPoints: 100 });
+  assert.equal(view.timeline[0]?.path, client.current.path);
+  assert.deepEqual(view.counts_by_type, { meal: 1 });
+  assert.equal(controller.state.focusTarget, "rich-capture-visualization");
+  assert.equal(client.calls.at(-1)?.[0], "capture.visualization.build");
 });

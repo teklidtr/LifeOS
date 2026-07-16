@@ -18,17 +18,18 @@ observation, and agent-assisted reflection.
 10. [First-Class Daily and Weekly Reviews](10-first-class-reviews.md)
 11. [Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md)
 12. [Personal Experiments](12-personal-experiments.md)
+13. [Rich Capture for Meals, Exercise, and Attachments](13-rich-capture.md)
 
 ## Suggested reading path
 
 New users should read Chapters 2, 4, and 5 first. Read Chapter 9 before using
-the goal-to-plan copilot, Chapter 10 before migrating or rebuilding reviews, Chapter 11 before building the semantic index or saving knowledge conversations, and Chapter 12 before designing or tracking personal experiments. Chapter 1 is useful when you want to understand the
+the goal-to-plan copilot, Chapter 10 before migrating or rebuilding reviews, Chapter 11 before building the semantic index or saving knowledge conversations, Chapter 12 before designing or tracking personal experiments, and Chapter 13 before importing media or using meal and exercise capture. Chapter 1 is useful when you want to understand the
 system boundaries, while Chapter 3 is the reference
 chapter for individual modules.
 
 ## Navigation
 
-Every chapter includes **Previous**, **Manual home**, and **Next** links at both
+Every chapter includes **Previous**, **Manual home**, and, where applicable, **Next** links at both
 the top and bottom so you can move through the manual without returning to the
 repository tree.
 

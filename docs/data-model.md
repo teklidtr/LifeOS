@@ -229,3 +229,74 @@ a dated replacement rather than rewriting the original active protocol.
 
 Derived indexes, due windows, chart models, and analysis caches live under
 `.lifeos/experiments/` and are rebuildable from these artifacts.
+
+## Rich capture (canonical)
+
+```yaml
+id: cap-<timestamp>-<random>
+type: rich-capture
+schema_version: 1
+title:
+description:
+capture_type: meal | exercise | attachment | mixed
+state: captured | processing | needs-review | enriched | linked | completed | failed | archived
+captured_at:
+event_at:
+timezone:
+source_entry_point:
+privacy_scope: standard | private | protected
+sensitive: false
+location:
+tags: []
+attachments: []
+links: []
+derived_values: []
+domain_data: {}
+extraction_status:
+enrichment_status:
+exclude_from_semantic: false
+exclude_from_conversations: false
+exclude_from_reviews: false
+exclude_from_experiments: false
+provenance: []
+lifecycle: []
+merged_from: []
+split_from:
+created_at:
+updated_at:
+```
+
+The managed capture block renders inspectable summaries. Human annotations stay
+outside it. Derived values retain field name, value or range, unit, source,
+confidence, assumptions, evidence references, and status. `unknown` cannot carry
+a numeric value, and a missing value is never normalized to zero.
+
+## Attachment manifest (canonical)
+
+```yaml
+id: att-<stable-id>
+type: attachment-manifest
+schema_version: 1
+content_hash: sha256:<digest>
+original_filename:
+canonical_path: attachments/originals/<prefix>/<digest>/<safe-name>
+media_type:
+byte_size:
+attachment_kind: original | user-edited | generated-derivative
+capture_source:
+imported_at:
+created_at:
+modified_at:
+extraction_status:
+preview_status:
+transcript_status:
+duplicate_of:
+parent_capture_ids: []
+derived_artifact_refs: []
+provider_disclosures: []
+redaction_state:
+```
+
+Original bytes plus the manifest are canonical evidence. Extracted text, OCR,
+transcripts, thumbnails, waveforms, descriptions, embeddings, and indexes are
+versioned derived artifacts keyed by the original content hash.

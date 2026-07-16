@@ -185,3 +185,20 @@ proposal-created, proposal-stale, and migration-required states. Controls have
 accessible names, predictable focus restoration, keyboard activation, and live
 status announcements. Raw observations and textual summaries remain usable when
 visual rendering fails.
+
+## Rich capture workspace
+
+The rich-capture ribbon opens quick capture by default. The workspace controller
+also supports review, timeline, gallery, list, meal, exercise, attachment,
+unresolved, failed, and archived modes. It saves canonical Markdown before
+starting optional processing and routes every domain action through typed
+`capture.*` bridge calls.
+
+The controller exposes explicit states for duplicates, unsupported and oversized
+processing, missing or changed originals, malformed and unsupported schemas,
+queued or interrupted processing, provider failure, sensitive-scope denial,
+stale indexes and proposals, merge conflicts, migration, and recovery. Mobile
+state uses one column, 44-pixel minimum touch targets, and deferred enrichment.
+Keyboard actions have descriptive accessible labels, status changes use live
+announcements, and list/raw-record access remains available if visual rendering
+fails.

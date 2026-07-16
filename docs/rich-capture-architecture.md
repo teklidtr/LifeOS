@@ -80,7 +80,7 @@ Daily and weekly reviews surface dismissible evidence-fingerprinted capture find
 
 ## Recovery and migration
 
-Indexes, manifests, previews, extractions, embeddings, timelines, and galleries can be rebuilt from capture Markdown, manifest Markdown, and original files. Rebuilds checkpoint progress and never rewrite human sections unnecessarily. Legacy migration is conservative, source-hash guarded, resumable, and a documented no-op when no supported legacy form is found.
+Indexes, manifests, previews, extractions, embeddings, timelines, galleries, and inspectable visualization models can be rebuilt from capture Markdown, manifest Markdown, and original files. Rebuilds checkpoint progress and never rewrite human sections unnecessarily. Legacy migration is conservative, source-hash guarded, resumable, and a documented no-op when no supported legacy form is found.
 
 ## Obsidian workspace
 
@@ -103,3 +103,7 @@ The plugin is a thin typed client with quick-capture and full-review modes. Entr
 ## Schema compatibility
 
 Direction 7 uses capture schema version 1, attachment-manifest schema version 1, enrichment schema version 1, and derived-index schema version 1. Unsupported canonical versions fail closed. Derived version mismatches require rebuild rather than canonical mutation.
+
+## Validation and operating guides
+
+See [Migration and Recovery](rich-capture-recovery.md), [Testing and Release Validation](rich-capture-testing.md), and the [Rich Capture User Manual](user-manual/13-rich-capture.md).

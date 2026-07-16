@@ -21,3 +21,16 @@
 **Daily menu:** A small set of worthwhile actions matched to time, energy, motivation, and recovery.
 
 **Export profile:** Rules selecting and transforming content for a specific consumer.
+
+**Rich capture:** A canonical record of an observation or supplied evidence that
+can be saved quickly and enriched later.
+
+**Attachment manifest:** Portable Markdown metadata that identifies an original
+file by stable ID, content hash, media type, size, canonical path, references,
+and processing state.
+
+**Derived value:** A visible, sourced, editable field produced by extraction,
+import, or optional inference. It remains distinct from a confirmed fact.
+
+**Content-addressed original:** An attachment stored at a deterministic
+vault-relative path derived from the SHA-256 hash of its exact bytes.
