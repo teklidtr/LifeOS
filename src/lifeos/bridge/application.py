@@ -215,6 +215,14 @@ class BridgeApplication:
             if method == "retrieval.index.health":
                 strict_object(params, allowed=set())
                 return self.knowledge.retriever.index_service.health().to_dict()
+            if method == "retrieval.index.recovery.plan":
+                strict_object(params, allowed=set())
+                return self.knowledge.retriever.index_service.recovery_plan().to_dict()
+            if method == "retrieval.index.recover":
+                strict_object(params, allowed=set())
+                return self.knowledge.retriever.index_service.recover(
+                    progress=self._retrieval_progress
+                ).to_dict()
             if method == "retrieval.index.rebuild":
                 data = strict_object(params, allowed={"resume", "batch_size"})
                 resume = data.get("resume", True)

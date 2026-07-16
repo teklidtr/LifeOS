@@ -84,6 +84,8 @@ CAPABILITIES = (
     "feedback.replay",
     "retrieval.index.health",
     "retrieval.index.rebuild",
+    "retrieval.index.recovery.plan",
+    "retrieval.index.recover",
     "retrieval.index.sync",
     "retrieval.search",
     "conversation.create",

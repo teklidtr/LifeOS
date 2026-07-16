@@ -28,7 +28,7 @@ from .evaluation import FixtureResult, RetrievalEvaluation, RetrievalFixture, ev
 from .models import ChunkedNote, IndexedChunk, IndexedDocument
 from .policy import load_retrieval_policy
 from .search import HybridRetriever, RankingComponents, RetrievalEvidence, RetrievalResponse
-from .service import IndexHealth, IndexProgress, IndexResult, RetrievalIndexService
+from .service import IndexHealth, IndexProgress, IndexRecoveryPlan, IndexResult, RetrievalIndexService
 from .providers import (
     DeterministicAnswerProvider,
     DeterministicEmbeddingProvider,
@@ -45,6 +45,7 @@ __all__ = [
     "INDEX_SCHEMA_VERSION",
     "IndexHealth",
     "IndexProgress",
+    "IndexRecoveryPlan",
     "IndexResult",
     "IndexedChunk",
     "IndexedDocument",

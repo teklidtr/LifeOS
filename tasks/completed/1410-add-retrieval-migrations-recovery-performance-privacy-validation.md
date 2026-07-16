@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1410
 title: Add retrieval migrations, recovery, performance, and privacy validation
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1409

@@ -63,6 +63,20 @@ class IndexHealth:
         return asdict(self)
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class IndexRecoveryPlan:
+    state: IndexState
+    action: str
+    destructive_to_derived_state: bool
+    canonical_markdown_affected: bool
+    resumable: bool
+    reason: str
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
 @dataclass(frozen=True, slots=True)
 class IndexResult:
     operation: str
@@ -358,6 +372,37 @@ class RetrievalIndexService:
             return self._result("embedding", "complete", processed, len(missing), (), (), (), (), (), (), self.active_path)
         finally:
             index.close()
+
+
+    def recovery_plan(self) -> IndexRecoveryPlan:
+        health = self.health()
+        if health.state == "healthy":
+            return IndexRecoveryPlan(health.state, "none", False, False, False, "The active index matches canonical Markdown.")
+        if health.state == "stale":
+            return IndexRecoveryPlan(health.state, "incremental-sync", False, False, True, "Synchronize changed, moved, and deleted notes.")
+        if health.state == "interrupted" and self.staging_path.exists():
+            return IndexRecoveryPlan(health.state, "resume-rebuild", False, False, True, "Resume the staged rebuild without publishing partial state.")
+        if health.state in {"corrupt", "incompatible"}:
+            return IndexRecoveryPlan(health.state, "discard-and-rebuild", True, False, False, "Delete only disposable retrieval data and rebuild from Markdown.")
+        return IndexRecoveryPlan(health.state, "full-rebuild", True, False, False, "Build disposable retrieval data from canonical Markdown.")
+
+    def recover(
+        self,
+        *,
+        cancellation: CancellationToken | None = None,
+        progress: ProgressSink | None = None,
+    ) -> IndexResult:
+        plan = self.recovery_plan()
+        if plan.action == "none":
+            health = self.health()
+            return self._result("recovery", "complete", 0, 0, (), (), (), (), (), health.diagnostics, self.active_path)
+        if plan.action == "incremental-sync":
+            return self.incremental_sync(cancellation=cancellation, progress=progress)
+        if plan.action == "resume-rebuild":
+            return self.rebuild(cancellation=cancellation, progress=progress, resume=True)
+        if plan.action == "discard-and-rebuild":
+            self.discard()
+        return self.rebuild(cancellation=cancellation, progress=progress, resume=False)
 
     def discard(self) -> tuple[str, ...]:
         removed: list[str] = []
