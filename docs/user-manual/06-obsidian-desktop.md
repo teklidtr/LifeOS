@@ -41,6 +41,20 @@ reviewable proposal. Existing active plans are surfaced before another plan is
 created. See [Goal-to-Plan Copilot](09-goal-to-plan-copilot.md) for the complete
 workflow and privacy controls.
 
+## Knowledge conversations
+
+Open **Knowledge Conversation** from the ribbon, command palette, active note,
+selection, folder, or tag. Inspect and refine the scope before asking. Evidence
+cards expose ranking signals and open the exact note section. Pin useful sources,
+exclude irrelevant ones, use evidence-only mode, or branch from a saved turn.
+
+Index health and provider disclosure remain visible. Missing generation falls back
+to local retrieval, while stale evidence and malformed citations are labelled
+explicitly. Converting an answer into a note, section, link, question, claim,
+flashcard, or contradiction always opens a proposal preview. See [Semantic
+Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md).
+
+
 ## Reviews and proposals
 
 Use **Open Today's Review**, **Open This Week's Review**, **Open Active Review

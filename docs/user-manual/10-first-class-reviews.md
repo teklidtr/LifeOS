@@ -1,4 +1,4 @@
-[← Goal-to-Plan Copilot](09-goal-to-plan-copilot.md) · [Manual home](README.md)
+[← Goal-to-Plan Copilot](09-goal-to-plan-copilot.md) · [Manual home](README.md) · [Next: Semantic Retrieval →](11-semantic-retrieval-and-knowledge-conversations.md)
 
 # First-Class Daily and Weekly Reviews
 
@@ -192,4 +192,4 @@ work, diagnose motivation, or determine whether a personal direction is good.
 Long histories remain queryable, but Obsidian presentation may still need
 additional filtering and visualization in later releases.
 
-[← Goal-to-Plan Copilot](09-goal-to-plan-copilot.md) · [Manual home](README.md)
+[← Goal-to-Plan Copilot](09-goal-to-plan-copilot.md) · [Manual home](README.md) · [Next: Semantic Retrieval →](11-semantic-retrieval-and-knowledge-conversations.md)

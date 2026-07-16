@@ -530,6 +530,23 @@ be rebuilt from Markdown after `.lifeos/` is removed. See
 [First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
 
 
+## 3.16 Semantic retrieval and knowledge conversations
+
+### What it is
+
+An evidence-first Obsidian workspace combines exact, lexical, semantic, metadata,
+link, and optional graph retrieval. Saved conversations are canonical Markdown;
+chunks, embeddings, and ranking state are disposable.
+
+### How it connects
+
+The Python bridge enforces scope and privacy policy, exposes ranking components,
+validates citations, detects changed evidence, and creates proposal previews for
+reviewed conversation outcomes. Missing providers degrade to local retrieval, and
+removing `.lifeos/retrieval/` triggers a rebuild rather than knowledge loss. See
+[Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md).
+
+
 ---
 
 [← Previous: Executive Summary & Philosophy](02-executive-summary-and-philosophy.md) · [Manual home](README.md) · [Next: Setup & Installation →](04-setup-and-installation.md)

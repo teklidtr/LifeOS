@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from threading import Event
 from typing import Literal, Protocol, runtime_checkable
 

@@ -158,6 +158,7 @@ class ConversationProposalService:
         create = request.action in {"create_capture", "draft_note"}
         base_hash: str | None = None
         unified_diff: str | None = None
+        operation: CreateFile | PatchHumanFile
         if create:
             if (self.vault_root / request.target_path).exists():
                 raise ConversationError("target_exists", "The proposed target already exists.")
@@ -186,7 +187,7 @@ class ConversationProposalService:
             operation_name = "patch_human_file"
             new_content = None
         patch_document = PatchDocumentV2(2, proposal_id, (operation,))
-        evidence = tuple(
+        evidence: tuple[dict[str, object], ...] = tuple(
             {
                 "evidence_id": item.evidence_id,
                 "path": item.path,

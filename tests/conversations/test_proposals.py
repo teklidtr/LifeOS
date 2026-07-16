@@ -15,11 +15,14 @@ NOW = datetime(2026, 7, 16, 11, tzinfo=timezone.utc)
 
 
 def write(root: Path, path: str, content: str) -> None:
-    target = root / path; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(content, encoding="utf-8")
+    target = root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
 
 
 def setup(tmp_path: Path) -> tuple[Path, str, str]:
-    vault = tmp_path / "vault"; vault.mkdir()
+    vault = tmp_path / "vault"
+    vault.mkdir()
     write(vault, "wiki/source.md", "# Evidence\n\nA grounded source passage.")
     write(vault, "wiki/target.md", "# Target\n\nHuman text.\n")
     conversations = KnowledgeConversationService(vault_root=vault, runtime_dir=vault / ".lifeos")
@@ -68,8 +71,13 @@ def test_append_proposal_carries_stale_target_hash_and_never_mutates_target(tmp_
 @pytest.mark.parametrize(
     "action",
     [
-        "create_capture", "suggest_links", "research_questions", "extract_claims",
-        "flashcard_candidates", "mark_contradiction", "mark_unresolved_question",
+        "create_capture",
+        "suggest_links",
+        "research_questions",
+        "extract_claims",
+        "flashcard_candidates",
+        "mark_contradiction",
+        "mark_unresolved_question",
     ],
 )
 def test_all_supported_actions_produce_reviewable_previews(tmp_path: Path, action: str) -> None:
@@ -77,19 +85,24 @@ def test_all_supported_actions_produce_reviewable_previews(tmp_path: Path, actio
     service = ConversationProposalService(vault_root=vault, runtime_dir=vault / ".lifeos")
     target = "captures/outcome.md" if action == "create_capture" else "wiki/target.md"
     preview, _, _, _ = service.preview(
-        ConversationProposalRequest(conversation_path, turn_id, action, target, "Reviewed content."),  # type: ignore[arg-type]
+        ConversationProposalRequest(
+            conversation_path, turn_id, action, target, "Reviewed content."
+        ),  # type: ignore[arg-type]
         now=NOW,
     )
     assert preview.evidence and preview.target_path == target
 
 
 def test_proposal_requires_a_real_evidence_turn(tmp_path: Path) -> None:
-    vault = tmp_path / "vault"; vault.mkdir()
+    vault = tmp_path / "vault"
+    vault.mkdir()
     conversations = KnowledgeConversationService(vault_root=vault, runtime_dir=vault / ".lifeos")
     artifact = conversations.create(title="Empty", now=NOW)
     service = ConversationProposalService(vault_root=vault, runtime_dir=vault / ".lifeos")
     with pytest.raises(ConversationError):
         service.preview(
-            ConversationProposalRequest(artifact.relative_path, "turn-001", "draft_note", "wiki/x.md", "x"),
+            ConversationProposalRequest(
+                artifact.relative_path, "turn-001", "draft_note", "wiki/x.md", "x"
+            ),
             now=NOW,
         )

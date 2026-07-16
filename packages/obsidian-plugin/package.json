@@ -8,7 +8,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "compile": "tsc -p tsconfig.json",
-    "test": "npm run compile && node --test dist-test/test/*.test.js",
+    "test": "npm run compile && node --test --test-concurrency=1 --test-force-exit dist-test/test/*.test.js",
     "build": "npm run compile && mkdir -p build && cp dist-test/src/index.js build/main.js && cp manifest.json build/manifest.json && cp styles.css build/styles.css"
   }
 }

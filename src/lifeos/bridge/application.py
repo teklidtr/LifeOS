@@ -95,7 +95,7 @@ from lifeos.conversations import (
     ConversationProposalService,
     KnowledgeConversationService,
 )
-from lifeos.retrieval import RetrievalError, RetrievalRequest, RetrievalScope
+from lifeos.retrieval import RetrievalError, RetrievalRequest
 from lifeos.conversations.contracts import scope_from_dict
 from lifeos.feedback import (
     FeedbackControlService,
@@ -349,11 +349,15 @@ class BridgeApplication:
                     required={"conversation_path", "turn_id", "action", "target_path", "content"},
                 )
                 moment = _iso_datetime(data.pop("now"), "now") if data.get("now") is not None else None
-                request = ConversationProposalRequest(**data)
+                proposal_request = ConversationProposalRequest(**data)
                 if method.endswith("preview"):
-                    preview, _, _, _ = self.conversation_proposals.preview(request, now=moment)
+                    preview, _, _, _ = self.conversation_proposals.preview(
+                        proposal_request, now=moment
+                    )
                     return preview.to_dict()
-                return self.conversation_proposals.publish(request, now=moment).to_dict()
+                return self.conversation_proposals.publish(
+                    proposal_request, now=moment
+                ).to_dict()
         except ProtocolError:
             raise
         except (ConversationError, RetrievalError, TypeError, ValueError) as exc:

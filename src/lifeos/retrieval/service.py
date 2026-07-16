@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -22,7 +21,7 @@ from lifeos.retrieval.contracts import (
     scope_decision,
 )
 from lifeos.retrieval.index import INDEX_RELATIVE_PATH, INDEX_SCHEMA_VERSION, RetrievalIndex
-from lifeos.retrieval.models import ChunkedNote, IndexedChunk
+from lifeos.retrieval.models import ChunkedNote
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown
 
@@ -114,14 +113,24 @@ class RetrievalIndexService:
 
     def health(self, *, embedding_provider: EmbeddingProvider | None = None) -> IndexHealth:
         rebuild = self._read_state(self.rebuild_state_path)
+        status_value = rebuild.get("status")
+        rebuild_status = status_value if isinstance(status_value, str) else None
         if not self.active_path.exists():
-            state: IndexState = "interrupted" if rebuild.get("status") == "interrupted" else "building" if rebuild.get("status") == "building" else "missing"
-            return IndexHealth(state, False, None, 0, 0, 0, 0, 0, (), (), (), rebuild.get("status"), ())
+            state: IndexState = (
+                "interrupted"
+                if rebuild_status == "interrupted"
+                else "building"
+                if rebuild_status == "building"
+                else "missing"
+            )
+            return IndexHealth(
+                state, False, None, 0, 0, 0, 0, 0, (), (), (), rebuild_status, ()
+            )
         try:
             index = RetrievalIndex(self.active_path, create=False)
         except RetrievalError as exc:
             state = "incompatible" if exc.code == "incompatible_index" else "corrupt"
-            return IndexHealth(state, False, None, 0, 0, 0, 0, 0, (), (), (), rebuild.get("status"), (exc.message,))
+            return IndexHealth(state, False, None, 0, 0, 0, 0, 0, (), (), (), rebuild_status, (exc.message,))
         try:
             counts = index.counts()
             current = self._allowed_sources()
@@ -136,9 +145,9 @@ class RetrievalIndexService:
                 embedded = {item.chunk_id for item in index.embeddings(embedding_provider.capabilities)}
                 missing_embeddings = len({item.chunk_id for item in index.chunks()} - embedded)
             state = "stale" if stale or missing or orphaned or stale_embeddings or missing_embeddings else "healthy"
-            if rebuild.get("status") == "building":
+            if rebuild_status == "building":
                 state = "building"
-            elif rebuild.get("status") == "interrupted" and state == "healthy":
+            elif rebuild_status == "interrupted" and state == "healthy":
                 state = "interrupted"
             return IndexHealth(
                 state,
@@ -152,11 +161,13 @@ class RetrievalIndexService:
                 stale,
                 missing,
                 orphaned,
-                rebuild.get("status"),
+                rebuild_status,
                 (),
             )
         except (RetrievalError, VaultAccessError) as exc:
-            return IndexHealth("stale", True, INDEX_SCHEMA_VERSION, 0, 0, 0, 0, 0, (), (), (), rebuild.get("status"), (str(exc),))
+            return IndexHealth(
+                "stale", True, INDEX_SCHEMA_VERSION, 0, 0, 0, 0, 0, (), (), (), rebuild_status, (str(exc),)
+            )
         finally:
             index.close()
 
@@ -187,8 +198,10 @@ class RetrievalIndexService:
             last_path = None
             processed = 0
         else:
-            last_path = prior.get("last_path")
-            processed = int(prior.get("processed", 0))
+            last_path_value = prior.get("last_path")
+            last_path = last_path_value if isinstance(last_path_value, str) else None
+            processed_value = prior.get("processed", 0)
+            processed = processed_value if isinstance(processed_value, int) else 0
         state = {
             "schema_version": 1,
             "status": "building",
@@ -279,7 +292,8 @@ class RetrievalIndexService:
                     old_path = candidates[0]
                     note = reidentify_note(chunk_markdown_file(source_by_path[new_path]), existing[old_path].document_id)
                     index.rename_path(old_path, note)
-                    removed.remove(old_path); added.remove(new_path)
+                    removed.remove(old_path)
+                    added.remove(new_path)
                     renamed.append((old_path, new_path))
 
             # Then preserve a durable frontmatter identity across a move that also edited content.
@@ -293,7 +307,8 @@ class RetrievalIndexService:
                 )
                 if candidate is not None:
                     index.rename_path(candidate, note)
-                    removed.remove(candidate); added.remove(new_path)
+                    removed.remove(candidate)
+                    added.remove(new_path)
                     renamed.append((candidate, new_path))
 
             operations = len(removed) + len(added) + len(changed)
@@ -302,7 +317,10 @@ class RetrievalIndexService:
                 "schema_version": 1, "status": "running", "started_at": _now(), "processed": 0, "total": operations
             })
             for path in sorted(removed):
-                token.checkpoint(); index.delete_path(path); deleted.append(path); processed += 1
+                token.checkpoint()
+                index.delete_path(path)
+                deleted.append(path)
+                processed += 1
                 self._sync_progress(progress, processed, operations, path, diagnostics)
             for path, kind in [(path, "created") for path in sorted(added)] + [(path, "updated") for path in sorted(changed)]:
                 try:
@@ -322,7 +340,8 @@ class RetrievalIndexService:
                 except RetrievalError as exc:
                     if exc.code == "cancelled":
                         raise
-                    skipped.append(path); diagnostics.append(f"{path}:{exc.code}:{exc.message}")
+                    skipped.append(path)
+                    diagnostics.append(f"{path}:{exc.code}:{exc.message}")
                 processed += 1
                 self._sync_progress(progress, processed, operations, path, diagnostics)
             self.incremental_state_path.unlink(missing_ok=True)
@@ -408,7 +427,8 @@ class RetrievalIndexService:
         removed: list[str] = []
         for path in (self.active_path, self.staging_path, self.rebuild_state_path, self.incremental_state_path):
             if path.exists():
-                path.unlink(); removed.append(str(path.relative_to(self.runtime_dir)))
+                path.unlink()
+                removed.append(str(path.relative_to(self.runtime_dir)))
         return tuple(removed)
 
     def _allowed_sources(self) -> tuple[VaultMarkdownFile, ...]:
@@ -464,7 +484,8 @@ def _prefixed(content: bytes) -> str:
 def _manifest_hash(sources: Sequence[VaultMarkdownFile]) -> str:
     digest = hashlib.sha256()
     for source in sources:
-        digest.update(source.relative_path.encode("utf-8")); digest.update(b"\0")
+        digest.update(source.relative_path.encode("utf-8"))
+        digest.update(b"\0")
         digest.update(hashlib.sha256(source.content_bytes).digest())
     return "sha256:" + digest.hexdigest()
 

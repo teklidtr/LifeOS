@@ -211,3 +211,29 @@ blocked states; and exposes explicit migration preview and index rebuild actions
 Legacy source files remain untouched after migration. See
 [Review Artifact Architecture](review-artifact-architecture.md) and
 [First-Class Daily and Weekly Reviews](user-manual/10-first-class-reviews.md).
+
+## Semantic retrieval and knowledge conversations
+
+Semantic retrieval is an additional, derived discovery layer over canonical
+Markdown. Structural chunks, embeddings, link tables, ranking state, and rebuild
+journals live under `.lifeos/retrieval/` and use index schema version 1. A complete
+rebuild writes to staging and publishes atomically; incremental synchronization
+handles creates, edits, stable-ID moves, content-preserving renames, and deletes.
+Missing, stale, interrupted, corrupt, and incompatible states expose explicit
+recovery plans.
+
+Hybrid ranking keeps exact, lexical, semantic, metadata, link, optional graph,
+pin, and optional reranking signals separate and inspectable. Filters and
+protected-scope policy run before ranking. Results preserve note path, heading,
+line range, hashes, source metadata, duplicate provenance, and deterministic tie
+ordering. No-provider mode retains all local non-vector signals.
+
+Knowledge conversations are canonical Markdown under `conversations/YYYY/`.
+Their managed block stores scope, turns, evidence fingerprints, validated
+citations, branch lineage, provider disclosure, and lifecycle state. Human-owned
+annotations remain outside the managed block. Deterministic citation validation
+rejects nonexistent evidence and marks changed or deleted sources stale.
+Conversation outcomes create ordinary proposals with exact targets, patches,
+evidence, and stale-target hashes. They never mutate another note directly. See
+[Semantic Retrieval and Knowledge Conversation Architecture](semantic-retrieval-conversation-architecture.md)
+and [Semantic Retrieval and Knowledge Conversations](user-manual/11-semantic-retrieval-and-knowledge-conversations.md).

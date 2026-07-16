@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Phase 14 implementation.
+Shipped in Phase 14 through `LIFEOS-1400` to `LIFEOS-1411`.
 
 ## Purpose
 

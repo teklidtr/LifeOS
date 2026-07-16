@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import replace
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any
 
 from lifeos.context.search import token_sequence
@@ -204,7 +204,9 @@ def _bounded_structural_parts(
         if match:
             marker = match.group(2)
             if not in_fence:
-                in_fence = True; fence_char = marker[0]; fence_len = len(marker)
+                in_fence = True
+                fence_char = marker[0]
+                fence_len = len(marker)
             elif marker[0] == fence_char and len(marker) >= fence_len:
                 in_fence = False
         if not buffer:

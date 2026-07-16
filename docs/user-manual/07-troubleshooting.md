@@ -35,6 +35,21 @@ reloaded before refresh. Duplicate identities, unsupported schemas, or damaged m
 boundaries are blocked with a link to the canonical Markdown note. Legacy migration must
 be previewed again whenever a source hash changes.
 
+## Semantic retrieval recovery
+
+- **Missing index:** choose **Rebuild index**.
+- **Stale index:** choose **Synchronize index** after ordinary note changes.
+- **Interrupted rebuild:** resume it; the prior healthy index remains active until publication.
+- **Corrupt or incompatible index:** use the displayed recovery plan to delete only `.lifeos/retrieval/` and rebuild.
+- **No results:** inspect scope filters, exclusions, protected-path diagnostics, and exact spelling.
+- **Unavailable provider:** continue in evidence-only or local retrieval mode.
+- **Timeout, cancellation, or malformed response:** no unsupported generated answer is saved as grounded fact.
+- **Stale evidence:** open the changed source and rerun retrieval; the historical turn remains preserved.
+
+Deleting `.lifeos/` does not delete `conversations/` or any canonical note. The
+next rebuild recreates derived chunks and ranking state from Markdown.
+
+
 ## Recovery hatch
 
 The vault remains ordinary Markdown when the plugin is unavailable. You may edit notes in

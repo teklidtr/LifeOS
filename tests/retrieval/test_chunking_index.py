@@ -22,7 +22,11 @@ def source(tmp_path: Path, relative: str, content: str) -> VaultMarkdownFile:
 
 
 def test_heading_boundaries_block_ids_links_and_provenance(tmp_path: Path) -> None:
-    note = chunk_markdown_file(source(tmp_path, "wiki/a.md", """---
+    note = chunk_markdown_file(
+        source(
+            tmp_path,
+            "wiki/a.md",
+            """---
 id: note-a
 type: concept
 title: Energy Balance
@@ -38,7 +42,10 @@ See [[wiki/b#Details]].
 ## Limits
 
 A conflicting account exists.
-"""), indexed_at=datetime(2026, 7, 16, tzinfo=timezone.utc))
+""",
+        ),
+        indexed_at=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    )
     assert note.document.document_id == "id:note-a"
     assert note.document.tags == ("biology", "metabolism")
     assert [chunk.heading for chunk in note.chunks] == ["Overview", "Overview", "Limits"]
@@ -48,9 +55,18 @@ A conflicting account exists.
     assert note.chunks[0].metadata["source"] == "textbook"
 
 
-def test_structural_chunking_suppresses_duplicate_passages_and_bounds_large_notes(tmp_path: Path) -> None:
+def test_structural_chunking_suppresses_duplicate_passages_and_bounds_large_notes(
+    tmp_path: Path,
+) -> None:
     repeated = "Repeated evidence paragraph."
-    content = "# A\n\n" + repeated + "\n\n" + repeated + "\n\n" + " ".join(f"Long sentence {index}." for index in range(300))
+    content = (
+        "# A\n\n"
+        + repeated
+        + "\n\n"
+        + repeated
+        + "\n\n"
+        + " ".join(f"Long sentence {index}." for index in range(300))
+    )
     note = chunk_markdown_file(source(tmp_path, "wiki/large.md", content), max_chunk_characters=300)
     assert any(item.startswith("duplicate-passage") for item in note.diagnostics)
     assert len(note.chunks) > 2
@@ -67,7 +83,9 @@ def test_malformed_frontmatter_and_unsupported_files_fail_safely(tmp_path: Path)
 
 
 def test_index_round_trip_links_and_fresh_embeddings(tmp_path: Path) -> None:
-    note = chunk_markdown_file(source(tmp_path, "wiki/a.md", "# A\n\nAlpha [[b]].\n\n## B\n\nBeta."))
+    note = chunk_markdown_file(
+        source(tmp_path, "wiki/a.md", "# A\n\nAlpha [[b]].\n\n## B\n\nBeta.")
+    )
     index_path = tmp_path / ".lifeos" / "retrieval" / "index.sqlite3"
     with RetrievalIndex(index_path) as index:
         index.replace_note(note)
@@ -75,7 +93,11 @@ def test_index_round_trip_links_and_fresh_embeddings(tmp_path: Path) -> None:
         assert index.document_by_path("wiki/a.md") == note.document
         assert index.chunks() == note.chunks
         provider = DeterministicEmbeddingProvider(dimensions=4)
-        batch = provider.embed([chunk.text for chunk in note.chunks], timeout_seconds=1, cancellation=CancellationToken())
+        batch = provider.embed(
+            [chunk.text for chunk in note.chunks],
+            timeout_seconds=1,
+            cancellation=CancellationToken(),
+        )
         index.write_embeddings(chunks=note.chunks, batch=batch, created_at="2026-07-16T00:00:00Z")
         assert len(index.embeddings(provider.capabilities)) == 2
         assert index.stale_embedding_count() == 0
@@ -88,7 +110,11 @@ def test_replacing_changed_note_drops_orphan_chunks_and_embeddings(tmp_path: Pat
     provider = DeterministicEmbeddingProvider(dimensions=4)
     index.write_embeddings(
         chunks=first.chunks,
-        batch=provider.embed([item.text for item in first.chunks], timeout_seconds=1, cancellation=CancellationToken()),
+        batch=provider.embed(
+            [item.text for item in first.chunks],
+            timeout_seconds=1,
+            cancellation=CancellationToken(),
+        ),
         created_at="now",
     )
     second = chunk_markdown_file(source(tmp_path, "wiki/a.md", "# A\n\nChanged."))
@@ -108,7 +134,9 @@ def test_reidentify_preserves_document_identity_for_rename(tmp_path: Path) -> No
 
 def test_incompatible_schema_is_reported(tmp_path: Path) -> None:
     path = tmp_path / "index.sqlite3"
-    index = RetrievalIndex(path); index.set_meta("schema_version", "99"); index.close()
+    index = RetrievalIndex(path)
+    index.set_meta("schema_version", "99")
+    index.close()
     with pytest.raises(RetrievalError) as caught:
         RetrievalIndex(path)
     assert caught.value.code == "incompatible_index"

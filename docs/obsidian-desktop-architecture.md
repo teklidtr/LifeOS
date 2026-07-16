@@ -137,3 +137,35 @@ promise background attention processing.
 `LIFEOS-1001` establishes typed writes, `1002` exposes them through the bridge, `1003`
 creates the plugin shell, `1004` through `1010` add user workflows, `1011` adds optional
 background delivery, and `1012` validates and packages the complete desktop loop.
+
+## Semantic retrieval workspace
+
+The knowledge conversation workspace follows the same thin-client boundary. The
+plugin owns presentation and ephemeral selection state; Python owns scope policy,
+index lifecycle, retrieval, citation validation, conversation artifacts, and
+proposal construction. The primary view presents scope, privacy disclosure,
+index health, ranked evidence, grounded answer paragraphs, and source controls in
+one inspectable workflow.
+
+The bridge capability family includes `retrieval.index.health`, rebuild,
+synchronize, recovery plan, recover, and search, plus conversation create, list,
+load, ask, scope update, pin, exclude, branch, rename, archive, stale check, and
+proposal preview/create. Index progress uses JSON-RPC notifications. Strict
+parameter allowlists and protocol negotiation reject unknown fields or unsupported
+major versions.
+
+Conversation Markdown belongs to canonical state. `.lifeos/retrieval/` belongs
+to derived runtime. Protected scope checks occur in Python before candidate
+selection and before provider disclosure. Missing providers degrade to local
+retrieval; corrupt or incompatible index state disables unsupported operations and
+offers an explicit derived-state rebuild.
+
+Additional repository paths:
+
+```text
+src/lifeos/retrieval/                 structural index and hybrid retrieval
+src/lifeos/conversations/             canonical artifacts, grounding, proposals
+packages/obsidian-plugin/src/knowledge-conversation.ts
+packages/obsidian-plugin/src/knowledge-conversation-workspace.ts
+tests/retrieval/ tests/conversations/ tests/e2e/test_semantic_retrieval_conversations.py
+```

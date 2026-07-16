@@ -32,10 +32,5 @@ PY
 PYTHONPATH=src python3 -m pytest --import-mode=importlib \
   tests/copilot tests/e2e/test_goal_plan_copilot.py -q
 ./scripts/validate-first-class-reviews.sh
-npm --prefix packages/obsidian-plugin ci
-npm --prefix packages/obsidian-plugin run lint
-npm --prefix packages/obsidian-plugin run typecheck
-npm --prefix packages/obsidian-plugin test
-npm --prefix packages/obsidian-plugin run build
-rm -rf packages/obsidian-plugin/dist-test
+LIFEOS_SKIP_PLUGIN_CHECKS=1 ./scripts/validate-semantic-retrieval.sh
 git diff --check

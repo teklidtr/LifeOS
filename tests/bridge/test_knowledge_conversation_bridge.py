@@ -6,11 +6,15 @@ from lifeos.bridge import BridgeApplication, ProtocolError, ReferenceBridgeClien
 
 
 def setup(tmp_path: Path, notifications: list[dict] | None = None):
-    vault = tmp_path / "vault"; vault.mkdir()
-    source = vault / "wiki" / "source.md"; source.parent.mkdir()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    source = vault / "wiki" / "source.md"
+    source.parent.mkdir()
     source.write_text("# Evidence\n\nMitochondria produce ATP.\n", encoding="utf-8")
     bridge = BridgeApplication(
-        vault_root=vault, runtime_dir=tmp_path / "runtime", actor_id="local",
+        vault_root=vault,
+        runtime_dir=tmp_path / "runtime",
+        actor_id="local",
         notify=notifications.append if notifications is not None else None,
     )
     return bridge, ReferenceBridgeClient(bridge), vault
@@ -36,25 +40,40 @@ def test_conversation_lifecycle_scope_evidence_branch_and_proposal(tmp_path: Pat
     created = client.call("conversation.create", title="Energy", scope={"folders": ["wiki"]})
     path = created["path"]
     asked = client.call(
-        "conversation.ask", path=path, query="ATP", expected_hash=created["content_hash"], evidence_only=True
+        "conversation.ask",
+        path=path,
+        query="ATP",
+        expected_hash=created["content_hash"],
+        evidence_only=True,
     )
     turn = asked["turns"][-1]
     assert turn["state"] == "evidence-only" and turn["evidence"]
     pinned = client.call(
-        "conversation.source.pin", path=path, source_path="wiki/source.md",
-        expected_hash=asked["content_hash"], enabled=True,
+        "conversation.source.pin",
+        path=path,
+        source_path="wiki/source.md",
+        expected_hash=asked["content_hash"],
+        enabled=True,
     )
     assert pinned["metadata"]["pinned_sources"] == ["wiki/source.md"]
     branch = client.call("conversation.branch", path=path, turn_id=turn["turn_id"])
     assert branch["metadata"]["parent_conversation_id"] == asked["metadata"]["conversation_id"]
     preview = client.call(
-        "conversation.proposal.preview", conversation_path=path, turn_id=turn["turn_id"],
-        action="draft_note", target_path="wiki/new.md", content="Grounded note.",
+        "conversation.proposal.preview",
+        conversation_path=path,
+        turn_id=turn["turn_id"],
+        action="draft_note",
+        target_path="wiki/new.md",
+        content="Grounded note.",
     )
     assert preview["target_path"] == "wiki/new.md"
     published = client.call(
-        "conversation.proposal.create", conversation_path=path, turn_id=turn["turn_id"],
-        action="draft_note", target_path="wiki/new.md", content="Grounded note.",
+        "conversation.proposal.create",
+        conversation_path=path,
+        turn_id=turn["turn_id"],
+        action="draft_note",
+        target_path="wiki/new.md",
+        content="Grounded note.",
     )
     assert (vault / published["proposal_path"] / "patches.json").exists()
     assert not (vault / "wiki/new.md").exists()
@@ -62,10 +81,13 @@ def test_conversation_lifecycle_scope_evidence_branch_and_proposal(tmp_path: Pat
 
 def test_strict_params_and_protected_scope_denial_cross_bridge(tmp_path: Path) -> None:
     _, client, vault = setup(tmp_path)
-    private = vault / "private" / "secret.md"; private.parent.mkdir()
+    private = vault / "private" / "secret.md"
+    private.parent.mkdir()
     private.write_text("# Secret\n\nSensitive phrase.\n", encoding="utf-8")
     client.call("retrieval.index.rebuild")
-    result = client.call("retrieval.search", query="Sensitive phrase", scope={"paths": ["private/secret.md"]})
+    result = client.call(
+        "retrieval.search", query="Sensitive phrase", scope={"paths": ["private/secret.md"]}
+    )
     assert result["results"] == []
     with pytest.raises(ProtocolError) as caught:
         client.call("conversation.create", title="x", unknown=True)

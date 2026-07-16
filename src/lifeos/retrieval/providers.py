@@ -8,8 +8,10 @@ import re
 from collections.abc import Mapping, Sequence
 
 from lifeos.retrieval.contracts import (
+    AnswerEvidence,
     CancellationToken,
     EmbeddingBatch,
+    GeneratedAnswer,
     ProviderCapabilities,
     ProviderError,
     RerankCandidate,
@@ -125,9 +127,7 @@ def _normalize(vector: Sequence[float]) -> tuple[float, ...]:
 class DeterministicAnswerProvider:
     """Configurable local answer adapter for deterministic fixtures and demos."""
 
-    def __init__(self, answer: "GeneratedAnswer", *, local_only: bool = True) -> None:
-        from lifeos.retrieval.contracts import GeneratedAnswer
-
+    def __init__(self, answer: GeneratedAnswer, *, local_only: bool = True) -> None:
         if not isinstance(answer, GeneratedAnswer):
             raise ProviderError("invalid_provider", "Deterministic answer must use GeneratedAnswer.")
         self._answer = answer
@@ -142,11 +142,11 @@ class DeterministicAnswerProvider:
     def generate(
         self,
         query: str,
-        evidence: Sequence["AnswerEvidence"],
+        evidence: Sequence[AnswerEvidence],
         *,
         timeout_seconds: float | None,
         cancellation: CancellationToken,
-    ) -> "GeneratedAnswer":
+    ) -> GeneratedAnswer:
         del query, evidence, timeout_seconds
         cancellation.checkpoint()
         return self._answer
@@ -168,11 +168,11 @@ class FailingAnswerProvider:
     def generate(
         self,
         query: str,
-        evidence: Sequence["AnswerEvidence"],
+        evidence: Sequence[AnswerEvidence],
         *,
         timeout_seconds: float | None,
         cancellation: CancellationToken,
-    ) -> "GeneratedAnswer":
+    ) -> GeneratedAnswer:
         del query, evidence, timeout_seconds
         cancellation.checkpoint()
         raise ProviderError(self.code, f"Deterministic provider failure: {self.code}.")

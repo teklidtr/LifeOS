@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1411
 title: Validate and document semantic retrieval and conversations
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1410
@@ -14,9 +14,9 @@ Ship end-to-end fixtures, release scripts, architecture/protocol/schema/recovery
 
 # Scope
 
-- Implement only this task's named capability and its focused tests.
-- Preserve canonical Markdown, proposal gating, provider neutrality, and UI-first behavior.
-- Record diagnostics and degraded states instead of inventing evidence.
+- Test the complete index, retrieval, conversation, citation, proposal, privacy, and recovery loop.
+- Add release validation for Python, bridge, plugin, schemas, provider neutrality, and manual links.
+- Document architecture, data models, setup, recovery, accessibility, and the complete user workflow.
 
 # Out of scope
 
@@ -47,9 +47,8 @@ Ship end-to-end fixtures, release scripts, architecture/protocol/schema/recovery
 # Validation commands
 
 ```bash
-PYTHONPATH=src python3 -m pytest --import-mode=importlib tests/retrieval tests/conversations -q
-npm --prefix packages/obsidian-plugin test
-npm --prefix packages/obsidian-plugin run typecheck
+./scripts/validate-semantic-retrieval.sh
+./scripts/validate-release.sh
 git diff --check
 ```
 

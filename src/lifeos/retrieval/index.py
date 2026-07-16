@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path

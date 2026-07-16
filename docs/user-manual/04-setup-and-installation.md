@@ -264,7 +264,21 @@ uv run lifeos-mcp \
 Keep the server local and use STDIO transport. Do not expose it as an
 unauthenticated network service.
 
-## 4.13 Create the first vault commit
+## 4.13 Build the semantic retrieval index
+
+After enabling the desktop plugin, open **Knowledge Conversation** and choose
+**Rebuild index**. The first build scans allowed Markdown, creates structural
+chunks, and publishes `.lifeos/retrieval/index.sqlite3` only when complete.
+Embeddings are optional. Without an embedding adapter, exact, lexical, metadata,
+link, and graph retrieval remain available.
+
+Review the protected and excluded prefixes before enabling an external adapter.
+The workspace discloses the exact selected passages before external generation.
+Provider configuration remains runtime-specific and is not written into canonical
+conversation fields.
+
+
+## 4.14 Create the first vault commit
 
 From the vault:
 

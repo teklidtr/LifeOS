@@ -161,7 +161,7 @@ Phase 13 shipped through `LIFEOS-1300` to `LIFEOS-1311`, including release fixtu
 LifeOS adds inspectable hybrid retrieval and durable evidence-grounded knowledge
 conversations while preserving Markdown as the source of truth.
 
-Planned delivery through `LIFEOS-1400` to `LIFEOS-1411` includes:
+Shipped delivery through `LIFEOS-1400` to `LIFEOS-1411` includes:
 
 - structural, versioned, disposable retrieval indexing
 - incremental create, edit, rename, move, and delete synchronization
@@ -172,3 +172,15 @@ Planned delivery through `LIFEOS-1400` to `LIFEOS-1411` includes:
 - proposal-gated conversion of conversation outcomes into knowledge
 - a graphical Obsidian evidence-first workspace
 - privacy policy, protected-scope denial, recovery, evaluation, and release gates
+
+
+Phase 14 is shipped. The accepted architecture is documented in
+`docs/semantic-retrieval-conversation-architecture.md`, and the complete user
+workflow is in
+`docs/user-manual/11-semantic-retrieval-and-knowledge-conversations.md`.
+
+Delivered release coverage includes structural and incremental index lifecycle,
+provider-neutral deterministic fallbacks, explainable hybrid ranking, duplicate
+suppression, protected-scope denial, canonical conversation branches, deterministic
+citation validation, stale evidence, proposal previews, index recovery, large-vault
+budgets, Obsidian keyboard paths, end-to-end fixtures, and manual-link validation.
