@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1402
 title: Build deterministic structural chunking and versioned index storage
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1401

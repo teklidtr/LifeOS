@@ -22,13 +22,20 @@ from .contracts import (
     build_provider_disclosure,
     scope_decision,
 )
+from .chunking import chunk_markdown_file, reidentify_note
+from .index import INDEX_SCHEMA_VERSION, RetrievalIndex, StoredEmbedding
+from .models import ChunkedNote, IndexedChunk, IndexedDocument
 from .policy import load_retrieval_policy
 from .providers import DeterministicEmbeddingProvider, DeterministicReranker, UnavailableEmbeddingProvider
 
 __all__ = [
     "AnswerEvidence",
     "AnswerProvider",
+    "ChunkedNote",
     "CancellationToken",
+    "INDEX_SCHEMA_VERSION",
+    "IndexedChunk",
+    "IndexedDocument",
     "DeterministicEmbeddingProvider",
     "DeterministicReranker",
     "EmbeddingBatch",
@@ -39,6 +46,7 @@ __all__ = [
     "ProviderDisclosure",
     "ProviderError",
     "RetrievalError",
+    "RetrievalIndex",
     "RetrievalPolicy",
     "RetrievalRequest",
     "RetrievalScope",
@@ -46,8 +54,11 @@ __all__ = [
     "RerankResult",
     "RerankingProvider",
     "ScopeDecision",
+    "StoredEmbedding",
     "UnavailableEmbeddingProvider",
     "build_provider_disclosure",
+    "chunk_markdown_file",
     "load_retrieval_policy",
+    "reidentify_note",
     "scope_decision",
 ]
