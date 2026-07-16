@@ -1,3 +1,12 @@
+from lifeos.reviews.decisions import (
+    DuplicateReviewProposal,
+    ReviewDecisionService,
+    ReviewProposalError,
+    ReviewProposalRequest,
+    ReviewProposalResult,
+    artifact_item_fingerprints,
+    create_review_proposal,
+)
 from lifeos.reviews.progress import ReviewProgressService, rebuild_progress_cache
 from lifeos.reviews.snapshot import (
     build_review_snapshot,
@@ -56,3 +65,9 @@ __all__ += [
 ]
 
 __all__ += ["ReviewProgressService", "rebuild_progress_cache"]
+
+__all__ += [
+    "DuplicateReviewProposal", "ReviewDecisionService", "ReviewProposalError",
+    "ReviewProposalRequest", "ReviewProposalResult", "artifact_item_fingerprints",
+    "create_review_proposal",
+]

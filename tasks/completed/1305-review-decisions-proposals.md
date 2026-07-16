@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1305
 title: Add review item decisions and proposal handoff
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1304
