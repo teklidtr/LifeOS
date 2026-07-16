@@ -25,3 +25,32 @@
 @media (max-width: 720px) {
   .lifeos-knowledge-conversation { grid-template-columns: 1fr; }
 }
+
+.lifeos-experiments {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.8fr) minmax(22rem, 1.5fr);
+  gap: var(--size-4-4);
+}
+.lifeos-experiments__design,
+.lifeos-experiments__observations,
+.lifeos-experiments__analysis,
+.lifeos-experiments__history {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3);
+}
+.lifeos-experiments [data-safety="blocked"],
+.lifeos-experiments [data-safety="emergency"] {
+  border-inline-start: 3px solid var(--text-error);
+  padding-inline-start: var(--size-4-2);
+}
+.lifeos-experiments [data-missing="true"] {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.lifeos-experiments__status[aria-live="polite"] {
+  min-height: 1.5em;
+}
+@media (max-width: 720px) {
+  .lifeos-experiments { grid-template-columns: 1fr; }
+}

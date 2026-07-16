@@ -5,6 +5,7 @@ import { GoalPlanWorkspaceController, WorkspaceOrigin } from "./goal-plan-worksp
 import { ReviewWorkspaceController, ReviewWorkspaceOrigin } from "./review-workspace.js";
 import { KnowledgeConversationOrigin, KnowledgeConversationWorkspaceController } from "./knowledge-conversation-workspace.js";
 import { emptyScope } from "./knowledge-conversation.js";
+import { ExperimentWorkspaceController, ExperimentWorkspaceOrigin } from "./experiment-workspace.js";
 
 export interface ObsidianHost {
   addRibbonIcon(icon: string, title: string, callback: () => void): () => void;
@@ -43,11 +44,18 @@ export class ReviewWorkspaceView {
   refresh(): void { this.refreshCount += 1; }
 }
 
+export class ExperimentWorkspaceView {
+  refreshCount = 0;
+  constructor(readonly controller: ExperimentWorkspaceController) {}
+  refresh(): void { this.refreshCount += 1; }
+}
+
 export class LifeOSPlugin {
   static readonly VIEW_TYPE = "lifeos-today";
   static readonly COPILOT_VIEW_TYPE = "lifeos-goal-plan";
   static readonly REVIEW_VIEW_TYPE = "lifeos-reviews";
   static readonly KNOWLEDGE_CONVERSATION_VIEW_TYPE = "lifeos-knowledge-conversation";
+  static readonly EXPERIMENT_VIEW_TYPE = "lifeos-experiments";
   readonly view = new LifeOSView();
   readonly copilot: GoalPlanWorkspaceController;
   readonly copilotView: GoalPlanWorkspaceView;
@@ -55,6 +63,8 @@ export class LifeOSPlugin {
   readonly reviewView: ReviewWorkspaceView;
   readonly knowledgeConversations: KnowledgeConversationWorkspaceController;
   readonly knowledgeConversationView: KnowledgeConversationWorkspaceView;
+  readonly experiments: ExperimentWorkspaceController;
+  readonly experimentView: ExperimentWorkspaceView;
   readonly connection: ConnectionManager;
   private disposers: Array<() => void> = [];
 
@@ -70,6 +80,8 @@ export class LifeOSPlugin {
     this.reviewView = new ReviewWorkspaceView(this.reviews);
     this.knowledgeConversations = new KnowledgeConversationWorkspaceController(client, (path) => this.host.openFilePath?.(path));
     this.knowledgeConversationView = new KnowledgeConversationWorkspaceView(this.knowledgeConversations);
+    this.experiments = new ExperimentWorkspaceController(client, (path) => this.host.openFilePath?.(path));
+    this.experimentView = new ExperimentWorkspaceView(this.experiments);
   }
 
   async load(): Promise<void> {
@@ -77,8 +89,10 @@ export class LifeOSPlugin {
     this.disposers.push(this.host.registerView(LifeOSPlugin.COPILOT_VIEW_TYPE, () => this.copilotView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.REVIEW_VIEW_TYPE, () => this.reviewView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE, () => this.knowledgeConversationView));
+    this.disposers.push(this.host.registerView(LifeOSPlugin.EXPERIMENT_VIEW_TYPE, () => this.experimentView));
     this.disposers.push(this.host.addRibbonIcon("layout-dashboard", "Open LifeOS", () => this.openToday()));
     this.disposers.push(this.host.addRibbonIcon("messages-square", "Open Knowledge Conversation", () => this.openKnowledgeConversation("ribbon")));
+    this.disposers.push(this.host.addRibbonIcon("flask-conical", "Open Personal Experiments", () => this.openExperiments("ribbon")));
     this.disposers.push(this.host.addCommand("lifeos-open-today", "Open LifeOS Today", () => this.openToday()));
     this.disposers.push(this.host.addCommand("lifeos-open-goal-plan", "Open Goal-to-Plan Copilot", () => this.openGoalPlan("command-palette")));
     this.disposers.push(this.host.addCommand("lifeos-plan-active-goal", "Plan from Active Goal Note", () => {
@@ -123,6 +137,19 @@ export class LifeOSPlugin {
       const tag = this.host.getActiveTag?.();
       this.openKnowledgeConversation("tag", tag ? { tags: [tag] } : {});
     }));
+    this.disposers.push(this.host.addCommand("lifeos-open-experiments", "Open Personal Experiments", () => this.openExperiments("command-palette")));
+    this.disposers.push(this.host.addCommand("lifeos-create-experiment", "Create Personal Experiment", () => {
+      const path = this.host.getActiveFilePath?.();
+      this.openExperiments(this.experimentOrigin(path), path);
+    }));
+    this.disposers.push(this.host.addCommand("lifeos-open-active-experiment", "Open Active Experiment Workspace", () => {
+      const path = this.host.getActiveFilePath?.();
+      this.openExperiments("active-note", path);
+      if (path?.startsWith("experiments/") && path.endsWith(".md")) void this.experiments.load(path, "active-note");
+    }));
+    this.disposers.push(this.host.addCommand("lifeos-open-experiment-history", "Open Experiment History", () => {
+      this.openExperiments("history"); void this.experiments.loadHistory();
+    }));
     this.disposers.push(this.connection.subscribe((state, detail) => {
       this.view.state = state === "connected"
         ? { kind: "ready", title: "LifeOS", detail: "Connected" }
@@ -151,6 +178,24 @@ export class LifeOSPlugin {
   openReviews(origin: ReviewWorkspaceOrigin): void {
     this.reviews.state = { ...this.reviews.state, origin, focusTarget: "review-workspace-title" };
     this.host.openView(LifeOSPlugin.REVIEW_VIEW_TYPE);
+  }
+
+  openExperiments(origin: ExperimentWorkspaceOrigin, sourcePath?: string): void {
+    this.experiments.prepare(origin, sourcePath);
+    this.host.openView(LifeOSPlugin.EXPERIMENT_VIEW_TYPE);
+  }
+
+  private experimentOrigin(path?: string): ExperimentWorkspaceOrigin {
+    if (!path) return "command-palette";
+    if (path.startsWith("goals/")) return "goal";
+    if (path.startsWith("plans/")) return "plan";
+    if (path.startsWith("tasks/")) return "task";
+    if (path.startsWith("captures/")) return "capture";
+    if (path.startsWith("reviews/daily/")) return "daily-review";
+    if (path.startsWith("reviews/weekly/")) return "weekly-review";
+    if (path.startsWith("conversations/")) return "knowledge-conversation";
+    if (path.startsWith("experiments/")) return "active-note";
+    return "command-palette";
   }
 
   private reviewContext(): { day: string; now: string; timezone: string; hour: number } {
@@ -188,3 +233,5 @@ export * from "./review-artifact.js";
 export * from "./review-workspace.js";
 export * from "./knowledge-conversation.js";
 export * from "./knowledge-conversation-workspace.js";
+export * from "./experiment.js";
+export * from "./experiment-workspace.js";
