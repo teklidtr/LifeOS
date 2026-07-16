@@ -292,3 +292,45 @@ unchanged dismissed items remain suppressed until evidence changes.
 Review completion and item decisions cannot silently mutate goals, plans, tasks,
 experiments, captures, or other canonical notes. Consequential changes use the
 existing durable proposal lifecycle and recovery machinery.
+
+## DD-060: Semantic retrieval composes existing navigation modes
+
+Semantic similarity is an optional signal layered beside exact lexical matching,
+metadata, links, and graph candidates. It never replaces canonical note navigation
+or make generated statements into retrieved facts.
+
+## DD-061: Retrieval state is disposable and transactionally rebuildable
+
+Chunks, embeddings, ranking state, and rebuild journals live under `.lifeos/`.
+A staging rebuild is published atomically; a missing, corrupt, partial, or
+incompatible index degrades safely and can be rebuilt from Markdown.
+
+## DD-062: Protected retrieval scopes are default deny
+
+Sensitive-folder policy is enforced before candidate generation and provider
+invocation. Semantic similarity cannot override an exclusion. External disclosure
+requires both policy permission and an explicit request grant.
+
+## DD-063: Knowledge conversations are canonical Markdown artifacts
+
+Saved sessions, provenance, visible explanations, citations, branches, and user
+annotations remain portable Markdown. Runtime UI state and search caches are
+rebuildable. Hidden chain-of-thought is never stored.
+
+## DD-064: Citation validation is deterministic and model independent
+
+A model may select only supplied evidence identifiers. LifeOS independently
+validates path, heading, source hash, chunk hash, and support metadata, and marks
+changed evidence stale rather than silently refreshing historical claims.
+
+## DD-065: Conversation outcomes become proposals, not mutations
+
+Captures, notes, appended sections, links, research questions, claims, flashcards,
+and contradiction records produced from a conversation use exact typed patches and
+the existing proposal lifecycle.
+
+## DD-066: Retrieval and answer providers are optional and neutral
+
+Embedding, reranking, and generation adapters expose provider-neutral capability,
+timeout, cancellation, and bounded-batch contracts. Missing or invalid providers
+cannot disable local retrieval or evidence-only conversation use.
