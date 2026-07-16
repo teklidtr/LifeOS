@@ -1,0 +1,71 @@
+"""Read-only facade for deterministic copilot diagnostics and context preview."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from lifeos.copilot import build_copilot_index, parse_goal_note
+from lifeos.copilot.context import (
+    PlanningContextPack,
+    PlanningContextPolicy,
+    build_planning_context,
+)
+from lifeos.copilot.readiness import GoalReadinessReport, evaluate_goal_readiness
+from lifeos.facade.models import ToolDescriptor, ToolEffect
+from lifeos.vault import read_vault_markdown
+
+COPILOT_READINESS_DESCRIPTOR = ToolDescriptor(
+    name="copilot.goal_readiness",
+    description="Inspect deterministic readiness findings for one canonical goal.",
+    effect=ToolEffect.READ_ONLY,
+)
+COPILOT_CONTEXT_DESCRIPTOR = ToolDescriptor(
+    name="copilot.context_preview",
+    description="Build a bounded, inspectable planning context preview.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CopilotReadinessRequest:
+    goal_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class CopilotContextRequest:
+    goal_path: str
+    include_paths: tuple[str, ...] = ()
+    exclude_paths: tuple[str, ...] = ()
+    redact_terms: tuple[str, ...] = ()
+    allowed_sensitive_roots: tuple[str, ...] = ()
+    max_total_bytes: int = 24_000
+    max_item_bytes: int = 6_000
+
+
+def inspect_goal_readiness(
+    *, vault_root: Path, request: CopilotReadinessRequest
+) -> GoalReadinessReport:
+    source = read_vault_markdown(vault_root, request.goal_path)
+    goal = parse_goal_note(path=request.goal_path, content=source.content)
+    return evaluate_goal_readiness(goal, index=build_copilot_index(vault_root))
+
+
+def preview_goal_context(
+    *, vault_root: Path, request: CopilotContextRequest
+) -> PlanningContextPack:
+    source = read_vault_markdown(vault_root, request.goal_path)
+    goal = parse_goal_note(path=request.goal_path, content=source.content)
+    return build_planning_context(
+        vault_root=vault_root,
+        goal=goal,
+        index=build_copilot_index(vault_root),
+        include_paths=request.include_paths,
+        exclude_paths=request.exclude_paths,
+        redact_terms=request.redact_terms,
+        policy=PlanningContextPolicy(
+            allowed_sensitive_roots=request.allowed_sensitive_roots
+        ),
+        max_total_bytes=request.max_total_bytes,
+        max_item_bytes=request.max_item_bytes,
+    )

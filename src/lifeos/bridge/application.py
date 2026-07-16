@@ -9,7 +9,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from lifeos.attention import evaluate_attention, save_preference
-from lifeos.copilot import CopilotContractError, inspect_copilot_note
+from lifeos.copilot import CopilotContractError, PlanningContextError, inspect_copilot_note
+from lifeos.facade.copilot_tools import (
+    CopilotContextRequest,
+    CopilotReadinessRequest,
+    inspect_goal_readiness,
+    preview_goal_context,
+)
 from lifeos.bridge.protocol import CAPABILITIES, ENGINE_VERSION, PROTOCOL_VERSION, ProtocolError, strict_object
 from lifeos.daily import (
     CheckInRequest,
@@ -28,6 +34,7 @@ from lifeos.config import FeatureFlags, LifeOSConfig
 from lifeos.registry import Registry
 from lifeos.status import collect_status
 from lifeos.versioning import DESKTOP_RUNTIME_SCHEMA_VERSION
+from lifeos.vault import VaultAccessError
 from lifeos.planning import load_plan_actions
 from lifeos.scheduler import BackgroundServiceInstaller, ScheduleConfig, load_schedule, save_schedule
 from lifeos.feedback import (
@@ -85,6 +92,41 @@ class BridgeApplication:
         return preferences, dataset, status, observations
 
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.goal.readiness":
+            data = strict_object(params, allowed={"goal_path"}, required={"goal_path"})
+            try:
+                return inspect_goal_readiness(
+                    vault_root=self.daily.vault_root,
+                    request=CopilotReadinessRequest(goal_path=data["goal_path"]),
+                ).to_dict()
+            except (CopilotContractError, VaultAccessError) as exc:
+                raise ProtocolError("copilot_readiness_invalid", str(exc)) from exc
+        if method == "copilot.context.preview":
+            data = strict_object(
+                params,
+                allowed={
+                    "goal_path",
+                    "include_paths",
+                    "exclude_paths",
+                    "redact_terms",
+                    "allowed_sensitive_roots",
+                    "max_total_bytes",
+                    "max_item_bytes",
+                },
+                required={"goal_path"},
+            )
+            for key in ("include_paths", "exclude_paths", "redact_terms", "allowed_sensitive_roots"):
+                if key in data:
+                    value = data[key]
+                    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                        raise ProtocolError("invalid_params", f"{key} must be a list of strings.")
+                    data[key] = tuple(value)
+            try:
+                return preview_goal_context(
+                    vault_root=self.daily.vault_root, request=CopilotContextRequest(**data)
+                ).to_dict()
+            except (CopilotContractError, PlanningContextError, VaultAccessError) as exc:
+                raise ProtocolError("copilot_context_invalid", str(exc)) from exc
         if method == "copilot.note.inspect":
             data = strict_object(params, allowed={"path"}, required={"path"})
             path = data["path"]

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1202
 title: Build planning-readiness diagnostics and bounded context assembly
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1200

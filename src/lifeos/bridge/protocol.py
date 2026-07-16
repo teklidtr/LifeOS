@@ -12,6 +12,8 @@ ENGINE_VERSION = PYTHON_PACKAGE_VERSION
 CAPABILITIES = (
     "system.health",
     "copilot.note.inspect",
+    "copilot.goal.readiness",
+    "copilot.context.preview",
     "today.get",
     "scheduler.config.get",
     "scheduler.config.set",
