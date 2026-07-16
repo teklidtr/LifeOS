@@ -89,6 +89,14 @@ from lifeos.versioning import DESKTOP_RUNTIME_SCHEMA_VERSION
 from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.planning import load_plan_actions
 from lifeos.scheduler import BackgroundServiceInstaller, ScheduleConfig, load_schedule, save_schedule
+from lifeos.conversations import (
+    ConversationError,
+    ConversationProposalRequest,
+    ConversationProposalService,
+    KnowledgeConversationService,
+)
+from lifeos.retrieval import RetrievalError, RetrievalRequest, RetrievalScope
+from lifeos.conversations.contracts import scope_from_dict
 from lifeos.feedback import (
     FeedbackControlService,
     FeedbackProposalRequest,
@@ -147,6 +155,10 @@ class BridgeApplication:
             vault_root=vault_root, runtime_dir=runtime_dir
         )
         self.feedback_controls = FeedbackControlService(vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id)
+        self.knowledge = KnowledgeConversationService(vault_root=vault_root, runtime_dir=runtime_dir)
+        self.conversation_proposals = ConversationProposalService(
+            vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id
+        )
         self.config = LifeOSConfig(vault_root, runtime_dir, FeatureFlags(graphify=True, exports=True))
         self._notify = notify
         self._cancelled: set[str] = set()
@@ -187,7 +199,166 @@ class BridgeApplication:
         )
         return goal, index, context, option_set, option, decomposition, capacity
 
+
+    def _retrieval_progress(self, progress: object) -> None:
+        if self._notify is not None:
+            payload = progress.to_dict() if hasattr(progress, "to_dict") else _jsonable(progress)
+            self._notify({
+                "jsonrpc": "2.0",
+                "method": "retrieval.index.progress",
+                "params": payload,
+                "meta": {"protocol": PROTOCOL_VERSION},
+            })
+
+    def _dispatch_knowledge(self, method: str, params: object) -> object:
+        try:
+            if method == "retrieval.index.health":
+                strict_object(params, allowed=set())
+                return self.knowledge.retriever.index_service.health().to_dict()
+            if method == "retrieval.index.rebuild":
+                data = strict_object(params, allowed={"resume", "batch_size"})
+                resume = data.get("resume", True)
+                batch_size = data.get("batch_size", 64)
+                if type(resume) is not bool or type(batch_size) is not int:
+                    raise ProtocolError("invalid_params", "resume must be boolean and batch_size must be an integer.")
+                return self.knowledge.retriever.index_service.rebuild(
+                    resume=resume, batch_size=batch_size, progress=self._retrieval_progress
+                ).to_dict()
+            if method == "retrieval.index.sync":
+                strict_object(params, allowed=set())
+                return self.knowledge.retriever.index_service.incremental_sync(
+                    progress=self._retrieval_progress
+                ).to_dict()
+            if method == "retrieval.search":
+                data = strict_object(
+                    params,
+                    allowed={"query", "scope", "limit", "context_budget", "timeout_seconds"},
+                    required={"query"},
+                )
+                scope_value = data.get("scope", {})
+                if not isinstance(scope_value, dict):
+                    raise ProtocolError("invalid_params", "scope must be an object.")
+                request = RetrievalRequest(
+                    query=str(data["query"]),
+                    scope=scope_from_dict(scope_value),
+                    limit=data.get("limit", 8),
+                    context_budget=data.get("context_budget", 12000),
+                    timeout_seconds=data.get("timeout_seconds", 30.0),
+                )
+                return self.knowledge.retriever.search(request).to_dict()
+            if method == "conversation.create":
+                data = strict_object(params, allowed={"title", "scope", "now"}, required={"title"})
+                scope_value = data.get("scope", {})
+                if not isinstance(scope_value, dict):
+                    raise ProtocolError("invalid_params", "scope must be an object.")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.knowledge.create(
+                    title=str(data["title"]), scope=scope_from_dict(scope_value), now=moment
+                ).to_dict()
+            if method == "conversation.list":
+                data = strict_object(params, allowed={"include_archived"})
+                include = data.get("include_archived", True)
+                if type(include) is not bool:
+                    raise ProtocolError("invalid_params", "include_archived must be boolean.")
+                return [item.to_dict() for item in self.knowledge.artifacts.list(include_archived=include)]
+            if method == "conversation.load":
+                data = strict_object(params, allowed={"path"}, required={"path"})
+                return self.knowledge.artifacts.load(str(data["path"])).to_dict()
+            if method == "conversation.ask":
+                data = strict_object(
+                    params,
+                    allowed={"path", "query", "expected_hash", "evidence_only", "limit", "context_budget", "timeout_seconds", "now"},
+                    required={"path", "query", "expected_hash"},
+                )
+                evidence_only = data.get("evidence_only", False)
+                if type(evidence_only) is not bool:
+                    raise ProtocolError("invalid_params", "evidence_only must be boolean.")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.knowledge.ask(
+                    str(data["path"]), query=str(data["query"]), expected_hash=str(data["expected_hash"]),
+                    evidence_only=evidence_only, limit=data.get("limit", 8),
+                    context_budget=data.get("context_budget", 12000),
+                    timeout_seconds=data.get("timeout_seconds", 30.0), now=moment,
+                ).to_dict()
+            if method == "conversation.scope.update":
+                data = strict_object(params, allowed={"path", "expected_hash", "scope", "now"}, required={"path", "expected_hash", "scope"})
+                if not isinstance(data["scope"], dict):
+                    raise ProtocolError("invalid_params", "scope must be an object.")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.knowledge.artifacts.update(
+                    str(data["path"]), expected_hash=str(data["expected_hash"]),
+                    scope=scope_from_dict(data["scope"]), now=moment
+                ).to_dict()
+            if method in {"conversation.source.pin", "conversation.source.exclude"}:
+                data = strict_object(
+                    params, allowed={"path", "source_path", "enabled", "expected_hash", "now"},
+                    required={"path", "source_path", "expected_hash"},
+                )
+                enabled = data.get("enabled", True)
+                if type(enabled) is not bool:
+                    raise ProtocolError("invalid_params", "enabled must be boolean.")
+                artifact = self.knowledge.artifacts.load(str(data["path"]))
+                source_path = str(data["source_path"])
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                if method.endswith("pin"):
+                    values = set(artifact.metadata.pinned_sources)
+                    values.add(source_path) if enabled else values.discard(source_path)
+                    return self.knowledge.artifacts.update(
+                        artifact.relative_path, expected_hash=str(data["expected_hash"]),
+                        pinned_sources=tuple(sorted(values)), now=moment
+                    ).to_dict()
+                values = set(artifact.metadata.excluded_sources)
+                values.add(source_path) if enabled else values.discard(source_path)
+                return self.knowledge.artifacts.update(
+                    artifact.relative_path, expected_hash=str(data["expected_hash"]),
+                    excluded_sources=tuple(sorted(values)), now=moment
+                ).to_dict()
+            if method == "conversation.branch":
+                data = strict_object(params, allowed={"path", "turn_id", "title", "now"}, required={"path", "turn_id"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.knowledge.artifacts.branch(
+                    str(data["path"]), from_turn_id=str(data["turn_id"]),
+                    title=str(data["title"]) if data.get("title") is not None else None, now=moment
+                ).to_dict()
+            if method in {"conversation.rename", "conversation.archive"}:
+                allowed = {"path", "expected_hash", "now"} | ({"title"} if method.endswith("rename") else set())
+                required = {"path", "expected_hash"} | ({"title"} if method.endswith("rename") else set())
+                data = strict_object(params, allowed=allowed, required=required)
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                if method.endswith("rename"):
+                    return self.knowledge.artifacts.rename(
+                        str(data["path"]), str(data["title"]), expected_hash=str(data["expected_hash"]), now=moment
+                    ).to_dict()
+                return self.knowledge.artifacts.archive(
+                    str(data["path"]), expected_hash=str(data["expected_hash"]), now=moment
+                ).to_dict()
+            if method == "conversation.stale.check":
+                data = strict_object(params, allowed={"path"}, required={"path"})
+                return [turn.to_dict() for turn in self.knowledge.stale_status(str(data["path"]))]
+            if method in {"conversation.proposal.preview", "conversation.proposal.create"}:
+                data = strict_object(
+                    params, allowed={"conversation_path", "turn_id", "action", "target_path", "content", "title", "now"},
+                    required={"conversation_path", "turn_id", "action", "target_path", "content"},
+                )
+                moment = _iso_datetime(data.pop("now"), "now") if data.get("now") is not None else None
+                request = ConversationProposalRequest(**data)
+                if method.endswith("preview"):
+                    preview, _, _, _ = self.conversation_proposals.preview(request, now=moment)
+                    return preview.to_dict()
+                return self.conversation_proposals.publish(request, now=moment).to_dict()
+        except ProtocolError:
+            raise
+        except (ConversationError, RetrievalError, TypeError, ValueError) as exc:
+            raise ProtocolError(
+                getattr(exc, "code", "knowledge_workspace_invalid"),
+                getattr(exc, "message", str(exc)),
+                getattr(exc, "data", None),
+            ) from exc
+        raise ProtocolError("method_not_found", "The requested bridge method is not allowlisted.", {"method": method})
+
     def dispatch(self, method: str, params: object) -> object:
+        if method.startswith("retrieval.") or method.startswith("conversation."):
+            return self._dispatch_knowledge(method, params)
         if method == "copilot.replanning.scan":
             data = strict_object(params, allowed={"as_of"}, required={"as_of"})
             try:

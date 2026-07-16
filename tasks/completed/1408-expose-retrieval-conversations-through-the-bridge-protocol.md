@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1408
 title: Expose retrieval and conversations through the bridge protocol
-status: ready
+status: completed
 phase: 14
 depends_on:
   - LIFEOS-1403
