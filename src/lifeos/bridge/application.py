@@ -23,6 +23,9 @@ from lifeos.copilot import (
     parse_goal_note,
     SessionConflictError,
     inspect_copilot_note,
+    CapacityError,
+    RecurringWorkload,
+    check_portfolio_capacity,
 )
 from lifeos.facade.copilot_tools import (
     CopilotContextRequest,
@@ -109,6 +112,58 @@ class BridgeApplication:
         return preferences, dataset, status, observations
 
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.capacity.check":
+            data = strict_object(
+                params,
+                allowed={"session_id", "option_id", "as_of", "available_minutes", "recurring_workloads", "adaptive_durations"},
+                required={"session_id", "option_id", "as_of"},
+            )
+            as_of = _iso_date(data["as_of"], "as_of")
+            available = data.get("available_minutes")
+            if available is not None and (type(available) is not int or available < 0):
+                raise ProtocolError("invalid_params", "available_minutes must be non-negative or null.")
+            raw_workloads = data.get("recurring_workloads", [])
+            if not isinstance(raw_workloads, list) or not all(isinstance(item, dict) for item in raw_workloads):
+                raise ProtocolError("invalid_params", "recurring_workloads must be a list of objects.")
+            try:
+                workloads = tuple(RecurringWorkload(**strict_object(
+                    item,
+                    allowed={"workload_id", "title", "minutes", "kind", "protected", "source_ref"},
+                    required={"workload_id", "title", "minutes"},
+                )) for item in raw_workloads)
+            except (TypeError, CapacityError, ProtocolError) as exc:
+                raise ProtocolError("invalid_params", str(exc)) from exc
+            adaptive = data.get("adaptive_durations")
+            if adaptive is not None and (not isinstance(adaptive, dict) or not all(isinstance(key, str) for key in adaptive)):
+                raise ProtocolError("invalid_params", "adaptive_durations must be an object keyed by task ID.")
+            try:
+                snapshot = self.planning_sessions.get(data["session_id"])
+                session = snapshot.envelope.session
+                source = read_vault_markdown(self.daily.vault_root, session.goal_ref)
+                goal = parse_goal_note(path=session.goal_ref, content=source.content)
+                index = build_copilot_index(self.daily.vault_root)
+                context = build_planning_context(
+                    vault_root=self.daily.vault_root, goal=goal, index=index,
+                    include_paths=session.selected_context_refs, exclude_paths=session.excluded_context_refs,
+                )
+                options = generate_plan_options(
+                    goal=goal, session=session, readiness=snapshot.envelope.readiness,
+                    context=context, index=index, as_of=as_of,
+                )
+                option = next((item for item in options.options if item.option_id == data["option_id"]), None)
+                if option is None:
+                    raise CapacityError("selected option was not found")
+                decomposition = decompose_plan_option(option=option, horizon=goal.horizon)
+                return check_portfolio_capacity(
+                    option=option, decomposition=decomposition, index=index, as_of=as_of,
+                    available_minutes=available, recurring_workloads=workloads,
+                    adaptive_durations=adaptive,
+                ).to_dict()
+            except (
+                CapacityError, DecompositionError, PlanOptionError, PlanningSessionError,
+                CopilotContractError, PlanningContextError, VaultAccessError
+            ) as exc:
+                raise ProtocolError("copilot_capacity_invalid", str(exc)) from exc
         if method == "copilot.option.decompose":
             data = strict_object(
                 params,

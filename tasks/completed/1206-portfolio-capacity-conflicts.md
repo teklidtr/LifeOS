@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1206
 title: Check portfolio capacity, conflicts, and plan fit
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1205

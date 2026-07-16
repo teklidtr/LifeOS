@@ -20,6 +20,7 @@ CAPABILITIES = (
     "copilot.session.close",
     "copilot.options.generate",
     "copilot.option.decompose",
+    "copilot.capacity.check",
     "today.get",
     "scheduler.config.get",
     "scheduler.config.set",

@@ -135,3 +135,21 @@ __all__ += [
     "RollingWaveAdapter",
     "decompose_plan_option",
 ]
+
+from .capacity import (
+    CapacityError,
+    CapacityFinding,
+    CapacityView,
+    PortfolioCapacityReport,
+    RecurringWorkload,
+    check_portfolio_capacity,
+)
+
+__all__ += [
+    "CapacityError",
+    "CapacityFinding",
+    "CapacityView",
+    "PortfolioCapacityReport",
+    "RecurringWorkload",
+    "check_portfolio_capacity",
+]

@@ -69,3 +69,44 @@ def preview_goal_context(
         max_total_bytes=request.max_total_bytes,
         max_item_bytes=request.max_item_bytes,
     )
+
+from datetime import date
+from typing import Mapping
+
+from lifeos.copilot.capacity import (
+    PortfolioCapacityReport,
+    RecurringWorkload,
+    check_portfolio_capacity,
+)
+from lifeos.copilot.decomposition import DecompositionResult
+from lifeos.copilot.contracts import PlanOption
+
+COPILOT_CAPACITY_DESCRIPTOR = ToolDescriptor(
+    name="copilot.capacity_check",
+    description="Compare one draft plan with visible portfolio capacity and conflicts.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CopilotCapacityRequest:
+    option: PlanOption
+    decomposition: DecompositionResult
+    available_minutes: int | None
+    recurring_workloads: tuple[RecurringWorkload, ...] = ()
+    adaptive_durations: Mapping[str, int | None] | None = None
+    as_of: date = date.today()
+
+
+def inspect_portfolio_capacity(
+    *, vault_root: Path, request: CopilotCapacityRequest
+) -> PortfolioCapacityReport:
+    return check_portfolio_capacity(
+        option=request.option,
+        decomposition=request.decomposition,
+        index=build_copilot_index(vault_root),
+        as_of=request.as_of,
+        available_minutes=request.available_minutes,
+        recurring_workloads=request.recurring_workloads,
+        adaptive_durations=request.adaptive_durations,
+    )
