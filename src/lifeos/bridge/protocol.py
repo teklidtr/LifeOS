@@ -18,6 +18,7 @@ CAPABILITIES = (
     "copilot.session.get",
     "copilot.session.answer",
     "copilot.session.close",
+    "copilot.options.generate",
     "today.get",
     "scheduler.config.get",
     "scheduler.config.set",

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1204
 title: Generate structured medium-term plan options
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1201

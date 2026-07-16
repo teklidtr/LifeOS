@@ -95,3 +95,21 @@ __all__ += [
     "SessionEnvelope",
     "SessionSnapshot",
 ]
+
+from .options import (
+    DuplicatePlanFinding,
+    PlanOptionAdapter,
+    PlanOptionError,
+    PlanOptionRequest,
+    PlanOptionSet,
+    generate_plan_options,
+)
+
+__all__ += [
+    "DuplicatePlanFinding",
+    "PlanOptionAdapter",
+    "PlanOptionError",
+    "PlanOptionRequest",
+    "PlanOptionSet",
+    "generate_plan_options",
+]

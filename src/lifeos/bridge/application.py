@@ -14,6 +14,11 @@ from lifeos.copilot import (
     PlanningContextError,
     PlanningSessionError,
     PlanningSessionService,
+    PlanOptionError,
+    build_copilot_index,
+    build_planning_context,
+    generate_plan_options,
+    parse_goal_note,
     SessionConflictError,
     inspect_copilot_note,
 )
@@ -41,7 +46,7 @@ from lifeos.config import FeatureFlags, LifeOSConfig
 from lifeos.registry import Registry
 from lifeos.status import collect_status
 from lifeos.versioning import DESKTOP_RUNTIME_SCHEMA_VERSION
-from lifeos.vault import VaultAccessError
+from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.planning import load_plan_actions
 from lifeos.scheduler import BackgroundServiceInstaller, ScheduleConfig, load_schedule, save_schedule
 from lifeos.feedback import (
@@ -102,6 +107,32 @@ class BridgeApplication:
         return preferences, dataset, status, observations
 
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.options.generate":
+            data = strict_object(params, allowed={"session_id", "as_of"}, required={"session_id", "as_of"})
+            as_of = _iso_date(data["as_of"], "as_of")
+            try:
+                snapshot = self.planning_sessions.get(data["session_id"])
+                session = snapshot.envelope.session
+                source = read_vault_markdown(self.daily.vault_root, session.goal_ref)
+                goal = parse_goal_note(path=session.goal_ref, content=source.content)
+                index = build_copilot_index(self.daily.vault_root)
+                context = build_planning_context(
+                    vault_root=self.daily.vault_root,
+                    goal=goal,
+                    index=index,
+                    include_paths=session.selected_context_refs,
+                    exclude_paths=session.excluded_context_refs,
+                )
+                return generate_plan_options(
+                    goal=goal,
+                    session=session,
+                    readiness=snapshot.envelope.readiness,
+                    context=context,
+                    index=index,
+                    as_of=as_of,
+                ).to_dict()
+            except (PlanOptionError, PlanningSessionError, CopilotContractError, PlanningContextError, VaultAccessError) as exc:
+                raise ProtocolError("copilot_options_invalid", str(exc)) from exc
         if method == "copilot.session.start":
             data = strict_object(
                 params,
