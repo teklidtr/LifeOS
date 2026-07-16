@@ -540,6 +540,27 @@ def evaluate_attention(
         if exc.code != "not-found":
             diagnostics.append(f"daily-review: {exc}")
 
+    try:
+        week_start = day - timedelta(days=day.weekday())
+        iso = week_start.isocalendar()
+        weekly_path = f"reviews/weekly/{iso.year}-W{iso.week:02d}.md"
+        weekly_source = read_vault_markdown(vault_root, weekly_path)
+        weekly_parsed = parse_markdown_note(weekly_source.path, content=weekly_source.content)
+        phases = weekly_parsed.frontmatter.get("phases", [])
+        pending = any(isinstance(phase, dict) and phase.get("phase_id") == "weekly" and phase.get("state", "pending") == "pending" for phase in phases) if isinstance(phases, list) else False
+        if pending and (day.weekday() == 6 and as_of.hour >= 17):
+            item_id = _stable_id("weekly-review", f"{iso.year}-W{iso.week:02d}")
+            items.append(AttentionItem(
+                item_id, "weekly_review", "attention", "Resume weekly review",
+                "The canonical weekly review exists and remains open as the ISO week ends.", day.isoformat(),
+                (AttentionEvidence(weekly_path, "Weekly phase is pending"),),
+                (SuggestedAction("review", "Resume review"), SuggestedAction("snooze", "Ask tomorrow")),
+                "when the weekly review is completed or intentionally skipped",
+            ))
+    except VaultAccessError as exc:
+        if exc.code != "not-found":
+            diagnostics.append(f"weekly-review: {exc}")
+
     snoozed = dict(prefs.snoozed_until)
     dismissed = set(prefs.dismissed)
     filtered: list[AttentionItem] = []

@@ -21,7 +21,7 @@ from lifeos.reviews.contracts import (
 )
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.reviews.workflow import ReviewItem, ReviewSection, build_review_workflow
-from lifeos.vault import VaultAccessError, read_vault_markdown
+from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
 
 
 def _source_reference(vault_root: Path, item: ReviewItem, generated_at: str) -> tuple[ReviewSourceReference, ...]:
@@ -125,6 +125,65 @@ def _daily_evidence_section(vault_root: Path, day: date, generated_at: str) -> R
     return ReviewSectionSnapshot("daily-evidence", "Today's explicit evidence", False, "ready", tuple(items))
 
 
+def _weekly_evidence_sections(
+    vault_root: Path, runtime_dir: Path, range_start: date, range_end: date, generated_at: str
+) -> tuple[ReviewSectionSnapshot, ...]:
+    sections: list[ReviewSectionSnapshot] = []
+    try:
+        records = tuple(record for record in load_execution_records(vault_root) if range_start <= record.day <= range_end)
+        counts: dict[str, int] = {}
+        for record in records:
+            counts[record.outcome] = counts.get(record.outcome, 0) + 1
+        detail = ", ".join(f"{key}: {value}" for key, value in sorted(counts.items())) or "No explicit task outcomes were recorded; missing evidence remains unknown."
+        refs = tuple(ReviewSourceReference(record.plan_path, None, f"{record.day}: {record.outcome}", generated_at) for record in records)
+        execution = ReviewItemSnapshot(
+            "weekly-evidence:execution", "weekly-evidence", "Execution evidence", detail,
+            stable_fingerprint(range_start, range_end, *(f"{record.event_id}:{record.outcome}" for record in records)),
+            "ready", "review", refs,
+        )
+        sections.append(ReviewSectionSnapshot("weekly-evidence", "Week in explicit evidence", False, "ready", (execution,)))
+    except Exception as exc:
+        sections.append(ReviewSectionSnapshot("weekly-evidence", "Week in explicit evidence", False, "unavailable", (), str(exc)))
+
+    experiments: list[ReviewItemSnapshot] = []
+    try:
+        for source in iter_vault_markdown(vault_root, roots=("experiments",)):
+            parsed = parse_markdown_note(source.path, content=source.content)
+            if any(finding.severity == "error" for finding in parsed.findings):
+                continue
+            if str(parsed.frontmatter.get("status", "")).casefold() != "active":
+                continue
+            title = str(parsed.frontmatter.get("title") or source.path.stem)
+            required = parsed.frontmatter.get("required_metrics", [])
+            metric_names = tuple(item for item in required if isinstance(item, str)) if isinstance(required, list) else ()
+            source_hash = "sha256:" + content_hash(source.content)
+            detail = f"Active experiment; required observations: {', '.join(metric_names) if metric_names else 'none declared'}."
+            experiments.append(ReviewItemSnapshot(
+                f"experiments:{stable_fingerprint(source.relative_path)[-16:]}", "experiments", title, detail,
+                stable_fingerprint(source.relative_path, source_hash, metric_names), "ready", "open",
+                (ReviewSourceReference(source.relative_path, source_hash, detail, generated_at),),
+            ))
+        sections.append(ReviewSectionSnapshot("experiments", "Active experiments", True, "ready" if experiments else "empty", tuple(experiments)))
+    except VaultAccessError as exc:
+        sections.append(ReviewSectionSnapshot("experiments", "Active experiments", True, "unavailable", (), str(exc)))
+
+    health_items: list[ReviewItemSnapshot] = []
+    registry_path = runtime_dir / "registry.db"
+    health_items.append(ReviewItemSnapshot(
+        "system-health:registry", "system-health", "Disposable registry",
+        "Registry is present and rebuildable." if registry_path.exists() else "Registry is absent; review artifacts remain canonical and the index can be rebuilt.",
+        stable_fingerprint("registry", registry_path.exists()), "ready", "status", (),
+    ))
+    ownership_path = vault_root / "system" / "generated-ownership.json"
+    health_items.append(ReviewItemSnapshot(
+        "system-health:ownership", "system-health", "Generated ownership manifest",
+        "Ownership manifest is present." if ownership_path.exists() else "Ownership manifest is absent; consequential proposal preflight may fail closed.",
+        stable_fingerprint("ownership", ownership_path.exists()), "ready", "status", (),
+    ))
+    sections.append(ReviewSectionSnapshot("system-health", "System health", True, "ready", tuple(health_items)))
+    return tuple(sections)
+
+
 def build_review_snapshot(
     *,
     vault_root: Path,
@@ -149,6 +208,8 @@ def build_review_snapshot(
     sections = tuple(_snapshot_section(vault_root, section, generated) for section in workflow.sections)
     if kind == "daily":
         sections = (*sections, _daily_evidence_section(vault_root, day, generated))
+    else:
+        sections = (*sections, *_weekly_evidence_sections(vault_root, runtime_dir, workflow.range_start, workflow.range_end, generated))
     diagnostics = tuple(
         f"{section.section_id}: {section.diagnostic}"
         for section in sections

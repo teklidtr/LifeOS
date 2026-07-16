@@ -1,3 +1,11 @@
+from lifeos.reviews.weekly_review import (
+    WeeklyReviewDueState,
+    WeeklyReviewPrompt,
+    WeeklyReviewState,
+    complete_weekly_review,
+    open_weekly_review,
+    weekly_due_state,
+)
 from lifeos.reviews.daily_review import (
     DailyReviewDueState,
     DailyReviewPrompt,
@@ -100,4 +108,9 @@ __all__ += [
 __all__ += [
     "DailyReviewDueState", "DailyReviewPrompt", "DailyReviewState",
     "complete_daily_phase", "daily_due_state", "open_daily_review",
+]
+
+__all__ += [
+    "WeeklyReviewDueState", "WeeklyReviewPrompt", "WeeklyReviewState",
+    "complete_weekly_review", "open_weekly_review", "weekly_due_state",
 ]

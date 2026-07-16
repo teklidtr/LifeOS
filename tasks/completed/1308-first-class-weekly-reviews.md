@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1308
 title: Make weekly reviews first-class
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1307
