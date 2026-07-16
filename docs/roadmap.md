@@ -131,3 +131,27 @@ flows, context denial and redaction, duplicate-plan suppression, baseline and
 adaptive capacity comparisons, proposal recovery, living replanning, large-vault
 budgets, schema compatibility, derived-state rebuild, plugin keyboard paths, and
 manual-link validation.
+
+## Phase 13: First-class daily and weekly review artifacts
+
+LifeOS promotes daily and weekly reviews from transient guided workflows into
+durable, inspectable Markdown artifacts. A review can be opened, edited, resumed,
+linked, completed, and revisited directly in Obsidian without depending on
+disposable runtime state.
+
+Planned capabilities:
+
+- versioned daily and weekly review artifact contracts
+- one canonical daily artifact with morning and evening phases
+- canonical weekly artifacts with ISO-week identity and explicit date ranges
+- managed deterministic snapshots separated from human-owned reflection
+- durable progress, answers, item decisions, and review lifecycle
+- continuity links and carry-forward without silently duplicating obligations
+- proposal-gated actions for changes outside the review artifact
+- queryable review history, due-state, and completion summaries
+- an Obsidian-native review workspace and history browser
+- migration from legacy morning, evening, and weekly review notes
+- rebuild, recovery, release validation, and user-manual coverage
+
+Implementation proceeds through `LIFEOS-1300` to `LIFEOS-1311`.
+
