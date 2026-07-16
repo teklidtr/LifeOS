@@ -21,6 +21,7 @@ from lifeos.reviews.contracts import (
     ReviewArtifact,
     ReviewArtifactMetadata,
     ReviewItemDecision,
+    ReviewLifecycleEvent,
     ReviewPhaseProgress,
     ReviewStatus,
     ReviewSnapshotRecord,
@@ -49,6 +50,7 @@ class ReviewArtifactUpdate:
     snapshot_id: str | None = None
     snapshot_hash: str | None = None
     snapshot_history: tuple[ReviewSnapshotRecord, ...] | None = None
+    lifecycle_events: tuple[ReviewLifecycleEvent, ...] | None = None
     managed_blocks: Mapping[str, str] | None = None
 
     def fingerprint_payload(self) -> dict[str, Any]:
@@ -85,6 +87,7 @@ def _metadata_frontmatter(metadata: ReviewArtifactMetadata) -> dict[str, Any]:
         "snapshot_id": metadata.snapshot_id,
         "snapshot_hash": metadata.snapshot_hash,
         "snapshot_history": [record.to_dict() for record in metadata.snapshot_history],
+        "lifecycle_events": [event.to_dict() for event in metadata.lifecycle_events],
     }
 
 
@@ -398,6 +401,7 @@ class ReviewArtifactService:
                 "snapshot_id",
                 "snapshot_hash",
                 "snapshot_history",
+                "lifecycle_events",
             ):
                 value = getattr(update, key)
                 if value is not None:

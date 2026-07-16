@@ -6,7 +6,7 @@ const base = (): ReviewArtifactMetadata => ({
   review_id: "daily-2026-07-16", schema_version: 1, review_kind: "daily", period_start: "2026-07-16", period_end: "2026-07-16", timezone: "Europe/Istanbul", status: "open", created_at: "2026-07-16T09:00:00+03:00", updated_at: "2026-07-16T09:00:00+03:00", phases: [
     { phase_id: "morning", state: "pending", completed_sections: [], skipped_sections: [] },
     { phase_id: "evening", state: "pending", completed_sections: [], skipped_sections: [] },
-  ], item_decisions: [], answers: [], proposal_refs: [], migrated_from: [], snapshot_history: [],
+  ], item_decisions: [], answers: [], proposal_refs: [], migrated_from: [], snapshot_history: [], lifecycle_events: [],
 });
 
 test("review artifact identity and paths match Python rules", () => {

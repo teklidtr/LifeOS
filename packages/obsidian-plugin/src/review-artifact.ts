@@ -10,11 +10,12 @@ export interface ReviewSourceReference { path: string; content_hash?: string; de
 export interface ReviewItemSnapshot { item_id: string; section_id: string; title: string; detail: string; evidence_fingerprint: string; state: ReviewSectionState; action?: string; sources: ReviewSourceReference[]; diagnostic?: string; }
 export interface ReviewSectionSnapshot { section_id: string; title: string; optional: boolean; state: ReviewSectionState; items: ReviewItemSnapshot[]; diagnostic?: string; }
 export interface ReviewSnapshot { snapshot_id: string; generated_at: string; content_hash: string; sections: ReviewSectionSnapshot[]; diagnostics: string[]; }
+export interface ReviewLifecycleEvent { event_id: string; transition: string; at: string; actor_id: string; note?: string; }
 export interface ReviewSnapshotRecord { snapshot_id: string; content_hash: string; generated_at: string; }
 export interface ReviewPhaseProgress { phase_id: ReviewPhaseId; state: ReviewProgressState; completed_sections: string[]; skipped_sections: string[]; current_section?: string; completed_at?: string; }
 export interface ReviewItemDecision { item_id: string; evidence_fingerprint: string; decision: ReviewDecisionKind; decided_at: string; note?: string; proposal_id?: string; }
 export interface ReviewAnswer { prompt_id: string; value: string; answered_at: string; phase_id?: ReviewPhaseId; }
-export interface ReviewArtifactMetadata { review_id: string; schema_version: number; review_kind: ReviewKind; period_start: string; period_end: string; timezone: string; status: ReviewStatus; created_at: string; updated_at: string; phases: ReviewPhaseProgress[]; current_phase?: ReviewPhaseId; item_decisions: ReviewItemDecision[]; answers: ReviewAnswer[]; proposal_refs: string[]; previous_review_id?: string; next_review_id?: string; migrated_from: string[]; snapshot_id?: string; snapshot_hash?: string; snapshot_history: ReviewSnapshotRecord[]; }
+export interface ReviewArtifactMetadata { review_id: string; schema_version: number; review_kind: ReviewKind; period_start: string; period_end: string; timezone: string; status: ReviewStatus; created_at: string; updated_at: string; phases: ReviewPhaseProgress[]; current_phase?: ReviewPhaseId; item_decisions: ReviewItemDecision[]; answers: ReviewAnswer[]; proposal_refs: string[]; previous_review_id?: string; next_review_id?: string; migrated_from: string[]; snapshot_id?: string; snapshot_hash?: string; snapshot_history: ReviewSnapshotRecord[]; lifecycle_events: ReviewLifecycleEvent[]; }
 export interface ReviewArtifact { path: string; content_hash: string; metadata: ReviewArtifactMetadata; body: string; snapshot?: ReviewSnapshot; }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;

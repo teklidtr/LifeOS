@@ -96,6 +96,18 @@ class ReviewSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewLifecycleEvent:
+    event_id: str
+    transition: str
+    at: str
+    actor_id: str
+    note: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewSnapshotRecord:
     snapshot_id: str
     content_hash: str
@@ -164,6 +176,7 @@ class ReviewArtifactMetadata:
     snapshot_id: str | None = None
     snapshot_hash: str | None = None
     snapshot_history: tuple[ReviewSnapshotRecord, ...] = ()
+    lifecycle_events: tuple[ReviewLifecycleEvent, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -357,6 +370,17 @@ def parse_answer(value: object, *, field: str = "answers") -> ReviewAnswer:
     )
 
 
+def parse_lifecycle_event(value: object, *, field: str = "lifecycle_events") -> ReviewLifecycleEvent:
+    raw = _mapping(value, field)
+    return ReviewLifecycleEvent(
+        event_id=_string(raw.get("event_id"), f"{field}.event_id", pattern=_ITEM_ID),
+        transition=_string(raw.get("transition"), f"{field}.transition"),
+        at=_datetime(raw.get("at"), f"{field}.at"),
+        actor_id=_string(raw.get("actor_id"), f"{field}.actor_id"),
+        note=_optional_string(raw.get("note"), f"{field}.note"),
+    )
+
+
 def parse_snapshot_record(value: object, *, field: str = "snapshot_history") -> ReviewSnapshotRecord:
     raw = _mapping(value, field)
     return ReviewSnapshotRecord(
@@ -430,6 +454,12 @@ def validate_review_metadata(
     history = tuple(parse_snapshot_record(value, field=f"snapshot_history[{index}]") for index, value in enumerate(history_raw))
     if len({item.snapshot_id for item in history}) != len(history):
         raise ReviewContractError("duplicate_snapshot", "snapshot_history contains duplicate snapshot IDs.", "snapshot_history")
+    lifecycle_raw = frontmatter.get("lifecycle_events", [])
+    if not isinstance(lifecycle_raw, Sequence) or isinstance(lifecycle_raw, (str, bytes)):
+        raise ReviewContractError("invalid_collection", "lifecycle_events must be a list.", "lifecycle_events")
+    lifecycle = tuple(parse_lifecycle_event(value, field=f"lifecycle_events[{index}]") for index, value in enumerate(lifecycle_raw))
+    if len({item.event_id for item in lifecycle}) != len(lifecycle):
+        raise ReviewContractError("duplicate_lifecycle_event", "lifecycle_events contains duplicate IDs.", "lifecycle_events")
     return ReviewArtifactMetadata(
         review_id=review_id,
         schema_version=schema,
@@ -451,4 +481,5 @@ def validate_review_metadata(
         snapshot_id=_optional_string(frontmatter.get("snapshot_id"), "snapshot_id"),
         snapshot_hash=normalized_snapshot_hash,
         snapshot_history=history,
+        lifecycle_events=lifecycle,
     )

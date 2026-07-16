@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1304
 title: Persist review progress and reflection
-status: backlog
+status: completed
 phase: 13
 depends_on:
   - LIFEOS-1303
