@@ -143,6 +143,7 @@ CAPABILITIES = (
     "capture.merge.preview",
     "capture.merge.apply",
     "capture.rebuild",
+    "capture.privacy.preview",
     "capture.migration.preview",
     "capture.migration.apply",
     "capture.proposal.preview",

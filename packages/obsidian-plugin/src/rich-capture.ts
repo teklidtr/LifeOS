@@ -134,3 +134,57 @@ export interface CaptureProposalResult {
   proposal_path: string;
   preview: CaptureProposalPreview;
 }
+
+export interface CaptureContextPreview {
+  capture_path: string;
+  requested_operations: string[];
+  external_processing_intent: boolean;
+  local_analysis_only: boolean;
+  provider_payload_paths: string[];
+  items: Array<{
+    path: string;
+    kind: string;
+    content_hash: string;
+    inclusion_reason: string;
+    transfer: string;
+    byte_count: number;
+    included_bytes: number;
+    truncated: boolean;
+    excerpt: string;
+    attachment_id?: string;
+    media_type?: string;
+    redactions: Array<{ label: string; occurrences: number }>;
+  }>;
+  omissions: Array<{ path: string; reason: string; detail: string }>;
+  total_bytes: number;
+  truncated: boolean;
+  disclosure: string;
+}
+
+export interface CaptureMigrationPreview {
+  candidates: Array<Record<string, unknown>>;
+  legacy_formats_found: string[];
+  finding: string;
+}
+
+export interface CaptureMigrationResult {
+  state: string;
+  migrated: string[];
+  already_migrated: string[];
+  conflicts: Array<Record<string, unknown>>;
+  preserved_sources: string[];
+  audit_path: string;
+  finding: string;
+}
+
+export interface CaptureRecoveryReport {
+  state: string;
+  index: {
+    state: string;
+    entries: Array<Record<string, unknown>>;
+    diagnostics: Array<Record<string, unknown>>;
+    checkpoint_path?: string;
+  };
+  diagnostics: Array<Record<string, unknown>>;
+  rebuilt_manifests: string[];
+}

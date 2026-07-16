@@ -126,6 +126,9 @@ from lifeos.captures.integrations import CaptureLinkService
 from lifeos.captures.processing import CaptureProcessingService, MergePreview
 from lifeos.captures.proposals import CaptureProposalRequest, CaptureProposalService
 from lifeos.captures.storage import AttachmentStore
+from lifeos.captures.privacy import preview_capture_context
+from lifeos.captures.migration import apply_capture_migration, preview_capture_migration
+from lifeos.captures.recovery import audit_capture_recovery
 from lifeos.feedback import (
     FeedbackControlService,
     FeedbackProposalRequest,
@@ -576,10 +579,46 @@ class BridgeApplication:
                     preview, _, _ = self.capture_proposals.preview(request, now=moment)
                     return preview.to_dict()
                 return self.capture_proposals.publish(request, now=moment)
-            if method in {"capture.rebuild", "capture.migration.preview", "capture.migration.apply"}:
-                data = strict_object(params, allowed=set())
-                del data
-                return {"state": "not-required", "captures": len(self.captures.list()), "message": "No legacy rich-capture migration is currently required; canonical artifacts remain readable."}
+            if method == "capture.privacy.preview":
+                data = strict_object(
+                    params,
+                    allowed={"capture_path", "selected_attachment_ids", "selected_paths", "requested_operations", "external_processing_intent", "allow_sensitive_capture", "allowed_sensitive_roots", "redact_terms", "max_item_bytes", "max_total_bytes"},
+                    required={"capture_path"},
+                )
+                for key in ("selected_attachment_ids", "selected_paths", "requested_operations", "allowed_sensitive_roots", "redact_terms"):
+                    value = data.get(key, [])
+                    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                        raise ProtocolError("invalid_params", f"{key} must be a list of strings.")
+                    data[key] = tuple(value)
+                for key in ("external_processing_intent", "allow_sensitive_capture"):
+                    value = data.get(key, False)
+                    if type(value) is not bool:
+                        raise ProtocolError("invalid_params", f"{key} must be boolean.")
+                    data[key] = value
+                return preview_capture_context(vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir, **data).to_dict()
+            if method == "capture.rebuild":
+                data = strict_object(params, allowed={"rebuild_manifests", "delete_runtime", "interrupt_after", "batch_size"})
+                for key in ("rebuild_manifests", "delete_runtime"):
+                    value = data.get(key, False)
+                    if type(value) is not bool:
+                        raise ProtocolError("invalid_params", f"{key} must be boolean.")
+                    data[key] = value
+                interrupt_after = data.get("interrupt_after")
+                batch_size = data.get("batch_size", 64)
+                if interrupt_after is not None and (type(interrupt_after) is not int or interrupt_after < 1):
+                    raise ProtocolError("invalid_params", "interrupt_after must be a positive integer or null.")
+                if type(batch_size) is not int or batch_size < 1:
+                    raise ProtocolError("invalid_params", "batch_size must be a positive integer.")
+                return audit_capture_recovery(vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir, rebuild=True, **data).to_dict()
+            if method == "capture.migration.preview":
+                strict_object(params, allowed=set())
+                return preview_capture_migration(vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir).to_dict()
+            if method == "capture.migration.apply":
+                data = strict_object(params, allowed={"expected_source_hashes"})
+                hashes = data.get("expected_source_hashes", {})
+                if not isinstance(hashes, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in hashes.items()):
+                    raise ProtocolError("invalid_params", "expected_source_hashes must be an object of strings.")
+                return apply_capture_migration(vault_root=self.daily.vault_root, runtime_dir=self.daily.runtime_dir, expected_source_hashes=hashes).to_dict()
         except ProtocolError:
             raise
         except (CaptureError, TypeError, ValueError, OSError) as exc:

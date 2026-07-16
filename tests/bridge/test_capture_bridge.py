@@ -142,3 +142,65 @@ def test_capture_processing_can_be_cancelled_and_retried(tmp_path: Path) -> None
     assert cancelled["state"] == "cancelled"
     retry = bridge.call("capture.enrichment.retry", job_id=job["job_id"], now=NOW)
     assert retry["state"] == "queued"
+
+
+def test_capture_privacy_migration_and_recovery_bridge_methods(tmp_path: Path) -> None:
+    bridge, _ = client(tmp_path)
+    handshake = bridge.call("system.handshake", protocol="1.0")
+    for capability in (
+        "capture.privacy.preview",
+        "capture.rebuild",
+        "capture.migration.preview",
+        "capture.migration.apply",
+    ):
+        assert capability in handshake["capabilities"]
+    created = bridge.call(
+        "capture.create",
+        title="Private",
+        capture_type="attachment",
+        privacy_scope="protected",
+        sensitive=True,
+        now=NOW,
+    )
+    denied = bridge.call(
+        "capture.privacy.preview",
+        capture_path=created["path"],
+        requested_operations=["image-description"],
+        external_processing_intent=True,
+    )
+    assert denied["provider_payload_paths"] == []
+    assert denied["omissions"][0]["reason"] == "protected-default-deny"
+    allowed = bridge.call(
+        "capture.privacy.preview",
+        capture_path=created["path"],
+        requested_operations=["classify"],
+        external_processing_intent=True,
+        allow_sensitive_capture=True,
+        redact_terms=["Private"],
+    )
+    assert allowed["items"][0]["kind"] == "user-authored-capture-text"
+    rebuilt = bridge.call("capture.rebuild", delete_runtime=True, batch_size=2)
+    assert rebuilt["index"]["state"] == "ready"
+    migration = bridge.call("capture.migration.preview")
+    assert migration["candidates"] == []
+    applied = bridge.call("capture.migration.apply", expected_source_hashes={})
+    assert applied["state"] == "not-required"
+
+
+def test_capture_privacy_bridge_rejects_unbounded_or_malformed_inputs(tmp_path: Path) -> None:
+    bridge, _ = client(tmp_path)
+    created = bridge.call("capture.create", title="X", capture_type="attachment", now=NOW)
+    with pytest.raises(ProtocolError) as malformed:
+        bridge.call(
+            "capture.privacy.preview",
+            capture_path=created["path"],
+            selected_attachment_ids="bad",
+        )
+    assert malformed.value.code == "invalid_params"
+    with pytest.raises(ProtocolError) as budget:
+        bridge.call(
+            "capture.privacy.preview",
+            capture_path=created["path"],
+            max_total_bytes=0,
+        )
+    assert budget.value.code == "invalid_context_budget"

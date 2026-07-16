@@ -87,6 +87,10 @@ class Client implements BridgeClient {
     if (method === "capture.merge.apply") return artifact({ title: "Merged", merged_from: ["cap-1", "cap-2"] }) as T;
     if (method === "capture.proposal.preview") return { proposal_id: "prop-1", target_path: "notes/x.md", operation: "create_file", source_capture_id: "cap-123", source_capture_hash: this.current.content_hash, attachment_ids: [], included_actions: [], excluded_actions: [] } as T;
     if (method === "capture.proposal.create") return { proposal_id: "prop-1", proposal_path: "proposals/prop-1", preview: { proposal_id: "prop-1", target_path: "notes/x.md", operation: "create_file", source_capture_id: "cap-123", source_capture_hash: this.current.content_hash, attachment_ids: [], included_actions: [], excluded_actions: [] } } as T;
+    if (method === "capture.privacy.preview") return { capture_path: this.current.path, requested_operations: ["ocr"], external_processing_intent: false, local_analysis_only: true, provider_payload_paths: [], items: [], omissions: [{ path: this.current.path, reason: "explicit-processing-intent-required", detail: "denied" }], total_bytes: 0, truncated: false, disclosure: "Nothing uploaded." } as T;
+    if (method === "capture.migration.preview") return { candidates: [], legacy_formats_found: [], finding: "No migration." } as T;
+    if (method === "capture.migration.apply") return { state: "not-required", migrated: [], already_migrated: [], conflicts: [], preserved_sources: [], audit_path: "captures/migration-audit.json", finding: "No migration." } as T;
+    if (method === "capture.rebuild") return { state: "ready", index: { state: "ready", entries: [], diagnostics: [] }, diagnostics: [], rebuilt_manifests: [] } as T;
     throw new Error(`unhandled ${method}`);
   }
   onNotification(_listener: (method: string, params: Record<string, unknown>) => void): () => void { return () => undefined; }
@@ -147,4 +151,21 @@ test("keyboard and mobile contracts are accessible and avoid direct external mut
   assert.equal(actions.every((item) => item.ariaLabel.length > item.label.length), true);
   assert.equal(actions.some((item) => item.id === "apply-external"), false);
   assert.deepEqual(controller.state.mobile, { columns: 1, touchTargetMinPx: 44, enrichmentDeferred: true });
+});
+
+
+test("privacy disclosure, no-op migration, and recovery are inspectable", async () => {
+  const client = new Client(); const controller = new RichCaptureWorkspaceController(client);
+  await controller.load("captures/2026/lunch-cap-123.md");
+  const context = await controller.previewProviderContext({ requestedOperations: ["ocr"] });
+  assert.equal(context.local_analysis_only, true);
+  assert.equal(context.omissions[0]?.reason, "explicit-processing-intent-required");
+  assert.equal(controller.state.statusAnnouncement.includes("Nothing was uploaded"), true);
+  const migration = await controller.previewMigration();
+  assert.deepEqual(migration.candidates, []);
+  const applied = await controller.applyMigration(migration);
+  assert.equal(applied.state, "not-required");
+  const recovery = await controller.rebuild({ deleteRuntime: true, rebuildManifests: true });
+  assert.equal(recovery.index.state, "ready");
+  assert.equal(client.calls.some(([method]) => method === "capture.privacy.preview"), true);
 });

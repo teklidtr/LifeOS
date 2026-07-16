@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1607
 title: Add capture migration privacy and recovery
-status: ready
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1606
@@ -44,7 +44,13 @@ Privacy disclosure, redaction, migration, rebuild, performance limits, audits, a
 
 # Validation commands
 
-- Recorded at completion.
+- `PYTHONPATH=src python3 -m pytest -q --import-mode=importlib tests/captures tests/bridge/test_capture_bridge.py` -> 41 passed.
+- `npm --prefix packages/obsidian-plugin test` -> 44 passed.
+- `npm --prefix packages/obsidian-plugin run typecheck` -> passed.
+- `npm --prefix packages/obsidian-plugin run lint` -> passed.
+- `python3 -m compileall -q src/lifeos/captures src/lifeos/bridge` -> passed.
+- `git diff --check` -> passed.
+- Ruff and mypy were unavailable in the sandbox; locked dependency installation could not reach the package registry.
 
 # Relevant design decisions
 

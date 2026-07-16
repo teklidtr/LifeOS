@@ -4,8 +4,12 @@ import {
   AttachmentAudit,
   AttachmentImportResult,
   CaptureArtifact,
+  CaptureContextPreview,
   CaptureMergePreview,
+  CaptureMigrationPreview,
+  CaptureMigrationResult,
   CaptureProposalPreview,
+  CaptureRecoveryReport,
   CaptureProposalResult,
   CaptureState,
   CaptureType,
@@ -56,6 +60,9 @@ export interface RichCaptureWorkspaceState {
   mergePreview?: CaptureMergePreview;
   proposalPreview?: CaptureProposalPreview;
   attachmentAudits: AttachmentAudit[];
+  contextPreview?: CaptureContextPreview;
+  migrationPreview?: CaptureMigrationPreview;
+  recoveryReport?: CaptureRecoveryReport;
   focusTarget: string;
   statusAnnouncement: string;
   detail?: string;
@@ -349,6 +356,66 @@ export class RichCaptureWorkspaceController {
       });
       this.state = { ...this.state, captures: created, artifact: created[0], mode: "review", stage: "ready", focusTarget: "rich-capture-split-result", statusAnnouncement: `${created.length} captures created; source archived.` };
       return created;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async previewProviderContext(input: {
+    selectedAttachmentIds?: string[]; selectedPaths?: string[]; requestedOperations?: string[];
+    externalProcessingIntent?: boolean; allowSensitiveCapture?: boolean;
+    allowedSensitiveRoots?: string[]; redactTerms?: string[];
+    maxItemBytes?: number; maxTotalBytes?: number;
+  } = {}): Promise<CaptureContextPreview> {
+    const artifact = this.requireArtifact();
+    try {
+      const preview = await this.client.call<CaptureContextPreview>("capture.privacy.preview", {
+        capture_path: artifact.path,
+        selected_attachment_ids: input.selectedAttachmentIds ?? [],
+        selected_paths: input.selectedPaths ?? [],
+        requested_operations: input.requestedOperations ?? [],
+        external_processing_intent: input.externalProcessingIntent ?? false,
+        allow_sensitive_capture: input.allowSensitiveCapture ?? false,
+        allowed_sensitive_roots: input.allowedSensitiveRoots ?? [],
+        redact_terms: input.redactTerms ?? [],
+        max_item_bytes: input.maxItemBytes,
+        max_total_bytes: input.maxTotalBytes,
+      });
+      this.state = { ...this.state, contextPreview: preview, detail: preview.disclosure, focusTarget: "rich-capture-provider-disclosure", statusAnnouncement: "External processing payload preview is ready. Nothing was uploaded." };
+      return preview;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async previewMigration(): Promise<CaptureMigrationPreview> {
+    try {
+      const preview = await this.client.call<CaptureMigrationPreview>("capture.migration.preview", {});
+      this.state = { ...this.state, migrationPreview: preview, stage: preview.candidates.length ? "migration-required" : this.state.stage, detail: preview.finding, focusTarget: "rich-capture-migration-preview", statusAnnouncement: "Legacy capture migration preview completed." };
+      return preview;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async applyMigration(preview = this.state.migrationPreview): Promise<CaptureMigrationResult> {
+    if (!preview) throw new Error("A capture migration preview is required.");
+    const expectedSourceHashes = Object.fromEntries(preview.candidates.flatMap((item) => {
+      const source = item.source as { path?: unknown; content_hash?: unknown } | undefined;
+      return typeof source?.path === "string" && typeof source.content_hash === "string" ? [[source.path, source.content_hash]] : [];
+    }));
+    try {
+      const result = await this.client.call<CaptureMigrationResult>("capture.migration.apply", { expected_source_hashes: expectedSourceHashes });
+      this.state = { ...this.state, stage: result.conflicts.length ? "merge-conflict" : "ready", detail: result.finding, focusTarget: "rich-capture-migration-result", statusAnnouncement: result.state === "not-required" ? "No rich capture migration was required." : "Rich capture migration completed." };
+      return result;
+    } catch (error) { return this.fail(error); }
+  }
+
+  async rebuild(input: { rebuildManifests?: boolean; deleteRuntime?: boolean; interruptAfter?: number; batchSize?: number } = {}): Promise<CaptureRecoveryReport> {
+    this.state = { ...this.state, stage: "processing", focusTarget: "rich-capture-recovery-status", statusAnnouncement: "Rich capture derived state rebuild started." };
+    try {
+      const report = await this.client.call<CaptureRecoveryReport>("capture.rebuild", {
+        rebuild_manifests: input.rebuildManifests ?? false,
+        delete_runtime: input.deleteRuntime ?? false,
+        interrupt_after: input.interruptAfter,
+        batch_size: input.batchSize,
+      });
+      this.state = { ...this.state, recoveryReport: report, stage: report.state === "interrupted" ? "processing-cancelled" : report.diagnostics.length ? "needs-review" : "ready", detail: report.diagnostics.length ? `${report.diagnostics.length} recovery diagnostics require review.` : undefined, recovery: report.state === "interrupted" ? "Run rebuild again; canonical Markdown and original bytes were not changed." : undefined, focusTarget: "rich-capture-recovery-report", statusAnnouncement: report.state === "interrupted" ? "Rich capture rebuild interrupted safely." : "Rich capture rebuild completed." };
+      return report;
     } catch (error) { return this.fail(error); }
   }
 
