@@ -152,7 +152,7 @@ class AttachmentStore:
 
     def attach_to_capture(
         self, capture_path_value: str, reference: AttachmentReference, *, expected_hash: str, now: datetime | None = None
-    ) -> object:
+    ) -> CaptureArtifact:
         artifact = self.captures.load(capture_path_value)
         if any(item.attachment_id == reference.attachment_id for item in artifact.metadata.attachments):
             return artifact
@@ -166,7 +166,7 @@ class AttachmentStore:
 
     def remove_from_capture(
         self, capture_path_value: str, attachment_id: str, *, expected_hash: str, now: datetime | None = None
-    ) -> object:
+    ) -> CaptureArtifact:
         artifact = self.captures.load(capture_path_value)
         selected = tuple(item for item in artifact.metadata.attachments if item.attachment_id != attachment_id)
         if len(selected) == len(artifact.metadata.attachments):

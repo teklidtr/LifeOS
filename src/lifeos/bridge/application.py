@@ -118,6 +118,14 @@ from lifeos.experiments import (
     preview_experiment_migration,
 )
 from lifeos.experiments.design import evaluate_design
+from lifeos.captures import CaptureArtifactService, CaptureError
+from lifeos.captures.artifact import utc_now
+from lifeos.captures.contracts import ArtifactLink
+from lifeos.captures.enrichment import CaptureEnrichmentService
+from lifeos.captures.integrations import CaptureLinkService
+from lifeos.captures.processing import CaptureProcessingService, MergePreview
+from lifeos.captures.proposals import CaptureProposalRequest, CaptureProposalService
+from lifeos.captures.storage import AttachmentStore
 from lifeos.feedback import (
     FeedbackControlService,
     FeedbackProposalRequest,
@@ -182,6 +190,14 @@ class BridgeApplication:
         )
         self.experiments = ExperimentArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
         self.experiment_proposals = ExperimentProposalService(
+            vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id
+        )
+        self.captures = CaptureArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
+        self.capture_store = AttachmentStore(vault_root=vault_root, runtime_dir=runtime_dir)
+        self.capture_processing = CaptureProcessingService(vault_root=vault_root, runtime_dir=runtime_dir)
+        self.capture_links = CaptureLinkService(self.captures)
+        self.capture_enrichment = CaptureEnrichmentService(captures=self.captures)
+        self.capture_proposals = CaptureProposalService(
             vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id
         )
         self.config = LifeOSConfig(vault_root, runtime_dir, FeatureFlags(graphify=True, exports=True))
@@ -393,6 +409,183 @@ class BridgeApplication:
             ) from exc
         raise ProtocolError("method_not_found", "The requested bridge method is not allowlisted.", {"method": method})
 
+    def _dispatch_capture(self, method: str, params: object) -> object:
+        try:
+            if method == "capture.create":
+                data = strict_object(
+                    params,
+                    allowed={"title", "capture_type", "description", "event_at", "timezone", "source_entry_point", "privacy_scope", "sensitive", "tags", "now"},
+                    required={"title", "capture_type"},
+                )
+                tags = data.get("tags", [])
+                if not isinstance(tags, list) or not all(isinstance(item, str) for item in tags):
+                    raise ProtocolError("invalid_params", "tags must be a list of strings.")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                event_at = _iso_datetime(data["event_at"], "event_at") if data.get("event_at") is not None else None
+                return self.captures.create(
+                    title=str(data["title"]),
+                    capture_type=str(data["capture_type"]),
+                    description=str(data.get("description", "")),
+                    event_at=event_at,
+                    timezone_name=str(data.get("timezone", "UTC")),
+                    source_entry_point=str(data.get("source_entry_point", "bridge")),
+                    privacy_scope=str(data.get("privacy_scope", "standard")),
+                    sensitive=bool(data.get("sensitive", False)),
+                    tags=tuple(tags),
+                    now=moment,
+                ).to_dict()
+            if method == "capture.read":
+                data = strict_object(params, allowed={"path"}, required={"path"})
+                return self.captures.load(str(data["path"])).to_dict()
+            if method in {"capture.list", "capture.filter"}:
+                data = strict_object(params, allowed={"capture_types", "states"})
+                raw_types = data.get("capture_types")
+                raw_states = data.get("states")
+                for name, value in (("capture_types", raw_types), ("states", raw_states)):
+                    if value is not None and (not isinstance(value, list) or not all(isinstance(item, str) for item in value)):
+                        raise ProtocolError("invalid_params", f"{name} must be a list of strings.")
+                return [
+                    item.to_dict()
+                    for item in self.captures.list(
+                        capture_types=frozenset(raw_types) if raw_types is not None else None,
+                        states=frozenset(raw_states) if raw_states is not None else None,
+                    )
+                ]
+            if method == "capture.update":
+                data = strict_object(
+                    params,
+                    allowed={"path", "expected_hash", "title", "description", "event_at", "tags", "location", "privacy_scope", "sensitive", "now"},
+                    required={"path", "expected_hash"},
+                )
+                tags = data.get("tags")
+                if tags is not None and (not isinstance(tags, list) or not all(isinstance(item, str) for item in tags)):
+                    raise ProtocolError("invalid_params", "tags must be a list of strings.")
+                event_at = data.get("event_at")
+                if event_at is not None:
+                    _iso_datetime(event_at, "event_at")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.captures.update_user_fields(
+                    str(data["path"]),
+                    expected_hash=str(data["expected_hash"]),
+                    title=str(data["title"]) if data.get("title") is not None else None,
+                    description=str(data["description"]) if data.get("description") is not None else None,
+                    event_at=str(event_at) if event_at is not None else None,
+                    tags=tuple(tags) if tags is not None else None,
+                    location=str(data["location"]) if data.get("location") is not None else None,
+                    privacy_scope=str(data["privacy_scope"]) if data.get("privacy_scope") is not None else None,
+                    sensitive=bool(data["sensitive"]) if data.get("sensitive") is not None else None,
+                    now=moment,
+                ).to_dict()
+            if method == "capture.transition":
+                data = strict_object(params, allowed={"path", "target", "expected_hash", "reason", "now"}, required={"path", "target", "expected_hash"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.captures.transition(str(data["path"]), str(data["target"]), expected_hash=str(data["expected_hash"]), reason=str(data.get("reason", "")), now=moment).to_dict()
+            if method == "capture.attachment.add":
+                data = strict_object(params, allowed={"path", "expected_hash", "source_path", "independent_copy", "now"}, required={"path", "expected_hash", "source_path"})
+                independent = data.get("independent_copy", False)
+                if type(independent) is not bool:
+                    raise ProtocolError("invalid_params", "independent_copy must be boolean.")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                capture = self.captures.load(str(data["path"]))
+                if capture.content_hash != str(data["expected_hash"]):
+                    raise CaptureError("stale_capture", "Capture changed before attachment import.")
+                imported = self.capture_store.import_file(
+                    Path(str(data["source_path"])),
+                    capture_source="bridge",
+                    parent_capture_id=capture.metadata.capture_id,
+                    independent_copy=independent,
+                    now=moment,
+                )
+                updated = self.capture_store.attach_to_capture(capture.path, imported.reference, expected_hash=capture.content_hash, now=moment)
+                return {"capture": updated.to_dict(), "attachment": imported.to_dict()}
+            if method == "capture.attachment.remove":
+                data = strict_object(params, allowed={"path", "expected_hash", "attachment_id", "now"}, required={"path", "expected_hash", "attachment_id"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.capture_store.remove_from_capture(str(data["path"]), str(data["attachment_id"]), expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "capture.attachment.audit":
+                data = strict_object(params, allowed={"attachment_id"}, required={"attachment_id"})
+                return self.capture_store.audit(str(data["attachment_id"])).to_dict()
+            if method == "capture.enrichment.start":
+                data = strict_object(params, allowed={"path", "expected_hash", "now"}, required={"path", "expected_hash"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.capture_processing.start_extraction(str(data["path"]), expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "capture.enrichment.run":
+                data = strict_object(params, allowed={"job_id", "now"}, required={"job_id"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.capture_processing.run_extraction(str(data["job_id"]), now=moment).to_dict()
+            if method == "capture.enrichment.cancel":
+                data = strict_object(params, allowed={"job_id", "now"}, required={"job_id"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.capture_processing.cancel(str(data["job_id"]), now=moment).to_dict()
+            if method == "capture.enrichment.retry":
+                data = strict_object(params, allowed={"job_id", "now"}, required={"job_id"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.capture_processing.retry(str(data["job_id"]), now=moment).to_dict()
+            if method == "capture.inference.decide":
+                data = strict_object(params, allowed={"path", "field_name", "decision", "expected_hash", "corrected_value", "now"}, required={"path", "field_name", "decision", "expected_hash"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.capture_enrichment.decide_value(str(data["path"]), str(data["field_name"]), str(data["decision"]), expected_hash=str(data["expected_hash"]), corrected_value=data.get("corrected_value"), now=moment).to_dict()
+            if method == "capture.link":
+                data = strict_object(params, allowed={"path", "expected_hash", "target_path", "relation", "artifact_type", "content_hash", "now"}, required={"path", "expected_hash", "target_path", "relation"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                link = ArtifactLink(str(data["target_path"]), str(data["relation"]), str(data.get("artifact_type", "note")), str(data["content_hash"]) if data.get("content_hash") is not None else None)
+                return self.capture_links.link(str(data["path"]), link, expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "capture.unlink":
+                data = strict_object(params, allowed={"path", "expected_hash", "target_path", "now"}, required={"path", "expected_hash", "target_path"})
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.capture_links.unlink(str(data["path"]), str(data["target_path"]), expected_hash=str(data["expected_hash"]), now=moment).to_dict()
+            if method == "capture.split":
+                data = strict_object(params, allowed={"path", "groups", "expected_hash", "now"}, required={"path", "groups", "expected_hash"})
+                groups = data["groups"]
+                if not isinstance(groups, list) or not all(isinstance(group, list) and all(isinstance(item, str) for item in group) for group in groups):
+                    raise ProtocolError("invalid_params", "groups must be a list of attachment ID lists.")
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return [item.to_dict() for item in self.capture_processing.split(str(data["path"]), tuple(tuple(group) for group in groups), expected_hash=str(data["expected_hash"]), now=moment)]
+            if method == "capture.merge.preview":
+                data = strict_object(params, allowed={"source_paths"}, required={"source_paths"})
+                source_paths = data["source_paths"]
+                if not isinstance(source_paths, list) or not all(isinstance(item, str) for item in source_paths):
+                    raise ProtocolError("invalid_params", "source_paths must be a list of strings.")
+                return self.capture_processing.merge_preview(tuple(source_paths)).to_dict()
+            if method == "capture.merge.apply":
+                data = strict_object(params, allowed={"preview", "now"}, required={"preview"})
+                preview = data["preview"]
+                if not isinstance(preview, dict):
+                    raise ProtocolError("invalid_params", "preview must be an object.")
+                normalized = dict(preview)
+                for key in ("source_paths", "source_hashes", "attachment_ids", "link_paths", "warnings"):
+                    value = normalized.get(key)
+                    if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) for item in value):
+                        raise ProtocolError("invalid_params", f"preview.{key} must be a list of strings.")
+                    normalized[key] = tuple(value)
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                return self.capture_processing.apply_merge(MergePreview(**normalized), now=moment).to_dict()
+            if method in {"capture.proposal.preview", "capture.proposal.create"}:
+                data = strict_object(params, allowed={"capture_path", "action", "target_path", "content", "create_target", "attachment_ids", "included_actions", "excluded_actions", "now"}, required={"capture_path", "action", "target_path", "content"})
+                for key in ("attachment_ids", "included_actions", "excluded_actions"):
+                    value = data.get(key, [])
+                    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                        raise ProtocolError("invalid_params", f"{key} must be a list of strings.")
+                    data[key] = tuple(value)
+                create_target = data.get("create_target", False)
+                if type(create_target) is not bool:
+                    raise ProtocolError("invalid_params", "create_target must be boolean.")
+                moment = _iso_datetime(data.pop("now"), "now") if data.get("now") is not None else None
+                request = CaptureProposalRequest(**data)
+                if method.endswith("preview"):
+                    preview, _, _ = self.capture_proposals.preview(request, now=moment)
+                    return preview.to_dict()
+                return self.capture_proposals.publish(request, now=moment)
+            if method in {"capture.rebuild", "capture.migration.preview", "capture.migration.apply"}:
+                data = strict_object(params, allowed=set())
+                del data
+                return {"state": "not-required", "captures": len(self.captures.list()), "message": "No legacy rich-capture migration is currently required; canonical artifacts remain readable."}
+        except ProtocolError:
+            raise
+        except (CaptureError, TypeError, ValueError, OSError) as exc:
+            raise ProtocolError(getattr(exc, "code", "capture_invalid"), getattr(exc, "message", str(exc)), getattr(exc, "data", None)) from exc
+        raise ProtocolError("method_not_found", "The requested capture method is not allowlisted.", {"method": method})
+
     def _dispatch_experiment(self, method: str, params: object) -> object:
         try:
             if method == "experiment.create":
@@ -576,6 +769,8 @@ class BridgeApplication:
             return self._dispatch_knowledge(method, params)
         if method.startswith("experiment."):
             return self._dispatch_experiment(method, params)
+        if method.startswith("capture."):
+            return self._dispatch_capture(method, params)
         if method == "copilot.replanning.scan":
             data = strict_object(params, allowed={"as_of"}, required={"as_of"})
             try:

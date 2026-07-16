@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1605
 title: Expose rich capture bridge protocol
-status: ready
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1604
@@ -44,7 +44,10 @@ Typed bridge capabilities and application routing without duplicating Python bus
 
 # Validation commands
 
-- Recorded at completion.
+- `PYTHONPATH=src python3 -m pytest -q --import-mode=importlib tests/bridge/test_capture_bridge.py tests/bridge/test_experiment_bridge.py tests/captures` -> 36 passed.
+- `python3 -m compileall -q src/lifeos/bridge src/lifeos/captures` -> passed.
+- `git diff --check` -> passed.
+- Ruff and mypy were unavailable in the sandbox; locked dependency installation could not reach the package registry.
 
 # Relevant design decisions
 

@@ -96,6 +96,14 @@ class CaptureProcessingService:
             self.captures.transition(artifact.path, target, expected_hash=artifact.content_hash, reason="extraction finished", now=utc_now(now))
         return final
 
+    def cancel(self, job_id: str, *, now: datetime | None = None) -> ProcessingJob:
+        job = self.load_job(job_id)
+        if job.state in {"completed", "cancelled"}:
+            return job
+        cancelled = replace(job, state="cancelled", updated_at=utc_now(now).isoformat())
+        self._write_job(cancelled)
+        return cancelled
+
     def retry(self, job_id: str, *, now: datetime | None = None) -> ProcessingJob:
         job = self.load_job(job_id)
         retry = replace(job, state="queued", failed_attachment_ids=(), updated_at=utc_now(now).isoformat())
