@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Mapping, Sequence
 
 CAPTURE_SCHEMA_VERSION = 1
@@ -205,6 +205,7 @@ class CaptureMetadata:
     attachments: tuple[AttachmentReference, ...] = ()
     links: tuple[ArtifactLink, ...] = ()
     derived_values: tuple[DerivedValue, ...] = ()
+    domain_data: dict[str, object] = field(default_factory=dict)
     extraction_status: ProcessingState = "not-requested"
     enrichment_status: ProcessingState = "not-requested"
     exclude_from_semantic: bool = False
@@ -251,6 +252,7 @@ class CaptureMetadata:
             "attachments": [item.to_dict() for item in self.attachments],
             "links": [item.to_dict() for item in self.links],
             "derived_values": [item.to_dict() for item in self.derived_values],
+            "domain_data": self.domain_data,
             "extraction_status": self.extraction_status,
             "enrichment_status": self.enrichment_status,
             "exclude_from_semantic": self.exclude_from_semantic,
@@ -378,7 +380,7 @@ def capture_metadata_from_dict(data: Mapping[str, Any]) -> CaptureMetadata:
         privacy_scope=str(data.get("privacy_scope", "standard")),  # type: ignore[arg-type]
         sensitive=bool(data.get("sensitive", False)), location=str(data["location"]) if data.get("location") is not None else None,
         tags=tuple(str(item) for item in _sequence(data.get("tags"), "tags")), attachments=attachments, links=links,
-        derived_values=tuple(derived), extraction_status=str(data.get("extraction_status", "not-requested")),  # type: ignore[arg-type]
+        derived_values=tuple(derived), domain_data=dict(_mapping(data.get("domain_data", {}), "domain_data")), extraction_status=str(data.get("extraction_status", "not-requested")),  # type: ignore[arg-type]
         enrichment_status=str(data.get("enrichment_status", "not-requested")),  # type: ignore[arg-type]
         exclude_from_semantic=bool(data.get("exclude_from_semantic", False)),
         exclude_from_conversations=bool(data.get("exclude_from_conversations", False)),
