@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1203
 title: Implement guided goal clarification sessions
-status: backlog
+status: completed
 phase: 12
 depends_on:
   - LIFEOS-1201

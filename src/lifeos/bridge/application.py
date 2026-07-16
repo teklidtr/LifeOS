@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from lifeos.attention import evaluate_attention, save_preference
-from lifeos.copilot import CopilotContractError, PlanningContextError, inspect_copilot_note
+from lifeos.copilot import (
+    CopilotContractError,
+    PlanningContextError,
+    PlanningSessionError,
+    PlanningSessionService,
+    SessionConflictError,
+    inspect_copilot_note,
+)
 from lifeos.facade.copilot_tools import (
     CopilotContextRequest,
     CopilotReadinessRequest,
@@ -74,6 +81,9 @@ class BridgeApplication:
         self.daily = DailyInteractionService(vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id)
         self.study_sessions = StudySessionService(vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id)
         self.proposals = DesktopProposalService(vault_root=vault_root, actor_id=self.actor_id)
+        self.planning_sessions = PlanningSessionService(
+            vault_root=vault_root, runtime_dir=runtime_dir
+        )
         self.feedback_controls = FeedbackControlService(vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id)
         self.config = LifeOSConfig(vault_root, runtime_dir, FeatureFlags(graphify=True, exports=True))
         self._notify = notify
@@ -92,6 +102,52 @@ class BridgeApplication:
         return preferences, dataset, status, observations
 
     def dispatch(self, method: str, params: object) -> object:
+        if method == "copilot.session.start":
+            data = strict_object(
+                params,
+                allowed={"goal_path", "session_id", "selected_context_refs", "excluded_context_refs"},
+                required={"goal_path"},
+            )
+            for key in ("selected_context_refs", "excluded_context_refs"):
+                if key in data:
+                    value = data[key]
+                    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                        raise ProtocolError("invalid_params", f"{key} must be a list of strings.")
+                    data[key] = tuple(value)
+            try:
+                return self.planning_sessions.start(**data).to_dict()
+            except (PlanningSessionError, CopilotContractError) as exc:
+                raise ProtocolError("copilot_session_invalid", str(exc)) from exc
+        if method == "copilot.session.get":
+            data = strict_object(params, allowed={"session_id"}, required={"session_id"})
+            try:
+                return self.planning_sessions.get(data["session_id"]).to_dict()
+            except PlanningSessionError as exc:
+                raise ProtocolError("copilot_session_invalid", str(exc)) from exc
+        if method == "copilot.session.answer":
+            data = strict_object(
+                params,
+                allowed={"session_id", "question_id", "response_kind", "value", "expected_revision"},
+                required={"session_id", "question_id", "response_kind", "expected_revision"},
+            )
+            try:
+                return self.planning_sessions.answer(**data).to_dict()
+            except SessionConflictError as exc:
+                raise ProtocolError("copilot_session_stale", str(exc)) from exc
+            except (PlanningSessionError, CopilotContractError) as exc:
+                raise ProtocolError("copilot_session_invalid", str(exc)) from exc
+        if method == "copilot.session.close":
+            data = strict_object(
+                params,
+                allowed={"session_id", "outcome", "label", "rationale", "expected_revision"},
+                required={"session_id", "outcome", "label", "expected_revision"},
+            )
+            try:
+                return self.planning_sessions.close(**data).to_dict()
+            except SessionConflictError as exc:
+                raise ProtocolError("copilot_session_stale", str(exc)) from exc
+            except (PlanningSessionError, CopilotContractError) as exc:
+                raise ProtocolError("copilot_session_invalid", str(exc)) from exc
         if method == "copilot.goal.readiness":
             data = strict_object(params, allowed={"goal_path"}, required={"goal_path"})
             try:

@@ -73,3 +73,25 @@ __all__ += [
     "ReadinessFinding",
     "evaluate_goal_readiness",
 ]
+
+from .sessions import (
+    ClarificationQuestion,
+    ClarificationQuestionAdapter,
+    PlanningSessionError,
+    PlanningSessionService,
+    QuestionSuggestion,
+    SessionConflictError,
+    SessionEnvelope,
+    SessionSnapshot,
+)
+
+__all__ += [
+    "ClarificationQuestion",
+    "ClarificationQuestionAdapter",
+    "PlanningSessionError",
+    "PlanningSessionService",
+    "QuestionSuggestion",
+    "SessionConflictError",
+    "SessionEnvelope",
+    "SessionSnapshot",
+]
