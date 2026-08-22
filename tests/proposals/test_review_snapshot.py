@@ -29,12 +29,14 @@ def _hash(content: str) -> str:
 
 def test_snapshot_covers_all_operation_types_in_order(tmp_path: Path) -> None:
     generated = "# Generated\n\nOld value.\n"
+    human = "old\n"
     managed = (
         "# Managed\n\n<!-- lifeos:managed:start summary -->\n"
         "Old summary.\n<!-- lifeos:managed:end summary -->\n"
     )
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki/generated.md").write_text(generated, encoding="utf-8")
+    (tmp_path / "wiki/human.md").write_text(human, encoding="utf-8")
     (tmp_path / "wiki/managed.md").write_text(managed, encoding="utf-8")
     manifest = tmp_path / "system/generated-ownership.json"
     manifest.parent.mkdir()
@@ -65,7 +67,7 @@ def test_snapshot_covers_all_operation_types_in_order(tmp_path: Path) -> None:
             PatchHumanFile(
                 "op-human",
                 "wiki/human.md",
-                "sha256:" + "b" * 64,
+                _hash(human),
                 "@@ -1 +1 @@\n-old\n+new\n",
             ),
             ReplaceGeneratedFileV2(
@@ -164,3 +166,23 @@ def test_snapshot_tampering_and_operation_mismatch_fail_closed(tmp_path: Path) -
         parse_review_snapshot_bytes(tampered, patch_document=document)
 
     assert error.value.code == "operation_identity_mismatch"
+
+
+def test_human_patch_snapshot_requires_current_reviewed_target(tmp_path: Path) -> None:
+    target = tmp_path / "wiki/human.md"
+    target.parent.mkdir(parents=True)
+    original = "# Human\n\nOld\n"
+    target.write_text(original, encoding="utf-8")
+    operation = PatchHumanFile(
+        "op-human",
+        "wiki/human.md",
+        _hash(original),
+        "@@ -3 +3 @@\n-Old\n+New\n",
+    )
+    document = PatchDocumentV2(2, PROPOSAL_ID, (operation,))
+    target.write_text("# Human\n\nChanged elsewhere\n", encoding="utf-8")
+
+    with pytest.raises(ReviewSnapshotError) as error:
+        build_review_snapshot(vault_root=tmp_path, patch_document=document)
+
+    assert error.value.code == "stale_base_hash"

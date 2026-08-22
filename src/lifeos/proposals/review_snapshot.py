@@ -18,6 +18,7 @@ from .patches import (
     serialize_patch_json_bytes,
     validate_patch_document,
 )
+from .unified_diff import DiffError, apply_diff
 
 REVIEW_SNAPSHOT_FILENAME = "review.json"
 REVIEW_SNAPSHOT_SCHEMA_VERSION = 1
@@ -95,13 +96,22 @@ def _read_target_text(vault_root: Path, target_path: str) -> tuple[str, bytes]:
 def operation_unified_diff(vault_root: Path, operation: PatchOperation) -> str:
     target_path = operation.target_path
     if operation.op == "patch_human_file":
-        return "\n".join(
-            (
-                f"--- a/{target_path}",
-                f"+++ b/{target_path}",
-                operation.unified_diff.rstrip("\n"),
+        original, original_bytes = _read_target_text(vault_root, target_path)
+        if _prefixed_hash(original_bytes) != operation.base_hash:
+            raise ReviewSnapshotError(
+                "stale_base_hash",
+                target_path,
+                "target content no longer matches the operation base hash",
             )
-        )
+        try:
+            candidate = apply_diff(original, operation.unified_diff)
+        except DiffError as error:
+            raise ReviewSnapshotError(
+                "invalid_unified_diff",
+                target_path,
+                "human-file patch cannot be applied to the reviewed target",
+            ) from error
+        return _unified_diff(original, candidate, target_path)
     if operation.op in ("create_file", "create_generated_file"):
         return _unified_diff("", operation.new_content, target_path, created=True)
     if operation.op == "release_generated_ownership":
