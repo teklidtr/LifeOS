@@ -37,6 +37,19 @@ class StdioBridgeServer:
                 self._write(success_frame(request_id, result))
             except ProtocolError as exc:
                 self._write(error_frame(request_id, exc))
+            except Exception:
+                # STDIO is a long-lived request boundary. An implementation
+                # failure must not terminate the child process or expose a
+                # local traceback and filesystem paths to the UI.
+                self._write(
+                    error_frame(
+                        request_id,
+                        ProtocolError(
+                            "internal_error",
+                            "The LifeOS bridge could not complete the request.",
+                        ),
+                    )
+                )
             if self.application.shutdown_requested:
                 return 0
         return 0

@@ -115,7 +115,12 @@ def _recover_transaction(
     transaction_dir = recovery_root / str(journal.transaction_id)
 
     if journal.phase is RecoveryPhase.COMPLETE:
-        _verify_all_staged(vault_root=vault_root, journal=journal)
+        # COMPLETE is a terminal commit record, not an unresolved recovery
+        # phase. Canonical files may legitimately change after the application
+        # commits and before this retained journal is cleaned by the next run.
+        # Discovery and removal still validate the journal and transaction
+        # layout; canonical phase verification remains mandatory below for
+        # every incomplete transaction.
         remove_completed_recovery_transaction(
             recovery_root=recovery_root,
             transaction_id=journal.transaction_id,

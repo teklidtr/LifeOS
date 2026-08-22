@@ -70,6 +70,79 @@ def test_malformed_json_returns_structured_error(tmp_path: Path) -> None:
     assert json.loads(writer.getvalue())["error"]["code"] == "parse_error"
 
 
+def test_proposal_failure_is_typed_and_server_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = app(tmp_path)
+
+    def fail_execute(**_params: object) -> dict[str, object]:
+        raise ValueError("Recovery is required before application can continue")
+
+    monkeypatch.setattr(bridge.proposals, "execute", fail_execute)
+    requests = (
+        {
+            "jsonrpc": "2.0",
+            "id": "proposal",
+            "method": "proposal.execute",
+            "params": {
+                "proposal_id": "prop-20260714T120000Z-1234abcd",
+                "action": "accept",
+                "token": "token",
+            },
+        },
+        {"jsonrpc": "2.0", "id": "health", "method": "system.health", "params": {}},
+    )
+    reader = io.StringIO("".join(json.dumps(request) + "\n" for request in requests))
+    writer = io.StringIO()
+
+    assert StdioBridgeServer(bridge, reader=reader, writer=writer).serve() == 0
+
+    frames = [json.loads(line) for line in writer.getvalue().splitlines()]
+    assert frames[0]["error"] == {
+        "code": "proposal_invalid",
+        "message": "Recovery is required before application can continue",
+        "data": {},
+    }
+    assert frames[1]["result"]["status"] == "healthy"
+
+
+def test_unexpected_dispatch_failure_is_redacted_and_server_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = app(tmp_path)
+    original_dispatch = bridge.dispatch
+    calls = 0
+
+    def fail_once(method: str, params: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("secret traceback detail /local/path")
+        return original_dispatch(method, params)
+
+    monkeypatch.setattr(bridge, "dispatch", fail_once)
+    request = {"jsonrpc": "2.0", "method": "system.health", "params": {}}
+    reader = io.StringIO(
+        json.dumps({**request, "id": "failed"})
+        + "\n"
+        + json.dumps({**request, "id": "healthy"})
+        + "\n"
+    )
+    writer = io.StringIO()
+
+    assert StdioBridgeServer(bridge, reader=reader, writer=writer).serve() == 0
+
+    frames = [json.loads(line) for line in writer.getvalue().splitlines()]
+    assert frames[0]["error"] == {
+        "code": "internal_error",
+        "message": "The LifeOS bridge could not complete the request.",
+        "data": {},
+    }
+    assert "secret" not in writer.getvalue()
+    assert "/local/path" not in writer.getvalue()
+    assert frames[1]["result"]["status"] == "healthy"
+
+
 def test_feedback_release_methods_are_strict_and_read_only(tmp_path: Path) -> None:
     bridge = app(tmp_path)
     client = ReferenceBridgeClient(bridge)

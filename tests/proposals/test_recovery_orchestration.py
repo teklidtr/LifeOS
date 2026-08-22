@@ -271,6 +271,29 @@ def test_complete_non_generated_transaction_cleans_without_ownership_rewrite(
     assert "status: applied" in proposal_text
 
 
+def test_complete_transaction_cleanup_ignores_later_canonical_changes(
+    tmp_path: Path,
+) -> None:
+    meta, vault_root, proposal = _load_two_target_application(tmp_path)
+    result = apply_proposal(
+        proposal,
+        vault_root=vault_root,
+        applied_by="admin",
+        applied_at="2026-07-13T03:00:00Z",
+    )
+    assert result.new_status.value == "applied"
+    journal = _single_journal(vault_root)
+    assert journal.phase is RecoveryPhase.COMPLETE
+
+    (vault_root / "test1.txt").unlink()
+    (vault_root / "proposals" / meta.id / "proposal.md").unlink()
+
+    recovered = recover_interrupted_applications(vault_root=vault_root)
+
+    assert recovered.transactions[0].action is RecoveryAction.CLEANED
+    assert not (vault_root / ".lifeos" / "recovery" / str(journal.transaction_id)).exists()
+
+
 def test_recovery_twice_has_same_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

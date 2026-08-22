@@ -2340,23 +2340,43 @@ class BridgeApplication:
             BackgroundServiceInstaller(self.daily.runtime_dir).uninstall()
             return {"installed": False}
         if method == "proposal.list":
-            strict_object(params, allowed=set())
-            return [item.to_dict() for item in self.proposals.list()]
+            try:
+                strict_object(params, allowed=set())
+                return [item.to_dict() for item in self.proposals.list()]
+            except ValueError as exc:
+                raise ProtocolError("proposal_invalid", str(exc)) from exc
         if method == "proposal.inspect":
-            data = strict_object(params, allowed={"proposal_id"}, required={"proposal_id"})
-            return self.proposals.inspect(data["proposal_id"]).to_dict()
+            try:
+                data = strict_object(params, allowed={"proposal_id"}, required={"proposal_id"})
+                return self.proposals.inspect(data["proposal_id"]).to_dict()
+            except ProtocolError:
+                raise
+            except ValueError as exc:
+                raise ProtocolError("proposal_invalid", str(exc)) from exc
         if method == "proposal.prepare":
-            data = strict_object(
-                params, allowed={"proposal_id", "action"}, required={"proposal_id", "action"}
-            )
-            return asdict(self.proposals.prepare(**data))
+            try:
+                data = strict_object(
+                    params,
+                    allowed={"proposal_id", "action"},
+                    required={"proposal_id", "action"},
+                )
+                return asdict(self.proposals.prepare(**data))
+            except ProtocolError:
+                raise
+            except ValueError as exc:
+                raise ProtocolError("proposal_invalid", str(exc)) from exc
         if method == "proposal.execute":
-            data = strict_object(
-                params,
-                allowed={"proposal_id", "action", "token", "reason"},
-                required={"proposal_id", "action", "token"},
-            )
-            return self.proposals.execute(**data)
+            try:
+                data = strict_object(
+                    params,
+                    allowed={"proposal_id", "action", "token", "reason"},
+                    required={"proposal_id", "action", "token"},
+                )
+                return self.proposals.execute(**data)
+            except ProtocolError:
+                raise
+            except ValueError as exc:
+                raise ProtocolError("proposal_invalid", str(exc)) from exc
         if method == "system.status":
             strict_object(params, allowed=set())
             return asdict(
