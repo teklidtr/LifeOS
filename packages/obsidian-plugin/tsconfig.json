@@ -5,6 +5,8 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "types": ["node", "obsidian"],
     "outDir": "dist-test",
     "rootDir": ".",
     "declaration": true,

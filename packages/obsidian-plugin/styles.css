@@ -54,3 +54,15 @@
 @media (max-width: 720px) {
   .lifeos-experiments { grid-template-columns: 1fr; }
 }
+.lifeos-view {
+  padding: var(--size-4-4);
+}
+
+.lifeos-state {
+  color: var(--text-muted);
+}
+
+.lifeos-state-error,
+.lifeos-state-blocked {
+  color: var(--text-error);
+}

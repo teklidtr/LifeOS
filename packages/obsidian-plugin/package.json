@@ -9,6 +9,13 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "compile": "tsc -p tsconfig.json",
     "test": "npm run compile && node --test --test-concurrency=1 --test-force-exit dist-test/test/*.test.js",
-    "build": "npm run compile && mkdir -p build && cp dist-test/src/index.js build/main.js && cp manifest.json build/manifest.json && cp styles.css build/styles.css"
+    "build": "npm run typecheck && node esbuild.config.mjs",
+    "test:artifact": "node --test test/build-artifact.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "esbuild": "0.28.2",
+    "obsidian": "1.13.1",
+    "typescript": "7.0.2"
   }
 }

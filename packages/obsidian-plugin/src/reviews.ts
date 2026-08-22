@@ -6,7 +6,7 @@ export interface ReviewWorkflow{review_id:string;kind:GuidedReviewKind;day:strin
 export class ReviewWizardController{
   workflow?:ReviewWorkflow;
   constructor(private readonly client:BridgeClient,private readonly openPath:(path:string)=>void){}
-  async start(kind:GuidedReviewKind,day:string):Promise<ReviewWorkflow>{this.workflow=await this.client.call("review.build",{kind,day});return this.workflow;}
+  async start(kind:GuidedReviewKind,day:string):Promise<ReviewWorkflow>{const workflow=await this.client.call<ReviewWorkflow>("review.build",{kind,day});this.workflow=workflow;return workflow;}
   async mark(sectionId:string,state:"complete"|"skip"):Promise<void>{if(!this.workflow)throw new Error("Review is not loaded.");const completed=new Set(this.workflow.progress.completed_sections);const skipped=new Set(this.workflow.progress.skipped_sections);if(state==="complete"){completed.add(sectionId);skipped.delete(sectionId);}else{skipped.add(sectionId);completed.delete(sectionId);}this.workflow.progress=await this.client.call("review.progress",{review_id:this.workflow.review_id,completed_sections:[...completed],skipped_sections:[...skipped],current_section:sectionId});}
   async save(idempotencyKey:string,expectedHash?:string):Promise<{reference:{path:string}}>{if(!this.workflow)throw new Error("Review is not loaded.");const result=await this.client.call<{reference:{path:string}}>("review.save",{kind:this.workflow.kind,day:this.workflow.day,idempotency_key:idempotencyKey,expected_hash:expectedHash});this.openPath(result.reference.path);return result;}
   open(item:ReviewItem):void{if(item.source_path)this.openPath(item.source_path);}

@@ -9,7 +9,7 @@ class FakeBridge implements BridgeClient {
   async call<T>(_method: string, _params: Record<string, unknown>): Promise<T> { throw new Error("unused"); }
   onNotification(listener: (method: string, params: Record<string, unknown>) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   async stop(): Promise<void> { this.stops++; }
-  notify(method: string): void { for (const listener of this.listeners) listener(method, {}); }
+  notify(method: string, params: Record<string, unknown> = {}): void { for (const listener of this.listeners) listener(method, params); }
 }
 
 class FakeHost implements ObsidianHost {
@@ -66,5 +66,14 @@ test("repeated load call does not start duplicate process", async () => {
   const bridge = new FakeBridge(); const plugin = new LifeOSPlugin(new FakeHost(), bridge, settings);
   await plugin.load(); await plugin.connection.start(settings);
   assert.equal(bridge.starts, 1);
+  await plugin.unload();
+});
+
+test("unexpected bridge exit changes the plugin to an actionable unavailable state", async () => {
+  const bridge = new FakeBridge(); const plugin = new LifeOSPlugin(new FakeHost(), bridge, settings);
+  await plugin.load();
+  bridge.notify("system.bridge_stopped", { detail: "The bridge exited with code 1." });
+  assert.equal(plugin.connection.current, "unavailable");
+  assert.equal(plugin.view.state.kind, "error");
   await plugin.unload();
 });

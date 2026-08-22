@@ -40,8 +40,11 @@ export class ConnectionManager {
         return;
       }
       this.handshake = handshake;
-      this.unsubscribe = this.client.onNotification((method) => {
+      this.unsubscribe = this.client.onNotification((method, params) => {
         if (method === "vault.changed" || method === "attention.changed") this.invalidated();
+        if (method === "system.bridge_stopped") {
+          this.markCrashed(typeof params.detail === "string" ? params.detail : undefined);
+        }
       });
       this.setState("connected");
     } catch (error) {
