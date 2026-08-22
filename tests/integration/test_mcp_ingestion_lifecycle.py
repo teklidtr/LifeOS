@@ -185,6 +185,72 @@ async def test_mcp_ingestion_lifecycle_applies_reviewed_proposal_end_to_end(
 
 
 @pytest.mark.anyio
+async def test_mcp_ingestion_updates_one_existing_wiki_section_end_to_end(
+    mcp_server_helper_path: Path,
+    config: LifeOSConfig,
+    config_path: Path,
+    vault_root: Path,
+    registry: Registry,
+    setup_source: None,
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "auth-update.jsonl"
+    target_path = vault_root / "wiki" / "first-aid.md"
+    original = (
+        "---\nid: first-aid\ntitle: First Aid\n---\n\n"
+        "# First Aid\n\n"
+        "## Equipment notes\n\nOld incomplete list.\n\n"
+        "## Safety\n\nKeep this section unchanged.\n"
+    )
+    target_path.write_text(original)
+
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=[
+            str(mcp_server_helper_path),
+            "--config",
+            str(config_path),
+            "--actor-id",
+            "integration-human",
+            "--authorization-log",
+            str(log_path),
+        ],
+    )
+
+    async with stdio_client(server_params) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            update_result = await session.call_tool(
+                "ingestion_update_wiki_section_proposal",
+                arguments={
+                    "source_path": "sources/test.md",
+                    "target_path": "wiki/first-aid.md",
+                    "heading": "Equipment notes",
+                    "body": "Verified complete list with reasons.",
+                },
+            )
+            assert not update_result.isError
+            update_data = json.loads(update_result.content[0].text)
+            assert update_data["status"] == "draft"
+            assert update_data["heading"] == "Equipment notes"
+            proposal_id = update_data["proposal_id"]
+            assert target_path.read_text() == original
+
+            submit = await session.call_tool("proposal_submit", {"proposal_id": proposal_id})
+            assert not submit.isError
+            approve = await session.call_tool("proposal_approve", {"proposal_id": proposal_id})
+            assert not approve.isError
+            apply = await session.call_tool("proposal_apply", {"proposal_id": proposal_id})
+            assert not apply.isError
+
+    assert target_path.read_text() == original.replace(
+        "Old incomplete list.", "Verified complete list with reasons."
+    )
+    source_path = vault_root / "sources" / "test.md"
+    assert source_path.read_bytes() == b"Canonical candidate content.\n"
+
+
+@pytest.mark.anyio
 async def test_mcp_approval_denial_leaves_proposal_pending(
     mcp_server_helper_path: Path,
     config: LifeOSConfig,

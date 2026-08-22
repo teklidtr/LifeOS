@@ -122,8 +122,11 @@ and near-term work concrete.
 4. Run `uv run lifeos scan`, or let the MCP-connected agent call
    `registry_refresh`, after adding the source.
 5. Ask the MCP-connected agent to ingest the registered source into an explicit
-   `wiki/` target. The agent reads it with `vault_read_markdown`, synthesizes a
-   grounded draft, and calls `ingestion_create_wiki_proposal`.
+   `wiki/` target. For an absent target, the agent synthesizes a grounded draft
+   and calls `ingestion_create_wiki_proposal`. For an existing note, identify the
+   one heading to update; the agent reads that target and calls
+   `ingestion_update_wiki_section_proposal` with the heading text and replacement
+   body.
 6. Review the resulting draft proposal. Ingestion does not submit, approve, or
    apply it.
 

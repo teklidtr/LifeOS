@@ -15,9 +15,17 @@
 This is expected: the standalone `lifeos ingest` command and embedded model
 runtime were removed. Connect an external agent to `lifeos-mcp`, then ask it to
 ingest the registered vault-relative source into an explicit `wiki/` target.
-The agent must call `registry_refresh`, then `vault_read_markdown`, followed by
-`ingestion_create_wiki_proposal`, and stop at the resulting draft. Refreshing
-first ensures moved or changed sources have current registry paths and hashes.
+The agent must call `registry_refresh`, then `vault_read_markdown`. It follows
+with `ingestion_create_wiki_proposal` when the target is absent. For one section
+of an existing target, it also reads the target and calls
+`ingestion_update_wiki_section_proposal`. Both paths stop at the resulting
+draft. Refreshing first ensures moved or changed sources have current registry
+paths and hashes.
+
+The section-update tool requires one unique ATX heading, supplied without `#`
+markers. If the heading is missing or duplicated, choose a more precise target
+heading or edit the note structure before retrying. Whole-note merging remains
+outside this bounded ingestion operation.
 
 LifeOS does not need a model name or provider API key for this workflow. If the
 MCP tools are missing, verify the MCP extra is installed and the client launches

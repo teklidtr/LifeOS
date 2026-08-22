@@ -14,9 +14,12 @@ from lifeos.facade.errors import (
 )
 from lifeos.facade.proposal_tools import (
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
+    UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
     CreateWikiProposalRequest,
     CreateWikiProposalResult,
+    UpdateWikiSectionProposalRequest,
     create_wiki_proposal,
+    update_wiki_section_proposal,
 )
 from lifeos.ingestion.orchestration import (
     MissingSourceError,
@@ -39,6 +42,14 @@ from lifeos.registry import Registry
 def test_create_wiki_proposal_descriptor() -> None:
     assert CREATE_WIKI_PROPOSAL_DESCRIPTOR.name == "ingestion.create_wiki_proposal"
     assert CREATE_WIKI_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
+
+
+def test_update_wiki_section_proposal_descriptor() -> None:
+    assert (
+        UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.name
+        == "ingestion.update_wiki_section_proposal"
+    )
+    assert UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
 
 def test_request_and_result_are_frozen_and_slotted() -> None:
     from dataclasses import fields
@@ -95,6 +106,27 @@ def test_request_rejects_empty_or_whitespace_only_body(empty_body: str) -> None:
 def test_request_preserves_body_exactly() -> None:
     req = CreateWikiProposalRequest(source_path="src", target_path="wiki", title="Title", body="  \n Body  \n\r")
     assert req.body == "  \n Body  \n\r"
+
+
+def test_update_request_is_bounded_to_one_heading_and_body() -> None:
+    request = UpdateWikiSectionProposalRequest(
+        source_path="study/source.md",
+        target_path="wiki/target.md",
+        heading="Ekipman notları",
+        body="Yeni içerik.",
+    )
+    assert request.heading == "Ekipman notları"
+    assert not hasattr(request, "base_hash")
+    assert not hasattr(request, "proposal_id")
+
+    with pytest.raises(ValueError, match="# markers"):
+        UpdateWikiSectionProposalRequest(
+            "study/source.md", "wiki/target.md", "## Ekipman notları", "Body"
+        )
+    with pytest.raises(ValueError, match="one line"):
+        UpdateWikiSectionProposalRequest(
+            "study/source.md", "wiki/target.md", "Ekipman\nnotları", "Body"
+        )
 
 
 # Error mappings
@@ -307,6 +339,103 @@ def test_real_happy_path_facade(tmp_path: Path) -> None:
     assert prov["sources"][0]["content_hash"] == f"sha256:{content_hash}"
     assert prov["schema_version"] == 1
     assert prov["created_at"] == "2025-01-01T12:00:00Z"
+
+
+def test_real_happy_path_updates_one_existing_wiki_section(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    (vault_root / "study").mkdir()
+    registry = Registry(tmp_path / "registry.db")
+    registry.initialize()
+
+    source_bytes = b"Verified equipment source.\n"
+    target_bytes = (
+        "---\nid: first-aid\n---\n\n# İlk Yardım\n\n"
+        "## Ekipman notları\n\nEski.\n\n## Güvenlik\n\nKorunur.\n"
+    ).encode()
+    (vault_root / "study" / "source.md").write_bytes(source_bytes)
+    target_path = vault_root / "wiki" / "ilk-yardim.md"
+    target_path.write_bytes(target_bytes)
+
+    from lifeos.registry.file_tracking import hash_file_content, register_scan
+    from lifeos.scanner import VaultFile
+
+    register_scan(
+        registry,
+        vault_root,
+        [
+            VaultFile(Path("study/source.md"), ".md", len(source_bytes)),
+            VaultFile(Path("wiki/ilk-yardim.md"), ".md", len(target_bytes)),
+        ],
+    )
+    result = update_wiki_section_proposal(
+        vault_root=vault_root,
+        registry=registry,
+        request=UpdateWikiSectionProposalRequest(
+            "study/source.md",
+            "wiki/ilk-yardim.md",
+            "Ekipman notları",
+            "Yeni doğrulanmış liste.",
+        ),
+        clock_fn=lambda: datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+        random_suffix_fn=lambda: "abcdef12",
+    )
+
+    assert result.status == "draft"
+    assert result.heading == "Ekipman notları"
+    assert target_path.read_bytes() == target_bytes
+
+    from lifeos.proposals.loader import load_proposal_directory
+    from lifeos.proposals.unified_diff import apply_diff
+
+    loaded = load_proposal_directory(
+        vault_root / result.proposal_path,
+        proposals_root=vault_root / "proposals",
+    ).proposal
+    assert loaded is not None
+    assert loaded.metadata.related_sources == ("study/source.md",)
+    operation = loaded.patch_document.operations[0]
+    assert operation.op == "patch_human_file"
+    assert operation.base_hash == f"sha256:{hash_file_content(target_bytes)}"
+    candidate = apply_diff(target_bytes.decode(), operation.unified_diff)
+    assert "## Ekipman notları\n\nYeni doğrulanmış liste." in candidate
+    assert "## Güvenlik\n\nKorunur." in candidate
+
+
+def test_update_rejects_missing_heading_without_persisting(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    (vault_root / "study").mkdir()
+    source = vault_root / "study" / "source.md"
+    target = vault_root / "wiki" / "target.md"
+    source.write_text("Source.\n")
+    target.write_text("# Note\n")
+    registry = Registry(tmp_path / "registry.db")
+    registry.initialize()
+
+    from lifeos.registry.file_tracking import register_scan
+    from lifeos.scanner import VaultFile
+
+    register_scan(
+        registry,
+        vault_root,
+        [
+            VaultFile(Path("study/source.md"), ".md", source.stat().st_size),
+            VaultFile(Path("wiki/target.md"), ".md", target.stat().st_size),
+        ],
+    )
+
+    with pytest.raises(ToolValidationError, match="Invalid or ambiguous"):
+        update_wiki_section_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=UpdateWikiSectionProposalRequest(
+                "study/source.md", "wiki/target.md", "Missing", "New"
+            ),
+        )
+    assert list((vault_root / "proposals").iterdir()) == []
 
 def test_verify_identity_and_time_generation(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"

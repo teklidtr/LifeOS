@@ -9,9 +9,22 @@ from dataclasses import replace
 
 from lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent
 from lifeos.ingestion.provenance import ProvenanceGenerator
-from lifeos.ingestion.proposals import build_wiki_proposal, persist_wiki_proposal, ProposalPublicationError, validate_wiki_target_path, InvalidWikiTargetError, ProposalAlreadyExistsError, WikiProposalDocuments
+from lifeos.ingestion.proposals import (
+    InvalidWikiSectionError,
+    InvalidWikiTargetError,
+    ProposalAlreadyExistsError,
+    ProposalPublicationError,
+    WikiProposalDocuments,
+    WikiSectionUnchangedError,
+    build_wiki_proposal,
+    build_wiki_section_update_proposal,
+    persist_wiki_proposal,
+    replace_wiki_section,
+    validate_wiki_target_path,
+)
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.ingestion.provenance import extract_provenance
+from lifeos.proposals.unified_diff import apply_diff
 
 @pytest.fixture
 def sample_content() -> WikiProposalContent:
@@ -160,6 +173,120 @@ def test_model_id_omission_remains_canonical(sample_content: WikiProposalContent
     patches = json.loads(doc.patches_json)["operations"]
     md_content = patches[0]["new_content"]
     assert "model_id" not in md_content
+
+
+def test_replace_wiki_section_preserves_all_surrounding_content() -> None:
+    original = (
+        "---\n"
+        "id: first-aid\n"
+        "title: İlk Yardım\n"
+        "---\n\n"
+        "# İlk Yardım\n\n"
+        "## Ekipman notları\n\n"
+        "Eski ve eksik liste.\n\n"
+        "### Eski alt başlık\n\n"
+        "Eski ayrıntı.\n\n"
+        "## Güvenlik\n\n"
+        "Bu bölüm korunur.\n"
+    )
+
+    updated = replace_wiki_section(
+        target_content=original,
+        heading="Ekipman notları",
+        section_body="Yeni doğrulanmış liste.\n\n### Sınav notu\n\nNedenleriyle birlikte.",
+    )
+
+    assert updated == (
+        "---\n"
+        "id: first-aid\n"
+        "title: İlk Yardım\n"
+        "---\n\n"
+        "# İlk Yardım\n\n"
+        "## Ekipman notları\n\n"
+        "Yeni doğrulanmış liste.\n\n"
+        "### Sınav notu\n\n"
+        "Nedenleriyle birlikte.\n\n"
+        "## Güvenlik\n\n"
+        "Bu bölüm korunur.\n"
+    )
+
+
+def test_replace_wiki_section_ignores_headings_inside_fenced_code() -> None:
+    original = "# Note\n\n```markdown\n## Ekipman notları\n```\n\n## Ekipman notları\n\nOld.\n"
+    updated = replace_wiki_section(
+        target_content=original,
+        heading="Ekipman notları",
+        section_body="New.",
+    )
+    assert "```markdown\n## Ekipman notları\n```" in updated
+    assert updated.endswith("## Ekipman notları\n\nNew.\n")
+
+
+@pytest.mark.parametrize(
+    ("target", "message"),
+    [
+        ("# Note\n", "not found"),
+        ("## Same\n\nA\n\n## Same\n\nB\n", "not unique"),
+    ],
+)
+def test_replace_wiki_section_requires_one_exact_heading(target: str, message: str) -> None:
+    with pytest.raises(InvalidWikiSectionError, match=message):
+        replace_wiki_section(target_content=target, heading="Same", section_body="New")
+
+
+def test_replace_wiki_section_rejects_body_that_escapes_selected_section() -> None:
+    with pytest.raises(InvalidWikiSectionError, match="peer or parent"):
+        replace_wiki_section(
+            target_content="# Note\n\n## Selected\n\nOld\n\n## Next\n\nKeep\n",
+            heading="Selected",
+            section_body="New\n\n## Injected peer",
+        )
+
+
+def test_section_update_builder_emits_base_hash_patch_and_source_metadata(
+    sample_source: SourceSnapshot,
+) -> None:
+    original = "---\nid: stable\n---\n\n# Note\n\n## Selected\n\nOld.\n\n## Keep\n\nSame.\n"
+    target_hash = "sha256:" + "b" * 64
+    generator = ProvenanceGenerator("external", "1", "1", None)
+
+    documents = build_wiki_section_update_proposal(
+        source=sample_source,
+        target_path="wiki/note.md",
+        target_content=original,
+        target_content_hash=target_hash,
+        heading="Selected",
+        section_body="New.",
+        generator=generator,
+        proposal_id="prop-20260713T123000Z-abcdef12",
+        created_at="2026-07-13T12:30:00Z",
+    )
+
+    operation = json.loads(documents.patches_json)["operations"][0]
+    assert operation["op"] == "patch_human_file"
+    assert operation["target_path"] == "wiki/note.md"
+    assert operation["base_hash"] == target_hash
+    assert apply_diff(original, operation["unified_diff"]) == original.replace("Old.", "New.")
+    parsed = parse_markdown_note(Path("proposal.md"), content=documents.proposal_markdown.decode())
+    assert parsed.frontmatter["risk"] == "medium"
+    assert parsed.frontmatter["related_sources"] == [sample_source.path]
+    assert parsed.frontmatter["extensions"]["ingestion"]["source_hash"] == sample_source.content_hash
+
+
+def test_section_update_builder_rejects_no_effect(sample_source: SourceSnapshot) -> None:
+    original = "# Note\n\n## Selected\n\nSame.\n"
+    with pytest.raises(WikiSectionUnchangedError):
+        build_wiki_section_update_proposal(
+            source=sample_source,
+            target_path="wiki/note.md",
+            target_content=original,
+            target_content_hash="sha256:" + "b" * 64,
+            heading="Selected",
+            section_body="Same.",
+            generator=ProvenanceGenerator("external", "1", "1", None),
+            proposal_id="prop-20260713T123000Z-abcdef12",
+            created_at="2026-07-13T12:30:00Z",
+        )
 
 def test_invalid_target_path_rejected(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
     with pytest.raises(ValueError, match="Target path must be within the canonical wiki area"):

@@ -254,6 +254,12 @@ After the MCP client connects, an ingestion request such as “Ingest
 `ingestion_create_wiki_proposal`. The default result is a draft proposal. The
 server does not infer permission to submit, approve, or apply it.
 
+If the explicit wiki target already exists, read it with `vault_read_markdown`
+and use `ingestion_update_wiki_section_proposal` with one unique ATX heading and
+its replacement body. Supply heading text without `#` markers. This produces a
+base-hash-bound draft patch and preserves the rest of the note; it does not
+perform a whole-note semantic merge.
+
 This is the only supported agent-assisted ingestion route. The connected agent
 supplies semantic interpretation; LifeOS does not accept a model name, provider
 API key, or environment-based model configuration. The MCP workflow refreshes

@@ -10,9 +10,13 @@ from .errors import (
 from .models import ToolDescriptor, ToolEffect
 from .proposal_tools import (
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
+    UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
     CreateWikiProposalRequest,
     CreateWikiProposalResult,
+    UpdateWikiSectionProposalRequest,
+    UpdateWikiSectionProposalResult,
     create_wiki_proposal,
+    update_wiki_section_proposal,
 )
 from .read_only import (
     READ_MARKDOWN_DESCRIPTOR,
@@ -28,6 +32,7 @@ from .registry_tools import (
 
 __all__ = [
     "CREATE_WIKI_PROPOSAL_DESCRIPTOR",
+    "UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR",
     "CreateWikiProposalRequest",
     "CreateWikiProposalResult",
     "READ_MARKDOWN_DESCRIPTOR",
@@ -44,7 +49,10 @@ __all__ = [
     "ToolNotFoundError",
     "ToolUnavailableError",
     "ToolValidationError",
+    "UpdateWikiSectionProposalRequest",
+    "UpdateWikiSectionProposalResult",
     "create_wiki_proposal",
     "read_markdown",
     "refresh_registry",
+    "update_wiki_section_proposal",
 ]

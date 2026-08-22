@@ -1,9 +1,11 @@
+import difflib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 import yaml
 import shutil
 import os
+import re
 
 from lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent
 from lifeos.proposals.schema import (
@@ -12,7 +14,12 @@ from lifeos.proposals.schema import (
     ProposalRisk,
 )
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
-from lifeos.proposals.patches import CreateGeneratedFileV2, serialize_patch_json_bytes, PatchDocumentV2
+from lifeos.proposals.patches import (
+    CreateGeneratedFileV2,
+    PatchDocumentV2,
+    PatchHumanFile,
+    serialize_patch_json_bytes,
+)
 from lifeos.registry.file_tracking import validate_vault_path
 from lifeos.ingestion.provenance import provenance_to_frontmatter_value, LifeOSProvenance, ProvenanceSource, ProvenanceGenerator
 from lifeos._atomic_write import atomic_write_file_secure
@@ -27,6 +34,14 @@ class ProposalAlreadyExistsError(ProposalPublicationError):
     pass
 
 class InvalidWikiTargetError(ValueError):
+    pass
+
+
+class InvalidWikiSectionError(ValueError):
+    pass
+
+
+class WikiSectionUnchangedError(Exception):
     pass
 
 def validate_wiki_target_path(target_path: str) -> str:
@@ -45,6 +60,106 @@ class WikiProposalDocuments:
 
 class _WikiFrontmatterDumper(yaml.SafeDumper):
     pass
+
+
+_ATX_HEADING_RE = re.compile(
+    r"^[ \t]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:\r?\n)?$"
+)
+_FENCE_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
+
+
+def _scan_atx_headings(
+    lines: list[str], *, skip_frontmatter: bool
+) -> list[tuple[int, int, str]]:
+    headings: list[tuple[int, int, str]] = []
+    in_frontmatter = False
+    in_fence = False
+    fence_char = ""
+    fence_length = 0
+
+    for index, line in enumerate(lines):
+        clean = line.rstrip("\r\n")
+        if skip_frontmatter and index == 0 and clean.lstrip("\ufeff") == "---":
+            in_frontmatter = True
+            continue
+        if in_frontmatter:
+            if clean == "---":
+                in_frontmatter = False
+            continue
+
+        fence = _FENCE_RE.match(clean)
+        if fence:
+            marker = fence.group(1)
+            if not in_fence:
+                in_fence = True
+                fence_char = marker[0]
+                fence_length = len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_length:
+                in_fence = False
+            continue
+        if in_fence:
+            continue
+
+        match = _ATX_HEADING_RE.match(line)
+        if match is None:
+            continue
+        title = re.sub(r"[ \t]+#+[ \t]*$", "", match.group(2)).strip()
+        headings.append((index, len(match.group(1)), title))
+
+    return headings
+
+
+def replace_wiki_section(*, target_content: str, heading: str, section_body: str) -> str:
+    """Replace one exact ATX-heading section without touching surrounding content."""
+    if not isinstance(heading, str) or not heading or heading.isspace():
+        raise InvalidWikiSectionError("Heading must be a non-empty string")
+    if heading != heading.strip() or "\n" in heading or "\r" in heading:
+        raise InvalidWikiSectionError("Heading must be exact and have no surrounding whitespace")
+    if heading.startswith("#"):
+        raise InvalidWikiSectionError("Heading must not include Markdown # markers")
+    if not isinstance(section_body, str) or not section_body or section_body.isspace():
+        raise InvalidWikiSectionError("Section body must be a non-empty string")
+
+    lines = target_content.splitlines(keepends=True)
+    headings = _scan_atx_headings(lines, skip_frontmatter=True)
+    matches = [item for item in headings if item[2] == heading]
+    if not matches:
+        raise InvalidWikiSectionError(f"Heading was not found: {heading}")
+    if len(matches) != 1:
+        raise InvalidWikiSectionError(f"Heading is not unique: {heading}")
+
+    heading_index, heading_level, _ = matches[0]
+    section_end = len(lines)
+    for index, level, _title in headings:
+        if index > heading_index and level <= heading_level:
+            section_end = index
+            break
+
+    normalized_body = section_body.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    body_headings = _scan_atx_headings(
+        normalized_body.splitlines(keepends=True), skip_frontmatter=False
+    )
+    if any(level <= heading_level for _index, level, _title in body_headings):
+        raise InvalidWikiSectionError(
+            "Section body cannot introduce a peer or parent heading"
+        )
+
+    heading_line = lines[heading_index]
+    if heading_line.endswith("\r\n"):
+        newline = "\r\n"
+    elif heading_line.endswith("\r"):
+        newline = "\r"
+    else:
+        newline = "\n"
+    rendered_body = normalized_body.replace("\n", newline)
+    separator = newline + rendered_body + newline
+    if section_end < len(lines):
+        separator += newline
+
+    prefix = "".join(lines[: heading_index + 1])
+    if not heading_line.endswith(("\n", "\r")):
+        prefix += newline
+    return prefix + separator + "".join(lines[section_end:])
 
 def _represent_string(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
     if len(data) == 20 and data.endswith("Z") and data[10] == "T":
@@ -157,6 +272,127 @@ def build_wiki_proposal(
         patches_json=patches_json_bytes,
     )
 
+
+def build_wiki_section_update_proposal(
+    *,
+    source: SourceSnapshot,
+    target_path: str,
+    target_content: str,
+    target_content_hash: str,
+    heading: str,
+    section_body: str,
+    generator: ProvenanceGenerator,
+    proposal_id: str,
+    created_at: str,
+) -> WikiProposalDocuments:
+    norm_target = validate_wiki_target_path(target_path)
+    candidate = replace_wiki_section(
+        target_content=target_content,
+        heading=heading,
+        section_body=section_body,
+    )
+    if candidate == target_content:
+        raise WikiSectionUnchangedError(f"Section already has the proposed content: {heading}")
+
+    diff_lines = tuple(
+        difflib.unified_diff(
+            target_content.splitlines(keepends=True),
+            candidate.splitlines(keepends=True),
+            fromfile=norm_target,
+            tofile=norm_target,
+        )
+    )
+    unified_diff = "".join(diff_lines[2:])
+    patch = PatchHumanFile(
+        id="op-update-wiki-section",
+        target_path=norm_target,
+        base_hash=target_content_hash,
+        unified_diff=unified_diff,
+    )
+    document = PatchDocumentV2(
+        schema_version=2,
+        proposal_id=proposal_id,
+        operations=(patch,),
+    )
+    metadata = ProposalMetadata(
+        id=proposal_id,
+        schema_version=1,
+        patch_schema_version=2,
+        lifecycle_schema_version=1,
+        title=f"Update {norm_target}: {heading}",
+        description=f"Generated by {generator.id} {generator.version}",
+        status=ProposalStatus.DRAFT,
+        risk=ProposalRisk.MEDIUM,
+        created_at=created_at,
+        created_by="agent",
+        submitted_at=None,
+        submitted_by=None,
+        review_digest=None,
+        approved_at=None,
+        approved_by=None,
+        rejected_at=None,
+        rejected_by=None,
+        rejection_reason=None,
+        applied_at=None,
+        applied_by=None,
+        related_goals=(),
+        related_sources=(source.path,),
+        extensions={
+            "ingestion": {
+                "action": "update_wiki_section",
+                "source_hash": source.content_hash,
+                "target_path": norm_target,
+                "heading": heading,
+            }
+        },
+    )
+    proposal_body = (
+        f"Updates the exact `{heading}` section in `{norm_target}` from the registered "
+        f"source `{source.path}`. All surrounding target content is preserved."
+    )
+    proposal_markdown = serialize_proposal_markdown(metadata, proposal_body)
+    proposal_markdown = proposal_markdown.replace(b"\nreview_digest: null\n", b"\n")
+    return WikiProposalDocuments(
+        proposal_id=proposal_id,
+        target_path=norm_target,
+        proposal_markdown=proposal_markdown,
+        patches_json=serialize_patch_json_bytes(document),
+    )
+
+
+def _persist_proposal_documents(
+    *, proposals_root: Path, documents: WikiProposalDocuments
+) -> Path:
+    proposal_dir = proposals_root / documents.proposal_id
+    proposal_created = False
+    publication_complete = False
+    dir_fd = -1
+
+    try:
+        try:
+            proposal_dir.mkdir(parents=False, exist_ok=False)
+            proposal_created = True
+        except FileExistsError as e:
+            raise ProposalAlreadyExistsError(
+                f"Proposal directory already exists: {proposal_dir}"
+            ) from e
+
+        try:
+            dir_fd = os.open(proposal_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            atomic_write_file_secure(dir_fd, "proposal.md", documents.proposal_markdown)
+            atomic_write_file_secure(dir_fd, "patches.json", documents.patches_json)
+            publication_complete = True
+        except OSError as e:
+            raise ProposalPublicationError(f"Failed to write proposal files: {e}") from e
+    finally:
+        if dir_fd != -1:
+            os.close(dir_fd)
+        if proposal_created and not publication_complete:
+            shutil.rmtree(proposal_dir, ignore_errors=True)
+
+    return proposal_dir
+
+
 def persist_wiki_proposal(
     *,
     proposals_root: Path,
@@ -167,32 +403,10 @@ def persist_wiki_proposal(
     if (vault_root / documents.target_path).exists():
         raise WikiTargetExistsError(f"Target path already exists: {documents.target_path}")
 
-    proposal_dir = proposals_root / documents.proposal_id
-    
-    proposal_created = False
-    publication_complete = False
-    dir_fd = -1
+    return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)
 
-    try:
-        try:
-            proposal_dir.mkdir(parents=False, exist_ok=False)
-            proposal_created = True
-        except FileExistsError as e:
-            raise ProposalAlreadyExistsError(f"Proposal directory already exists: {proposal_dir}") from e
 
-        try:
-            dir_fd = os.open(proposal_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            atomic_write_file_secure(dir_fd, "proposal.md", documents.proposal_markdown)
-            atomic_write_file_secure(dir_fd, "patches.json", documents.patches_json)
-            publication_complete = True
-        except OSError as e:
-            raise ProposalPublicationError(f"Failed to write proposal files: {e}") from e
-
-    finally:
-        if dir_fd != -1:
-            os.close(dir_fd)
-            
-        if proposal_created and not publication_complete:
-            shutil.rmtree(proposal_dir, ignore_errors=True)
-            
-    return proposal_dir
+def persist_wiki_section_update_proposal(
+    *, proposals_root: Path, documents: WikiProposalDocuments
+) -> Path:
+    return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)

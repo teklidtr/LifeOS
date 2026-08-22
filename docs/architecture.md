@@ -54,10 +54,12 @@ Agents do not silently promote interpretations into truth.
 
 LifeOS does not embed an ingestion model client or accept provider API keys.
 External agents connect through the local STDIO MCP adapter, read an explicitly
-registered source, synthesize a grounded draft, and submit only the bounded
-title and body fields to the proposal-producing facade. LifeOS independently
-owns source verification, hashes, proposal identity, provenance, lifecycle
-state, and persistence.
+registered source, and synthesize a grounded draft. For an absent wiki target,
+the agent submits only bounded title and body fields. For an existing human-owned
+wiki note, it may submit one exact ATX heading and its replacement body; LifeOS
+constructs a base-hash-bound `patch_human_file` proposal while preserving all
+surrounding bytes. LifeOS independently owns source verification, hashes,
+proposal identity, provenance, lifecycle state, and persistence.
 
 ### Human layer
 

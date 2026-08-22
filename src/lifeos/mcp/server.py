@@ -33,8 +33,11 @@ from lifeos.facade.errors import (
 )
 from lifeos.facade.proposal_tools import (
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
+    UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
     CreateWikiProposalRequest,
+    UpdateWikiSectionProposalRequest,
     create_wiki_proposal,
+    update_wiki_section_proposal,
 )
 from lifeos.facade.read_only import READ_MARKDOWN_DESCRIPTOR, ReadMarkdownRequest, read_markdown
 from lifeos.facade.registry_tools import (
@@ -49,6 +52,7 @@ from lifeos.mcp.models import (
     ReadMarkdownMCPResult,
     RegistryRefreshMCPResult,
     SubmitProposalMCPResult,
+    UpdateWikiSectionProposalMCPResult,
 )
 from lifeos.registry import Registry
 
@@ -58,9 +62,11 @@ T = TypeVar("T")
 
 LIFEOS_MCP_INSTRUCTIONS = (
     "LifeOS keeps Markdown canonical. For ingestion requests, first call registry_refresh "
-    "to register the source's current path and hash, then call vault_read_markdown, "
-    "synthesize a grounded title and body "
-    "from that content, then call ingestion_create_wiki_proposal. Stop after the draft "
+    "to register the source's current path and hash, then call vault_read_markdown for "
+    "the source. To create an absent wiki target, synthesize a grounded title and body "
+    "and call ingestion_create_wiki_proposal. To update an existing wiki note, also read "
+    "that target, synthesize the replacement body for one exact heading, and call "
+    "ingestion_update_wiki_section_proposal. Stop after the draft "
     "proposal unless the user explicitly requests another exact lifecycle transition. "
     "Never call proposal_submit, proposal_approve, or proposal_apply merely because an "
     "ingestion was requested. Use vault-relative paths and never directly rewrite "
@@ -80,6 +86,12 @@ CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{CREATE_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown and "
     "supply a source-grounded title and body. This creates a draft and does not modify "
     "the target wiki note."
+)
+UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
+    f"{UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
+    "has inspected both the registered source and existing target. Supply the exact "
+    "heading text without # markers and only its replacement body. This creates a "
+    "base-hash-bound draft and does not modify the target wiki note."
 )
 SUBMIT_PROPOSAL_MCP_DESCRIPTION = (
     f"{SUBMIT_PROPOSAL_DESCRIPTOR.description} Call only when the user explicitly requests "
@@ -205,6 +217,30 @@ def create_mcp_server(
 
         return _invoke_mcp_tool(op)
 
+    def ingestion_update_wiki_section_proposal_tool(
+        source_path: str, target_path: str, heading: str, body: str
+    ) -> UpdateWikiSectionProposalMCPResult:
+        def op() -> UpdateWikiSectionProposalMCPResult:
+            res = update_wiki_section_proposal(
+                vault_root=vault_root,
+                registry=registry,
+                request=UpdateWikiSectionProposalRequest(
+                    source_path=source_path,
+                    target_path=target_path,
+                    heading=heading,
+                    body=body,
+                ),
+            )
+            return {
+                "proposal_id": res.proposal_id,
+                "proposal_path": res.proposal_path,
+                "target_path": res.target_path,
+                "heading": res.heading,
+                "status": "draft",
+            }
+
+        return _invoke_mcp_tool(op)
+
     def proposal_submit_tool(proposal_id: str) -> SubmitProposalMCPResult:
         def op() -> SubmitProposalMCPResult:
             res = submit_proposal_tool(
@@ -284,6 +320,18 @@ def create_mcp_server(
                 description=CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION,
                 annotations=ToolAnnotations(
                     title="Create wiki ingestion proposal",
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=False,
+                    openWorldHint=False,
+                ),
+            ),
+            _strict_tool(
+                ingestion_update_wiki_section_proposal_tool,
+                name="ingestion_update_wiki_section_proposal",
+                description=UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Update wiki section ingestion proposal",
                     readOnlyHint=False,
                     destructiveHint=False,
                     idempotentHint=False,

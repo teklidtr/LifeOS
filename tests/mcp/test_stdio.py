@@ -44,6 +44,7 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
                 "registry_refresh",
                 "vault_read_markdown",
                 "ingestion_create_wiki_proposal",
+                "ingestion_update_wiki_section_proposal",
                 "proposal_submit",
                 "proposal_approve",
                 "proposal_apply",
@@ -56,4 +57,8 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             assert advertised["registry_refresh"].annotations.idempotentHint is True
             assert advertised["vault_read_markdown"].annotations.readOnlyHint is True
             assert advertised["ingestion_create_wiki_proposal"].annotations.destructiveHint is False
+            assert (
+                advertised["ingestion_update_wiki_section_proposal"].annotations.destructiveHint
+                is False
+            )
             assert advertised["proposal_apply"].annotations.destructiveHint is True

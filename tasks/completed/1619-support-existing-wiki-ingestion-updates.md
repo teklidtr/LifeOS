@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1619
 title: Support existing wiki section updates during ingestion
-status: ready
+status: completed
 milestone: maintenance
 depends_on: [LIFEOS-111, LIFEOS-113.3, LIFEOS-115.1, LIFEOS-1613]
 ---
@@ -71,3 +71,28 @@ git diff --check
 - DD-036: Python is the sole business-rule engine.
 - DD-037: the Obsidian plugin remains a thin desktop client.
 - DD-079: agent-assisted ingestion is MCP-only.
+
+# Implementation record
+
+- Added `ingestion_update_wiki_section_proposal` as a strict MCP tool backed by
+  the typed facade.
+- Added deterministic ATX-heading selection that ignores fenced-code headings,
+  requires one exact match, preserves surrounding bytes, and rejects replacement
+  bodies that introduce peer or parent headings.
+- Added a source-linked, medium-risk `patch_human_file` proposal bound to the
+  target's current SHA-256 hash.
+- Preserved the existing create-only tool unchanged and documented the explicit
+  absent-target versus existing-section routing decision.
+- Added builder, facade, MCP schema/delegation, STDIO advertisement, and complete
+  submit/approve/apply lifecycle coverage.
+
+# Validation record
+
+- Focused ingestion, facade, MCP, and lifecycle suites: 154 passed before the
+  final schema assertion; the final task-scoped run passed 155 tests.
+- Full regression suite: 1,389 passed in the sandbox; its sole blocked UNIX
+  socket case passed separately with system permission (3 parametrized cases).
+- Task-scoped Ruff: passed.
+- Task-scoped strict mypy: passed across all changed source files.
+- Manual links: all links across 14 chapters validated.
+- `git diff --check`: passed.

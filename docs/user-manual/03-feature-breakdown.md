@@ -386,8 +386,13 @@ The connected agent must use the advertised tools in this order:
 ```text
 registry_refresh
   → vault_read_markdown
-  → agent synthesizes a source-grounded title and body
-  → ingestion_create_wiki_proposal
+  → if the wiki target is absent:
+      agent synthesizes a source-grounded title and body
+      → ingestion_create_wiki_proposal
+  → if one section of an existing wiki target must change:
+      vault_read_markdown on the target
+      → agent synthesizes that exact section's replacement body
+      → ingestion_update_wiki_section_proposal
   → stop at draft
 ```
 
@@ -396,9 +401,11 @@ registry_refresh
 The MCP adapter reads the canonical source through the bounded facade. The
 external agent interprets the source, while LifeOS verifies its registered
 identity and current hash, validates the supplied fields, creates a draft
-proposal, and records provenance. It does not directly overwrite the target
-wiki page, and ingestion alone never implies permission to submit, approve, or
-apply the proposal.
+proposal, and records provenance. Existing-note updates require one unique ATX
+heading (the heading text is supplied without `#` markers) and produce a
+base-hash-bound human-file patch that preserves every surrounding section. It
+does not directly overwrite the target wiki page, and ingestion alone never
+implies permission to submit, approve, or apply the proposal.
 
 ## 3.11 Proposal lifecycle, ownership, and recovery
 
@@ -476,9 +483,11 @@ When an MCP client receives an ingestion request, the LifeOS server advertises
 the bounded workflow explicitly: refresh the disposable registry with
 `registry_refresh`, read the registered source with `vault_read_markdown`,
 synthesize a source-grounded title and body, call
-`ingestion_create_wiki_proposal`, and stop at the resulting draft. Submission,
-approval, and application each require a separate explicit user request and
-retain trusted interactive authorization.
+`ingestion_create_wiki_proposal` for an absent target, or read the existing
+target and call `ingestion_update_wiki_section_proposal` for one exact section.
+Both paths stop at the resulting draft. Submission, approval, and application
+each require a separate explicit user request and retain trusted interactive
+authorization.
 
 ## 3.13 Graph views
 

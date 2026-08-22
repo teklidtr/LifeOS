@@ -403,7 +403,10 @@ SHA-256 identifies exact binary duplicates independently of filenames. Same-name
 LifeOS does not embed an ingestion model runtime, accept provider API keys, or
 expose a standalone semantic-ingestion CLI command. An external agent reads an
 explicitly registered source through the local STDIO MCP adapter, synthesizes a
-grounded title and body, and calls the bounded proposal-producing tool. LifeOS
-independently verifies the source and owns hashes, proposal identity,
-provenance, lifecycle state, and persistence. Ingestion stops at draft unless
-the user separately requests an exact lifecycle transition.
+grounded result, and calls a bounded proposal-producing tool. An absent wiki
+target uses title-and-body creation. An existing human-owned wiki note uses an
+explicit single-heading replacement whose patch is bound to the current target
+hash; LifeOS does not perform autonomous whole-note merging. LifeOS independently
+verifies the source and owns hashes, proposal identity, provenance, lifecycle
+state, and persistence. Ingestion stops at draft unless the user separately
+requests an exact lifecycle transition.
