@@ -10,14 +10,18 @@ from dataclasses import replace
 from lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent
 from lifeos.ingestion.provenance import ProvenanceGenerator
 from lifeos.ingestion.proposals import (
+    CompoundWikiProposalDocuments,
     InvalidWikiSectionError,
     InvalidWikiTargetError,
     ProposalAlreadyExistsError,
     ProposalPublicationError,
     WikiProposalDocuments,
     WikiSectionUnchangedError,
+    WikiTargetExistsError,
+    build_compound_wiki_proposal,
     build_wiki_proposal,
     build_wiki_section_update_proposal,
+    persist_compound_wiki_proposal,
     persist_wiki_proposal,
     replace_wiki_section,
     validate_wiki_target_path,
@@ -287,6 +291,73 @@ def test_section_update_builder_rejects_no_effect(sample_source: SourceSnapshot)
             proposal_id="prop-20260713T123000Z-abcdef12",
             created_at="2026-07-13T12:30:00Z",
         )
+
+
+def test_compound_builder_emits_create_then_hash_bound_section_patch(
+    sample_content: WikiProposalContent,
+    sample_source: SourceSnapshot,
+) -> None:
+    original = "# First Aid\n\n## Equipment notes\n\nOld.\n\n## Keep\n\nSame.\n"
+    target_hash = "sha256:" + "b" * 64
+
+    documents = build_compound_wiki_proposal(
+        content=sample_content,
+        source=sample_source,
+        create_target_path="wiki/equipment.md",
+        update_target_path="wiki/first-aid.md",
+        update_target_content=original,
+        update_target_content_hash=target_hash,
+        heading="Equipment notes",
+        section_body="See [[equipment]] for the verified list.",
+        proposal_id="prop-20260713T123000Z-abcdef12",
+        created_at="2026-07-13T12:30:00Z",
+    )
+
+    operations = json.loads(documents.patches_json)["operations"]
+    assert [operation["op"] for operation in operations] == [
+        "create_generated_file",
+        "patch_human_file",
+    ]
+    assert operations[0]["target_path"] == "wiki/equipment.md"
+    assert operations[0]["expected_target_state"] == "absent"
+    assert operations[1]["target_path"] == "wiki/first-aid.md"
+    assert operations[1]["base_hash"] == target_hash
+    assert "See [[equipment]]" in apply_diff(original, operations[1]["unified_diff"])
+
+    parsed = parse_markdown_note(
+        Path("proposal.md"), content=documents.proposal_markdown.decode()
+    )
+    ingestion = parsed.frontmatter["extensions"]["ingestion"]
+    assert parsed.frontmatter["risk"] == "medium"
+    assert parsed.frontmatter["related_sources"] == [sample_source.path]
+    assert ingestion == {
+        "action": "create_wiki_and_update_section",
+        "source_hash": sample_source.content_hash,
+        "create_target_path": "wiki/equipment.md",
+        "update_target_path": "wiki/first-aid.md",
+        "heading": "Equipment notes",
+    }
+
+
+def test_compound_persistence_rejects_present_create_target(tmp_path: Path) -> None:
+    proposals_root = tmp_path / "proposals"
+    proposals_root.mkdir()
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "existing.md").write_text("Existing.\n")
+    documents = CompoundWikiProposalDocuments(
+        proposal_id="prop-20260713T123000Z-abcdef12",
+        create_target_path="wiki/existing.md",
+        update_target_path="wiki/update.md",
+        proposal_markdown=b"proposal",
+        patches_json=b"{}",
+    )
+
+    with pytest.raises(WikiTargetExistsError, match="Target path already exists"):
+        persist_compound_wiki_proposal(
+            proposals_root=proposals_root,
+            documents=documents,
+        )
+    assert not (proposals_root / documents.proposal_id).exists()
 
 def test_invalid_target_path_rejected(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
     with pytest.raises(ValueError, match="Target path must be within the canonical wiki area"):

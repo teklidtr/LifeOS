@@ -32,10 +32,13 @@ from lifeos.facade.errors import (
     ToolValidationError,
 )
 from lifeos.facade.proposal_tools import (
+    COMPOUND_WIKI_PROPOSAL_DESCRIPTOR,
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
     UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
+    CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
     UpdateWikiSectionProposalRequest,
+    create_wiki_and_update_section_proposal,
     create_wiki_proposal,
     update_wiki_section_proposal,
 )
@@ -48,6 +51,7 @@ from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.mcp.models import (
     ApplyProposalMCPResult,
     ApproveProposalMCPResult,
+    CompoundWikiProposalMCPResult,
     CreateWikiProposalMCPResult,
     ReadMarkdownMCPResult,
     RegistryRefreshMCPResult,
@@ -64,7 +68,10 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "LifeOS keeps Markdown canonical. For ingestion requests, first call registry_refresh "
     "to register the source's current path and hash, then call vault_read_markdown for "
     "the source. To create an absent wiki target, synthesize a grounded title and body "
-    "and call ingestion_create_wiki_proposal. To update an existing wiki note, also read "
+    "and call ingestion_create_wiki_proposal. When one ingestion should both create a "
+    "detailed wiki page and update one exact section in an existing wiki note, also read "
+    "that existing target and call ingestion_create_wiki_and_update_section_proposal. "
+    "To update only an existing wiki note, also read "
     "that target, synthesize the replacement body for one exact heading, and call "
     "ingestion_update_wiki_section_proposal. Stop after the draft "
     "proposal unless the user explicitly requests another exact lifecycle transition. "
@@ -92,6 +99,13 @@ UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
     "has inspected both the registered source and existing target. Supply the exact "
     "heading text without # markers and only its replacement body. This creates a "
     "base-hash-bound draft and does not modify the target wiki note."
+)
+COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION = (
+    f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
+    "has inspected both the registered source and existing update target. Supply the "
+    "absent create target with its grounded title and body, plus one exact heading and "
+    "replacement body for the existing target. This creates one atomic two-operation "
+    "draft and does not modify either target."
 )
 SUBMIT_PROPOSAL_MCP_DESCRIPTION = (
     f"{SUBMIT_PROPOSAL_DESCRIPTOR.description} Call only when the user explicitly requests "
@@ -241,6 +255,40 @@ def create_mcp_server(
 
         return _invoke_mcp_tool(op)
 
+    def ingestion_create_wiki_and_update_section_proposal_tool(
+        source_path: str,
+        create_target_path: str,
+        create_title: str,
+        create_body: str,
+        update_target_path: str,
+        update_heading: str,
+        update_body: str,
+    ) -> CompoundWikiProposalMCPResult:
+        def op() -> CompoundWikiProposalMCPResult:
+            res = create_wiki_and_update_section_proposal(
+                vault_root=vault_root,
+                registry=registry,
+                request=CompoundWikiProposalRequest(
+                    source_path=source_path,
+                    create_target_path=create_target_path,
+                    create_title=create_title,
+                    create_body=create_body,
+                    update_target_path=update_target_path,
+                    update_heading=update_heading,
+                    update_body=update_body,
+                ),
+            )
+            return {
+                "proposal_id": res.proposal_id,
+                "proposal_path": res.proposal_path,
+                "create_target_path": res.create_target_path,
+                "update_target_path": res.update_target_path,
+                "heading": res.heading,
+                "status": "draft",
+            }
+
+        return _invoke_mcp_tool(op)
+
     def proposal_submit_tool(proposal_id: str) -> SubmitProposalMCPResult:
         def op() -> SubmitProposalMCPResult:
             res = submit_proposal_tool(
@@ -332,6 +380,18 @@ def create_mcp_server(
                 description=UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION,
                 annotations=ToolAnnotations(
                     title="Update wiki section ingestion proposal",
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=False,
+                    openWorldHint=False,
+                ),
+            ),
+            _strict_tool(
+                ingestion_create_wiki_and_update_section_proposal_tool,
+                name="ingestion_create_wiki_and_update_section_proposal",
+                description=COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Create wiki and update section ingestion proposal",
                     readOnlyHint=False,
                     destructiveHint=False,
                     idempotentHint=False,

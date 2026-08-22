@@ -9,12 +9,16 @@ from .errors import (
 )
 from .models import ToolDescriptor, ToolEffect
 from .proposal_tools import (
+    COMPOUND_WIKI_PROPOSAL_DESCRIPTOR,
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
     UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
+    CompoundWikiProposalRequest,
+    CompoundWikiProposalResult,
     CreateWikiProposalRequest,
     CreateWikiProposalResult,
     UpdateWikiSectionProposalRequest,
     UpdateWikiSectionProposalResult,
+    create_wiki_and_update_section_proposal,
     create_wiki_proposal,
     update_wiki_section_proposal,
 )
@@ -31,8 +35,11 @@ from .registry_tools import (
 )
 
 __all__ = [
+    "COMPOUND_WIKI_PROPOSAL_DESCRIPTOR",
     "CREATE_WIKI_PROPOSAL_DESCRIPTOR",
     "UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR",
+    "CompoundWikiProposalRequest",
+    "CompoundWikiProposalResult",
     "CreateWikiProposalRequest",
     "CreateWikiProposalResult",
     "READ_MARKDOWN_DESCRIPTOR",
@@ -51,6 +58,7 @@ __all__ = [
     "ToolValidationError",
     "UpdateWikiSectionProposalRequest",
     "UpdateWikiSectionProposalResult",
+    "create_wiki_and_update_section_proposal",
     "create_wiki_proposal",
     "read_markdown",
     "refresh_registry",

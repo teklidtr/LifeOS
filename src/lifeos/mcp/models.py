@@ -31,6 +31,15 @@ class UpdateWikiSectionProposalMCPResult(TypedDict):
     status: Literal["draft"]
 
 
+class CompoundWikiProposalMCPResult(TypedDict):
+    proposal_id: str
+    proposal_path: str
+    create_target_path: str
+    update_target_path: str
+    heading: str
+    status: Literal["draft"]
+
+
 class SubmitProposalMCPResult(TypedDict):
     proposal_id: str
     status: Literal["pending"]

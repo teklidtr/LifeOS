@@ -58,6 +58,15 @@ class WikiProposalDocuments:
     proposal_markdown: bytes
     patches_json: bytes
 
+
+@dataclass(frozen=True, slots=True)
+class CompoundWikiProposalDocuments:
+    proposal_id: str
+    create_target_path: str
+    update_target_path: str
+    proposal_markdown: bytes
+    patches_json: bytes
+
 class _WikiFrontmatterDumper(yaml.SafeDumper):
     pass
 
@@ -182,6 +191,63 @@ def _serialize_wiki_frontmatter(metadata: dict[str, Any]) -> str:
         rendered += "\n"
     return f"---\n{rendered}---\n"
 
+
+def _build_generated_wiki_candidate(
+    *, content: WikiProposalContent, source: SourceSnapshot, created_at: str
+) -> str:
+    provenance = LifeOSProvenance(
+        schema_version=1,
+        sources=(
+            ProvenanceSource(path=source.path, content_hash=source.content_hash),
+        ),
+        generator=ProvenanceGenerator(
+            id=content.generator.id,
+            version=content.generator.version,
+            prompt_schema_version=content.generator.prompt_schema_version,
+            model_id=content.generator.model_id,
+        ),
+        created_at=created_at,
+    )
+    frontmatter = {
+        "title": content.title,
+        "lifeos_provenance": provenance_to_frontmatter_value(provenance),
+    }
+    candidate = _serialize_wiki_frontmatter(frontmatter) + content.body
+    return candidate if candidate.endswith("\n") else candidate + "\n"
+
+
+def _build_wiki_section_patch(
+    *,
+    target_path: str,
+    target_content: str,
+    target_content_hash: str,
+    heading: str,
+    section_body: str,
+) -> PatchHumanFile:
+    candidate = replace_wiki_section(
+        target_content=target_content,
+        heading=heading,
+        section_body=section_body,
+    )
+    if candidate == target_content:
+        raise WikiSectionUnchangedError(
+            f"Section already has the proposed content: {heading}"
+        )
+    diff_lines = tuple(
+        difflib.unified_diff(
+            target_content.splitlines(keepends=True),
+            candidate.splitlines(keepends=True),
+            fromfile=target_path,
+            tofile=target_path,
+        )
+    )
+    return PatchHumanFile(
+        id="op-update-wiki-section",
+        target_path=target_path,
+        base_hash=target_content_hash,
+        unified_diff="".join(diff_lines[2:]),
+    )
+
 def build_wiki_proposal(
     *,
     content: WikiProposalContent,
@@ -192,29 +258,13 @@ def build_wiki_proposal(
 ) -> WikiProposalDocuments:
     # 1. Validate target
     norm_target = validate_wiki_target_path(target_path)
-    
-    
-    # 2. Build canonical provenance
-    provenance = LifeOSProvenance(
-        schema_version=1,
-        sources=(ProvenanceSource(path=source.path, content_hash=source.content_hash),),
-        generator=ProvenanceGenerator(
-            id=content.generator.id,
-            version=content.generator.version,
-            prompt_schema_version=content.generator.prompt_schema_version,
-            model_id=content.generator.model_id,
-        ),
+
+    # 2. Construct generated candidate Markdown with canonical provenance.
+    candidate_markdown = _build_generated_wiki_candidate(
+        content=content,
+        source=source,
         created_at=created_at,
     )
-    
-    # 3. Construct candidate markdown
-    frontmatter = {
-        "title": content.title,
-        "lifeos_provenance": provenance_to_frontmatter_value(provenance),
-    }
-    candidate_markdown = _serialize_wiki_frontmatter(frontmatter) + content.body
-    if not candidate_markdown.endswith("\n"):
-        candidate_markdown += "\n"
 
     # 4. Construct Proposal metadata
     # The proposal title identifies the proposed wiki target or draft title
@@ -286,28 +336,12 @@ def build_wiki_section_update_proposal(
     created_at: str,
 ) -> WikiProposalDocuments:
     norm_target = validate_wiki_target_path(target_path)
-    candidate = replace_wiki_section(
+    patch = _build_wiki_section_patch(
+        target_path=norm_target,
         target_content=target_content,
+        target_content_hash=target_content_hash,
         heading=heading,
         section_body=section_body,
-    )
-    if candidate == target_content:
-        raise WikiSectionUnchangedError(f"Section already has the proposed content: {heading}")
-
-    diff_lines = tuple(
-        difflib.unified_diff(
-            target_content.splitlines(keepends=True),
-            candidate.splitlines(keepends=True),
-            fromfile=norm_target,
-            tofile=norm_target,
-        )
-    )
-    unified_diff = "".join(diff_lines[2:])
-    patch = PatchHumanFile(
-        id="op-update-wiki-section",
-        target_path=norm_target,
-        base_hash=target_content_hash,
-        unified_diff=unified_diff,
     )
     document = PatchDocumentV2(
         schema_version=2,
@@ -360,8 +394,105 @@ def build_wiki_section_update_proposal(
     )
 
 
+def build_compound_wiki_proposal(
+    *,
+    content: WikiProposalContent,
+    source: SourceSnapshot,
+    create_target_path: str,
+    update_target_path: str,
+    update_target_content: str,
+    update_target_content_hash: str,
+    heading: str,
+    section_body: str,
+    proposal_id: str,
+    created_at: str,
+) -> CompoundWikiProposalDocuments:
+    norm_create_target = validate_wiki_target_path(create_target_path)
+    norm_update_target = validate_wiki_target_path(update_target_path)
+    if norm_create_target == norm_update_target:
+        raise InvalidWikiTargetError("Create and update targets must be different")
+
+    candidate_markdown = _build_generated_wiki_candidate(
+        content=content,
+        source=source,
+        created_at=created_at,
+    )
+    create_patch = CreateGeneratedFileV2(
+        id="op-create-wiki-page",
+        target_path=norm_create_target,
+        expected_target_state="absent",
+        generator_id=content.generator.id,
+        generator_version=content.generator.version,
+        new_content=candidate_markdown,
+    )
+    section_patch = _build_wiki_section_patch(
+        target_path=norm_update_target,
+        target_content=update_target_content,
+        target_content_hash=update_target_content_hash,
+        heading=heading,
+        section_body=section_body,
+    )
+    document = PatchDocumentV2(
+        schema_version=2,
+        proposal_id=proposal_id,
+        operations=(create_patch, section_patch),
+    )
+    metadata = ProposalMetadata(
+        id=proposal_id,
+        schema_version=1,
+        patch_schema_version=2,
+        lifecycle_schema_version=1,
+        title=(
+            f"Create {norm_create_target}: {content.title}; update "
+            f"{norm_update_target}: {heading}"
+        ),
+        description=f"Generated by {content.generator.id} {content.generator.version}",
+        status=ProposalStatus.DRAFT,
+        risk=ProposalRisk.MEDIUM,
+        created_at=created_at,
+        created_by="agent",
+        submitted_at=None,
+        submitted_by=None,
+        review_digest=None,
+        approved_at=None,
+        approved_by=None,
+        rejected_at=None,
+        rejected_by=None,
+        rejection_reason=None,
+        applied_at=None,
+        applied_by=None,
+        related_goals=(),
+        related_sources=(source.path,),
+        extensions={
+            "ingestion": {
+                "action": "create_wiki_and_update_section",
+                "source_hash": source.content_hash,
+                "create_target_path": norm_create_target,
+                "update_target_path": norm_update_target,
+                "heading": heading,
+            }
+        },
+    )
+    proposal_body = (
+        f"Creates the detailed wiki page `{norm_create_target}` and updates the exact "
+        f"`{heading}` section in `{norm_update_target}` from the registered source "
+        f"`{source.path}`. Both changes remain one atomic proposal."
+    )
+    proposal_markdown = serialize_proposal_markdown(metadata, proposal_body)
+    proposal_markdown = proposal_markdown.replace(b"\nreview_digest: null\n", b"\n")
+    return CompoundWikiProposalDocuments(
+        proposal_id=proposal_id,
+        create_target_path=norm_create_target,
+        update_target_path=norm_update_target,
+        proposal_markdown=proposal_markdown,
+        patches_json=serialize_patch_json_bytes(document),
+    )
+
+
 def _persist_proposal_documents(
-    *, proposals_root: Path, documents: WikiProposalDocuments
+    *,
+    proposals_root: Path,
+    documents: WikiProposalDocuments | CompoundWikiProposalDocuments,
 ) -> Path:
     proposal_dir = proposals_root / documents.proposal_id
     proposal_created = False
@@ -409,4 +540,15 @@ def persist_wiki_proposal(
 def persist_wiki_section_update_proposal(
     *, proposals_root: Path, documents: WikiProposalDocuments
 ) -> Path:
+    return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)
+
+
+def persist_compound_wiki_proposal(
+    *, proposals_root: Path, documents: CompoundWikiProposalDocuments
+) -> Path:
+    vault_root = proposals_root.parent
+    if (vault_root / documents.create_target_path).exists():
+        raise WikiTargetExistsError(
+            f"Target path already exists: {documents.create_target_path}"
+        )
     return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)

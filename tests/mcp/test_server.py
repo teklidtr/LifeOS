@@ -17,6 +17,7 @@ from lifeos.facade.errors import (
 )
 from lifeos.facade.read_only import ReadMarkdownRequest
 from lifeos.facade.proposal_tools import (
+    CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
     UpdateWikiSectionProposalRequest,
 )
@@ -32,6 +33,7 @@ def test_server_registers_only_approved_tools() -> None:
         "registry_refresh",
         "vault_read_markdown",
         "ingestion_create_wiki_proposal",
+        "ingestion_create_wiki_and_update_section_proposal",
         "ingestion_update_wiki_section_proposal",
         "proposal_submit",
         "proposal_approve",
@@ -60,6 +62,7 @@ def test_server_advertises_safe_ingestion_workflow() -> None:
     assert "first call registry_refresh" in server.instructions
     assert "then call vault_read_markdown" in server.instructions
     assert "call ingestion_create_wiki_proposal" in server.instructions
+    assert "call ingestion_create_wiki_and_update_section_proposal" in server.instructions
     assert "call ingestion_update_wiki_section_proposal" in server.instructions
     assert "Stop after the draft proposal" in server.instructions
     assert "Never call proposal_submit, proposal_approve, or proposal_apply" in server.instructions
@@ -80,6 +83,9 @@ def test_tools_advertise_workflow_specific_descriptions() -> None:
         "ingestion_update_wiki_section_proposal"
     ].description
     assert "base-hash-bound draft" in tools["ingestion_update_wiki_section_proposal"].description
+    assert "atomic two-operation draft" in tools[
+        "ingestion_create_wiki_and_update_section_proposal"
+    ].description
     assert "explicitly requests" in tools["proposal_submit"].description
     assert "explicitly requests" in tools["proposal_approve"].description
     assert "changes canonical vault content" in tools["proposal_apply"].description
@@ -109,6 +115,12 @@ def test_tools_advertise_accurate_safety_annotations() -> None:
     assert tools["ingestion_create_wiki_proposal"].annotations.idempotentHint is False
     assert tools["ingestion_update_wiki_section_proposal"].annotations.destructiveHint is False
     assert tools["ingestion_update_wiki_section_proposal"].annotations.idempotentHint is False
+    assert tools[
+        "ingestion_create_wiki_and_update_section_proposal"
+    ].annotations.destructiveHint is False
+    assert tools[
+        "ingestion_create_wiki_and_update_section_proposal"
+    ].annotations.idempotentHint is False
     assert tools["proposal_submit"].annotations.destructiveHint is False
     assert tools["proposal_approve"].annotations.destructiveHint is False
     assert tools["proposal_apply"].annotations.destructiveHint is True
@@ -135,6 +147,26 @@ def test_update_ingestion_schema_exposes_only_bounded_fields() -> None:
         "target_path",
         "heading",
         "body",
+    }
+    assert tool.parameters["additionalProperties"] is False
+
+
+def test_compound_ingestion_schema_exposes_only_bounded_fields() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tool = server._tool_manager.get_tool(
+        "ingestion_create_wiki_and_update_section_proposal"
+    )
+
+    assert set(tool.parameters["properties"]) == {
+        "source_path",
+        "create_target_path",
+        "create_title",
+        "create_body",
+        "update_target_path",
+        "update_heading",
+        "update_body",
     }
     assert tool.parameters["additionalProperties"] is False
 
@@ -248,6 +280,55 @@ def test_update_wiki_section_proposal_delegates_to_facade(mock_facade) -> None:
         "proposal_path": "prop/path",
         "target_path": "wiki/target.md",
         "heading": "Selected",
+        "status": "draft",
+    }
+
+
+@patch("lifeos.mcp.server.create_wiki_and_update_section_proposal")
+def test_compound_wiki_proposal_delegates_to_facade(mock_facade) -> None:
+    mock_facade.return_value = MagicMock(
+        proposal_id="prop1",
+        proposal_path="proposals/prop1",
+        create_target_path="wiki/detail.md",
+        update_target_path="wiki/summary.md",
+        heading="Equipment notes",
+    )
+    registry = MagicMock()
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+    )
+
+    result = server._tool_manager.get_tool(
+        "ingestion_create_wiki_and_update_section_proposal"
+    ).fn(
+        source_path="study/source.md",
+        create_target_path="wiki/detail.md",
+        create_title="Detail",
+        create_body="Detailed body",
+        update_target_path="wiki/summary.md",
+        update_heading="Equipment notes",
+        update_body="See [[detail]].",
+    )
+
+    mock_facade.assert_called_once_with(
+        vault_root=Path("/fake"),
+        registry=registry,
+        request=CompoundWikiProposalRequest(
+            source_path="study/source.md",
+            create_target_path="wiki/detail.md",
+            create_title="Detail",
+            create_body="Detailed body",
+            update_target_path="wiki/summary.md",
+            update_heading="Equipment notes",
+            update_body="See [[detail]].",
+        ),
+    )
+    assert result == {
+        "proposal_id": "prop1",
+        "proposal_path": "proposals/prop1",
+        "create_target_path": "wiki/detail.md",
+        "update_target_path": "wiki/summary.md",
+        "heading": "Equipment notes",
         "status": "draft",
     }
 

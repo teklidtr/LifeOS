@@ -25,8 +25,10 @@ from lifeos.ingestion.orchestration import (
     VerifiedRegisteredSource,
 )
 from lifeos.ingestion.proposals import (
+    build_compound_wiki_proposal,
     build_wiki_section_update_proposal,
     build_wiki_proposal,
+    persist_compound_wiki_proposal,
     persist_wiki_section_update_proposal,
     persist_wiki_proposal,
     InvalidWikiSectionError,
@@ -40,6 +42,7 @@ from lifeos.ingestion.proposals import (
 from lifeos.proposals.schema import generate_proposal_id
 from lifeos.ingestion.drafts import WikiProposalContent
 from lifeos.ingestion.provenance import ProvenanceGenerator
+from lifeos.markdown.parser import parse_markdown_note
 from lifeos.registry.file_tracking import hash_file_content
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
@@ -53,6 +56,15 @@ CREATE_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
 UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     name="ingestion.update_wiki_section_proposal",
     description="Create a reviewable draft proposal for one existing wiki section.",
+    effect=ToolEffect.PROPOSAL_PRODUCING,
+)
+
+COMPOUND_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
+    name="ingestion.create_wiki_and_update_section_proposal",
+    description=(
+        "Create one reviewable draft that adds a wiki page and updates one "
+        "existing wiki section."
+    ),
     effect=ToolEffect.PROPOSAL_PRODUCING,
 )
 
@@ -121,6 +133,43 @@ class UpdateWikiSectionProposalResult:
     proposal_id: str
     proposal_path: str
     target_path: str
+    heading: str
+    status: Literal["draft"]
+
+
+@dataclass(frozen=True, slots=True)
+class CompoundWikiProposalRequest:
+    source_path: str
+    create_target_path: str
+    create_title: str
+    create_body: str
+    update_target_path: str
+    update_heading: str
+    update_body: str
+
+    def __post_init__(self) -> None:
+        CreateWikiProposalRequest(
+            source_path=self.source_path,
+            target_path=self.create_target_path,
+            title=self.create_title,
+            body=self.create_body,
+        )
+        UpdateWikiSectionProposalRequest(
+            source_path=self.source_path,
+            target_path=self.update_target_path,
+            heading=self.update_heading,
+            body=self.update_body,
+        )
+        if self.create_target_path == self.update_target_path:
+            raise ValueError("create and update targets must be different")
+
+
+@dataclass(frozen=True, slots=True)
+class CompoundWikiProposalResult:
+    proposal_id: str
+    proposal_path: str
+    create_target_path: str
+    update_target_path: str
     heading: str
     status: Literal["draft"]
 
@@ -307,5 +356,103 @@ def update_wiki_section_proposal(
         proposal_path=persisted_path.relative_to(vault_root).as_posix(),
         target_path=documents.target_path,
         heading=request.heading,
+        status="draft",
+    )
+
+
+def create_wiki_and_update_section_proposal(
+    *,
+    vault_root: Path,
+    registry: Registry,
+    request: CompoundWikiProposalRequest,
+    clock_fn: Callable[[], datetime] = _utc_now,
+    random_suffix_fn: Callable[[], str] = _random_suffix,
+) -> CompoundWikiProposalResult:
+    verified = _load_verified_source(
+        vault_root=vault_root,
+        registry=registry,
+        source_path=request.source_path,
+    )
+
+    try:
+        create_target_path = validate_wiki_target_path(request.create_target_path)
+        update_target_path = validate_wiki_target_path(request.update_target_path)
+    except (FileTrackingError, InvalidWikiTargetError) as e:
+        raise ToolValidationError("Invalid wiki target path") from e
+    if create_target_path == update_target_path:
+        raise ToolValidationError("Create and update targets must be different")
+
+    try:
+        update_target = read_vault_markdown(vault_root, update_target_path)
+    except VaultAccessError as e:
+        if e.code == "not-found":
+            raise ToolNotFoundError("Wiki update target is missing") from e
+        if e.code in {"invalid-path", "invalid-extension"}:
+            raise ToolValidationError("Invalid wiki update target path") from e
+        raise ToolExecutionError("Could not read wiki update target") from e
+    if parse_markdown_note(
+        Path(update_target_path), content=update_target.content
+    ).managed_blocks:
+        raise ToolValidationError(
+            "Wiki update target contains managed blocks and cannot use a human patch"
+        )
+
+    generator = ProvenanceGenerator(
+        id=GENERATOR_ID,
+        version=GENERATOR_VERSION,
+        prompt_schema_version=REQUEST_SCHEMA_VERSION,
+        model_id=None,
+    )
+    content = WikiProposalContent(
+        title=request.create_title,
+        body=request.create_body,
+        generator=generator,
+    )
+    now = clock_fn()
+    proposal_id = generate_proposal_id(
+        clock_fn=lambda: now,
+        random_suffix_fn=random_suffix_fn,
+    )
+    created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    update_target_hash = f"sha256:{hash_file_content(update_target.content_bytes)}"
+
+    try:
+        documents = build_compound_wiki_proposal(
+            content=content,
+            source=verified.source,
+            create_target_path=create_target_path,
+            update_target_path=update_target_path,
+            update_target_content=update_target.content,
+            update_target_content_hash=update_target_hash,
+            heading=request.update_heading,
+            section_body=request.update_body,
+            proposal_id=proposal_id,
+            created_at=created_at,
+        )
+    except InvalidWikiSectionError as e:
+        raise ToolValidationError("Invalid or ambiguous wiki section") from e
+    except InvalidWikiTargetError as e:
+        raise ToolValidationError("Invalid wiki target path") from e
+    except WikiSectionUnchangedError as e:
+        raise ToolConflictError("Wiki section already has the proposed content") from e
+
+    try:
+        persisted_path = persist_compound_wiki_proposal(
+            proposals_root=vault_root / "proposals",
+            documents=documents,
+        )
+    except WikiTargetExistsError as e:
+        raise ToolConflictError("Wiki create target already exists") from e
+    except ProposalAlreadyExistsError as e:
+        raise ToolConflictError("Draft proposal already exists") from e
+    except ProposalPublicationError as e:
+        raise ToolExecutionError("Could not publish draft proposal") from e
+
+    return CompoundWikiProposalResult(
+        proposal_id=proposal_id,
+        proposal_path=persisted_path.relative_to(vault_root).as_posix(),
+        create_target_path=documents.create_target_path,
+        update_target_path=documents.update_target_path,
+        heading=request.update_heading,
         status="draft",
     )

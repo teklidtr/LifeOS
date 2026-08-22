@@ -13,11 +13,14 @@ from lifeos.facade.errors import (
     ToolExecutionError,
 )
 from lifeos.facade.proposal_tools import (
+    COMPOUND_WIKI_PROPOSAL_DESCRIPTOR,
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
     UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
+    CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
     CreateWikiProposalResult,
     UpdateWikiSectionProposalRequest,
+    create_wiki_and_update_section_proposal,
     create_wiki_proposal,
     update_wiki_section_proposal,
 )
@@ -50,6 +53,14 @@ def test_update_wiki_section_proposal_descriptor() -> None:
         == "ingestion.update_wiki_section_proposal"
     )
     assert UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
+
+
+def test_compound_wiki_proposal_descriptor() -> None:
+    assert (
+        COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.name
+        == "ingestion.create_wiki_and_update_section_proposal"
+    )
+    assert COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
 
 def test_request_and_result_are_frozen_and_slotted() -> None:
     from dataclasses import fields
@@ -126,6 +137,32 @@ def test_update_request_is_bounded_to_one_heading_and_body() -> None:
     with pytest.raises(ValueError, match="one line"):
         UpdateWikiSectionProposalRequest(
             "study/source.md", "wiki/target.md", "Ekipman\nnotları", "Body"
+        )
+
+
+def test_compound_request_is_bounded_and_requires_distinct_targets() -> None:
+    request = CompoundWikiProposalRequest(
+        "study/source.md",
+        "wiki/detail.md",
+        "Detail",
+        "Detailed body",
+        "wiki/summary.md",
+        "Equipment notes",
+        "See [[detail]].",
+    )
+    assert request.update_heading == "Equipment notes"
+    assert not hasattr(request, "base_hash")
+    assert not hasattr(request, "proposal_id")
+
+    with pytest.raises(ValueError, match="must be different"):
+        CompoundWikiProposalRequest(
+            "study/source.md",
+            "wiki/same.md",
+            "Detail",
+            "Detailed body",
+            "wiki/same.md",
+            "Equipment notes",
+            "Replacement",
         )
 
 
@@ -401,6 +438,113 @@ def test_real_happy_path_updates_one_existing_wiki_section(tmp_path: Path) -> No
     candidate = apply_diff(target_bytes.decode(), operation.unified_diff)
     assert "## Ekipman notları\n\nYeni doğrulanmış liste." in candidate
     assert "## Güvenlik\n\nKorunur." in candidate
+
+
+def test_real_happy_path_creates_compound_wiki_draft(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    (vault_root / "study").mkdir()
+    registry = Registry(tmp_path / "registry.db")
+    registry.initialize()
+
+    source_bytes = b"Verified equipment source.\n"
+    update_bytes = (
+        "# First Aid\n\n## Equipment notes\n\nOld.\n\n## Safety\n\nKeep.\n"
+    ).encode()
+    (vault_root / "study" / "source.md").write_bytes(source_bytes)
+    update_path = vault_root / "wiki" / "first-aid.md"
+    update_path.write_bytes(update_bytes)
+
+    from lifeos.registry.file_tracking import hash_file_content, register_scan
+    from lifeos.scanner import VaultFile
+
+    register_scan(
+        registry,
+        vault_root,
+        [
+            VaultFile(Path("study/source.md"), ".md", len(source_bytes)),
+            VaultFile(Path("wiki/first-aid.md"), ".md", len(update_bytes)),
+        ],
+    )
+    result = create_wiki_and_update_section_proposal(
+        vault_root=vault_root,
+        registry=registry,
+        request=CompoundWikiProposalRequest(
+            "study/source.md",
+            "wiki/equipment.md",
+            "Equipment",
+            "Verified detailed list.",
+            "wiki/first-aid.md",
+            "Equipment notes",
+            "See [[equipment]] for the verified list.",
+        ),
+        clock_fn=lambda: datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+        random_suffix_fn=lambda: "abcdef12",
+    )
+
+    assert result.status == "draft"
+    assert not (vault_root / "wiki" / "equipment.md").exists()
+    assert update_path.read_bytes() == update_bytes
+
+    from lifeos.proposals.loader import load_proposal_directory
+
+    loaded = load_proposal_directory(
+        vault_root / result.proposal_path,
+        proposals_root=vault_root / "proposals",
+    ).proposal
+    assert loaded is not None
+    assert [operation.op for operation in loaded.patch_document.operations] == [
+        "create_generated_file",
+        "patch_human_file",
+    ]
+    assert loaded.patch_document.operations[1].base_hash == (
+        f"sha256:{hash_file_content(update_bytes)}"
+    )
+
+
+def test_compound_draft_rejects_managed_update_target_without_persisting(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    (vault_root / "study").mkdir()
+    source = vault_root / "study" / "source.md"
+    source.write_text("Verified source.\n")
+    target = vault_root / "wiki" / "summary.md"
+    target.write_text(
+        "# Summary\n\n## Equipment\n\n"
+        "<!-- lifeos:managed:start equipment -->\nOld.\n"
+        "<!-- lifeos:managed:end equipment -->\n"
+    )
+    registry = Registry(tmp_path / "registry.db")
+    registry.initialize()
+
+    from lifeos.registry.file_tracking import register_scan
+    from lifeos.scanner import VaultFile
+
+    register_scan(
+        registry,
+        vault_root,
+        [VaultFile(Path("study/source.md"), ".md", source.stat().st_size)],
+    )
+
+    with pytest.raises(ToolValidationError, match="contains managed blocks"):
+        create_wiki_and_update_section_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=CompoundWikiProposalRequest(
+                "study/source.md",
+                "wiki/detail.md",
+                "Detail",
+                "Detailed body",
+                "wiki/summary.md",
+                "Equipment",
+                "Replacement",
+            ),
+        )
+    assert list((vault_root / "proposals").iterdir()) == []
 
 
 def test_update_rejects_missing_heading_without_persisting(tmp_path: Path) -> None:

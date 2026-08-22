@@ -251,6 +251,100 @@ async def test_mcp_ingestion_updates_one_existing_wiki_section_end_to_end(
 
 
 @pytest.mark.anyio
+async def test_mcp_compound_ingestion_applies_two_operations_atomically(
+    mcp_server_helper_path: Path,
+    config: LifeOSConfig,
+    config_path: Path,
+    vault_root: Path,
+    registry: Registry,
+    setup_source: None,
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "auth-compound.jsonl"
+    update_target = vault_root / "wiki" / "first-aid.md"
+    original = (
+        "# First Aid\n\n"
+        "## Equipment notes\n\nOld incomplete list.\n\n"
+        "## Safety\n\nKeep this section unchanged.\n"
+    )
+    update_target.write_text(original)
+    create_target = vault_root / "wiki" / "equipment.md"
+
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=[
+            str(mcp_server_helper_path),
+            "--config",
+            str(config_path),
+            "--actor-id",
+            "integration-human",
+            "--authorization-log",
+            str(log_path),
+        ],
+    )
+
+    async with stdio_client(server_params) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            compound = await session.call_tool(
+                "ingestion_create_wiki_and_update_section_proposal",
+                arguments={
+                    "source_path": "sources/test.md",
+                    "create_target_path": "wiki/equipment.md",
+                    "create_title": "Equipment",
+                    "create_body": "Verified detailed equipment list.\n",
+                    "update_target_path": "wiki/first-aid.md",
+                    "update_heading": "Equipment notes",
+                    "update_body": "See [[equipment]] for the verified detailed list.",
+                },
+            )
+            assert not compound.isError
+            compound_data = json.loads(compound.content[0].text)
+            proposal_id = compound_data["proposal_id"]
+            assert compound_data["status"] == "draft"
+            assert not create_target.exists()
+            assert update_target.read_text() == original
+
+            submit = await session.call_tool(
+                "proposal_submit", {"proposal_id": proposal_id}
+            )
+            assert not submit.isError
+            approve = await session.call_tool(
+                "proposal_approve", {"proposal_id": proposal_id}
+            )
+            assert not approve.isError
+            apply = await session.call_tool(
+                "proposal_apply", {"proposal_id": proposal_id}
+            )
+            assert not apply.isError
+            apply_data = json.loads(apply.content[0].text)
+            assert apply_data["status"] == "applied"
+            assert set(apply_data["changed_paths"]) == {
+                "wiki/equipment.md",
+                "wiki/first-aid.md",
+            }
+
+    assert create_target.exists()
+    assert "Verified detailed equipment list." in create_target.read_text()
+    assert update_target.read_text() == original.replace(
+        "Old incomplete list.",
+        "See [[equipment]] for the verified detailed list.",
+    )
+    source_path = vault_root / "sources" / "test.md"
+    assert source_path.read_bytes() == b"Canonical candidate content.\n"
+
+    loaded = load_proposal_directory(
+        vault_root / "proposals" / proposal_id,
+        proposals_root=vault_root / "proposals",
+    ).proposal
+    assert loaded is not None
+    assert [operation.op for operation in loaded.patch_document.operations] == [
+        "create_generated_file",
+        "patch_human_file",
+    ]
+
+
+@pytest.mark.anyio
 async def test_mcp_approval_denial_leaves_proposal_pending(
     mcp_server_helper_path: Path,
     config: LifeOSConfig,
