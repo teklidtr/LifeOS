@@ -387,7 +387,8 @@ The connected agent must use the advertised tools in this order:
 registry_refresh
   → vault_read_markdown
   → if the wiki target is absent:
-      agent synthesizes a source-grounded title and body
+      agent evaluates source_tags and source_topics
+      agent synthesizes a source-grounded title, body, and optional canonical tags
       → ingestion_create_wiki_proposal
   → if one section of an existing wiki target must change:
       vault_read_markdown on the target
@@ -405,12 +406,17 @@ registry_refresh
 The MCP adapter reads the canonical source through the bounded facade. The
 external agent interprets the source, while LifeOS verifies its registered
 identity and current hash, validates the supplied fields, creates a draft
-proposal, and records provenance. Existing-note updates require one unique ATX
+proposal, and records provenance. Source taxonomy is evidence: the agent can keep,
+remove, combine, or add tags, including when the source has no useful taxonomy.
+The proposal displays the source taxonomy, proposed canonical tags, rationale,
+and exact tag diff. Existing-note updates require one unique ATX
 heading (the heading text is supplied without `#` markers). LifeOS checks the
 canonical ownership manifest before publishing the draft. Human-owned targets
 produce a base-hash-bound human-file patch; unchanged targets owned by the same
 ingestion generator produce a generated-file replacement derived from the same
-exact-section edit. Both preserve every surrounding section. It does not directly
+exact-section edit. A generated-owned replacement may revise tags in the same
+operation; a human-owned target rejects requested tag changes. Both preserve every
+surrounding body section. It does not directly
 overwrite the target wiki page, and ingestion alone never implies permission to
 submit, approve, or apply the proposal.
 
@@ -496,7 +502,7 @@ MCP-compatible client rather than used as an interactive shell command.
 When an MCP client receives an ingestion request, the LifeOS server advertises
 the bounded workflow explicitly: refresh the disposable registry with
 `registry_refresh`, read the registered source with `vault_read_markdown`,
-synthesize a source-grounded title and body, call
+synthesize a source-grounded title, body, and optional reviewed wiki tags, call
 `ingestion_create_wiki_proposal` for an absent target, or read the existing
 target and call `ingestion_update_wiki_section_proposal` for one exact section.
 When one ingestion should do both, call

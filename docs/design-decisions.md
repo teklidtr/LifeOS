@@ -464,3 +464,17 @@ lifecycle transition or application. Legacy proposals without a snapshot remain
 loadable, but their current-state reconstruction is explicitly labeled and may
 be unavailable after later vault changes. SQLite and Git history are not required
 to render a new proposal's reviewed diff.
+
+## DD-084: Ingestion taxonomy is agent-proposed and proposal-reviewed
+
+The bounded MCP read response exposes normalized source `tags` and `topics`
+beside the Markdown body, but no unrelated frontmatter. Source taxonomy is
+evidence rather than canonical output: the external agent may retain, remove,
+combine, or supplement it and supplies optional canonical wiki `tags` plus a
+concise rationale. LifeOS validates tag count, syntax, Unicode normalization,
+length, lowercase form, and uniqueness deterministically. Accepted tags are
+written only through the reviewed proposal operation and are indexed by the
+existing wiki retrieval path. A generated-owned exact-section update may revise
+tags in the same full-file replacement; ingestion never changes tags on a
+human-owned wiki target. Missing taxonomy and omitted proposed tags remain valid
+and do not cause metadata invention.

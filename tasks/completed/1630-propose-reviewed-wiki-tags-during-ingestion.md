@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1630
 title: Propose reviewed wiki tags during ingestion
-status: in-progress
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1629
@@ -60,3 +60,25 @@ ordinary ingestion proposal.
 - DD-079 and DD-081: ingestion is MCP-only and ownership-aware.
 - DD-083: exact reviewed operation diffs remain immutable history.
 - `docs/safety-and-ownership.md`: generated ownership and human content boundaries.
+
+# Implementation
+
+- Added bounded, normalized `source_tags` and `source_topics` to registered-source
+  snapshots and MCP Markdown reads without exposing unrelated frontmatter.
+- Added optional canonical wiki tags and one-line rationale to create, compound
+  create, and generated-owned section-update contracts.
+- Added deterministic tag validation and rendered accepted tags in canonical wiki
+  frontmatter, proposal review text, and immutable operation diffs.
+- Preserved human ownership by rejecting ingestion tag changes on human-owned
+  targets; generated-owned updates revise tags and the exact section in one typed
+  replacement.
+- Updated architecture, safety, design-decision, setup, feature, and workflow docs.
+
+# Validation
+
+- `1443` Python tests passed with importlib collection mode.
+- Focused ingestion, facade, read-only, orchestration, MCP, and taxonomy coverage:
+  `151` tests passed before the final additions and the full-suite run.
+- Ruff passed for all changed Python source and test files.
+- Strict mypy passed for all changed Python source modules.
+- `git diff --check` passed.

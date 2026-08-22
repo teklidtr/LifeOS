@@ -254,6 +254,11 @@ After the MCP client connects, an ingestion request such as “Ingest
 `ingestion_create_wiki_proposal`. The default result is a draft proposal. The
 server does not infer permission to submit, approve, or apply it.
 
+`vault_read_markdown` returns the Markdown body plus bounded `source_tags` and
+`source_topics`. The connected agent may improve or replace that taxonomy and
+send optional canonical wiki tags with a rationale. Source metadata is never
+copied automatically; the proposal diff is the review boundary.
+
 If the explicit wiki target already exists, read it with `vault_read_markdown`
 and use `ingestion_update_wiki_section_proposal` with one unique ATX heading and
 its replacement body. Supply heading text without `#` markers. This produces a

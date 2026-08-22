@@ -16,6 +16,9 @@ A generator may replace the whole file only when ownership is recorded in the ca
 For bounded ingestion updates, LifeOS may derive that replacement by changing one
 exact heading while preserving the rest of the generated file. The manifest
 generator and raw content hash must both match before a draft is published.
+The same reviewed full-file replacement may revise canonical wiki `tags` while
+preserving body content outside the selected section. Source `tags` and `topics`
+are evidence only. Ingestion rejects tag changes for human-owned targets.
 
 If a generated file is manually deleted, its ownership entry is not disposable.
 Ingestion reports the orphan and requires an explicit restore or ownership-release

@@ -123,7 +123,10 @@ and near-term work concrete.
    `registry_refresh`, after adding the source.
 5. Ask the MCP-connected agent to ingest the registered source into an explicit
    `wiki/` target. For an absent target, the agent synthesizes a grounded draft
-   and calls `ingestion_create_wiki_proposal`. For an existing note, identify the
+   and calls `ingestion_create_wiki_proposal`. The read response includes bounded
+   source `tags` and `topics`; review the agent's proposed canonical wiki tags in
+   the proposal diff because they may deliberately differ from the source. For an
+   existing note, identify the
    one heading to update; the agent reads that target and calls
    `ingestion_update_wiki_section_proposal` with the heading text and replacement
    body. LifeOS reads canonical ownership and emits either a human-file patch or

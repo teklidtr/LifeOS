@@ -55,12 +55,19 @@ Agents do not silently promote interpretations into truth.
 LifeOS does not embed an ingestion model client or accept provider API keys.
 External agents connect through the local STDIO MCP adapter, read an explicitly
 registered source, and synthesize a grounded draft. For an absent wiki target,
-the agent submits only bounded title and body fields. For an existing wiki note,
-it may submit one exact ATX heading and its replacement body. LifeOS reads durable
+the bounded read facade exposes the Markdown body plus normalized source `tags`
+and `topics`; unrelated frontmatter remains hidden. The agent submits a title,
+body, and optional reviewed canonical wiki tags with a concise rationale. Source
+taxonomy is evidence, not an instruction: the agent may retain, remove, combine,
+or supplement it. For an existing wiki note, it may submit one exact ATX heading
+and its replacement body. LifeOS reads durable
 ownership before draft publication: a human-owned target becomes a base-hash-bound
 `patch_human_file`, while an unchanged target owned by the same ingestion generator
 becomes a base-hash-bound `replace_generated_file` containing the deterministic
-section replacement. A compound draft uses `create_generated_file` followed by the
+section replacement. Only that generated-file replacement may revise wiki tags in
+the same operation; ingestion refuses tag changes on human-owned targets. Proposed
+tags appear in canonical frontmatter and in the immutable reviewed diff. A compound
+draft uses `create_generated_file` followed by the
 ownership-appropriate update operation. Orphaned ownership, generator mismatch,
 external modification, and a missing or malformed ownership manifest stop before an
 ingestion draft is written. The Obsidian proposal workspace exposes orphan
