@@ -66,3 +66,123 @@
 .lifeos-state-blocked {
   color: var(--text-error);
 }
+
+.lifeos-proposals {
+  container: lifeos-proposals / inline-size;
+}
+
+.lifeos-proposals__heading,
+.lifeos-proposals__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.lifeos-proposals__heading {
+  justify-content: space-between;
+}
+
+.lifeos-proposals__heading h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-proposals__workspace {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(14rem, 0.7fr) minmax(0, 1.7fr);
+  gap: var(--size-4-4);
+}
+
+.lifeos-proposals__list,
+.lifeos-proposals__detail {
+  min-width: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3);
+}
+
+.lifeos-proposals__detail h3,
+.lifeos-proposals__detail li,
+.lifeos-proposals__detail p,
+.lifeos-proposals__detail code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.lifeos-proposals__detail code {
+  white-space: normal;
+}
+
+.lifeos-proposals__proposal {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-block-end: var(--size-4-1);
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+  text-align: start;
+}
+
+.lifeos-proposals__proposal small {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-proposals__proposal[aria-current="true"] {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.lifeos-proposals__metadata {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--size-4-1) var(--size-4-3);
+}
+
+.lifeos-proposals__metadata dt {
+  font-weight: var(--font-semibold);
+}
+
+.lifeos-proposals__metadata dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.lifeos-proposals__actions {
+  margin-block: var(--size-4-4);
+}
+
+.lifeos-proposals__operation pre,
+.lifeos-proposals__confirmation-digest {
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lifeos-proposals__terminal-state {
+  color: var(--text-muted);
+}
+
+@container lifeos-proposals (max-width: 48rem) {
+  .lifeos-proposals__workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .lifeos-proposals__workspace {
+    grid-template-columns: 1fr;
+  }
+}
