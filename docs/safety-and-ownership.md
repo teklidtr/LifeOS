@@ -21,6 +21,14 @@ If a generated file is manually deleted, its ownership entry is not disposable.
 Ingestion reports the orphan and requires an explicit restore or ownership-release
 decision; registry refresh never removes the entry.
 
+The Obsidian **Open Proposals** workspace lists each orphan with the recorded raw
+SHA-256, generator identity/version, and timestamps. **Restore instructions** never
+reconstruct content: the user must restore reviewed bytes that match the recorded
+hash. **Create release proposal** creates a draft whose manifest deletion is shown
+as a red-line diff. Applying that draft requires trusted confirmation, an absent
+target, and an unchanged ownership record. Scan, startup, status, and ingestion are
+read-only with respect to this reconciliation decision.
+
 ### System policy
 
 Policy and instruction changes require explicit proposal approval.

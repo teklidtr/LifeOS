@@ -441,6 +441,62 @@ def _candidate_for_operation(
     )
 
 
+def _release_reviewed_ownership_entries(
+    *,
+    proposal: LoadedProposal,
+    operation_indexes: list[int],
+    entries: dict[str, ManifestEntry],
+    root_fd: int,
+    outcome: ProposalApplicationResult,
+) -> None:
+    for index in operation_indexes:
+        operation = proposal.patch_document.operations[index]
+        entry = entries.get(operation.target_path)
+        if entry is None:
+            raise ApplicationError(
+                "Ownership entry changed after review",
+                outcome,
+                code=ApplicationErrorCode.OWNERSHIP_CONFLICT,
+            )
+        reviewed_entry = (
+            getattr(operation, "expected_content_hash", ""),
+            getattr(operation, "expected_generator_id", ""),
+            getattr(operation, "expected_generator_version", ""),
+            getattr(operation, "expected_created_at", ""),
+            getattr(operation, "expected_updated_at", ""),
+        )
+        current_entry = (
+            f"sha256:{entry.content_hash}",
+            entry.generator_id,
+            entry.generator_version,
+            entry.created_at,
+            entry.updated_at,
+        )
+        if reviewed_entry != current_entry:
+            raise ApplicationError(
+                "Ownership entry changed after review",
+                outcome,
+                code=ApplicationErrorCode.OWNERSHIP_CONFLICT,
+            )
+        try:
+            os.stat(operation.target_path, dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise ApplicationError(
+                "Failed to verify orphaned ownership target",
+                outcome,
+                code=ApplicationErrorCode.TARGET_CONFLICT,
+            ) from error
+        else:
+            raise ApplicationError(
+                "Ownership target was restored after review",
+                outcome,
+                code=ApplicationErrorCode.TARGET_CONFLICT,
+            )
+        del entries[operation.target_path]
+
+
 def _validate_precommit_state(
     *,
     vault_root: Path,
@@ -1144,54 +1200,15 @@ def _execute_application_transaction(
                 updated_at=applied_at,
             )
 
-        for index in manifest_operation_indexes:
-            operation = proposal.patch_document.operations[index]
-            entry = new_entries.get(operation.target_path)
-            if entry is None:
-                raise ApplicationError(
-                    "Ownership entry changed after review",
-                    outcome,
-                    code=ApplicationErrorCode.OWNERSHIP_CONFLICT,
-                )
-            reviewed_entry = (
-                getattr(operation, "expected_content_hash", ""),
-                getattr(operation, "expected_generator_id", ""),
-                getattr(operation, "expected_generator_version", ""),
-                getattr(operation, "expected_created_at", ""),
-                getattr(operation, "expected_updated_at", ""),
-            )
-            current_entry = (
-                f"sha256:{entry.content_hash}",
-                entry.generator_id,
-                entry.generator_version,
-                entry.created_at,
-                entry.updated_at,
-            )
-            if reviewed_entry != current_entry:
-                raise ApplicationError(
-                    "Ownership entry changed after review",
-                    outcome,
-                    code=ApplicationErrorCode.OWNERSHIP_CONFLICT,
-                )
-            try:
-                assert root_fd is not None
-                os.stat(operation.target_path, dir_fd=root_fd, follow_symlinks=False)
-            except FileNotFoundError:
-                pass
-            except OSError as error:
-                raise ApplicationError(
-                    "Failed to verify orphaned ownership target",
-                    outcome,
-                    code=ApplicationErrorCode.TARGET_CONFLICT,
-                ) from error
-            else:
-                raise ApplicationError(
-                    "Ownership target was restored after review",
-                    outcome,
-                    code=ApplicationErrorCode.TARGET_CONFLICT,
-                )
-            ownership_changed = True
-            del new_entries[operation.target_path]
+        assert root_fd is not None
+        _release_reviewed_ownership_entries(
+            proposal=proposal,
+            operation_indexes=manifest_operation_indexes,
+            entries=new_entries,
+            root_fd=root_fd,
+            outcome=outcome,
+        )
+        ownership_changed = ownership_changed or bool(manifest_operation_indexes)
 
         if ownership_changed:
             if "system" not in parent_descriptors:

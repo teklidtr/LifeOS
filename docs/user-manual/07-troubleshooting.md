@@ -36,6 +36,14 @@ explicit ownership-release workflow. If the target exists but its ownership hash
 or generator differs, reconcile that mismatch before retrying. No invalid draft
 is created, and `registry_refresh` does not alter ownership.
 
+Open **LifeOS Proposals** and find the **Ownership recovery** card for the missing
+target. Use **Restore instructions** if you can restore reviewed bytes matching the
+displayed SHA-256. If deletion was intentional, use **Create release proposal**,
+review the `system/generated-ownership.json` deletion diff, and then use **Accept
+changes**. If the target reappears or any ownership field changes before
+acceptance, LifeOS refuses the stale release proposal. Do not edit the manifest by
+hand to bypass review.
+
 LifeOS does not need a model name or provider API key for this workflow. If the
 MCP tools are missing, verify the MCP extra is installed and the client launches
 `lifeos-mcp` with the intended `lifeos.yml` configuration.

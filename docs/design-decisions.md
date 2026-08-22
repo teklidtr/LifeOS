@@ -437,3 +437,16 @@ generator, whose raw hash still matches the manifest, uses
 `replace_generated_file` with a deterministic exact-section candidate. Generator
 or hash mismatches fail closed. Compound ingestion applies the same classification
 to its update target. Registry refresh never repairs or deletes durable ownership.
+
+## DD-082: Orphaned generated ownership is reconciled explicitly
+
+LifeOS deterministically lists every `system/generated-ownership.json` entry whose
+target is absent, including its recorded content hash, generator identity/version,
+and creation/update timestamps. Detection is read-only. The user may restore
+reviewed bytes whose SHA-256 matches the record, or create a high-risk draft with
+the typed `release_generated_ownership` operation. Release is never a scan,
+startup, or ingestion side effect: it uses the ordinary proposal review and trusted
+acceptance path. Preflight and application both require the target to remain absent
+and every recorded ownership field to match the reviewed operation. The operation
+changes only the canonical ownership manifest and participates in the existing
+atomic recovery transaction.

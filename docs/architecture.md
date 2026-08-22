@@ -62,9 +62,14 @@ ownership before draft publication: a human-owned target becomes a base-hash-bou
 becomes a base-hash-bound `replace_generated_file` containing the deterministic
 section replacement. A compound draft uses `create_generated_file` followed by the
 ownership-appropriate update operation. Orphaned ownership, generator mismatch,
-external modification, and a missing or malformed ownership manifest stop before a
-draft is written. LifeOS independently owns source verification, hashes, proposal
-identity, provenance, lifecycle state, and persistence.
+external modification, and a missing or malformed ownership manifest stop before an
+ingestion draft is written. The Obsidian proposal workspace exposes orphan
+diagnostics and lets the user follow hash-bound restore instructions or create a
+separate ownership-release proposal. A release operation is bound to the complete
+reviewed manifest entry, requires the target to remain absent, and updates only the
+ownership manifest inside the ordinary atomic proposal transaction. LifeOS
+independently owns source verification, hashes, proposal identity, provenance,
+lifecycle state, and persistence.
 
 ### Human layer
 
@@ -84,12 +89,14 @@ A deterministic tool applies only explicitly approved items whose target hashes 
 
 ## Registry
 
-The registry stores file hashes, source versions, derived outputs, proposal state, generated ownership, task records, graph state, and migrations.
+The registry stores file hashes, source versions, derived outputs, indexed proposal
+and ownership facts, task records, graph state, and migrations. Canonical generated
+ownership remains exclusively in `system/generated-ownership.json`.
 
 It does not replace Markdown content. The shared deterministic refresh facade is
 available as `lifeos scan` for local recovery and as `registry_refresh` for MCP
 agents. Both entry points rebuild file and proposal indexes without changing
-canonical Markdown.
+canonical Markdown or adding, repairing, or releasing durable ownership.
 
 ## Managed content
 

@@ -93,6 +93,15 @@ hashes before changing canonical Markdown. Pending or approved proposals may be
 **Rejected**. If the proposal changed after review, acceptance fails without
 applying it. See [First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
 
+When a generated file has been manually deleted but its durable ownership record
+remains, the same workspace shows an **Ownership recovery** card. Compare the
+recorded SHA-256, generator, and timestamps. Choose **Restore instructions** when
+you have reviewed file bytes to put back at the exact path; the card does not guess
+or recreate content. Choose **Create release proposal** when the deletion was
+intentional. Review the resulting red-line manifest diff and use **Accept changes**
+to release ownership. Creating the draft alone does not change ownership, and
+Refresh does not resolve or hide the orphan.
+
 ## Personal experiments
 
 Open **Personal Experiments** from the ribbon, command palette, or a relevant goal,
