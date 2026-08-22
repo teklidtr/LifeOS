@@ -8,6 +8,14 @@ class ReadMarkdownMCPResult(TypedDict):
     markdown_body: str
 
 
+class RegistryRefreshMCPResult(TypedDict):
+    new: list[str]
+    modified: list[str]
+    unchanged: list[str]
+    deleted: list[str]
+    proposals_indexed: int
+
+
 class CreateWikiProposalMCPResult(TypedDict):
     proposal_id: str
     proposal_path: str

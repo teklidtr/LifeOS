@@ -3,8 +3,9 @@
 # 4. Setup & Installation Guide
 
 LifeOS is a local Python application and Markdown vault, not a hosted web
-service. The core system requires no external account. AI ingestion and MCP
-integration are optional.
+service. The core system requires no external account. Agent-assisted ingestion
+uses an optional local MCP integration; LifeOS itself has no embedded model
+client or provider API-key configuration.
 
 ## 4.1 Prerequisites
 
@@ -24,8 +25,7 @@ integration are optional.
 
 ### Optional
 
-- An AI provider account and API key for `lifeos ingest`
-- An MCP-compatible agent client
+- An MCP-compatible agent client for agent-assisted ingestion
 - Graph and export features enabled in configuration
 - A compatible local `pypdf` installation for PDF text extraction
 
@@ -75,7 +75,6 @@ Or install only what you need:
 
 ```bash
 uv sync --extra dev
-uv sync --extra ai
 uv sync --extra mcp
 ```
 
@@ -185,31 +184,15 @@ Configuration rules:
 ## 4.8 Initialize and populate the registry
 
 The registry is explicit and disposable. With the LifeOS repository virtual
-environment activated, set the absolute path to the configuration file and run:
+environment activated, run:
 
 ```bash
-LIFEOS_CONFIG=/absolute/path/to/LifeOS-vault/lifeos.yml
-
-python - "$LIFEOS_CONFIG" <<'PY'
-import sys
-from pathlib import Path
-
-from lifeos.config import load_config
-from lifeos.registry import Registry, register_proposals_scan, register_scan
-from lifeos.scanner import scan_vault
-
-config = load_config(Path(sys.argv[1]))
-registry = Registry(config.runtime_dir / "registry.db")
-registry.initialize()
-register_scan(registry, config.vault_root, scan_vault(config.vault_root))
-register_proposals_scan(registry, vault_root=config.vault_root)
-
-print(f"Initialized and indexed {registry.database_path}")
-PY
+uv run lifeos scan --config /absolute/path/to/LifeOS-vault/lifeos.yml
 ```
 
-Run the same indexing snippet again after large manual imports or when you
-intentionally rebuild the disposable registry.
+Run the same command after manual imports, edits, moves, or deletions, or when
+you intentionally rebuild the disposable registry. Use `--json` for structured
+automation output.
 
 ## 4.9 Open the vault in Obsidian
 
@@ -246,52 +229,7 @@ A fresh installation may report missing graph or export generations. That is
 normal until you build them. A blocked recovery transaction or corrupt canonical
 state should be investigated before consequential operations.
 
-## 4.11 Optional AI setup
-
-From the LifeOS application repository, install AI support and activate the
-updated environment:
-
-```bash
-cd /absolute/path/to/lifeos
-uv sync --extra ai
-source .venv/bin/activate
-```
-
-The current `ai` extra installs the provider-neutral runtime but does not yet
-include the OpenAI client. When using an `openai:` model, install its provider
-dependency into the same environment:
-
-```bash
-uv pip install "pydantic-ai-slim[openai]"
-```
-
-In the same shell, set the provider credential required by your model, for
-example:
-
-```bash
-export OPENAI_API_KEY="..."
-export LIFEOS_AI_MODEL="openai:gpt-4o"
-
-: "${OPENAI_API_KEY:?Set OPENAI_API_KEY first}"
-: "${LIFEOS_AI_MODEL:?Set LIFEOS_AI_MODEL first}"
-```
-
-Before ingestion, make sure the source file has been registered. Change to the
-directory containing `lifeos.yml`, then run the command there. Source and target
-paths are relative to the vault configured in `lifeos.yml`.
-
-```bash
-cd /absolute/path/to/directory-containing-lifeos.yml
-
-lifeos ingest \
-  study/example.md \
-  --target wiki/example.md \
-  --model "$LIFEOS_AI_MODEL"
-```
-
-The result should be a draft proposal, not a direct wiki mutation.
-
-## 4.12 Optional MCP setup
+## 4.11 Optional MCP setup
 
 Install MCP support:
 
@@ -311,11 +249,18 @@ Keep the server local and use STDIO transport. Do not expose it as an
 unauthenticated network service.
 
 After the MCP client connects, an ingestion request such as “Ingest
-`study/example.md` into `wiki/example.md` using LifeOS” is routed through source
-reading and `ingestion_create_wiki_proposal`. The default result is a draft
-proposal. The server does not infer permission to submit, approve, or apply it.
+`study/example.md` into `wiki/example.md` using LifeOS” is routed through
+`registry_refresh`, `vault_read_markdown`, and
+`ingestion_create_wiki_proposal`. The default result is a draft proposal. The
+server does not infer permission to submit, approve, or apply it.
 
-## 4.13 Build the semantic retrieval index
+This is the only supported agent-assisted ingestion route. The connected agent
+supplies semantic interpretation; LifeOS does not accept a model name, provider
+API key, or environment-based model configuration. The MCP workflow refreshes
+the disposable registry so the source is registered with its current path and
+hash before ingestion.
+
+## 4.12 Build the semantic retrieval index
 
 After enabling the desktop plugin, open **Knowledge Conversation** and choose
 **Rebuild index**. The first build scans allowed Markdown, creates structural
@@ -329,7 +274,7 @@ Provider configuration remains runtime-specific and is not written into canonica
 conversation fields.
 
 
-## 4.14 Create the first vault commit
+## 4.13 Create the first vault commit
 
 From the vault:
 

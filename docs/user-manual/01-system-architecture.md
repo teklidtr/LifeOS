@@ -40,7 +40,7 @@ graph TD
     end
 
     subgraph AgentLayer["Agent-assisted layer"]
-        Ingestion["AI ingestion and analysis"]
+        Ingestion["MCP ingestion proposal tools"]
         Facade["Typed tool facade"]
         MCP["Local STDIO MCP server"]
     end
@@ -68,7 +68,8 @@ graph TD
     CLI --> Config
     MCP --> Facade
     Facade --> SecureVault
-    Facade --> ProposalEngine
+    Facade --> Ingestion
+    Ingestion --> ProposalEngine
 
     Vault --> Journal
     Vault --> Knowledge
@@ -109,8 +110,6 @@ graph TD
     GraphState --> Status
     ExportState --> Status
 
-    CLI --> Ingestion
-    Ingestion --> ProposalEngine
     ProposalEngine --> Approval
     Approval --> Application
     Application --> Vault
@@ -139,6 +138,10 @@ The diagram separates LifeOS into five responsibility zones:
 The most important rule is that arrows flowing *from* an AI or derived view do
 not grant authority. AI output becomes durable only through the proposal,
 approval, validation, and application path.
+
+Ingestion is MCP-only. The external agent performs semantic synthesis; LifeOS
+contains no ingestion model client or API-key configuration. Its facade verifies
+the registered source and owns proposal identity, provenance, and persistence.
 
 ---
 

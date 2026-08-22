@@ -8,23 +8,12 @@ from lifeos.registry.file_tracking import (
     hash_file_content,
     validate_vault_path,
 )
-from lifeos.markdown.parser import parse_markdown_note
-from lifeos.ingestion.backend import (
-    AnalysisBackend,
-    AnalysisRequest,
-    AnalysisResult,
-    SourceSnapshot,
-)
+from lifeos.ingestion.drafts import SourceSnapshot
 
 @dataclass(frozen=True, slots=True)
 class VerifiedRegisteredSource:
     source: SourceSnapshot
     content: bytes
-
-@dataclass(frozen=True, slots=True)
-class AnalyzedSource:
-    source: SourceSnapshot
-    analysis: AnalysisResult
 
 class OrchestrationError(RuntimeError):
     pass
@@ -43,14 +32,6 @@ class ModifiedSourceError(OrchestrationError):
 
 
 class SourceReadError(OrchestrationError):
-    pass
-
-
-class SourceDecodeError(OrchestrationError):
-    pass
-
-
-class SourceParseError(OrchestrationError):
     pass
 
 
@@ -97,37 +78,3 @@ def load_registered_source(
         content_hash=f"sha256:{raw_hash}",
     )
     return VerifiedRegisteredSource(source=snapshot, content=source_bytes)
-
-
-def analyze_registered_source(
-    *,
-    registry: Registry,
-    vault_root: Path,
-    source_path: str,
-    backend: AnalysisBackend,
-) -> AnalyzedSource:
-    verified = load_registered_source(
-        registry=registry,
-        vault_root=vault_root,
-        source_path=source_path,
-    )
-    
-    target_file = vault_root / source_path
-
-    try:
-        decoded_text = verified.content.decode("utf-8")
-    except UnicodeDecodeError as e:
-        raise SourceDecodeError("Invalid UTF-8 encoding") from e
-
-    try:
-        parsed_note = parse_markdown_note(target_file, content=decoded_text)
-    except ValueError as e:
-        raise SourceParseError("Failed to parse markdown") from e
-
-    request = AnalysisRequest(
-        source=verified.source,
-        markdown_body=parsed_note.body,
-    )
-
-    analysis = backend.analyze(request)
-    return AnalyzedSource(source=verified.source, analysis=analysis)

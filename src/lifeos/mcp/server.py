@@ -37,12 +37,17 @@ from lifeos.facade.proposal_tools import (
     create_wiki_proposal,
 )
 from lifeos.facade.read_only import READ_MARKDOWN_DESCRIPTOR, ReadMarkdownRequest, read_markdown
+from lifeos.facade.registry_tools import (
+    REGISTRY_REFRESH_DESCRIPTOR,
+    refresh_registry,
+)
 from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.mcp.models import (
     ApplyProposalMCPResult,
     ApproveProposalMCPResult,
     CreateWikiProposalMCPResult,
     ReadMarkdownMCPResult,
+    RegistryRefreshMCPResult,
     SubmitProposalMCPResult,
 )
 from lifeos.registry import Registry
@@ -52,13 +57,19 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 LIFEOS_MCP_INSTRUCTIONS = (
-    "LifeOS keeps Markdown canonical. For ingestion requests, first call "
-    "vault_read_markdown on the registered source, synthesize a grounded title and body "
+    "LifeOS keeps Markdown canonical. For ingestion requests, first call registry_refresh "
+    "to register the source's current path and hash, then call vault_read_markdown, "
+    "synthesize a grounded title and body "
     "from that content, then call ingestion_create_wiki_proposal. Stop after the draft "
     "proposal unless the user explicitly requests another exact lifecycle transition. "
     "Never call proposal_submit, proposal_approve, or proposal_apply merely because an "
     "ingestion was requested. Use vault-relative paths and never directly rewrite "
     "canonical notes."
+)
+
+REGISTRY_REFRESH_MCP_DESCRIPTION = (
+    f"{REGISTRY_REFRESH_DESCRIPTOR.description} Use after files are added, changed, moved, "
+    "or deleted. This writes only rebuildable registry data and does not change Markdown."
 )
 
 READ_MARKDOWN_MCP_DESCRIPTION = (
@@ -149,6 +160,19 @@ def _invoke_mcp_tool(operation: Callable[[], T]) -> T:
 def create_mcp_server(
     *, vault_root: Path, registry: Registry, authorizer: ConsequentialAuthorizer
 ) -> FastMCP:
+    def registry_refresh_tool() -> RegistryRefreshMCPResult:
+        def op() -> RegistryRefreshMCPResult:
+            result = refresh_registry(vault_root=vault_root, registry=registry)
+            return {
+                "new": list(result.new),
+                "modified": list(result.modified),
+                "unchanged": list(result.unchanged),
+                "deleted": list(result.deleted),
+                "proposals_indexed": result.proposals_indexed,
+            }
+
+        return _invoke_mcp_tool(op)
+
     def vault_read_markdown_tool(vault_path: str) -> ReadMarkdownMCPResult:
         def op() -> ReadMarkdownMCPResult:
             res = read_markdown(
@@ -230,6 +254,18 @@ def create_mcp_server(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
         tools=[
+            _strict_tool(
+                registry_refresh_tool,
+                name="registry_refresh",
+                description=REGISTRY_REFRESH_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Refresh LifeOS registry",
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
             _strict_tool(
                 vault_read_markdown_tool,
                 name="vault_read_markdown",

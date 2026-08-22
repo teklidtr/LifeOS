@@ -17,6 +17,7 @@ from lifeos.facade.errors import (
 )
 from lifeos.facade.read_only import ReadMarkdownRequest
 from lifeos.facade.proposal_tools import CreateWikiProposalRequest
+from lifeos.facade.registry_tools import RegistryRefreshResult
 
 
 def test_server_registers_only_approved_tools() -> None:
@@ -25,6 +26,7 @@ def test_server_registers_only_approved_tools() -> None:
     server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
 
     expected_tools = {
+        "registry_refresh",
         "vault_read_markdown",
         "ingestion_create_wiki_proposal",
         "proposal_submit",
@@ -51,7 +53,8 @@ def test_server_advertises_safe_ingestion_workflow() -> None:
     )
 
     assert server.instructions == LIFEOS_MCP_INSTRUCTIONS
-    assert "first call vault_read_markdown" in server.instructions
+    assert "first call registry_refresh" in server.instructions
+    assert "then call vault_read_markdown" in server.instructions
     assert "then call ingestion_create_wiki_proposal" in server.instructions
     assert "Stop after the draft proposal" in server.instructions
     assert "Never call proposal_submit, proposal_approve, or proposal_apply" in server.instructions
@@ -64,6 +67,7 @@ def test_tools_advertise_workflow_specific_descriptions() -> None:
     tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
 
     assert all(tool.description for tool in tools.values())
+    assert "rebuildable registry data" in tools["registry_refresh"].description
     assert "before ingestion" in tools["vault_read_markdown"].description
     assert "after vault_read_markdown" in tools["ingestion_create_wiki_proposal"].description
     assert "creates a draft" in tools["ingestion_create_wiki_proposal"].description
@@ -85,6 +89,13 @@ def test_tools_advertise_accurate_safety_annotations() -> None:
         "idempotentHint": True,
         "openWorldHint": False,
     }
+    assert tools["registry_refresh"].annotations.model_dump() == {
+        "title": "Refresh LifeOS registry",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
     assert tools["ingestion_create_wiki_proposal"].annotations.destructiveHint is False
     assert tools["ingestion_create_wiki_proposal"].annotations.idempotentHint is False
     assert tools["proposal_submit"].annotations.destructiveHint is False
@@ -100,6 +111,32 @@ def test_tools_map_to_expected_facade_descriptors() -> None:
 
     tool = server._tool_manager.get_tool("vault_read_markdown")
     assert "vault_path" in tool.parameters["properties"]
+
+
+@patch("lifeos.mcp.server.refresh_registry")
+def test_registry_refresh_delegates_to_facade(mock_facade: MagicMock) -> None:
+    mock_facade.return_value = RegistryRefreshResult(
+        new=("study/new.md",),
+        modified=(),
+        unchanged=("wiki/old.md",),
+        deleted=("study/old.md",),
+        proposals_indexed=3,
+    )
+    registry = MagicMock()
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+    )
+
+    result = server._tool_manager.get_tool("registry_refresh").fn()
+
+    mock_facade.assert_called_once_with(vault_root=Path("/fake"), registry=registry)
+    assert result == {
+        "new": ["study/new.md"],
+        "modified": [],
+        "unchanged": ["wiki/old.md"],
+        "deleted": ["study/old.md"],
+        "proposals_indexed": 3,
+    }
 
 
 @patch("lifeos.mcp.server.read_markdown")
@@ -276,9 +313,16 @@ def test_error_payload_does_not_leak_absolute_paths(caplog) -> None:
 
 def test_mcp_outputs_have_explicit_structured_schemas() -> None:
     # Ensure they are returning TypedDicts instead of plain dicts
-    from lifeos.mcp.models import ReadMarkdownMCPResult
+    from lifeos.mcp.models import ReadMarkdownMCPResult, RegistryRefreshMCPResult
 
     assert ReadMarkdownMCPResult.__annotations__ == {"vault_path": str, "markdown_body": str}
+    assert RegistryRefreshMCPResult.__annotations__ == {
+        "new": list[str],
+        "modified": list[str],
+        "unchanged": list[str],
+        "deleted": list[str],
+        "proposals_indexed": int,
+    }
 
 
 def test_mcp_apply_returns_sanitized_recovery_required_error(

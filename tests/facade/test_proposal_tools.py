@@ -25,7 +25,7 @@ from lifeos.ingestion.orchestration import (
     UnregisteredSourceError,
     VerifiedRegisteredSource,
 )
-from lifeos.ingestion.backend import SourceSnapshot
+from lifeos.ingestion.drafts import SourceSnapshot
 from lifeos.ingestion.proposals import (
     InvalidWikiTargetError,
     ProposalAlreadyExistsError,
@@ -209,7 +209,7 @@ def test_proposal_publication_error_maps_to_execution_error(tmp_path: Path) -> N
         # Verify the partial directory is cleaned up
         assert not (vault_root / "proposals" / "prop-20250101T120000Z-abcdef12").exists()
 
-def test_facade_does_not_decode_or_parse_source(tmp_path: Path) -> None:
+def test_facade_uses_verified_source_without_decoding_or_parsing_it(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
     registry = Registry(tmp_path / "registry.db")
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
@@ -217,8 +217,7 @@ def test_facade_does_not_decode_or_parse_source(tmp_path: Path) -> None:
     with patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load, \
          patch("lifeos.facade.proposal_tools.build_wiki_proposal") as mock_build, \
          patch("lifeos.facade.proposal_tools.persist_wiki_proposal") as mock_persist, \
-         patch("lifeos.facade.proposal_tools.generate_proposal_id", return_value="id"), \
-         patch("lifeos.ingestion.orchestration.parse_markdown_note") as mock_parse:
+         patch("lifeos.facade.proposal_tools.generate_proposal_id", return_value="id"):
          
         mock_load.return_value = VerifiedRegisteredSource(
             source=SourceSnapshot("src.md", "hash"),
@@ -228,7 +227,7 @@ def test_facade_does_not_decode_or_parse_source(tmp_path: Path) -> None:
         mock_build.return_value = WikiProposalDocuments("id", "wiki/target.md", b"doc", b"patch")
         
         create_wiki_proposal(vault_root=vault_root, registry=registry, request=req)
-        mock_parse.assert_not_called()
+        assert mock_build.call_args.kwargs["source"] == SourceSnapshot("src.md", "hash")
 
 def test_real_happy_path_facade(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"

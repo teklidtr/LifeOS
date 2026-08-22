@@ -10,6 +10,34 @@
 - **Blocked:** complete the displayed recovery or authorization step.
 - **Corrupt:** open the linked canonical note and repair the typed diagnostic.
 
+## Ingestion command is unavailable
+
+This is expected: the standalone `lifeos ingest` command and embedded model
+runtime were removed. Connect an external agent to `lifeos-mcp`, then ask it to
+ingest the registered vault-relative source into an explicit `wiki/` target.
+The agent must call `registry_refresh`, then `vault_read_markdown`, followed by
+`ingestion_create_wiki_proposal`, and stop at the resulting draft. Refreshing
+first ensures moved or changed sources have current registry paths and hashes.
+
+LifeOS does not need a model name or provider API key for this workflow. If the
+MCP tools are missing, verify the MCP extra is installed and the client launches
+`lifeos-mcp` with the intended `lifeos.yml` configuration.
+
+## Registry paths are stale after a file move
+
+Run the supported deterministic refresh from the directory containing
+`lifeos.yml`:
+
+```bash
+uv run lifeos scan
+```
+
+From another directory, pass `--config /absolute/path/to/lifeos.yml`. The command
+reports new, modified, unchanged, and deleted paths and refreshes the proposal
+index. It changes only disposable `registry.db` state. It does not update source
+links written inside Markdown and does not rebuild semantic retrieval; those
+require a proposal and **Synchronize index**, respectively.
+
 ## Plugin fails to load
 
 Rebuild from the repository root with `npm --prefix packages/obsidian-plugin ci`

@@ -397,3 +397,13 @@ Meal, exercise, and general captures link to diary, reviews, goals, plans, tasks
 ## DD-078: Attachment identity is content based and derived state is recoverable
 
 SHA-256 identifies exact binary duplicates independently of filenames. Same-name different-content files remain distinct. Canonical manifests preserve references and lineage; changed bytes invalidate dependent results. Runtime indexes, previews, extractions, embeddings, galleries, and timelines can be deleted and rebuilt.
+
+## DD-079: Agent-assisted ingestion is MCP-only
+
+LifeOS does not embed an ingestion model runtime, accept provider API keys, or
+expose a standalone semantic-ingestion CLI command. An external agent reads an
+explicitly registered source through the local STDIO MCP adapter, synthesizes a
+grounded title and body, and calls the bounded proposal-producing tool. LifeOS
+independently verifies the source and owns hashes, proposal identity,
+provenance, lifecycle state, and persistence. Ingestion stops at draft unless
+the user separately requests an exact lifecycle transition.

@@ -52,6 +52,13 @@ Agents interpret meaning:
 
 Agents do not silently promote interpretations into truth.
 
+LifeOS does not embed an ingestion model client or accept provider API keys.
+External agents connect through the local STDIO MCP adapter, read an explicitly
+registered source, synthesize a grounded draft, and submit only the bounded
+title and body fields to the proposal-producing facade. LifeOS independently
+owns source verification, hashes, proposal identity, provenance, lifecycle
+state, and persistence.
+
 ### Human layer
 
 The user controls goals, proposal approval, personal interpretations, policy changes, pattern promotion, and archival decisions.
@@ -72,7 +79,10 @@ A deterministic tool applies only explicitly approved items whose target hashes 
 
 The registry stores file hashes, source versions, derived outputs, proposal state, generated ownership, task records, graph state, and migrations.
 
-It does not replace Markdown content.
+It does not replace Markdown content. The shared deterministic refresh facade is
+available as `lifeos scan` for local recovery and as `registry_refresh` for MCP
+agents. Both entry points rebuild file and proposal indexes without changing
+canonical Markdown.
 
 ## Managed content
 

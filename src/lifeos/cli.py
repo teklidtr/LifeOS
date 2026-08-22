@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -41,6 +42,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     status_parser.add_argument("--json", action="store_true", help="Output status as JSON")
 
+    scan_parser = subparsers.add_parser(
+        "scan", help="Refresh the disposable file and proposal registry"
+    )
+    scan_parser.add_argument(
+        "--config",
+        default="lifeos.yml",
+        type=Path,
+        help="Path to lifeos.yml (default: lifeos.yml)",
+    )
+    scan_parser.add_argument("--json", action="store_true", help="Output result as JSON")
+
     proposals_parser = subparsers.add_parser("proposals", help="Manage proposals")
     proposals_subparsers = proposals_parser.add_subparsers(dest="proposals_command", required=True)
 
@@ -62,17 +74,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report migration candidates without writing proposal files",
     )
-
-    ingest_parser = subparsers.add_parser(
-        "ingest", help="Analyze a source file and create a wiki proposal"
-    )
-    ingest_parser.add_argument("source", help="Vault-relative path to the source file")
-    ingest_parser.add_argument(
-        "--target",
-        required=True,
-        help="Vault-relative path to the target wiki file (e.g. wiki/new-page.md)",
-    )
-    ingest_parser.add_argument("--model", help="AI model specification (e.g. openai:gpt-4o)")
 
     context_parser = subparsers.add_parser("context", help="Build inspectable context packs")
     context_subparsers = context_parser.add_subparsers(dest="context_command", required=True)
@@ -144,6 +145,50 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the LifeOS command-line interface."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "scan":
+        from lifeos.facade.errors import ToolExecutionError
+        from lifeos.facade.registry_tools import refresh_registry
+
+        try:
+            config = load_config(args.config)
+            result = refresh_registry(
+                vault_root=config.vault_root,
+                registry=Registry(config.runtime_dir / "registry.db"),
+            )
+        except ConfigError as error:
+            print(f"Configuration error: {error}", file=sys.stderr)
+            return 1
+        except ToolExecutionError as error:
+            print(f"Scan error: {error}", file=sys.stderr)
+            return 1
+
+        payload = {
+            "new": list(result.new),
+            "modified": list(result.modified),
+            "unchanged": list(result.unchanged),
+            "deleted": list(result.deleted),
+            "proposals_indexed": result.proposals_indexed,
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        else:
+            print(
+                "Registry refreshed: "
+                f"{len(result.new)} new, "
+                f"{len(result.modified)} modified, "
+                f"{len(result.unchanged)} unchanged, "
+                f"{len(result.deleted)} deleted; "
+                f"{result.proposals_indexed} proposals indexed."
+            )
+            for label, paths in (
+                ("New", result.new),
+                ("Modified", result.modified),
+                ("Deleted", result.deleted),
+            ):
+                for path in paths:
+                    print(f"{label}: {path}")
+        return 0
 
     if args.command == "status":
         from lifeos.status import (
@@ -470,73 +515,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         print(serialize_context_pack(pack) if args.json else format_context_pack(pack))
         return 0
-
-    if args.command == "ingest":
-        import os
-        import secrets
-        from datetime import datetime, timezone
-        from lifeos.proposals.schema import generate_proposal_id
-        from lifeos.registry._registry import RegistryError, RegistryOpenError
-        from lifeos.ingestion.orchestration import OrchestrationError
-        from lifeos.ingestion.backend import AnalysisBackendError
-        from lifeos.ingestion.proposals import WikiTargetExistsError
-        from lifeos.ingestion.backend_factory import (
-            get_analysis_backend,
-            AnalysisBackendConfigurationError,
-        )
-        from lifeos.ingestion.cli_service import ingest_source
-
-        config_path = Path("lifeos.yml")
-        try:
-            config = load_config(config_path)
-        except ConfigError as e:
-            print(f"Configuration error: {e}", file=sys.stderr)
-            return 1
-
-        model_spec = args.model or os.environ.get("LIFEOS_AI_MODEL") or ""
-
-        try:
-            backend = get_analysis_backend(vault_root=config.vault_root, model_spec=model_spec)
-        except AnalysisBackendConfigurationError as e:
-            print(f"Configuration error: {e}", file=sys.stderr)
-            return 1
-
-        registry = Registry(config.runtime_dir / "registry.db")
-
-        now = datetime.now(timezone.utc).replace(microsecond=0)
-        created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-        try:
-            proposal_id = generate_proposal_id(
-                clock_fn=lambda: now, random_suffix_fn=lambda: secrets.token_hex(4)
-            )
-        except ValueError as e:
-            print(f"Configuration error: Could not generate ID: {e}", file=sys.stderr)
-            return 1
-
-        try:
-            result = ingest_source(
-                vault_root=config.vault_root,
-                registry=registry,
-                source_path=args.source,
-                target_path=args.target,
-                backend=backend,
-                proposal_id=proposal_id,
-                created_at=created_at,
-            )
-            print(f"Created draft proposal {result.proposal_id} at proposals/{result.proposal_id}/")
-            return 0
-        except OrchestrationError as e:
-            print(f"Orchestration error: {e}", file=sys.stderr)
-            return 1
-        except AnalysisBackendError as e:
-            print(f"Analysis error: {e}", file=sys.stderr)
-            return 1
-        except (WikiTargetExistsError, ValueError) as e:
-            print(f"Proposal error: {e}", file=sys.stderr)
-            return 1
-        except (RegistryOpenError, RegistryError) as e:
-            print(f"Registry error: {e}", file=sys.stderr)
-            return 1
 
     parser.print_help()
     return 1

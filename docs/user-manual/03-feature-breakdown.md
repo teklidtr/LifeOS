@@ -138,6 +138,16 @@ The registry supports:
 It does **not** replace Markdown and should not contain the only copy of
 canonical knowledge. The registry may be deleted and rebuilt.
 
+Use either supported adapter; both call the same deterministic Python facade:
+
+```bash
+uv run lifeos scan
+uv run lifeos scan --json
+```
+
+An MCP-connected agent uses `registry_refresh`. Refreshing the registry does not
+rebuild the separate semantic retrieval, graph, or export indexes.
+
 ## 3.5 Status and diagnostics
 
 ### What it is
@@ -358,31 +368,37 @@ missing-data diagnostics, freshness, and explicit noncausal caveats.
 A useful finding is not automatically promoted into canonical truth. Review it
 before writing or proposing a durable pattern note.
 
-## 3.10 AI-assisted ingestion
+## 3.10 MCP-only agent-assisted ingestion
 
 ### What it is
 
-Ingestion analyzes a registered source note and creates a draft wiki proposal.
+Ingestion turns a registered source note into a draft wiki proposal through an
+external agent connected to the local LifeOS MCP server. LifeOS does not run an
+embedded model client and does not accept model names or provider API keys.
 
-```bash
-uv run lifeos ingest \
-  study/cell-biology/chapter-03.md \
-  --target wiki/cell-membrane.md \
-  --model openai:gpt-4o
+```text
+Ingest study/cell-biology/chapter-03.md into
+wiki/cell-membrane.md using LifeOS.
 ```
 
-You may set a default model:
+The connected agent must use the advertised tools in this order:
 
-```bash
-export LIFEOS_AI_MODEL="openai:gpt-4o"
+```text
+registry_refresh
+  → vault_read_markdown
+  → agent synthesizes a source-grounded title and body
+  → ingestion_create_wiki_proposal
+  → stop at draft
 ```
 
 ### How it connects
 
-The ingestion pipeline reads the canonical source, verifies its registered
-identity, sends bounded context to the AI backend, validates structured output,
-creates a draft proposal, and records provenance. It does not directly overwrite
-the target wiki page.
+The MCP adapter reads the canonical source through the bounded facade. The
+external agent interprets the source, while LifeOS verifies its registered
+identity and current hash, validates the supplied fields, creates a draft
+proposal, and records provenance. It does not directly overwrite the target
+wiki page, and ingestion alone never implies permission to submit, approve, or
+apply the proposal.
 
 ## 3.11 Proposal lifecycle, ownership, and recovery
 
@@ -457,8 +473,9 @@ The server uses STDIO protocol output and should normally be launched by an
 MCP-compatible client rather than used as an interactive shell command.
 
 When an MCP client receives an ingestion request, the LifeOS server advertises
-the bounded workflow explicitly: read the registered source with
-`vault_read_markdown`, synthesize a source-grounded title and body, call
+the bounded workflow explicitly: refresh the disposable registry with
+`registry_refresh`, read the registered source with `vault_read_markdown`,
+synthesize a source-grounded title and body, call
 `ingestion_create_wiki_proposal`, and stop at the resulting draft. Submission,
 approval, and application each require a separate explicit user request and
 retain trusted interactive authorization.

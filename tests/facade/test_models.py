@@ -19,6 +19,7 @@ from lifeos.facade import models
 
 def test_tool_effect_values() -> None:
     assert ToolEffect.READ_ONLY == "read_only"
+    assert ToolEffect.DERIVED_WRITE == "derived_write"
     assert ToolEffect.PROPOSAL_PRODUCING == "proposal_producing"
     assert ToolEffect.CONSEQUENTIAL == "consequential"
 

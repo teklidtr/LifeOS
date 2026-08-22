@@ -20,14 +20,21 @@ from .read_only import (
     ReadMarkdownResult,
     read_markdown,
 )
+from .registry_tools import (
+    REGISTRY_REFRESH_DESCRIPTOR,
+    RegistryRefreshResult,
+    refresh_registry,
+)
 
 __all__ = [
     "CREATE_WIKI_PROPOSAL_DESCRIPTOR",
     "CreateWikiProposalRequest",
     "CreateWikiProposalResult",
     "READ_MARKDOWN_DESCRIPTOR",
+    "REGISTRY_REFRESH_DESCRIPTOR",
     "ReadMarkdownRequest",
     "ReadMarkdownResult",
+    "RegistryRefreshResult",
     "ToolAuthorizationError",
     "ToolConflictError",
     "ToolDescriptor",
@@ -39,4 +46,5 @@ __all__ = [
     "ToolValidationError",
     "create_wiki_proposal",
     "read_markdown",
+    "refresh_registry",
 ]

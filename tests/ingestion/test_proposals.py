@@ -7,19 +7,17 @@ import os
 import pytest
 from dataclasses import replace
 
-from lifeos.ingestion.backend import AnalysisResult, SourceSnapshot, WikiPageDraft
+from lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent
 from lifeos.ingestion.provenance import ProvenanceGenerator
 from lifeos.ingestion.proposals import build_wiki_proposal, persist_wiki_proposal, ProposalPublicationError, validate_wiki_target_path, InvalidWikiTargetError, ProposalAlreadyExistsError, WikiProposalDocuments
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.ingestion.provenance import extract_provenance
 
 @pytest.fixture
-def sample_analysis() -> AnalysisResult:
-    return AnalysisResult(
-        draft=WikiPageDraft(
-            title="Test Page",
-            body="This is a test body.\nIt has multiple lines."
-        ),
+def sample_content() -> WikiProposalContent:
+    return WikiProposalContent(
+        title="Test Page",
+        body="This is a test body.\nIt has multiple lines.",
         generator=ProvenanceGenerator(
             id="test-gen",
             version="1.0",
@@ -35,17 +33,17 @@ def sample_source() -> SourceSnapshot:
         content_hash="sha256:" + "a" * 64  # valid 64 char hash
     )
 
-def test_identical_inputs_produce_identical_bytes(sample_analysis: AnalysisResult, sample_source: SourceSnapshot) -> None:
+def test_identical_inputs_produce_identical_bytes(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
     prop_id = "prop-20260713T123000Z-abcdef12"
     doc1 = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id=prop_id,
         created_at="2026-07-13T12:00:00Z"
     )
     doc2 = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id=prop_id,
@@ -54,11 +52,11 @@ def test_identical_inputs_produce_identical_bytes(sample_analysis: AnalysisResul
     assert doc1.proposal_markdown == doc2.proposal_markdown
     assert doc1.patches_json == doc2.patches_json
 
-def test_builder_performs_no_writes_and_injects_metadata(sample_analysis: AnalysisResult, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+def test_builder_performs_no_writes_and_injects_metadata(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
     before_files = list(tmp_path.rglob("*"))
     prop_id = "prop-20260713T123000Z-abcdef12"
     doc = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id=prop_id,
@@ -71,9 +69,9 @@ def test_builder_performs_no_writes_and_injects_metadata(sample_analysis: Analys
     assert f"id: {prop_id}".encode() in doc.proposal_markdown
     assert b"created_at: \"2026-07-13T12:30:00Z\"" in doc.proposal_markdown
 
-def test_proposal_and_provenance_use_same_timestamp(sample_analysis: AnalysisResult, sample_source: SourceSnapshot) -> None:
+def test_proposal_and_provenance_use_same_timestamp(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
     doc = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
@@ -84,12 +82,12 @@ def test_proposal_and_provenance_use_same_timestamp(sample_analysis: AnalysisRes
     candidate_md = patches[0]["new_content"]
     assert "created_at: \"2026-07-13T12:30:00Z\"" in candidate_md
 
-def test_valid_draft_loads_and_omits_review_digest(sample_analysis: AnalysisResult, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+def test_valid_draft_loads_and_omits_review_digest(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
     proposals_root = tmp_path / "proposals"
     proposals_root.mkdir(parents=True)
 
     doc = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
@@ -101,9 +99,9 @@ def test_valid_draft_loads_and_omits_review_digest(sample_analysis: AnalysisResu
     assert parsed.frontmatter.get("status") == "draft"
     assert "review_digest" not in parsed.frontmatter
 
-def test_v2_operation_emitted_with_absent_state(sample_analysis: AnalysisResult, sample_source: SourceSnapshot) -> None:
+def test_v2_operation_emitted_with_absent_state(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
     doc = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
@@ -118,9 +116,9 @@ def test_v2_operation_emitted_with_absent_state(sample_analysis: AnalysisResult,
     assert p["generator_id"] == "test-gen"
     assert p["generator_version"] == "1.0"
 
-def test_candidate_markdown_parses_and_preserves_body(sample_analysis: AnalysisResult, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+def test_candidate_markdown_parses_and_preserves_body(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
     doc = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
@@ -148,12 +146,12 @@ def test_candidate_markdown_parses_and_preserves_body(sample_analysis: AnalysisR
     assert parsed.body == "This is a test body.\nIt has multiple lines.\n"
     assert md_content.endswith("\n")
 
-def test_model_id_omission_remains_canonical(sample_analysis: AnalysisResult, sample_source: SourceSnapshot) -> None:
-    new_gen = replace(sample_analysis.generator, model_id=None)
-    new_analysis = replace(sample_analysis, generator=new_gen)
+def test_model_id_omission_remains_canonical(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
+    new_gen = replace(sample_content.generator, model_id=None)
+    new_content = replace(sample_content, generator=new_gen)
 
     doc = build_wiki_proposal(
-        analysis=new_analysis,
+        content=new_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
@@ -163,22 +161,22 @@ def test_model_id_omission_remains_canonical(sample_analysis: AnalysisResult, sa
     md_content = patches[0]["new_content"]
     assert "model_id" not in md_content
 
-def test_invalid_target_path_rejected(sample_analysis: AnalysisResult, sample_source: SourceSnapshot) -> None:
+def test_invalid_target_path_rejected(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
     with pytest.raises(ValueError, match="Target path must be within the canonical wiki area"):
         build_wiki_proposal(
-            analysis=sample_analysis,
+            content=sample_content,
             source=sample_source,
             target_path="journal/test.md",
             proposal_id="prop-20260713T123000Z-abcdef12",
             created_at="2026-07-13T12:30:00Z"
         )
 
-def test_existing_proposal_id_rejected(sample_analysis: AnalysisResult, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+def test_existing_proposal_id_rejected(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
     proposals_root = tmp_path / "proposals"
     proposals_root.mkdir(parents=True)
 
     doc = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
@@ -190,12 +188,12 @@ def test_existing_proposal_id_rejected(sample_analysis: AnalysisResult, sample_s
     with pytest.raises(ProposalPublicationError):
         persist_wiki_proposal(proposals_root=proposals_root, documents=doc)
 
-def test_failure_writing_cleans_up(sample_analysis: AnalysisResult, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+def test_failure_writing_cleans_up(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
     proposals_root = tmp_path / "proposals"
     proposals_root.mkdir(parents=True)
 
     doc = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
@@ -208,13 +206,13 @@ def test_failure_writing_cleans_up(sample_analysis: AnalysisResult, sample_sourc
 
     assert not (proposals_root / "prop-20260713T123000Z-abcdef12").exists()
 
-def test_full_lifecycle_workflow(sample_analysis: AnalysisResult, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+def test_full_lifecycle_workflow(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
     vault_root = tmp_path
     proposals_root = vault_root / "proposals"
     proposals_root.mkdir(parents=True)
 
     doc = build_wiki_proposal(
-        analysis=sample_analysis,
+        content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",

@@ -119,8 +119,13 @@ and near-term work concrete.
 1. Save the material under `study/` or `raw/`.
 2. Record its author, URL, edition, date, or citation.
 3. Add your questions and disagreements.
-4. Rebuild the registry index after adding the source.
-5. When ready, run `lifeos ingest` to create a proposed durable wiki note.
+4. Run `uv run lifeos scan`, or let the MCP-connected agent call
+   `registry_refresh`, after adding the source.
+5. Ask the MCP-connected agent to ingest the registered source into an explicit
+   `wiki/` target. The agent reads it with `vault_read_markdown`, synthesizes a
+   grounded draft, and calls `ingestion_create_wiki_proposal`.
+6. Review the resulting draft proposal. Ingestion does not submit, approve, or
+   apply it.
 
 ### Capture a flashcard
 
@@ -299,19 +304,27 @@ Not every thought needs promotion.
 
 ### 4. Review proposals
 
-List indexed proposals:
+In Obsidian, run **Open Proposals** from the command palette. Select each proposal
+and inspect its source paths, body, exact typed operations, review digest, and
+validation findings. Then move it through only the lifecycle steps you intend:
+
+1. **Submit** a draft for review.
+2. **Approve** the unchanged pending proposal.
+3. **Apply** the unchanged approved proposal to canonical Markdown.
+
+Approval and application require separate confirmations. Reject a pending or
+approved proposal when it should not proceed.
+
+For recovery or scripted inspection, list indexed proposals from the CLI:
 
 ```bash
 uv run lifeos proposals list --status pending
 uv run lifeos proposals list --status approved
 ```
 
-Open each proposal directory and review target paths, source references, patch
-contents, risk, and whether the proposal still reflects your intention.
-
-Submission, approval, and application are performed through the typed facade or
-MCP tools with trusted authorization. The CLI currently provides listing and
-legacy lifecycle migration, not direct approve or apply commands.
+The CLI provides listing and legacy lifecycle migration, not direct approval or
+application. The Obsidian workspace calls the trusted Python authorization
+boundary and does not implement lifecycle rules itself.
 
 ### 5. Rebuild derived products when useful
 
@@ -432,12 +445,9 @@ Use evidence gaps to decide what to read or test next.
 
 ### 8. Review AI proposals
 
-```bash
-uv run lifeos proposals list
-```
-
-For each proposal, approve and apply it through the trusted facade, reject it,
-leave it pending with a reason, or regenerate it when its source has changed.
+Open **Open Proposals** in Obsidian. For each proposal, submit, approve, apply, or
+reject it through the explicit workspace controls; leave it unchanged or
+regenerate it when its source has changed.
 Never approve a proposal merely because its prose sounds confident.
 
 ### 9. Rebuild useful graph views
@@ -469,20 +479,12 @@ public output.
 After a week of manual edits, refresh the registry:
 
 ```bash
-uv run python - <<'PY'
-from pathlib import Path
-
-from lifeos.config import load_config
-from lifeos.registry import Registry, register_proposals_scan, register_scan
-from lifeos.scanner import scan_vault
-
-config = load_config(Path("lifeos.yml"))
-registry = Registry(config.runtime_dir / "registry.db")
-registry.initialize()
-register_scan(registry, config.vault_root, scan_vault(config.vault_root))
-register_proposals_scan(registry, vault_root=config.vault_root)
-PY
+uv run lifeos scan
 ```
+
+Use `--config /absolute/path/to/lifeos.yml` when the command is not run beside
+the configuration file. An MCP-connected agent can perform the identical
+refresh with `registry_refresh`.
 
 ### 12. Commit the canonical vault
 

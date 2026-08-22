@@ -9,6 +9,7 @@ _TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
 
 class ToolEffect(str, Enum):
     READ_ONLY = "read_only"
+    DERIVED_WRITE = "derived_write"
     PROPOSAL_PRODUCING = "proposal_producing"
     CONSEQUENTIAL = "consequential"
 

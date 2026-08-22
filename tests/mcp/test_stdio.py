@@ -41,6 +41,7 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             tool_names = {t.name for t in tools.tools}
 
             assert tool_names == {
+                "registry_refresh",
                 "vault_read_markdown",
                 "ingestion_create_wiki_proposal",
                 "proposal_submit",
@@ -50,6 +51,9 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
 
             advertised = {tool.name: tool for tool in tools.tools}
             assert all(tool.description for tool in advertised.values())
+            assert advertised["registry_refresh"].annotations.readOnlyHint is False
+            assert advertised["registry_refresh"].annotations.destructiveHint is False
+            assert advertised["registry_refresh"].annotations.idempotentHint is True
             assert advertised["vault_read_markdown"].annotations.readOnlyHint is True
             assert advertised["ingestion_create_wiki_proposal"].annotations.destructiveHint is False
             assert advertised["proposal_apply"].annotations.destructiveHint is True

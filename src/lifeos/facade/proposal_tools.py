@@ -32,7 +32,7 @@ from lifeos.ingestion.proposals import (
     ProposalPublicationError,
 )
 from lifeos.proposals.schema import generate_proposal_id
-from lifeos.ingestion.backend import AnalysisResult, WikiPageDraft
+from lifeos.ingestion.drafts import WikiProposalContent
 from lifeos.ingestion.provenance import ProvenanceGenerator
 
 
@@ -119,12 +119,10 @@ def create_wiki_proposal(
         model_id=None,
     )
 
-    # 3. Construct AnalysisResult with supplied title and body
-    analysis = AnalysisResult(
-        draft=WikiPageDraft(
-            title=request.title,
-            body=request.body,
-        ),
+    # 3. Construct bounded proposal content from the external agent fields.
+    content = WikiProposalContent(
+        title=request.title,
+        body=request.body,
         generator=generator,
     )
 
@@ -143,7 +141,7 @@ def create_wiki_proposal(
     # 7. Build wiki proposal
     try:
         documents = build_wiki_proposal(
-            analysis=analysis,
+            content=content,
             source=verified.source,
             target_path=request.target_path,
             proposal_id=proposal_id,
