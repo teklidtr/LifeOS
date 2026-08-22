@@ -310,8 +310,10 @@ Not every thought needs promotion.
 ### 4. Review proposals
 
 In Obsidian, run **Open Proposals** from the command palette. Select each proposal
-and inspect its source paths, body, exact typed operations, review digest, and
-validation findings. Then move it through only the lifecycle steps you intend:
+and inspect its source paths, body, operation order and targets, GitHub-style line
+diffs, review digest, and validation findings. Added lines are green and removed
+lines are red; the underlying typed operations remain canonical. Then move it
+through only the lifecycle steps you intend:
 
 1. **Submit** a draft for review.
 2. **Approve** the unchanged pending proposal.

@@ -82,8 +82,9 @@ reflection. Refresh replaces managed evidence only and rejects concurrent edits.
 Review suggestions that affect another canonical note create ordinary draft proposals.
 Run **Open Proposals** from the command palette to open the dedicated proposal
 workspace. Proposals are grouped by lifecycle state. Select one to inspect its
-rationale, body, source paths, exact typed operations, Python-computed review
-digest, and validation findings.
+rationale, body, source paths, ordered operation targets, GitHub-style red/green
+line diffs, Python-computed review digest, and validation findings. The diff is a
+review view of the canonical typed operations; it does not replace or edit them.
 
 Use **Submit** to move a draft into review, then separately use **Approve** and
 **Apply**. Pending or approved proposals may be **Rejected**. Every action opens
