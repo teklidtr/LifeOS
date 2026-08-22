@@ -78,6 +78,7 @@ function inspection(
       operation_type: "create_file",
       target_path: "wiki/example.md",
       unified_diff: "--- /dev/null\n+++ b/wiki/example.md\n@@ -0,0 +1 @@\n+Example",
+      preview_source: "snapshot",
     }],
     related_sources: ["study/example.md"],
     findings: [],

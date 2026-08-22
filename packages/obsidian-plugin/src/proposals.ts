@@ -8,6 +8,7 @@ export interface ProposalOperationInspection {
   target_path: string;
   unified_diff: string;
   preview_error?: string | null;
+  preview_source: "snapshot" | "legacy_live";
 }
 
 export interface ProposalInspection {

@@ -220,6 +220,12 @@ button.lifeos-proposals__proposal[aria-current="true"] {
   color: var(--text-muted);
 }
 
+.lifeos-proposals__diff-warning {
+  padding: var(--size-4-2);
+  border-inline-start: 3px solid var(--text-warning);
+  color: var(--text-warning);
+}
+
 .lifeos-proposals__diff {
   max-width: 100%;
   min-width: 0;

@@ -340,6 +340,13 @@ class LifeOSProposalItemView extends ItemView {
         });
         target.createEl("code", { text: operation.target_path });
 
+        if (operation.preview_source === "legacy_live") {
+          operationContainer.createEl("p", {
+            cls: "lifeos-proposals__diff-warning",
+            text: "Legacy live preview: this proposal predates immutable review snapshots. Later vault changes may make this diff unavailable.",
+          });
+        }
+
         if (operation.preview_error) {
           operationContainer.createEl("p", {
             cls: "lifeos-proposals__diff-error",
