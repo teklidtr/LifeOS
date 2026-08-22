@@ -10,6 +10,18 @@
 - **Blocked:** complete the displayed recovery or authorization step.
 - **Corrupt:** open the linked canonical note and repair the typed diagnostic.
 
+## Plugin fails to load
+
+Rebuild from the repository root with `npm --prefix packages/obsidian-plugin ci`
+and `npm --prefix packages/obsidian-plugin run build`. Copy only `build/main.js`,
+`build/manifest.json`, and `build/styles.css` into
+`.obsidian/plugins/lifeos/`, then reload Obsidian.
+
+The production `main.js` is a bundled CommonJS Obsidian entry point. Files under
+`dist-test/` are unbundled test output and cannot be installed directly. If the
+plugin loads but reports **Unavailable**, the plugin bundle is working; correct
+the Python executable or `lifeos.yml` path in LifeOS Settings.
+
 ## Safe upgrade
 
 1. Commit or back up the Markdown vault.

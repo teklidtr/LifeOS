@@ -221,6 +221,12 @@ intentionally rebuild the disposable registry.
 
 No proprietary LifeOS Obsidian plugin is required for the core workflow. The first-class review workspace and other desktop cockpit views require the bundled LifeOS plugin, while the canonical Markdown artifacts remain usable without it.
 
+To build and install the optional bundled plugin, follow
+[Obsidian Desktop Cockpit → First run](06-obsidian-desktop.md#first-run). Build it
+from the LifeOS application repository; install only the resulting `main.js`,
+`manifest.json`, and `styles.css` in the vault's `.obsidian/plugins/lifeos/`
+directory.
+
 ## 4.10 Verify the installation
 
 From the directory containing `lifeos.yml`, with the LifeOS repository virtual

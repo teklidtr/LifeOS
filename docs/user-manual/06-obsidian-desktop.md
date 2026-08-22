@@ -7,13 +7,30 @@ performs every validated read or write. The CLI remains a recovery and developer
 
 ## First run
 
-1. Install the plugin folder containing `manifest.json`, `main.js`, and `styles.css` into
-   `.obsidian/plugins/lifeos/`.
-2. In **Settings → Community plugins**, enable **LifeOS**.
-3. Open **LifeOS Settings** and choose **lifeos.yml**, the trusted Python executable, and
-   your local actor display name.
-4. Enable **Start LifeOS when Obsidian opens**.
-5. Click the LifeOS ribbon icon. The connection indicator should show **Connected**.
+1. From the LifeOS repository root, build the bundled plugin:
+
+   ```bash
+   npm --prefix packages/obsidian-plugin ci
+   npm --prefix packages/obsidian-plugin run build
+   ```
+
+2. Install the three release files into the vault:
+
+   ```bash
+   mkdir -p /absolute/path/to/LifeOS-vault/.obsidian/plugins/lifeos
+   cp packages/obsidian-plugin/build/{main.js,manifest.json,styles.css} \
+     /absolute/path/to/LifeOS-vault/.obsidian/plugins/lifeos/
+   ```
+
+   Do not copy `dist-test/src/index.js` as `main.js`. It is unbundled controller
+   test output, not an Obsidian entry point.
+
+3. In **Settings → Community plugins**, enable **LifeOS**.
+4. Open **LifeOS Settings**. Choose the absolute `lifeos.yml` path and the
+   repository environment's Python executable, for example
+   `/absolute/path/to/lifeos/.venv/bin/python`, then set your local actor ID.
+5. Enable **Start on load**, click **Restart bridge**, and open the LifeOS ribbon
+   view. The connection indicator should show **Connected**.
 
 ## Today
 
