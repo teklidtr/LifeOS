@@ -361,6 +361,100 @@ def _evaluate_operation(
             ),
         )
 
+    if op.op == "release_generated_ownership":
+        try:
+            os.stat(norm_p, dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            return OperationPreflightResult(
+                operation_id=op.id,
+                target_path=target_path,
+                state="invalid",
+                findings=(
+                    PreflightFinding(
+                        severity="error",
+                        code="target_inspection_failed",
+                        operation_id=op.id,
+                        target_path=target_path,
+                        field_path=None,
+                        message=f"Failed to inspect ownership target: {error}",
+                    ),
+                ),
+            )
+        else:
+            return OperationPreflightResult(
+                operation_id=op.id,
+                target_path=target_path,
+                state="stale",
+                findings=(
+                    PreflightFinding(
+                        severity="error",
+                        code="target_restored",
+                        operation_id=op.id,
+                        target_path=target_path,
+                        field_path=None,
+                        message="Ownership target is present; release is no longer safe",
+                    ),
+                ),
+            )
+
+        entry = ownership.entries.get(norm_p)
+        if entry is None:
+            return OperationPreflightResult(
+                operation_id=op.id,
+                target_path=target_path,
+                state="stale",
+                findings=(
+                    PreflightFinding(
+                        severity="error",
+                        code="ownership_entry_missing",
+                        operation_id=op.id,
+                        target_path=target_path,
+                        field_path=None,
+                        message="Ownership entry has already been released or changed",
+                    ),
+                ),
+            )
+
+        expected_entry = (
+            f"sha256:{entry.content_hash}",
+            entry.generator_id,
+            entry.generator_version,
+            entry.created_at,
+            entry.updated_at,
+        )
+        reviewed_entry = (
+            getattr(op, "expected_content_hash", ""),
+            getattr(op, "expected_generator_id", ""),
+            getattr(op, "expected_generator_version", ""),
+            getattr(op, "expected_created_at", ""),
+            getattr(op, "expected_updated_at", ""),
+        )
+        if reviewed_entry != expected_entry:
+            return OperationPreflightResult(
+                operation_id=op.id,
+                target_path=target_path,
+                state="stale",
+                findings=(
+                    PreflightFinding(
+                        severity="error",
+                        code="ownership_entry_changed",
+                        operation_id=op.id,
+                        target_path=target_path,
+                        field_path=None,
+                        message="Ownership entry no longer matches the reviewed record",
+                    ),
+                ),
+            )
+
+        return OperationPreflightResult(
+            operation_id=op.id,
+            target_path=target_path,
+            state="valid",
+            findings=(),
+        )
+
     if op.op == "create_generated_file" or op.op == "create_file":
         if target_path in ownership.entries:
             return OperationPreflightResult(

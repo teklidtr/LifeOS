@@ -203,6 +203,27 @@ class ReplaceGeneratedFileV2:
         _validate_string_syntax(self.new_content)
 
 
+@dataclass(frozen=True)
+class ReleaseGeneratedOwnershipV2:
+    id: str
+    target_path: str
+    expected_content_hash: str
+    expected_generator_id: str
+    expected_generator_version: str
+    expected_created_at: str
+    expected_updated_at: str
+    op: Literal["release_generated_ownership"] = "release_generated_ownership"
+
+    def __post_init__(self) -> None:
+        _validate_id_syntax(self.id)
+        _validate_path_syntax(self.target_path)
+        _validate_hash_syntax(self.expected_content_hash)
+        _validate_identifier_syntax(self.expected_generator_id)
+        _validate_generator_version(self.expected_generator_version)
+        _validate_string_syntax(self.expected_created_at)
+        _validate_string_syntax(self.expected_updated_at)
+
+
 PatchOperationV1 = Union[
     ReplaceManagedBlock,
     CreateGeneratedFile,
@@ -215,6 +236,7 @@ PatchOperationV2 = Union[
     ReplaceManagedBlock,
     CreateGeneratedFileV2,
     ReplaceGeneratedFileV2,
+    ReleaseGeneratedOwnershipV2,
     CreateFile,
     PatchHumanFile,
 ]
@@ -272,7 +294,7 @@ class PatchDocumentV2:
         op_ids = set()
         targets = set()
         for op in self.operations:
-            if not isinstance(op, (ReplaceManagedBlock, CreateGeneratedFileV2, ReplaceGeneratedFileV2, CreateFile, PatchHumanFile)):
+            if not isinstance(op, (ReplaceManagedBlock, CreateGeneratedFileV2, ReplaceGeneratedFileV2, ReleaseGeneratedOwnershipV2, CreateFile, PatchHumanFile)):
                 raise ValueError("operation is not a valid v2 operation model")
             if op.id in op_ids:
                 raise ValueError("duplicate operation id")
@@ -552,6 +574,50 @@ def validate_patch_document(data: Mapping[str, object]) -> AnyPatchDocument:
                 allowed_op_fields = {"id", "op", "target_path", "base_hash", "unified_diff"}
                 _validate_hash(op_data.get("base_hash"), f"{op_path}.base_hash", errors)
                 _validate_string(op_data.get("unified_diff"), f"{op_path}.unified_diff", errors)
+            elif op_type == "release_generated_ownership":
+                allowed_op_fields = {
+                    "id",
+                    "op",
+                    "target_path",
+                    "expected_content_hash",
+                    "expected_generator_id",
+                    "expected_generator_version",
+                    "expected_created_at",
+                    "expected_updated_at",
+                }
+                if sv != 2:
+                    errors.append(
+                        PatchSchemaError(
+                            "unsupported_operation_version",
+                            f"{op_path}.op",
+                            "release_generated_ownership requires schema version 2",
+                        )
+                    )
+                _validate_hash(
+                    op_data.get("expected_content_hash"),
+                    f"{op_path}.expected_content_hash",
+                    errors,
+                )
+                _validate_identifier(
+                    op_data.get("expected_generator_id"),
+                    f"{op_path}.expected_generator_id",
+                    errors,
+                )
+                _validate_generator_version_schema(
+                    op_data.get("expected_generator_version"),
+                    f"{op_path}.expected_generator_version",
+                    errors,
+                )
+                _validate_string(
+                    op_data.get("expected_created_at"),
+                    f"{op_path}.expected_created_at",
+                    errors,
+                )
+                _validate_string(
+                    op_data.get("expected_updated_at"),
+                    f"{op_path}.expected_updated_at",
+                    errors,
+                )
             else:
                 errors.append(
                     PatchSchemaError("unknown_operation", f"{op_path}.op", "unknown operation type")
@@ -641,6 +707,20 @@ def validate_patch_document(data: Mapping[str, object]) -> AnyPatchDocument:
                         unified_diff=str(op_data["unified_diff"]),
                     )
                 )
+            elif op_type == "release_generated_ownership":
+                validated_ops.append(
+                    ReleaseGeneratedOwnershipV2(
+                        id=str(op_id),
+                        target_path=str(target),
+                        expected_content_hash=str(op_data["expected_content_hash"]),
+                        expected_generator_id=str(op_data["expected_generator_id"]),
+                        expected_generator_version=str(
+                            op_data["expected_generator_version"]
+                        ),
+                        expected_created_at=str(op_data["expected_created_at"]),
+                        expected_updated_at=str(op_data["expected_updated_at"]),
+                    )
+                )
 
     if errors:
         errors.sort(key=lambda e: (e.field_path, e.code, e.message))
@@ -709,6 +789,17 @@ def _serialize_op(op: PatchOperation) -> dict[str, Any]:
             "expected_generator_id": op.expected_generator_id,
             "generator_version": op.generator_version,
             "new_content": op.new_content,
+        }
+    elif isinstance(op, ReleaseGeneratedOwnershipV2):
+        return {
+            "id": op.id,
+            "op": op.op,
+            "target_path": op.target_path,
+            "expected_content_hash": op.expected_content_hash,
+            "expected_generator_id": op.expected_generator_id,
+            "expected_generator_version": op.expected_generator_version,
+            "expected_created_at": op.expected_created_at,
+            "expected_updated_at": op.expected_updated_at,
         }
     elif isinstance(op, CreateFile):
         return {

@@ -677,6 +677,7 @@ def _rollback_application(
     durability: str,
     recovery_artifacts_retained: bool,
     update_op_state: Callable[[int, OperationState, Optional[str]], None],
+    manifest_operation_indexes: tuple[int, ...] = (),
 ) -> _RollbackResult:
     rollback_succeeded = True
     recovery_required = False
@@ -702,10 +703,14 @@ def _rollback_application(
             else:
                 sync_result = rollback_creation("generated-ownership.json", manifest_staging)
             durability = _record_sync_result(sync_result, durability)
+            for index in manifest_operation_indexes:
+                update_op_state(index, OperationState.ROLLED_BACK, None)
         except Exception:
             rollback_succeeded = False
             recovery_required = True
             durability = "uncertain"
+            for index in manifest_operation_indexes:
+                update_op_state(index, OperationState.ROLLBACK_FAILED, "Rollback failed")
 
     for prepared in reversed(prepared_ops):
         if not prepared.committed:
@@ -935,6 +940,7 @@ def _execute_application_transaction(
 
     parent_descriptors: Dict[str, ParentDescriptor] = {}
     prepared_ops: List[_PreparedOp] = []
+    manifest_operation_indexes: list[int] = []
     manifest_staging: Optional[StagingFile] = None
     manifest_backup: Optional[BackupFile] = None
     lifecycle_staging: Optional[StagingFile] = None
@@ -1045,6 +1051,8 @@ def _execute_application_transaction(
             )
 
         for op in proposal.patch_document.operations:
+            if op.op == "release_generated_ownership":
+                continue
             target_path = op.target_path
             parent_relative = str(Path(target_path).parent)
             if parent_relative not in parent_descriptors:
@@ -1086,6 +1094,9 @@ def _execute_application_transaction(
 
         operation_candidates: List[_OperationCandidate] = []
         for index, operation in enumerate(proposal.patch_document.operations):
+            if operation.op == "release_generated_ownership":
+                manifest_operation_indexes.append(index)
+                continue
             parent = parent_descriptors[str(Path(operation.target_path).parent)]
             try:
                 candidate = _candidate_for_operation(
@@ -1132,6 +1143,55 @@ def _execute_application_transaction(
                 created_at=created_at,
                 updated_at=applied_at,
             )
+
+        for index in manifest_operation_indexes:
+            operation = proposal.patch_document.operations[index]
+            entry = new_entries.get(operation.target_path)
+            if entry is None:
+                raise ApplicationError(
+                    "Ownership entry changed after review",
+                    outcome,
+                    code=ApplicationErrorCode.OWNERSHIP_CONFLICT,
+                )
+            reviewed_entry = (
+                getattr(operation, "expected_content_hash", ""),
+                getattr(operation, "expected_generator_id", ""),
+                getattr(operation, "expected_generator_version", ""),
+                getattr(operation, "expected_created_at", ""),
+                getattr(operation, "expected_updated_at", ""),
+            )
+            current_entry = (
+                f"sha256:{entry.content_hash}",
+                entry.generator_id,
+                entry.generator_version,
+                entry.created_at,
+                entry.updated_at,
+            )
+            if reviewed_entry != current_entry:
+                raise ApplicationError(
+                    "Ownership entry changed after review",
+                    outcome,
+                    code=ApplicationErrorCode.OWNERSHIP_CONFLICT,
+                )
+            try:
+                assert root_fd is not None
+                os.stat(operation.target_path, dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                raise ApplicationError(
+                    "Failed to verify orphaned ownership target",
+                    outcome,
+                    code=ApplicationErrorCode.TARGET_CONFLICT,
+                ) from error
+            else:
+                raise ApplicationError(
+                    "Ownership target was restored after review",
+                    outcome,
+                    code=ApplicationErrorCode.TARGET_CONFLICT,
+                )
+            ownership_changed = True
+            del new_entries[operation.target_path]
 
         if ownership_changed:
             if "system" not in parent_descriptors:
@@ -1208,6 +1268,8 @@ def _execute_application_transaction(
                     "generated-ownership.json", system_parent, manifest_identity
                 )
                 durability = _record_sync_result(manifest_backup.sync_result, durability)
+            for index in manifest_operation_indexes:
+                update_op_state(index, OperationState.PREPARED)
 
         proposal_parent = ParentDescriptor(
             fd=prop_fd,
@@ -1428,6 +1490,9 @@ def _execute_application_transaction(
             durability=durability,
         )
         write_occurred = write_occurred or manifest_committed
+        if manifest_committed:
+            for index in manifest_operation_indexes:
+                update_op_state(index, OperationState.COMMITTED)
 
         assert recovery_journal is not None
         recovery_journal = _advance_recovery_phase(
@@ -1463,7 +1528,12 @@ def _execute_application_transaction(
             outcome,
             new_status=ProposalStatus.APPLIED,
             changed_paths=tuple(
-                operation.target_path for operation in proposal.patch_document.operations
+                dict.fromkeys(
+                    str(DEFAULT_OWNERSHIP_MANIFEST_PATH)
+                    if operation.op == "release_generated_ownership"
+                    else operation.target_path
+                    for operation in proposal.patch_document.operations
+                )
             ),
             proposal_source_hash_after=_prefixed_hash(proposal_candidate),
         )
@@ -1485,6 +1555,7 @@ def _execute_application_transaction(
             durability=durability,
             recovery_artifacts_retained=recovery_artifacts_retained,
             update_op_state=update_op_state,
+            manifest_operation_indexes=tuple(manifest_operation_indexes),
         )
         durability = rollback_result.durability
         rollback_succeeded = rollback_result.rollback_succeeded

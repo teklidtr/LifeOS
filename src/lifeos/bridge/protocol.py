@@ -39,6 +39,8 @@ CAPABILITIES = (
     "proposal.inspect",
     "proposal.prepare",
     "proposal.execute",
+    "ownership.orphans.list",
+    "ownership.release.proposal.create",
     "system.status",
     "review.build",
     "review.progress",

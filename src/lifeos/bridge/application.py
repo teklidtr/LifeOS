@@ -2377,6 +2377,26 @@ class BridgeApplication:
                 raise
             except ValueError as exc:
                 raise ProtocolError("proposal_invalid", str(exc)) from exc
+        if method == "ownership.orphans.list":
+            try:
+                strict_object(params, allowed=set())
+                return list(self.proposals.list_orphaned_ownership())
+            except ValueError as exc:
+                raise ProtocolError("ownership_invalid", str(exc)) from exc
+        if method == "ownership.release.proposal.create":
+            try:
+                data = strict_object(
+                    params,
+                    allowed={"target_path"},
+                    required={"target_path"},
+                )
+                return self.proposals.create_ownership_release_proposal(
+                    data["target_path"]
+                )
+            except ProtocolError:
+                raise
+            except ValueError as exc:
+                raise ProtocolError("ownership_invalid", str(exc)) from exc
         if method == "system.status":
             strict_object(params, allowed=set())
             return asdict(

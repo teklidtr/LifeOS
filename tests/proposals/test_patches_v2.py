@@ -11,6 +11,7 @@ from lifeos.proposals.patches import (
     PatchHumanFile,
     CreateGeneratedFileV2,
     ReplaceGeneratedFileV2,
+    ReleaseGeneratedOwnershipV2,
     serialize_patch_json_bytes,
     validate_patch_document,
     PatchSchemaError
@@ -52,6 +53,33 @@ def test_v2_construction() -> None:
     parsed = validate_patch_document(json.loads(b))
     assert isinstance(parsed, PatchDocumentV2)
     assert parsed.operations[0].generator_version == "v1.0.0" # type: ignore
+
+
+def test_v2_release_generated_ownership_round_trip_and_v1_rejection() -> None:
+    operation = ReleaseGeneratedOwnershipV2(
+        "op-release",
+        "wiki/missing.md",
+        "sha256:" + "a" * 64,
+        "lifeos.test",
+        "1",
+        "2026-08-22T10:00:00Z",
+        "2026-08-22T11:00:00Z",
+    )
+    document = PatchDocumentV2(
+        2,
+        "prop-20260713T090000Z-01234567",
+        (operation,),
+    )
+
+    serialized = serialize_patch_json_bytes(document)
+    parsed = validate_patch_document(json.loads(serialized))
+
+    assert parsed == document
+    invalid_v1 = json.loads(serialized)
+    invalid_v1["schema_version"] = 1
+    with pytest.raises(PatchSchemaError) as error:
+        validate_patch_document(invalid_v1)
+    assert error.value.code == "unsupported_operation_version"
 
 def test_v2_invalid_generator_version() -> None:
     # non-string values

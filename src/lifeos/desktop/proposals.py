@@ -16,6 +16,13 @@ from lifeos.facade.errors import ToolFacadeError
 from lifeos.proposals.lifecycle import compute_review_digest, reject_proposal
 from lifeos.proposals.loader import load_proposal_directory
 from lifeos.markdown.parser import parse_markdown_note
+from lifeos.ownership import (
+    DEFAULT_OWNERSHIP_MANIFEST_PATH,
+    GeneratedOwnership,
+    create_ownership_release_proposal,
+    list_orphaned_generated_ownership,
+)
+from lifeos.ownership.manifest import serialize_generated_ownership_bytes
 
 ProposalAction = Literal["accept", "submit", "approve", "apply", "reject"]
 
@@ -101,6 +108,19 @@ class DesktopProposalService:
                     continue
         return tuple(results)
 
+    def list_orphaned_ownership(self) -> tuple[dict[str, Any], ...]:
+        return tuple(
+            orphan.to_dict()
+            for orphan in list_orphaned_generated_ownership(self.vault_root)
+        )
+
+    def create_ownership_release_proposal(self, target_path: str) -> dict[str, str]:
+        return create_ownership_release_proposal(
+            vault_root=self.vault_root,
+            target_path=target_path,
+            created_by=self.actor_id,
+        ).to_dict()
+
     def inspect(self, proposal_id: str) -> ProposalInspection:
         root = self.vault_root / "proposals"
         loaded = load_proposal_directory(root / proposal_id, proposals_root=root)
@@ -145,6 +165,39 @@ class DesktopProposalService:
 
     def _operation_diff(self, operation: Any) -> str:
         target_path = operation.target_path
+        if operation.op == "release_generated_ownership":
+            ownership = GeneratedOwnership.load(
+                self.vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH,
+                self.vault_root,
+            )
+            entry = ownership.entries.get(target_path)
+            if entry is None:
+                raise ValueError("ownership entry no longer exists")
+            reviewed_entry = (
+                operation.expected_content_hash,
+                operation.expected_generator_id,
+                operation.expected_generator_version,
+                operation.expected_created_at,
+                operation.expected_updated_at,
+            )
+            current_entry = (
+                f"sha256:{entry.content_hash}",
+                entry.generator_id,
+                entry.generator_version,
+                entry.created_at,
+                entry.updated_at,
+            )
+            if reviewed_entry != current_entry:
+                raise ValueError("ownership entry no longer matches the reviewed record")
+            candidate_entries = dict(ownership.entries)
+            del candidate_entries[target_path]
+            original = serialize_generated_ownership_bytes(ownership.entries).decode("utf-8")
+            candidate = serialize_generated_ownership_bytes(candidate_entries).decode("utf-8")
+            return _unified_diff(
+                original,
+                candidate,
+                str(DEFAULT_OWNERSHIP_MANIFEST_PATH),
+            )
         if operation.op == "patch_human_file":
             return "\n".join(
                 (

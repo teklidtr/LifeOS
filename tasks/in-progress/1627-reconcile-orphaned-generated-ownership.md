@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1627
 title: Reconcile orphaned generated ownership
-status: backlog
+status: in-progress
 phase: 16
 depends_on:
   - LIFEOS-1626
