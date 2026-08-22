@@ -23,6 +23,10 @@ journal/
 raw/
 study/
 wiki/
+  sources/
+  entities/
+  concepts/
+  syntheses/
 flashcards/
 patterns/
 profile/
@@ -35,7 +39,12 @@ proposals/
 system/
 ```
 
-You do not need every directory on day one. Add domains as they become useful.
+You do not need every top-level directory on day one. Inside `wiki/`, the four
+shown folders have a narrower meaning: they are stable filing roles for generated
+knowledge pages, not a growing ontology. `sources/` holds source-centered pages,
+`entities/` named things or actors worth a durable page, `concepts/` reusable
+ideas, and `syntheses/` cross-source conclusions or comparisons. LifeOS does not
+create a page merely because a noun or tag appeared in a source.
 
 ### How it connects
 
@@ -377,8 +386,8 @@ external agent connected to the local LifeOS MCP server. LifeOS does not run an
 embedded model client and does not accept model names or provider API keys.
 
 ```text
-Ingest study/cell-biology/chapter-03.md into
-wiki/cell-membrane.md using LifeOS.
+Ingest study/cell-biology/chapter-03.md as the concept
+cell-membrane using LifeOS.
 ```
 
 The connected agent must use the advertised tools in this order:
@@ -388,6 +397,7 @@ registry_refresh
   → vault_read_markdown
   → if the wiki target is absent:
       agent evaluates source_tags and source_topics
+      agent chooses source/entity/concept/synthesis plus a canonical slug
       agent synthesizes a source-grounded title, body, and optional canonical tags
       → ingestion_create_wiki_proposal
   → if one section of an existing wiki target must change:
@@ -408,6 +418,18 @@ external agent interprets the source, while LifeOS verifies its registered
 identity and current hash, validates the supplied fields, creates a draft
 proposal, and records provenance. Source taxonomy is evidence: the agent can keep,
 remove, combine, or add tags, including when the source has no useful taxonomy.
+For a newly generated page, the preferred inputs are `page_kind` plus `slug`.
+LifeOS derives `wiki/sources/<slug>.md`, `wiki/entities/<slug>.md`,
+`wiki/concepts/<slug>.md`, or `wiki/syntheses/<slug>.md` and records the selected
+role as the generated page's `type`. Explicit `target_path` remains available for
+legacy or deliberately custom wiki notes. The role folder is created only when
+an approved generated create is applied, so merely creating a draft does not
+materialize `wiki/entities/` or `wiki/concepts/` on disk.
+This layout support is intentionally smaller than a full Karpathy-style
+compounding ingest: one current create request still produces one generated wiki
+page, while the compound request produces one create plus one exact section
+update. Automatic bounded fan-out across several entity/concept/synthesis pages
+is separate roadmap work rather than hidden side effect.
 The proposal displays the source taxonomy, proposed canonical tags, rationale,
 and exact tag diff. Existing-note updates require one unique ATX
 heading (the heading text is supplied without `#` markers). LifeOS checks the

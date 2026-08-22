@@ -478,3 +478,23 @@ existing wiki retrieval path. A generated-owned exact-section update may revise
 tags in the same full-file replacement; ingestion never changes tags on a
 human-owned wiki target. Missing taxonomy and omitted proposed tags remain valid
 and do not cause metadata invention.
+
+## DD-085: Wiki page roles are a small structural filing contract
+
+New agent-generated wiki pages prefer one of four stable page roles: `source`,
+`entity`, `concept`, or `synthesis`. LifeOS deterministically maps those roles to
+`wiki/sources/`, `wiki/entities/`, `wiki/concepts/`, and `wiki/syntheses/` from a
+portable lowercase kebab-case slug. The role is also recorded as generated
+frontmatter `type`. These roles describe how a durable knowledge page participates
+in the wiki; they are deliberately not a domain ontology, and LifeOS does not
+create a page for every noun, tag, or extracted entity. Existing explicit
+`wiki/...` targets remain compatible.
+
+Proposal preflight and application retain the default rule that missing parent
+directories are invalid. The only exception is an approved
+`create_generated_file` whose immediate parent is exactly one of the four known
+wiki role directories and whose `wiki/` parent already exists. Application may
+create that single role directory safely before publishing the reviewed page.
+This exception does not authorize arbitrary nested folders, human-owned creates,
+or autonomous semantic merging. Multi-page compounding ingestion is separate
+bounded work rather than an implicit consequence of the layout.

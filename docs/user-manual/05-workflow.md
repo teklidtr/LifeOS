@@ -121,9 +121,17 @@ and near-term work concrete.
 3. Add your questions and disagreements.
 4. Run `uv run lifeos scan`, or let the MCP-connected agent call
    `registry_refresh`, after adding the source.
-5. Ask the MCP-connected agent to ingest the registered source into an explicit
-   `wiki/` target. For an absent target, the agent synthesizes a grounded draft
-   and calls `ingestion_create_wiki_proposal`. The read response includes bounded
+5. Ask the MCP-connected agent to ingest the registered source. For a new
+   generated page, prefer a role and slug such as `concept + cell-membrane`,
+   `entity + andrej-karpathy`, `source + paper-2026`, or
+   `synthesis + spaced-repetition-evidence`. LifeOS derives the target beneath
+   `wiki/concepts/`, `wiki/entities/`, `wiki/sources/`, or `wiki/syntheses/`.
+   These are filing roles rather than a domain ontology, so the agent should
+   create only durable pages that improve retrieval or synthesis, not one page
+   per noun or source tag. Explicit `wiki/...` targets remain available when a
+   legacy or intentionally custom note is the right destination. For an absent
+   target, the agent synthesizes a grounded draft and calls
+   `ingestion_create_wiki_proposal`. The read response includes bounded
    source `tags` and `topics`; review the agent's proposed canonical wiki tags in
    the proposal diff because they may deliberately differ from the source. For an
    existing note, identify the

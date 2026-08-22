@@ -13,6 +13,10 @@ journal/
 raw/
 study/
 wiki/
+  sources/
+  entities/
+  concepts/
+  syntheses/
 flashcards/
 patterns/
 profile/
@@ -57,7 +61,14 @@ External agents connect through the local STDIO MCP adapter, read an explicitly
 registered source, and synthesize a grounded draft. For an absent wiki target,
 the bounded read facade exposes the Markdown body plus normalized source `tags`
 and `topics`; unrelated frontmatter remains hidden. The agent submits a title,
-body, and optional reviewed canonical wiki tags with a concise rationale. Source
+body, and optional reviewed canonical wiki tags with a concise rationale. For a
+new generated page, the preferred create route is a small structural
+`page_kind + slug` contract: `source`, `entity`, `concept`, or `synthesis` maps
+to `wiki/sources/`, `wiki/entities/`, `wiki/concepts/`, or `wiki/syntheses/`.
+These are filing roles, not a domain ontology, and existing explicit `wiki/...`
+targets remain compatible. The approved generated create may lazily create only
+one of those four exact role directories when it is first applied; arbitrary
+missing parent directories still fail closed. Source
 taxonomy is evidence, not an instruction: the agent may retain, remove, combine,
 or supplement it. For an existing wiki note, it may submit one exact ATX heading
 and its replacement body. LifeOS reads durable
@@ -77,6 +88,13 @@ reviewed manifest entry, requires the target to remain absent, and updates only 
 ownership manifest inside the ordinary atomic proposal transaction. LifeOS
 independently owns source verification, hashes, proposal identity, provenance,
 lifecycle state, and persistence.
+
+The structural layout does not yet turn one source into a Karpathy-style fan-out
+across many entity and concept pages. The bounded create tool still creates one
+generated page, and the compound tool creates one page plus one exact existing
+section update. Bounded multi-page compounding is tracked separately so it can
+gain operation budgets, per-page review evidence, and atomic recovery without
+weakening the current proposal boundary.
 
 ### Human layer
 

@@ -110,6 +110,10 @@ mkdir -p \
   raw \
   study \
   wiki \
+  wiki/sources \
+  wiki/entities \
+  wiki/concepts \
+  wiki/syntheses \
   flashcards \
   patterns \
   profile \
@@ -248,11 +252,21 @@ lifeos-mcp \
 Keep the server local and use STDIO transport. Do not expose it as an
 unauthenticated network service.
 
+The four `wiki/` subdirectories above are structural filing roles, not a domain
+ontology. Creating them during setup makes the layout immediately visible, but
+it is optional: when `wiki/` exists, LifeOS can lazily create one of those exact
+role folders while applying an approved generated-page proposal.
+
 After the MCP client connects, an ingestion request such as “Ingest
-`study/example.md` into `wiki/example.md` using LifeOS” is routed through
+`study/example.md` as a concept named `example` using LifeOS” is routed through
 `registry_refresh`, `vault_read_markdown`, and
 `ingestion_create_wiki_proposal`. The default result is a draft proposal. The
 server does not infer permission to submit, approve, or apply it.
+
+For new generated pages, the agent should prefer `page_kind` (`source`, `entity`,
+`concept`, or `synthesis`) plus a lowercase kebab-case `slug`; LifeOS derives the
+role-folder target. Explicit `target_path` remains supported for legacy or custom
+wiki layouts.
 
 `vault_read_markdown` returns the Markdown body plus bounded `source_tags` and
 `source_topics`. The connected agent may improve or replace that taxonomy and
