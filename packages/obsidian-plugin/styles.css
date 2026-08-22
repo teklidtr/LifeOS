@@ -87,6 +87,34 @@
   overflow-wrap: anywhere;
 }
 
+.lifeos-proposals__ownership-recovery {
+  margin-block-end: var(--size-4-5);
+  padding: var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.lifeos-proposals__ownership-card {
+  min-width: 0;
+  margin-block-start: var(--size-4-3);
+  padding: var(--size-4-3);
+  border-inline-start: 3px solid var(--text-warning);
+  background: var(--background-secondary);
+}
+
+.lifeos-proposals__ownership-card h4,
+.lifeos-proposals__ownership-card p,
+.lifeos-proposals__ownership-card code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.lifeos-proposals__restore-instructions {
+  padding: var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-primary-alt);
+}
+
 .lifeos-proposals__workspace {
   display: grid;
   width: 100%;

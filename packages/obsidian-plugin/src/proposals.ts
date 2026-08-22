@@ -31,6 +31,24 @@ export interface ConfirmationChallenge {
   expires_at: string;
 }
 
+export interface OrphanedGeneratedOwnership {
+  target_path: string;
+  content_hash: string;
+  generator_id: string;
+  generator_version: string;
+  created_at: string;
+  updated_at: string;
+  diagnostic_code: string;
+  diagnostic: string;
+  restore_instructions: string;
+}
+
+export interface OwnershipReleaseProposalResult {
+  proposal_id: string;
+  target_path: string;
+  proposal_path: string;
+}
+
 export type ProposalConfirmation = (
   challenge: ConfirmationChallenge,
   inspection: ProposalInspection,
@@ -42,8 +60,10 @@ export interface ProposalWorkspaceState {
   kind: ProposalWorkspaceKind;
   detail: string;
   proposals: ProposalInspection[];
+  orphanedOwnership: OrphanedGeneratedOwnership[];
   selected?: ProposalInspection;
-  busy?: "inspect" | ProposalAction;
+  busy?: "inspect" | "release_ownership" | ProposalAction;
+  restoreTargetPath?: string;
   announcement?: string;
 }
 
@@ -178,6 +198,18 @@ export class ProposalController {
     return this.client.call("proposal.list", {});
   }
 
+  listOrphanedOwnership(): Promise<OrphanedGeneratedOwnership[]> {
+    return this.client.call("ownership.orphans.list", {});
+  }
+
+  createOwnershipReleaseProposal(
+    targetPath: string,
+  ): Promise<OwnershipReleaseProposalResult> {
+    return this.client.call("ownership.release.proposal.create", {
+      target_path: targetPath,
+    });
+  }
+
   async inspect(id: string): Promise<ProposalInspection> {
     const inspection = await this.client.call<ProposalInspection>("proposal.inspect", {
       proposal_id: id,
@@ -213,6 +245,7 @@ export class ProposalWorkspaceController {
     kind: "loading",
     detail: "Load proposals to begin review.",
     proposals: [],
+    orphanedOwnership: [],
   };
 
   private readonly proposalController: ProposalController;
@@ -239,13 +272,17 @@ export class ProposalWorkspaceController {
       announcement: undefined,
     });
     try {
-      const proposals = await this.proposalController.list();
+      const [proposals, orphanedOwnership] = await Promise.all([
+        this.proposalController.list(),
+        this.proposalController.listOrphanedOwnership(),
+      ]);
       this.loaded = true;
-      if (proposals.length === 0) {
+      if (proposals.length === 0 && orphanedOwnership.length === 0) {
         this.update({
           kind: "empty",
-          detail: "No proposals are available for review.",
+          detail: "No proposals or ownership recovery items are available.",
           proposals: [],
+          orphanedOwnership: [],
         });
         return;
       }
@@ -253,9 +290,11 @@ export class ProposalWorkspaceController {
         ?? proposals[0];
       this.update({
         kind: "ready",
-        detail: `${proposals.length} proposal${proposals.length === 1 ? "" : "s"} available.`,
+        detail: `${proposals.length} proposal${proposals.length === 1 ? "" : "s"} and ${orphanedOwnership.length} ownership recovery item${orphanedOwnership.length === 1 ? "" : "s"} available.`,
         proposals,
+        orphanedOwnership,
         selected,
+        restoreTargetPath: this.state.restoreTargetPath,
       });
     } catch (error) {
       this.fail("Could not load proposals.", error);
@@ -319,6 +358,36 @@ export class ProposalWorkspaceController {
         busy: undefined,
         announcement: `Could not ${action} the proposal. ${message}`,
       });
+    }
+  }
+
+  showRestoreInstructions(targetPath: string): void {
+    const orphan = this.state.orphanedOwnership.find(
+      (item) => item.target_path === targetPath,
+    );
+    if (!orphan) throw new Error("Ownership recovery item is no longer available.");
+    this.update({
+      ...this.state,
+      restoreTargetPath: targetPath,
+      announcement: `Restore instructions shown for ${targetPath}. No changes were made.`,
+    });
+  }
+
+  async createOwnershipReleaseProposal(targetPath: string): Promise<void> {
+    this.update({
+      ...this.state,
+      busy: "release_ownership",
+      announcement: `Creating a reviewed ownership-release proposal for ${targetPath}…`,
+    });
+    try {
+      const result = await this.proposalController.createOwnershipReleaseProposal(targetPath);
+      await this.load(result.proposal_id);
+      this.update({
+        ...this.state,
+        announcement: `Draft proposal ${result.proposal_id} created. Review its manifest diff, then accept it to release ownership.`,
+      });
+    } catch (error) {
+      this.fail("Could not create the ownership-release proposal.", error);
     }
   }
 

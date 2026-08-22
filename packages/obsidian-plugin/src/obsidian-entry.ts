@@ -191,6 +191,7 @@ class LifeOSProposalItemView extends ItemView {
       const retry = this.contentEl.createEl("button", { text: "Retry" });
       retry.addEventListener("click", () => { void this.controller.load(); });
     }
+    this.renderOwnershipRecovery();
     if (state.proposals.length === 0) return;
 
     const workspace = this.contentEl.createDiv({ cls: "lifeos-proposals__workspace" });
@@ -228,6 +229,55 @@ class LifeOSProposalItemView extends ItemView {
       return;
     }
     this.renderInspection(detail, selected);
+  }
+
+  private renderOwnershipRecovery(): void {
+    const state = this.controller.state;
+    if (state.orphanedOwnership.length === 0) return;
+
+    const recovery = this.contentEl.createEl("section", {
+      cls: "lifeos-proposals__ownership-recovery",
+    });
+    recovery.createEl("h3", { text: "Ownership recovery" });
+    recovery.createEl("p", {
+      text: "These generated targets are missing, but their durable ownership records remain. Refresh and ingestion do not remove those records.",
+    });
+    for (const orphan of state.orphanedOwnership) {
+      const card = recovery.createEl("article", {
+        cls: "lifeos-proposals__ownership-card",
+      });
+      card.createEl("h4", { text: orphan.target_path });
+      card.createEl("p", { text: orphan.diagnostic });
+      const metadata = card.createEl("dl", { cls: "lifeos-proposals__metadata" });
+      this.renderMetadata(metadata, "SHA-256", orphan.content_hash);
+      this.renderMetadata(
+        metadata,
+        "Generator",
+        `${orphan.generator_id} ${orphan.generator_version}`,
+      );
+      this.renderMetadata(metadata, "Created", formatProposalTimestamp(orphan.created_at));
+      this.renderMetadata(metadata, "Updated", formatProposalTimestamp(orphan.updated_at));
+
+      const controls = card.createDiv({ cls: "lifeos-proposals__actions" });
+      const restore = controls.createEl("button", { text: "Restore instructions" });
+      restore.disabled = state.busy !== undefined;
+      restore.addEventListener("click", () => {
+        this.controller.showRestoreInstructions(orphan.target_path);
+      });
+      const release = controls.createEl("button", { text: "Create release proposal" });
+      release.addClass("mod-warning");
+      release.disabled = state.busy !== undefined;
+      release.addEventListener("click", () => {
+        void this.controller.createOwnershipReleaseProposal(orphan.target_path);
+      });
+
+      if (state.restoreTargetPath === orphan.target_path) {
+        card.createEl("p", {
+          cls: "lifeos-proposals__restore-instructions",
+          text: orphan.restore_instructions,
+        });
+      }
+    }
   }
 
   private renderInspection(container: HTMLElement, inspection: ProposalInspection): void {

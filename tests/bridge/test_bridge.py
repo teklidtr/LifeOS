@@ -35,6 +35,42 @@ def test_unknown_method_and_extra_field_are_rejected(tmp_path: Path) -> None:
     assert caught.value.code == "extra_fields"
 
 
+def test_bridge_lists_orphaned_ownership_and_creates_release_proposal(
+    tmp_path: Path,
+) -> None:
+    bridge = app(tmp_path)
+    manifest = bridge.daily.vault_root / "system/generated-ownership.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owned_files": {
+                    "wiki/missing.md": {
+                        "generator_id": "lifeos.test",
+                        "generator_version": "1",
+                        "content_hash": "a" * 64,
+                        "created_at": "2026-08-22T10:00:00Z",
+                        "updated_at": "2026-08-22T11:00:00Z",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = ReferenceBridgeClient(bridge)
+
+    orphans = client.call("ownership.orphans.list")
+    proposal = client.call(
+        "ownership.release.proposal.create",
+        target_path="wiki/missing.md",
+    )
+
+    assert orphans[0]["target_path"] == "wiki/missing.md"
+    assert proposal["target_path"] == "wiki/missing.md"
+    assert (bridge.daily.vault_root / proposal["proposal_path"]).is_dir()
+
+
 def test_duplicate_write_is_idempotent_and_actor_cannot_be_overridden(tmp_path: Path) -> None:
     bridge = app(tmp_path)
     client = ReferenceBridgeClient(bridge)

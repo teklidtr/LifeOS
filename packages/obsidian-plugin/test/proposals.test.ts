@@ -8,6 +8,7 @@ import {
   LifeOSSettings,
   ProposalController,
   ProposalInspection,
+  OrphanedGeneratedOwnership,
   ProposalWorkspaceController,
   formatProposalTimestamp,
   groupProposalsByStatus,
@@ -87,6 +88,8 @@ class WorkspaceClient implements BridgeClient {
   calls: string[] = [];
   status = "draft";
   failAcceptance = false;
+  releaseCreated = false;
+  orphanedOwnership: OrphanedGeneratedOwnership[] = [];
 
   async start(_settings: LifeOSSettings): Promise<HandshakeResult> {
     throw new Error("not used in this test");
@@ -94,8 +97,24 @@ class WorkspaceClient implements BridgeClient {
 
   async call<T>(method: string, params: Record<string, unknown>): Promise<T> {
     this.calls.push(method);
-    if (method === "proposal.list") return [inspection("p", this.status)] as T;
-    if (method === "proposal.inspect") return inspection("p", this.status) as T;
+    if (method === "proposal.list") {
+      return (this.releaseCreated
+        ? [inspection("release", "draft"), inspection("p", this.status)]
+        : [inspection("p", this.status)]) as T;
+    }
+    if (method === "proposal.inspect") {
+      const id = String(params.proposal_id);
+      return inspection(id, id === "release" ? "draft" : this.status) as T;
+    }
+    if (method === "ownership.orphans.list") return this.orphanedOwnership as T;
+    if (method === "ownership.release.proposal.create") {
+      this.releaseCreated = true;
+      return {
+        proposal_id: "release",
+        target_path: params.target_path,
+        proposal_path: "proposals/release",
+      } as T;
+    }
     if (method === "proposal.prepare") {
       return {
         token: "t",
@@ -233,11 +252,13 @@ test("proposal workspace accepts through one confirmation and refreshes", async 
   assert.equal(workspace.state.selected?.status, "applied");
   assert.deepEqual(client.calls, [
     "proposal.list",
+    "ownership.orphans.list",
     "proposal.inspect",
     "proposal.prepare",
     "proposal.inspect",
     "proposal.execute",
     "proposal.list",
+    "ownership.orphans.list",
   ]);
   assert.equal(announcements.at(-1), "Proposal p accept completed.");
   unsubscribe();
@@ -266,5 +287,41 @@ test("failed acceptance refreshes the last durable lifecycle state", async () =>
   assert.equal(workspace.state.kind, "error");
   assert.equal(workspace.state.selected?.status, "approved");
   assert.match(workspace.state.detail, /Target changed before application/);
-  assert.deepEqual(client.calls.slice(-2), ["proposal.execute", "proposal.list"]);
+  assert.deepEqual(client.calls.slice(-3), [
+    "proposal.execute",
+    "proposal.list",
+    "ownership.orphans.list",
+  ]);
+});
+
+test("ownership recovery shows restore guidance and creates a reviewed release draft", async () => {
+  const client = new WorkspaceClient();
+  client.orphanedOwnership = [{
+    target_path: "wiki/missing.md",
+    content_hash: "a".repeat(64),
+    generator_id: "lifeos.test",
+    generator_version: "1",
+    created_at: "2026-08-22T10:00:00Z",
+    updated_at: "2026-08-22T11:00:00Z",
+    diagnostic_code: "owned_target_missing",
+    diagnostic: "Generated ownership remains canonical, but its target is absent.",
+    restore_instructions: "Restore reviewed bytes with the recorded SHA-256.",
+  }];
+  const workspace = new ProposalWorkspaceController(client, async () => true);
+
+  await workspace.load();
+  workspace.showRestoreInstructions("wiki/missing.md");
+  assert.equal(workspace.state.restoreTargetPath, "wiki/missing.md");
+  assert.match(workspace.state.announcement ?? "", /No changes were made/);
+  assert.equal(client.calls.includes("ownership.release.proposal.create"), false);
+
+  await workspace.createOwnershipReleaseProposal("wiki/missing.md");
+
+  assert.equal(workspace.state.selected?.proposal_id, "release");
+  assert.match(workspace.state.announcement ?? "", /Review its manifest diff/);
+  assert.deepEqual(client.calls.slice(-3), [
+    "ownership.release.proposal.create",
+    "proposal.list",
+    "ownership.orphans.list",
+  ]);
 });
