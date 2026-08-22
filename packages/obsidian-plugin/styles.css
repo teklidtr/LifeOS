@@ -175,13 +175,86 @@ button.lifeos-proposals__proposal[aria-current="true"] {
   margin-block: var(--size-4-4);
 }
 
-.lifeos-proposals__operation pre,
 .lifeos-proposals__confirmation-digest {
   max-width: 100%;
   box-sizing: border-box;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.lifeos-proposals__operation {
+  min-width: 0;
+  margin-block-end: var(--size-4-5);
+}
+
+.lifeos-proposals__operation-target {
+  color: var(--text-muted);
+}
+
+.lifeos-proposals__diff {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+.lifeos-proposals__diff-line {
+  display: grid;
+  grid-template-columns: 3.5rem 3.5rem minmax(0, 1fr);
+  min-width: 0;
+}
+
+.lifeos-proposals__diff-number {
+  padding-inline: var(--size-4-2);
+  border-inline-end: 1px solid var(--background-modifier-border);
+  color: var(--text-faint);
+  text-align: end;
+  user-select: none;
+}
+
+.lifeos-proposals__diff-code {
+  min-width: 0;
+  padding-inline: var(--size-4-2);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lifeos-proposals__diff-line--added {
+  background: rgba(46, 160, 67, 0.2);
+}
+
+.lifeos-proposals__diff-line--removed {
+  background: rgba(248, 81, 73, 0.2);
+}
+
+.lifeos-proposals__diff-line--added .lifeos-proposals__diff-code {
+  color: var(--text-normal);
+}
+
+.lifeos-proposals__diff-line--removed .lifeos-proposals__diff-code {
+  color: var(--text-normal);
+}
+
+.lifeos-proposals__diff-line--header,
+.lifeos-proposals__diff-line--hunk {
+  background: rgba(56, 139, 253, 0.13);
+  color: var(--text-accent);
+}
+
+.lifeos-proposals__diff-line--note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.lifeos-proposals__diff-error {
+  padding: var(--size-4-2);
+  border-inline-start: 3px solid var(--text-warning);
+  color: var(--text-warning);
 }
 
 .lifeos-proposals__terminal-state {

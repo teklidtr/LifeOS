@@ -2,6 +2,14 @@ import { BridgeClient } from "./protocol.js";
 
 export type ProposalAction = "submit" | "approve" | "apply" | "reject";
 
+export interface ProposalOperationInspection {
+  operation_id: string;
+  operation_type: string;
+  target_path: string;
+  unified_diff: string;
+  preview_error?: string | null;
+}
+
 export interface ProposalInspection {
   proposal_id: string;
   status: string;
@@ -10,7 +18,7 @@ export interface ProposalInspection {
   description: string;
   body: string;
   review_digest: string;
-  operations: Array<Record<string, unknown>>;
+  operations: ProposalOperationInspection[];
   related_sources: string[];
   findings: string[];
 }
@@ -39,6 +47,21 @@ export interface ProposalWorkspaceState {
   announcement?: string;
 }
 
+export type ProposalDiffLineKind =
+  | "header"
+  | "hunk"
+  | "context"
+  | "added"
+  | "removed"
+  | "note";
+
+export interface ProposalDiffLine {
+  kind: ProposalDiffLineKind;
+  text: string;
+  oldLine: number | null;
+  newLine: number | null;
+}
+
 export const PROPOSAL_STATUS_ORDER = [
   "draft",
   "pending",
@@ -47,6 +70,47 @@ export const PROPOSAL_STATUS_ORDER = [
   "applied",
   "stale",
 ] as const;
+
+export function parseProposalDiff(unifiedDiff: string): ProposalDiffLine[] {
+  let oldLine: number | null = null;
+  let newLine: number | null = null;
+
+  return unifiedDiff.split("\n").filter((line, index, lines) =>
+    line.length > 0 || index < lines.length - 1
+  ).map((text) => {
+    if (text.startsWith("--- ") || text.startsWith("+++ ")) {
+      return { kind: "header", text, oldLine: null, newLine: null };
+    }
+
+    if (text.startsWith("@@")) {
+      const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
+      oldLine = match ? Number.parseInt(match[1]!, 10) : null;
+      newLine = match ? Number.parseInt(match[2]!, 10) : null;
+      return { kind: "hunk", text, oldLine: null, newLine: null };
+    }
+
+    if (text.startsWith("+")) {
+      const result = { kind: "added" as const, text, oldLine: null, newLine };
+      if (newLine !== null) newLine += 1;
+      return result;
+    }
+
+    if (text.startsWith("-")) {
+      const result = { kind: "removed" as const, text, oldLine, newLine: null };
+      if (oldLine !== null) oldLine += 1;
+      return result;
+    }
+
+    if (text.startsWith(" ")) {
+      const result = { kind: "context" as const, text, oldLine, newLine };
+      if (oldLine !== null) oldLine += 1;
+      if (newLine !== null) newLine += 1;
+      return result;
+    }
+
+    return { kind: "note", text, oldLine: null, newLine: null };
+  });
+}
 
 export function proposalActionsForStatus(status: string): ProposalAction[] {
   if (status === "draft") return ["submit"];

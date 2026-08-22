@@ -11,6 +11,7 @@ import {
   ProposalWorkspaceController,
   formatProposalTimestamp,
   groupProposalsByStatus,
+  parseProposalDiff,
   proposalActionsForStatus,
 } from "../src/index.js";
 
@@ -71,7 +72,12 @@ function inspection(
     description: `Description for ${id}`,
     body: `Body for ${id}`,
     review_digest: "d",
-    operations: [{ operation: "create_file", target_path: "wiki/example.md" }],
+    operations: [{
+      operation_id: "op-create-example",
+      operation_type: "create_file",
+      target_path: "wiki/example.md",
+      unified_diff: "--- /dev/null\n+++ b/wiki/example.md\n@@ -0,0 +1 @@\n+Example",
+    }],
     related_sources: ["study/example.md"],
     findings: [],
   };
@@ -175,6 +181,33 @@ test("proposal timestamps format locally and preserve malformed values", () => {
     "22 Ağu 2026 15:23",
   );
   assert.equal(formatProposalTimestamp("not-a-date", "tr-TR"), "not-a-date");
+});
+
+test("proposal diff parser tracks GitHub-style line kinds and line numbers", () => {
+  const lines = parseProposalDiff([
+    "--- a/wiki/example.md",
+    "+++ b/wiki/example.md",
+    "@@ -10,3 +10,3 @@",
+    " context",
+    "-old value",
+    "+new value",
+    " tail",
+  ].join("\n"));
+
+  assert.deepEqual(lines.map((line) => [
+    line.kind,
+    line.oldLine,
+    line.newLine,
+    line.text,
+  ]), [
+    ["header", null, null, "--- a/wiki/example.md"],
+    ["header", null, null, "+++ b/wiki/example.md"],
+    ["hunk", null, null, "@@ -10,3 +10,3 @@"],
+    ["context", 10, 10, " context"],
+    ["removed", 11, null, "-old value"],
+    ["added", null, 11, "+new value"],
+    ["context", 12, 12, " tail"],
+  ]);
 });
 
 test("proposal workspace loads, executes through confirmation, and refreshes", async () => {

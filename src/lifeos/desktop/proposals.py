@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import difflib
+import hashlib
 import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -13,8 +15,18 @@ from lifeos.facade.consequential_tools import ApplyProposalRequest, ApprovePropo
 from lifeos.facade.errors import ToolFacadeError
 from lifeos.proposals.lifecycle import compute_review_digest, reject_proposal
 from lifeos.proposals.loader import load_proposal_directory
+from lifeos.markdown.parser import parse_markdown_note
 
 ProposalAction = Literal["submit", "approve", "apply", "reject"]
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalOperationInspection:
+    operation_id: str
+    operation_type: str
+    target_path: str
+    unified_diff: str
+    preview_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +38,7 @@ class ProposalInspection:
     description: str
     body: str
     review_digest: str
-    operations: tuple[dict[str, Any], ...]
+    operations: tuple[ProposalOperationInspection, ...]
     related_sources: tuple[str, ...]
     findings: tuple[str, ...] = ()
 
@@ -97,11 +109,7 @@ class DesktopProposalService:
         proposal = loaded.proposal
         digest = compute_review_digest(proposal.metadata, proposal.body, proposal.patch_document)
         operations = tuple(
-            {
-                key: value
-                for key, value in vars(operation).items()
-                if not key.startswith("_")
-            }
+            self._inspect_operation(operation)
             for operation in proposal.patch_document.operations
         )
         return ProposalInspection(
@@ -118,6 +126,68 @@ class DesktopProposalService:
                 f"{finding.code}: {finding.message}" for finding in loaded.findings
             ),
         )
+
+    def _inspect_operation(self, operation: Any) -> ProposalOperationInspection:
+        target_path = operation.target_path
+        try:
+            unified_diff = self._operation_diff(operation)
+            preview_error = None
+        except (OSError, UnicodeError, ValueError) as exc:
+            unified_diff = ""
+            preview_error = f"Diff preview unavailable: {exc}"
+        return ProposalOperationInspection(
+            operation_id=operation.id,
+            operation_type=operation.op,
+            target_path=target_path,
+            unified_diff=unified_diff,
+            preview_error=preview_error,
+        )
+
+    def _operation_diff(self, operation: Any) -> str:
+        target_path = operation.target_path
+        if operation.op == "patch_human_file":
+            return "\n".join(
+                (
+                    f"--- a/{target_path}",
+                    f"+++ b/{target_path}",
+                    operation.unified_diff.rstrip("\n"),
+                )
+            )
+
+        if operation.op in ("create_file", "create_generated_file"):
+            return _unified_diff("", operation.new_content, target_path, created=True)
+
+        original = (self.vault_root / target_path).read_text(encoding="utf-8")
+        expected_hash = getattr(operation, "base_hash", "")
+        current_hash = f"sha256:{hashlib.sha256(original.encode('utf-8')).hexdigest()}"
+        if current_hash != expected_hash:
+            raise ValueError("target content no longer matches the proposal base hash")
+
+        if operation.op == "replace_generated_file":
+            candidate = operation.new_content
+        elif operation.op == "replace_managed_block":
+            parsed = parse_markdown_note(
+                self.vault_root / target_path,
+                content=original,
+            )
+            matching_blocks = [
+                block
+                for block in parsed.managed_blocks
+                if block.name == operation.block_name
+            ]
+            if len(matching_blocks) != 1:
+                raise ValueError(
+                    f"managed block '{operation.block_name}' is not present exactly once"
+                )
+            target_block = matching_blocks[0]
+            lines = original.splitlines(keepends=True)
+            before = "".join(lines[: target_block.start_line])
+            after = "".join(lines[target_block.end_line - 1 :])
+            candidate = before + operation.new_content + after
+        else:
+            raise ValueError(f"unsupported operation type '{operation.op}'")
+
+        return _unified_diff(original, candidate, target_path)
 
     def prepare(self, *, proposal_id: str, action: ProposalAction) -> ConfirmationChallenge:
         inspection = self.inspect(proposal_id)
@@ -158,3 +228,20 @@ class DesktopProposalService:
         except ToolFacadeError as exc:
             raise ValueError(str(exc)) from exc
         raise ValueError("Unsupported proposal action")
+
+
+def _unified_diff(
+    original: str,
+    candidate: str,
+    target_path: str,
+    *,
+    created: bool = False,
+) -> str:
+    lines = difflib.unified_diff(
+        original.splitlines(),
+        candidate.splitlines(),
+        fromfile="/dev/null" if created else f"a/{target_path}",
+        tofile=f"b/{target_path}",
+        lineterm="",
+    )
+    return "\n".join(lines)

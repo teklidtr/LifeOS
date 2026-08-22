@@ -23,6 +23,7 @@ import {
   type ObsidianHost,
   type ProposalAction,
   type ProposalInspection,
+  parseProposalDiff,
   proposalActionsForStatus,
   type ProposalWorkspaceController,
 } from "./index.js";
@@ -271,7 +272,7 @@ class LifeOSProposalItemView extends ItemView {
     container.createEl("h4", { text: "Related sources" });
     this.renderStringList(container, inspection.related_sources, "No related sources recorded.");
 
-    container.createEl("h4", { text: "Typed operations" });
+    container.createEl("h4", { text: "Changes" });
     if (inspection.operations.length === 0) {
       container.createEl("p", { text: "No operations recorded." });
     } else {
@@ -279,8 +280,50 @@ class LifeOSProposalItemView extends ItemView {
         const operationContainer = container.createEl("section", {
           cls: "lifeos-proposals__operation",
         });
-        operationContainer.createEl("h5", { text: `Operation ${index + 1}` });
-        operationContainer.createEl("pre", { text: JSON.stringify(operation, null, 2) });
+        operationContainer.createEl("h5", {
+          text: `Operation ${index + 1} · ${operation.operation_type}`,
+        });
+        const target = operationContainer.createEl("p", {
+          cls: "lifeos-proposals__operation-target",
+          text: "Target: ",
+        });
+        target.createEl("code", { text: operation.target_path });
+
+        if (operation.preview_error) {
+          operationContainer.createEl("p", {
+            cls: "lifeos-proposals__diff-error",
+            text: operation.preview_error,
+          });
+          return;
+        }
+
+        const lines = parseProposalDiff(operation.unified_diff);
+        if (lines.length === 0) {
+          operationContainer.createEl("p", { text: "No textual changes." });
+          return;
+        }
+
+        const diff = operationContainer.createDiv({ cls: "lifeos-proposals__diff" });
+        diff.setAttr("role", "table");
+        diff.setAttr("aria-label", `Diff for ${operation.target_path}`);
+        for (const line of lines) {
+          const row = diff.createDiv({
+            cls: `lifeos-proposals__diff-line lifeos-proposals__diff-line--${line.kind}`,
+          });
+          row.setAttr("role", "row");
+          row.createEl("span", {
+            cls: "lifeos-proposals__diff-number",
+            text: line.oldLine?.toString() ?? "",
+          }).setAttr("aria-hidden", "true");
+          row.createEl("span", {
+            cls: "lifeos-proposals__diff-number",
+            text: line.newLine?.toString() ?? "",
+          }).setAttr("aria-hidden", "true");
+          row.createEl("code", {
+            cls: "lifeos-proposals__diff-code",
+            text: line.text || " ",
+          });
+        }
       });
     }
 
