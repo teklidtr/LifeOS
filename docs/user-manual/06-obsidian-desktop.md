@@ -85,6 +85,10 @@ workspace. Proposals are grouped by lifecycle state. Select one to inspect its
 rationale, body, source paths, ordered operation targets, GitHub-style red/green
 line diffs, Python-computed review digest, and validation findings. The diff is a
 review view of the canonical typed operations; it does not replace or edit them.
+For new proposals the view is stored as an immutable, digest-bound snapshot and
+remains available in applied history after later target changes. **Legacy live
+preview** marks an older proposal whose diff must still be reconstructed from
+current vault state and may therefore become unavailable.
 
 Use **Accept changes** on a draft, pending, or approved proposal and confirm once.
 Python executes only the remaining lifecycle transitions, reloading and checking

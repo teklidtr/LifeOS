@@ -432,7 +432,14 @@ Each proposal lives under:
 proposals/<proposal-id>/
   proposal.md
   patches.json
+  review.json
 ```
+
+`patches.json` contains the operations LifeOS may apply. For new proposals,
+`review.json` preserves the exact red/green diff that was shown for those
+operations, so proposal history remains readable after later vault changes.
+Older proposals without `review.json` remain visible with a **Legacy live
+preview** warning; their historical diff may not be reconstructable.
 
 Generated-file authorization is tracked in:
 

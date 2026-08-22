@@ -450,3 +450,17 @@ acceptance path. Preflight and application both require the target to remain abs
 and every recorded ownership field to match the reviewed operation. The operation
 changes only the canonical ownership manifest and participates in the existing
 atomic recovery transaction.
+
+## DD-083: Proposal review diffs are immutable, digest-bound history
+
+Every newly published proposal stores a strict, versioned `review.json` beside
+`proposal.md` and `patches.json`. The ordered snapshot records the exact unified
+diff for each typed operation at publication time and binds itself to the
+proposal ID, canonical patch hash, operation identity and review digest. Typed
+operations remain the application authority; the snapshot is durable review and
+history evidence. Snapshot tampering, malformed content, missing content after a
+snapshot-aware load, or mismatch with `patches.json` fails closed before a new
+lifecycle transition or application. Legacy proposals without a snapshot remain
+loadable, but their current-state reconstruction is explicitly labeled and may
+be unavailable after later vault changes. SQLite and Git history are not required
+to render a new proposal's reviewed diff.

@@ -115,6 +115,13 @@ runs target-hash, ownership, preflight, and recovery checks. If a later transiti
 the proposal remains at the last durable lifecycle state rather than pretending the whole
 sequence succeeded.
 
+For new proposals, the red/green operation view comes from the canonical,
+digest-bound `review.json` created before draft publication. Applied proposals
+therefore retain the same reviewed diff even when a target is replaced, moved,
+deleted, or an ownership entry is released. `patches.json` remains authoritative
+for application. Proposals created before this format use an explicitly labeled
+legacy live preview; later vault state may make that reconstruction unavailable.
+
 ## Failure modes
 
 | Condition | UI state | Behavior |

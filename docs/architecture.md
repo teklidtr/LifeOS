@@ -80,12 +80,20 @@ The user controls goals, proposal approval, personal interpretations, policy cha
 Consequential changes are stored under:
 
 ```text
-.lifeos/proposals/<proposal-id>/
+proposals/<proposal-id>/
   proposal.md
-  patches/
+  patches.json
+  review.json
 ```
 
-A deterministic tool applies only explicitly approved items whose target hashes still match.
+`patches.json` contains the authoritative ordered typed operations. New proposals
+also contain a canonical, versioned `review.json` snapshot of the exact unified
+diffs shown during review. The snapshot is bound to the proposal ID, canonical
+patch hash, operation identities and lifecycle review digest, so applied history
+does not depend on later target or ownership-manifest state. Legacy proposals
+without a snapshot remain readable through an explicitly labeled live-preview
+fallback. A deterministic tool applies only explicitly approved items whose
+target hashes still match.
 
 ## Registry
 

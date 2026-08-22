@@ -318,7 +318,11 @@ Not every thought needs promotion.
 In Obsidian, run **Open Proposals** from the command palette. Select each proposal
 and inspect its source paths, body, operation order and targets, GitHub-style line
 diffs, review digest, and validation findings. Added lines are green and removed
-lines are red; the underlying typed operations remain canonical. Select **Accept
+lines are red; the underlying typed operations remain canonical. New proposals
+preserve this exact diff in a digest-bound review snapshot, so the same view is
+available after application even if the target later changes or disappears. A
+**Legacy live preview** warning means the older proposal predates snapshots and
+its diff is being reconstructed from current vault state. Select **Accept
 changes** and confirm once to apply the exact reviewed proposal. LifeOS retains
 the durable draft, pending, approved, and applied states internally, rechecks the
 digest between transitions, and validates target hashes before changing canonical

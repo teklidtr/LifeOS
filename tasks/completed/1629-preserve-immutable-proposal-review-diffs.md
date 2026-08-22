@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1629
 title: Preserve immutable proposal review diffs
-status: in-progress
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1627
@@ -53,3 +53,21 @@ targets or ownership manifest have changed.
 - DD-080: one confirmation is bound to the exact reviewed digest.
 - `docs/safety-and-ownership.md`: consequential changes remain inspectable and
   reviewable.
+
+# Implementation
+
+- Added canonical `review.json` snapshots for every proposal publisher.
+- Bound snapshots to proposal loading, lifecycle review digests and locked
+  application source verification.
+- Made the desktop bridge and Obsidian proposal view snapshot-first with an
+  explicit legacy live-preview fallback.
+- Preserved typed operations as the only application authority.
+
+# Validation
+
+- `1428` Python tests passed with importlib collection mode, including focused
+  proposal, lifecycle, application, facade, desktop and ownership coverage.
+- `53` Obsidian plugin tests passed.
+- Production plugin build and artifact tests passed.
+- Strict mypy passed for the snapshot, loader, lifecycle and desktop proposal
+  modules.

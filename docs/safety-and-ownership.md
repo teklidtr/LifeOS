@@ -44,6 +44,8 @@ Policy and instruction changes require explicit proposal approval.
 - managed markers remain valid
 - source references resolve
 - proposal is explicitly approved
+- stored review snapshot matches the proposal ID, canonical patch hash, ordered
+  operation identities, and authorized review digest when present
 
 ## Personal experiment safety and ownership
 
