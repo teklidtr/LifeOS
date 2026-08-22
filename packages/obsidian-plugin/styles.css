@@ -115,14 +115,18 @@
   white-space: normal;
 }
 
-.lifeos-proposals__proposal {
+button.lifeos-proposals__proposal {
   display: flex;
   width: 100%;
+  height: auto;
+  min-height: var(--input-height);
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: center;
+  padding-block: var(--size-4-2);
   margin-block-end: var(--size-4-1);
   overflow-wrap: anywhere;
   white-space: normal;
@@ -130,13 +134,13 @@
   text-align: start;
 }
 
-.lifeos-proposals__proposal small {
+button.lifeos-proposals__proposal small {
   display: block;
   max-width: 100%;
   overflow-wrap: anywhere;
 }
 
-.lifeos-proposals__proposal[aria-current="true"] {
+button.lifeos-proposals__proposal[aria-current="true"] {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
 }

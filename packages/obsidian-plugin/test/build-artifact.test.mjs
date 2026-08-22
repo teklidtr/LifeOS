@@ -58,7 +58,9 @@ test("proposal workspace artifact wraps long review text within its columns", as
 
   assert.match(styles, /\.lifeos-proposals\s*{[^}]*container:\s*lifeos-proposals \/ inline-size/s);
   assert.match(styles, /\.lifeos-proposals__workspace\s*{[^}]*min-width:\s*0/s);
-  assert.match(styles, /\.lifeos-proposals__proposal\s*{[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(styles, /button\.lifeos-proposals__proposal\s*{[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(styles, /button\.lifeos-proposals__proposal\s*{[^}]*height:\s*auto/s);
+  assert.match(styles, /button\.lifeos-proposals__proposal\s*{[^}]*min-height:\s*var\(--input-height\)/s);
   assert.match(styles, /\.lifeos-proposals__detail h3,[^{]*{[^}]*word-break:\s*break-word/s);
   assert.match(styles, /@container lifeos-proposals \(max-width:\s*48rem\)/);
 });

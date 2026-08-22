@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1620
 title: Fix wrapped proposal row height in Obsidian
-status: ready
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1618
@@ -49,3 +49,24 @@ git diff --check
 
 - DD-036: Obsidian is the primary interface.
 - DD-037: The plugin remains a thin desktop client.
+
+# Implementation record
+
+- Increased selector specificity to target proposal buttons explicitly.
+- Overrode Obsidian's fixed input height with content-driven `height: auto` while
+  retaining `--input-height` as the minimum control height.
+- Added vertical padding and centered short-row content without truncating long
+  titles or IDs.
+- Rebuilt the plugin and copied the verified stylesheet into the configured
+  LifeOS vault.
+
+# Validation record
+
+- TypeScript typecheck passed.
+- All 49 plugin tests passed.
+- Production plugin build passed.
+- Both artifact tests passed with new row-height assertions.
+- Installed stylesheet exactly matches the built artifact.
+- `git diff --check` passed.
+- Obsidian was cleanly restarted and visually verified: wrapped titles and IDs
+  remain within their row backgrounds and lifecycle headings no longer overlap.
