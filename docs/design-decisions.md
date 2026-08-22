@@ -412,3 +412,14 @@ human patch; LifeOS still does not perform autonomous whole-note merging. LifeOS
 independently verifies the source and owns hashes, proposal identity, provenance,
 lifecycle state, and persistence. Ingestion stops at draft unless the user
 separately requests an exact lifecycle transition.
+
+## DD-080: Obsidian proposal acceptance uses one composite confirmation
+
+The Obsidian proposal workspace presents **Accept changes** instead of requiring
+the user to separately click Submit, Approve, and Apply. One trusted confirmation
+is bound to the exact computed review digest and authorizes only the remaining
+lifecycle transitions for that proposal. Python persists submit and approval,
+reloads and rechecks the proposal between transitions, and retains the full
+application-time target, ownership, preflight, and recovery checks. A failure
+stops at the last durable state. Low-level lifecycle operations remain available
+for compatibility, and MCP ingestion continues to stop at draft.

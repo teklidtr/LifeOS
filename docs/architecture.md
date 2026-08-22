@@ -150,7 +150,11 @@ Obsidian is the primary human interface. A thin TypeScript plugin launches a vau
 Python bridge over versioned JSON-RPC/STDIO. Python remains the sole implementation of
 business rules and canonical writes. Direct UI writes use expected content hashes and
 idempotency keys. Consequential agent-generated changes remain proposals with trusted
-interactive authorization. See [Obsidian Desktop Architecture](obsidian-desktop-architecture.md).
+interactive authorization. The Obsidian review surface may present one **Accept changes**
+action for the remaining draft-to-applied lifecycle. One digest-bound confirmation authorizes
+that exact reviewed content; Python still persists each lifecycle transition, reloads and
+rechecks the digest between transitions, and runs full application-time target validation.
+See [Obsidian Desktop Architecture](obsidian-desktop-architecture.md).
 
 ## Adaptive feedback release architecture
 

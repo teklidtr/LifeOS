@@ -86,11 +86,12 @@ rationale, body, source paths, ordered operation targets, GitHub-style red/green
 line diffs, Python-computed review digest, and validation findings. The diff is a
 review view of the canonical typed operations; it does not replace or edit them.
 
-Use **Submit** to move a draft into review, then separately use **Approve** and
-**Apply**. Pending or approved proposals may be **Rejected**. Every action opens
-an explicit confirmation dialog, and the plugin re-inspects the proposal before
-execution. If its digest changed after review, the action fails without changing
-canonical content. See [First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
+Use **Accept changes** on a draft, pending, or approved proposal and confirm once.
+Python executes only the remaining lifecycle transitions, reloading and checking
+the reviewed digest between them; application still validates current target
+hashes before changing canonical Markdown. Pending or approved proposals may be
+**Rejected**. If the proposal changed after review, acceptance fails without
+applying it. See [First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
 
 ## Personal experiments
 

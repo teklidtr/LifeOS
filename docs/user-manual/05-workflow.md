@@ -312,15 +312,11 @@ Not every thought needs promotion.
 In Obsidian, run **Open Proposals** from the command palette. Select each proposal
 and inspect its source paths, body, operation order and targets, GitHub-style line
 diffs, review digest, and validation findings. Added lines are green and removed
-lines are red; the underlying typed operations remain canonical. Then move it
-through only the lifecycle steps you intend:
-
-1. **Submit** a draft for review.
-2. **Approve** the unchanged pending proposal.
-3. **Apply** the unchanged approved proposal to canonical Markdown.
-
-Approval and application require separate confirmations. Reject a pending or
-approved proposal when it should not proceed.
+lines are red; the underlying typed operations remain canonical. Select **Accept
+changes** and confirm once to apply the exact reviewed proposal. LifeOS retains
+the durable draft, pending, approved, and applied states internally, rechecks the
+digest between transitions, and validates target hashes before changing canonical
+Markdown. Reject a pending or approved proposal when it should not proceed.
 
 For recovery or scripted inspection, list indexed proposals from the CLI:
 

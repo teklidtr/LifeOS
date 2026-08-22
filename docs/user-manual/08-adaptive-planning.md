@@ -227,7 +227,8 @@ Every feedback proposal includes:
 - a typed patch;
 - a feedback evidence fingerprint.
 
-Review it in **LifeOS → Proposals**, then separately **Submit**, **Approve**, and **Apply**.
+Review it in **LifeOS → Proposals**, then select **Accept changes** and confirm the
+exact reviewed proposal once.
 Concurrent plan edits make the proposal stale. Interrupted application uses the existing
 recovery journal and resumes or rolls back safely.
 

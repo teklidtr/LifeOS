@@ -100,6 +100,14 @@ Writes are atomic. Multi-file consequential changes remain proposals and use the
 recovery journal. Ordinary direct human actions are narrowly targeted mutations that
 preserve unrelated frontmatter and body text.
 
+The proposal workspace exposes one **Accept changes** action for draft, pending, and
+approved proposals. Its single interactive confirmation is bound to the exact review
+digest. Python executes only the remaining submit, approve, and apply transitions,
+reloading the canonical proposal and checking the digest between them. Application still
+runs target-hash, ownership, preflight, and recovery checks. If a later transition fails,
+the proposal remains at the last durable lifecycle state rather than pretending the whole
+sequence succeeded.
+
 ## Failure modes
 
 | Condition | UI state | Behavior |
