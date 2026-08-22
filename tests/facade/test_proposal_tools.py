@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +11,7 @@ from lifeos.facade.models import (
 from lifeos.facade.errors import (
     ToolValidationError,
     ToolConflictError,
+    ToolOwnershipConflictError,
     ToolNotFoundError,
     ToolExecutionError,
 )
@@ -41,6 +44,48 @@ from lifeos.ingestion.proposals import (
 )
 from lifeos.registry.file_tracking import FileTrackingError
 from lifeos.registry import Registry
+
+
+def _write_ownership(
+    vault_root: Path, owned_files: dict[str, dict[str, str]] | None = None
+) -> None:
+    system = vault_root / "system"
+    system.mkdir(parents=True, exist_ok=True)
+    (system / "generated-ownership.json").write_text(
+        json.dumps(
+            {"schema_version": 1, "owned_files": owned_files or {}},
+            sort_keys=True,
+        )
+    )
+
+
+def _ownership_entry(
+    content: bytes, *, generator_id: str = "lifeos.facade.external_agent"
+) -> dict[str, str]:
+    return {
+        "generator_id": generator_id,
+        "generator_version": "1",
+        "content_hash": hashlib.sha256(content).hexdigest(),
+        "created_at": "2026-08-22T10:00:00Z",
+        "updated_at": "2026-08-22T10:00:00Z",
+    }
+
+
+def _registered_source(vault_root: Path, tmp_path: Path) -> Registry:
+    source = vault_root / "study" / "source.md"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"Verified source.\n")
+    registry = Registry(tmp_path / "ownership-aware-registry.db")
+    registry.initialize()
+    from lifeos.registry.file_tracking import register_scan
+    from lifeos.scanner import VaultFile
+
+    register_scan(
+        registry,
+        vault_root,
+        [VaultFile(Path("study/source.md"), ".md", source.stat().st_size)],
+    )
+    return registry
 
 def test_create_wiki_proposal_descriptor() -> None:
     assert CREATE_WIKI_PROPOSAL_DESCRIPTOR.name == "ingestion.create_wiki_proposal"
@@ -203,6 +248,7 @@ def test_source_read_error_maps_to_execution_error(tmp_path: Path) -> None:
         assert isinstance(exc_info.value.__cause__, SourceReadError)
 
 def test_invalid_wiki_target_error_maps_to_validation_error(tmp_path: Path) -> None:
+    _write_ownership(tmp_path)
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
     with patch("lifeos.facade.proposal_tools.load_registered_source"), \
          patch("lifeos.facade.proposal_tools.build_wiki_proposal", side_effect=InvalidWikiTargetError("msg")):
@@ -211,6 +257,7 @@ def test_invalid_wiki_target_error_maps_to_validation_error(tmp_path: Path) -> N
         assert isinstance(exc_info.value.__cause__, InvalidWikiTargetError)
 
 def test_wiki_target_exists_error_maps_to_conflict_error(tmp_path: Path) -> None:
+    _write_ownership(tmp_path)
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
     with patch("lifeos.facade.proposal_tools.load_registered_source"), \
          patch("lifeos.facade.proposal_tools.build_wiki_proposal"), \
@@ -220,6 +267,7 @@ def test_wiki_target_exists_error_maps_to_conflict_error(tmp_path: Path) -> None
         assert isinstance(exc_info.value.__cause__, WikiTargetExistsError)
 
 def test_proposal_already_exists_error_maps_to_conflict_error(tmp_path: Path) -> None:
+    _write_ownership(tmp_path)
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
     with patch("lifeos.facade.proposal_tools.load_registered_source"), \
          patch("lifeos.facade.proposal_tools.build_wiki_proposal"), \
@@ -232,6 +280,7 @@ def test_proposal_publication_error_maps_to_execution_error(tmp_path: Path) -> N
     vault_root = tmp_path / "vault"
     vault_root.mkdir()
     (vault_root / "proposals").mkdir()
+    _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     registry.initialize()
 
@@ -280,6 +329,7 @@ def test_proposal_publication_error_maps_to_execution_error(tmp_path: Path) -> N
 
 def test_facade_uses_verified_source_without_decoding_or_parsing_it(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
+    _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
     
@@ -302,6 +352,7 @@ def test_real_happy_path_facade(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
     vault_root.mkdir()
     (vault_root / "proposals").mkdir()
+    _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     registry.initialize()
     
@@ -383,6 +434,7 @@ def test_real_happy_path_updates_one_existing_wiki_section(tmp_path: Path) -> No
     (vault_root / "proposals").mkdir(parents=True)
     (vault_root / "wiki").mkdir()
     (vault_root / "study").mkdir()
+    _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     registry.initialize()
 
@@ -445,6 +497,7 @@ def test_real_happy_path_creates_compound_wiki_draft(tmp_path: Path) -> None:
     (vault_root / "proposals").mkdir(parents=True)
     (vault_root / "wiki").mkdir()
     (vault_root / "study").mkdir()
+    _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     registry.initialize()
 
@@ -510,6 +563,7 @@ def test_compound_draft_rejects_managed_update_target_without_persisting(
     (vault_root / "proposals").mkdir(parents=True)
     (vault_root / "wiki").mkdir()
     (vault_root / "study").mkdir()
+    _write_ownership(vault_root)
     source = vault_root / "study" / "source.md"
     source.write_text("Verified source.\n")
     target = vault_root / "wiki" / "summary.md"
@@ -552,6 +606,7 @@ def test_update_rejects_missing_heading_without_persisting(tmp_path: Path) -> No
     (vault_root / "proposals").mkdir(parents=True)
     (vault_root / "wiki").mkdir()
     (vault_root / "study").mkdir()
+    _write_ownership(vault_root)
     source = vault_root / "study" / "source.md"
     target = vault_root / "wiki" / "target.md"
     source.write_text("Source.\n")
@@ -581,8 +636,188 @@ def test_update_rejects_missing_heading_without_persisting(tmp_path: Path) -> No
         )
     assert list((vault_root / "proposals").iterdir()) == []
 
+
+def test_create_rejects_orphaned_ownership_without_persisting(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    registry = _registered_source(vault_root, tmp_path)
+    _write_ownership(
+        vault_root,
+        {"wiki/missing.md": _ownership_entry(b"previous generated content\n")},
+    )
+
+    with pytest.raises(
+        ToolOwnershipConflictError,
+        match="missing but retains generated ownership.*restore.*release ownership",
+    ):
+        create_wiki_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=CreateWikiProposalRequest(
+                "study/source.md", "wiki/missing.md", "Missing", "Replacement body"
+            ),
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
+
+
+def test_generated_owned_section_update_emits_valid_generated_replacement(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    registry = _registered_source(vault_root, tmp_path)
+    target_content = b"# Note\n\n## Selected\n\nOld.\n\n## Keep\n\nSame.\n"
+    target = vault_root / "wiki" / "generated.md"
+    target.write_bytes(target_content)
+    _write_ownership(
+        vault_root,
+        {"wiki/generated.md": _ownership_entry(target_content)},
+    )
+
+    result = update_wiki_section_proposal(
+        vault_root=vault_root,
+        registry=registry,
+        request=UpdateWikiSectionProposalRequest(
+            "study/source.md", "wiki/generated.md", "Selected", "New."
+        ),
+        clock_fn=lambda: datetime(2026, 8, 22, 15, 0, tzinfo=timezone.utc),
+        random_suffix_fn=lambda: "abcdef12",
+    )
+
+    from lifeos.proposals.loader import load_proposal_directory
+    from lifeos.proposals.validation import preflight_proposal
+
+    loaded = load_proposal_directory(
+        vault_root / result.proposal_path,
+        proposals_root=vault_root / "proposals",
+    ).proposal
+    assert loaded is not None
+    operation = loaded.patch_document.operations[0]
+    assert operation.op == "replace_generated_file"
+    assert operation.expected_generator_id == "lifeos.facade.external_agent"
+    assert operation.new_content == target_content.decode().replace("Old.", "New.")
+    assert preflight_proposal(loaded, vault_root=vault_root).state == "valid"
+
+
+def test_compound_generated_owned_update_emits_two_valid_operations(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    registry = _registered_source(vault_root, tmp_path)
+    target_content = b"# Summary\n\n## Equipment\n\nOld.\n\n## Keep\n\nSame.\n"
+    target = vault_root / "wiki" / "summary.md"
+    target.write_bytes(target_content)
+    _write_ownership(
+        vault_root,
+        {"wiki/summary.md": _ownership_entry(target_content)},
+    )
+
+    result = create_wiki_and_update_section_proposal(
+        vault_root=vault_root,
+        registry=registry,
+        request=CompoundWikiProposalRequest(
+            "study/source.md",
+            "wiki/detail.md",
+            "Detail",
+            "Detailed body.",
+            "wiki/summary.md",
+            "Equipment",
+            "See [[detail]].",
+        ),
+        clock_fn=lambda: datetime(2026, 8, 22, 15, 0, tzinfo=timezone.utc),
+        random_suffix_fn=lambda: "abcdef12",
+    )
+
+    from lifeos.proposals.loader import load_proposal_directory
+    from lifeos.proposals.validation import preflight_proposal
+
+    loaded = load_proposal_directory(
+        vault_root / result.proposal_path,
+        proposals_root=vault_root / "proposals",
+    ).proposal
+    assert loaded is not None
+    assert [operation.op for operation in loaded.patch_document.operations] == [
+        "create_generated_file",
+        "replace_generated_file",
+    ]
+    assert preflight_proposal(loaded, vault_root=vault_root).state == "valid"
+
+
+@pytest.mark.parametrize(
+    ("generator_id", "target_content", "manifest_content", "message"),
+    [
+        (
+            "another.generator",
+            b"# Note\n\n## Selected\n\nOld.\n",
+            b"# Note\n\n## Selected\n\nOld.\n",
+            "different generator",
+        ),
+        (
+            "lifeos.facade.external_agent",
+            b"# Note\n\n## Selected\n\nChanged outside ownership.\n",
+            b"# Note\n\n## Selected\n\nOld.\n",
+            "does not match its ownership record",
+        ),
+    ],
+)
+def test_generated_update_rejects_unsafe_ownership_without_persisting(
+    tmp_path: Path,
+    generator_id: str,
+    target_content: bytes,
+    manifest_content: bytes,
+    message: str,
+) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    registry = _registered_source(vault_root, tmp_path)
+    (vault_root / "wiki" / "generated.md").write_bytes(target_content)
+    _write_ownership(
+        vault_root,
+        {
+            "wiki/generated.md": _ownership_entry(
+                manifest_content, generator_id=generator_id
+            )
+        },
+    )
+
+    with pytest.raises(ToolOwnershipConflictError, match=message):
+        update_wiki_section_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=UpdateWikiSectionProposalRequest(
+                "study/source.md", "wiki/generated.md", "Selected", "New."
+            ),
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
+
+
+def test_missing_ownership_manifest_prevents_draft(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    registry = _registered_source(vault_root, tmp_path)
+
+    with pytest.raises(ToolValidationError, match="ownership manifest is missing"):
+        create_wiki_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=CreateWikiProposalRequest(
+                "study/source.md", "wiki/new.md", "New", "Body"
+            ),
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
+
 def test_verify_identity_and_time_generation(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
+    _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
     

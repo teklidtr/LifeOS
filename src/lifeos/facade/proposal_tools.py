@@ -13,6 +13,7 @@ from lifeos.facade.models import (
 from lifeos.facade.errors import (
     ToolValidationError,
     ToolConflictError,
+    ToolOwnershipConflictError,
     ToolNotFoundError,
     ToolExecutionError,
 )
@@ -45,6 +46,13 @@ from lifeos.ingestion.provenance import ProvenanceGenerator
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.registry.file_tracking import hash_file_content
 from lifeos.vault import VaultAccessError, read_vault_markdown
+from lifeos.ownership import (
+    DEFAULT_OWNERSHIP_MANIFEST_PATH,
+    GeneratedOwnership,
+    ManifestEntry,
+    ManifestError,
+    PathSafetyError,
+)
 
 
 CREATE_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
@@ -203,6 +211,57 @@ def _load_verified_source(
         raise ToolExecutionError("Could not read registered source") from e
 
 
+def _load_generated_ownership(*, vault_root: Path) -> GeneratedOwnership:
+    manifest_path = vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
+    if not manifest_path.exists():
+        raise ToolValidationError("Generated ownership manifest is missing")
+    try:
+        return GeneratedOwnership.load(manifest_path, vault_root)
+    except (ManifestError, PathSafetyError) as e:
+        raise ToolValidationError("Generated ownership manifest is invalid") from e
+
+
+def _check_create_target_ownership(
+    *,
+    vault_root: Path,
+    target_path: str,
+    ownership: GeneratedOwnership,
+) -> None:
+    if target_path not in ownership.entries:
+        return
+    if (vault_root / target_path).exists():
+        raise ToolOwnershipConflictError(
+            "Wiki target is generated-owned and already exists; use the "
+            "section-update ingestion tool"
+        )
+    raise ToolOwnershipConflictError(
+        "Wiki target is missing but retains generated ownership; restore the "
+        "file or release ownership before creating it again"
+    )
+
+
+def _classify_update_target_ownership(
+    *,
+    target_path: str,
+    target_content: bytes,
+    ownership: GeneratedOwnership,
+) -> ManifestEntry | None:
+    entry = ownership.entries.get(target_path)
+    if entry is None:
+        return None
+    if entry.generator_id != GENERATOR_ID:
+        raise ToolOwnershipConflictError(
+            "Generated wiki target is owned by a different generator and cannot "
+            "be updated by this ingestion tool"
+        )
+    if entry.content_hash != hash_file_content(target_content):
+        raise ToolOwnershipConflictError(
+            "Generated wiki target content does not match its ownership record; "
+            "restore or explicitly reconcile ownership before ingestion"
+        )
+    return entry
+
+
 def create_wiki_proposal(
     *,
     vault_root: Path,
@@ -216,6 +275,17 @@ def create_wiki_proposal(
         vault_root=vault_root,
         registry=registry,
         source_path=request.source_path,
+    )
+
+    try:
+        target_path = validate_wiki_target_path(request.target_path)
+    except (FileTrackingError, InvalidWikiTargetError) as e:
+        raise ToolValidationError("Invalid wiki target path") from e
+    ownership = _load_generated_ownership(vault_root=vault_root)
+    _check_create_target_ownership(
+        vault_root=vault_root,
+        target_path=target_path,
+        ownership=ownership,
     )
 
     # 2. Construct LifeOS-owned generator
@@ -250,7 +320,7 @@ def create_wiki_proposal(
         documents = build_wiki_proposal(
             content=content,
             source=verified.source,
-            target_path=request.target_path,
+            target_path=target_path,
             proposal_id=proposal_id,
             created_at=created_at,
         )
@@ -301,14 +371,34 @@ def update_wiki_section_proposal(
     except (FileTrackingError, InvalidWikiTargetError) as e:
         raise ToolValidationError("Invalid wiki target path") from e
 
+    ownership = _load_generated_ownership(vault_root=vault_root)
+    ownership_entry = ownership.entries.get(target_path)
+
     try:
         target = read_vault_markdown(vault_root, target_path)
     except VaultAccessError as e:
         if e.code == "not-found":
+            if ownership_entry is not None:
+                raise ToolOwnershipConflictError(
+                    "Wiki target is missing but retains generated ownership; restore "
+                    "the file or release ownership before updating it"
+                ) from e
             raise ToolNotFoundError("Wiki target is missing") from e
         if e.code in {"invalid-path", "invalid-extension"}:
             raise ToolValidationError("Invalid wiki target path") from e
         raise ToolExecutionError("Could not read wiki target") from e
+
+    ownership_entry = _classify_update_target_ownership(
+        target_path=target_path,
+        target_content=target.content_bytes,
+        ownership=ownership,
+    )
+    if ownership_entry is None and parse_markdown_note(
+        Path(target_path), content=target.content
+    ).managed_blocks:
+        raise ToolValidationError(
+            "Wiki update target contains managed blocks and cannot use a human patch"
+        )
 
     generator = ProvenanceGenerator(
         id=GENERATOR_ID,
@@ -335,6 +425,9 @@ def update_wiki_section_proposal(
             generator=generator,
             proposal_id=proposal_id,
             created_at=created_at,
+            expected_generator_id=(
+                ownership_entry.generator_id if ownership_entry is not None else None
+            ),
         )
     except InvalidWikiSectionError as e:
         raise ToolValidationError("Invalid or ambiguous wiki section") from e
@@ -382,15 +475,33 @@ def create_wiki_and_update_section_proposal(
     if create_target_path == update_target_path:
         raise ToolValidationError("Create and update targets must be different")
 
+    ownership = _load_generated_ownership(vault_root=vault_root)
+    _check_create_target_ownership(
+        vault_root=vault_root,
+        target_path=create_target_path,
+        ownership=ownership,
+    )
+    update_ownership_entry = ownership.entries.get(update_target_path)
+
     try:
         update_target = read_vault_markdown(vault_root, update_target_path)
     except VaultAccessError as e:
         if e.code == "not-found":
+            if update_ownership_entry is not None:
+                raise ToolOwnershipConflictError(
+                    "Wiki update target is missing but retains generated ownership; "
+                    "restore the file or release ownership before updating it"
+                ) from e
             raise ToolNotFoundError("Wiki update target is missing") from e
         if e.code in {"invalid-path", "invalid-extension"}:
             raise ToolValidationError("Invalid wiki update target path") from e
         raise ToolExecutionError("Could not read wiki update target") from e
-    if parse_markdown_note(
+    update_ownership_entry = _classify_update_target_ownership(
+        target_path=update_target_path,
+        target_content=update_target.content_bytes,
+        ownership=ownership,
+    )
+    if update_ownership_entry is None and parse_markdown_note(
         Path(update_target_path), content=update_target.content
     ).managed_blocks:
         raise ToolValidationError(
@@ -428,6 +539,11 @@ def create_wiki_and_update_section_proposal(
             section_body=request.update_body,
             proposal_id=proposal_id,
             created_at=created_at,
+            update_expected_generator_id=(
+                update_ownership_entry.generator_id
+                if update_ownership_entry is not None
+                else None
+            ),
         )
     except InvalidWikiSectionError as e:
         raise ToolValidationError("Invalid or ambiguous wiki section") from e

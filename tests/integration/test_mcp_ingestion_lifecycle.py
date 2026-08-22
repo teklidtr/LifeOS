@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 import pytest
@@ -248,6 +249,95 @@ async def test_mcp_ingestion_updates_one_existing_wiki_section_end_to_end(
     )
     source_path = vault_root / "sources" / "test.md"
     assert source_path.read_bytes() == b"Canonical candidate content.\n"
+
+
+@pytest.mark.anyio
+async def test_mcp_ingestion_updates_generated_owned_wiki_section_end_to_end(
+    mcp_server_helper_path: Path,
+    config: LifeOSConfig,
+    config_path: Path,
+    vault_root: Path,
+    registry: Registry,
+    setup_source: None,
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "auth-generated-update.jsonl"
+    target_path = vault_root / "wiki" / "generated.md"
+    original = (
+        "# Generated\n\n"
+        "## Equipment notes\n\nOld incomplete list.\n\n"
+        "## Safety\n\nKeep this section unchanged.\n"
+    )
+    target_path.write_text(original)
+    ownership = {
+        "schema_version": 1,
+        "owned_files": {
+            "wiki/generated.md": {
+                "generator_id": "lifeos.facade.external_agent",
+                "generator_version": "1",
+                "content_hash": hashlib.sha256(original.encode()).hexdigest(),
+                "created_at": "2026-08-22T10:00:00Z",
+                "updated_at": "2026-08-22T10:00:00Z",
+            }
+        },
+    }
+    (vault_root / "system" / "generated-ownership.json").write_text(
+        json.dumps(ownership)
+    )
+
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=[
+            str(mcp_server_helper_path),
+            "--config",
+            str(config_path),
+            "--actor-id",
+            "integration-human",
+            "--authorization-log",
+            str(log_path),
+        ],
+    )
+
+    async with stdio_client(server_params) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            update_result = await session.call_tool(
+                "ingestion_update_wiki_section_proposal",
+                arguments={
+                    "source_path": "sources/test.md",
+                    "target_path": "wiki/generated.md",
+                    "heading": "Equipment notes",
+                    "body": "Verified complete list with reasons.",
+                },
+            )
+            assert not update_result.isError
+            proposal_id = json.loads(update_result.content[0].text)["proposal_id"]
+            loaded = load_proposal_directory(
+                vault_root / "proposals" / proposal_id,
+                proposals_root=vault_root / "proposals",
+            ).proposal
+            assert loaded is not None
+            assert loaded.patch_document.operations[0].op == "replace_generated_file"
+
+            assert not (
+                await session.call_tool("proposal_submit", {"proposal_id": proposal_id})
+            ).isError
+            assert not (
+                await session.call_tool("proposal_approve", {"proposal_id": proposal_id})
+            ).isError
+            assert not (
+                await session.call_tool("proposal_apply", {"proposal_id": proposal_id})
+            ).isError
+
+    assert target_path.read_text() == original.replace(
+        "Old incomplete list.", "Verified complete list with reasons."
+    )
+    manifest = json.loads(
+        (vault_root / "system" / "generated-ownership.json").read_text()
+    )
+    assert manifest["owned_files"]["wiki/generated.md"]["content_hash"] == (
+        hashlib.sha256(target_path.read_bytes()).hexdigest()
+    )
 
 
 @pytest.mark.anyio

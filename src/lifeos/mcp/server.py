@@ -27,6 +27,7 @@ from lifeos.facade.errors import (
     ToolConflictError,
     ToolExecutionError,
     ToolNotFoundError,
+    ToolOwnershipConflictError,
     ToolRecoveryRequiredError,
     ToolUnavailableError,
     ToolValidationError,
@@ -73,7 +74,10 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "that existing target and call ingestion_create_wiki_and_update_section_proposal. "
     "To update only an existing wiki note, also read "
     "that target, synthesize the replacement body for one exact heading, and call "
-    "ingestion_update_wiki_section_proposal. Stop after the draft "
+    "ingestion_update_wiki_section_proposal. LifeOS selects a human patch or generated "
+    "replacement from canonical ownership; never guess ownership from the filename. "
+    "If ownership is orphaned, stop and report the restore-or-release remediation. "
+    "Stop after the draft "
     "proposal unless the user explicitly requests another exact lifecycle transition. "
     "Never call proposal_submit, proposal_approve, or proposal_apply merely because an "
     "ingestion was requested. Use vault-relative paths and never directly rewrite "
@@ -98,14 +102,15 @@ UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
     f"{UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
     "has inspected both the registered source and existing target. Supply the exact "
     "heading text without # markers and only its replacement body. This creates a "
-    "base-hash-bound draft and does not modify the target wiki note."
+    "base-hash-bound, ownership-aware draft and does not modify the target wiki note."
 )
 COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
     "has inspected both the registered source and existing update target. Supply the "
     "absent create target with its grounded title and body, plus one exact heading and "
-    "replacement body for the existing target. This creates one atomic two-operation "
-    "draft and does not modify either target."
+    "replacement body for the existing target. LifeOS selects the update operation from "
+    "canonical ownership. This creates one atomic two-operation draft and does not modify "
+    "either target."
 )
 SUBMIT_PROPOSAL_MCP_DESCRIPTION = (
     f"{SUBMIT_PROPOSAL_DESCRIPTOR.description} Call only when the user explicitly requests "
@@ -166,6 +171,8 @@ def _invoke_mcp_tool(operation: Callable[[], T]) -> T:
         raise ToolError("Invalid LifeOS tool arguments") from error
     except ToolNotFoundError as error:
         raise ToolError("Requested LifeOS object was not found") from error
+    except ToolOwnershipConflictError as error:
+        raise ToolError(str(error)) from error
     except ToolConflictError as error:
         raise ToolError("LifeOS operation conflicts with the current state") from error
     except ToolAuthorizationError as error:

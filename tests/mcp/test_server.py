@@ -12,6 +12,7 @@ from lifeos.facade.errors import (
     ToolConflictError,
     ToolExecutionError,
     ToolNotFoundError,
+    ToolOwnershipConflictError,
     ToolUnavailableError,
     ToolValidationError,
 )
@@ -64,6 +65,8 @@ def test_server_advertises_safe_ingestion_workflow() -> None:
     assert "call ingestion_create_wiki_proposal" in server.instructions
     assert "call ingestion_create_wiki_and_update_section_proposal" in server.instructions
     assert "call ingestion_update_wiki_section_proposal" in server.instructions
+    assert "selects a human patch or generated replacement" in server.instructions
+    assert "restore-or-release remediation" in server.instructions
     assert "Stop after the draft proposal" in server.instructions
     assert "Never call proposal_submit, proposal_approve, or proposal_apply" in server.instructions
 
@@ -82,7 +85,9 @@ def test_tools_advertise_workflow_specific_descriptions() -> None:
     assert "both the registered source and existing target" in tools[
         "ingestion_update_wiki_section_proposal"
     ].description
-    assert "base-hash-bound draft" in tools["ingestion_update_wiki_section_proposal"].description
+    assert "base-hash-bound, ownership-aware draft" in tools[
+        "ingestion_update_wiki_section_proposal"
+    ].description
     assert "atomic two-operation draft" in tools[
         "ingestion_create_wiki_and_update_section_proposal"
     ].description
@@ -424,6 +429,21 @@ def test_expected_facade_error_raises_sanitized_tool_error(exception, expected_m
         _invoke_mcp_tool(failing_op)
 
     assert str(exc_info.value) == expected_msg
+
+
+def test_ownership_conflict_returns_bounded_remediation() -> None:
+    message = (
+        "Wiki target is missing but retains generated ownership; restore the file "
+        "or release ownership before creating it again"
+    )
+
+    def failing_op() -> None:
+        raise ToolOwnershipConflictError(message)
+
+    with pytest.raises(ToolError) as exc_info:
+        _invoke_mcp_tool(failing_op)
+
+    assert str(exc_info.value) == message
 
 
 def test_unexpected_error_is_logged_and_sanitized(caplog) -> None:

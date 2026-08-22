@@ -18,6 +18,7 @@ from lifeos.proposals.patches import (
     CreateGeneratedFileV2,
     PatchDocumentV2,
     PatchHumanFile,
+    ReplaceGeneratedFileV2,
     serialize_patch_json_bytes,
 )
 from lifeos.registry.file_tracking import validate_vault_path
@@ -216,14 +217,16 @@ def _build_generated_wiki_candidate(
     return candidate if candidate.endswith("\n") else candidate + "\n"
 
 
-def _build_wiki_section_patch(
+def _build_wiki_section_operation(
     *,
     target_path: str,
     target_content: str,
     target_content_hash: str,
     heading: str,
     section_body: str,
-) -> PatchHumanFile:
+    generator: ProvenanceGenerator,
+    expected_generator_id: str | None,
+) -> PatchHumanFile | ReplaceGeneratedFileV2:
     candidate = replace_wiki_section(
         target_content=target_content,
         heading=heading,
@@ -232,6 +235,15 @@ def _build_wiki_section_patch(
     if candidate == target_content:
         raise WikiSectionUnchangedError(
             f"Section already has the proposed content: {heading}"
+        )
+    if expected_generator_id is not None:
+        return ReplaceGeneratedFileV2(
+            id="op-update-wiki-section",
+            target_path=target_path,
+            base_hash=target_content_hash,
+            expected_generator_id=expected_generator_id,
+            generator_version=generator.version,
+            new_content=candidate,
         )
     diff_lines = tuple(
         difflib.unified_diff(
@@ -334,14 +346,17 @@ def build_wiki_section_update_proposal(
     generator: ProvenanceGenerator,
     proposal_id: str,
     created_at: str,
+    expected_generator_id: str | None = None,
 ) -> WikiProposalDocuments:
     norm_target = validate_wiki_target_path(target_path)
-    patch = _build_wiki_section_patch(
+    patch = _build_wiki_section_operation(
         target_path=norm_target,
         target_content=target_content,
         target_content_hash=target_content_hash,
         heading=heading,
         section_body=section_body,
+        generator=generator,
+        expected_generator_id=expected_generator_id,
     )
     document = PatchDocumentV2(
         schema_version=2,
@@ -377,6 +392,11 @@ def build_wiki_section_update_proposal(
                 "source_hash": source.content_hash,
                 "target_path": norm_target,
                 "heading": heading,
+                **(
+                    {"target_ownership": "generated"}
+                    if expected_generator_id is not None
+                    else {}
+                ),
             }
         },
     )
@@ -406,6 +426,7 @@ def build_compound_wiki_proposal(
     section_body: str,
     proposal_id: str,
     created_at: str,
+    update_expected_generator_id: str | None = None,
 ) -> CompoundWikiProposalDocuments:
     norm_create_target = validate_wiki_target_path(create_target_path)
     norm_update_target = validate_wiki_target_path(update_target_path)
@@ -425,12 +446,14 @@ def build_compound_wiki_proposal(
         generator_version=content.generator.version,
         new_content=candidate_markdown,
     )
-    section_patch = _build_wiki_section_patch(
+    section_patch = _build_wiki_section_operation(
         target_path=norm_update_target,
         target_content=update_target_content,
         target_content_hash=update_target_content_hash,
         heading=heading,
         section_body=section_body,
+        generator=content.generator,
+        expected_generator_id=update_expected_generator_id,
     )
     document = PatchDocumentV2(
         schema_version=2,
@@ -470,6 +493,11 @@ def build_compound_wiki_proposal(
                 "create_target_path": norm_create_target,
                 "update_target_path": norm_update_target,
                 "heading": heading,
+                **(
+                    {"update_target_ownership": "generated"}
+                    if update_expected_generator_id is not None
+                    else {}
+                ),
             }
         },
     )

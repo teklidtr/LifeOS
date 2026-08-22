@@ -277,6 +277,42 @@ def test_section_update_builder_emits_base_hash_patch_and_source_metadata(
     assert parsed.frontmatter["extensions"]["ingestion"]["source_hash"] == sample_source.content_hash
 
 
+def test_section_update_builder_uses_generated_replacement_when_owned(
+    sample_source: SourceSnapshot,
+) -> None:
+    original = "# Note\n\n## Selected\n\nOld.\n\n## Keep\n\nSame.\n"
+    target_hash = "sha256:" + "b" * 64
+    documents = build_wiki_section_update_proposal(
+        source=sample_source,
+        target_path="wiki/generated.md",
+        target_content=original,
+        target_content_hash=target_hash,
+        heading="Selected",
+        section_body="New.",
+        generator=ProvenanceGenerator("external", "2", "1", None),
+        proposal_id="prop-20260713T123000Z-abcdef12",
+        created_at="2026-07-13T12:30:00Z",
+        expected_generator_id="external",
+    )
+
+    operation = json.loads(documents.patches_json)["operations"][0]
+    assert operation == {
+        "id": "op-update-wiki-section",
+        "op": "replace_generated_file",
+        "target_path": "wiki/generated.md",
+        "base_hash": target_hash,
+        "expected_generator_id": "external",
+        "generator_version": "2",
+        "new_content": original.replace("Old.", "New."),
+    }
+    parsed = parse_markdown_note(
+        Path("proposal.md"), content=documents.proposal_markdown.decode()
+    )
+    assert parsed.frontmatter["extensions"]["ingestion"]["target_ownership"] == (
+        "generated"
+    )
+
+
 def test_section_update_builder_rejects_no_effect(sample_source: SourceSnapshot) -> None:
     original = "# Note\n\n## Selected\n\nSame.\n"
     with pytest.raises(WikiSectionUnchangedError):

@@ -10,6 +10,11 @@ class ToolNotFoundError(ToolFacadeError):
 class ToolConflictError(ToolFacadeError):
     pass
 
+class ToolOwnershipConflictError(ToolConflictError):
+    """A bounded ownership conflict whose message is safe to show to an MCP caller."""
+
+    pass
+
 class ToolUnavailableError(ToolFacadeError):
     pass
 

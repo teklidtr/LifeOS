@@ -4,6 +4,7 @@ from .errors import (
     ToolExecutionError,
     ToolFacadeError,
     ToolNotFoundError,
+    ToolOwnershipConflictError,
     ToolUnavailableError,
     ToolValidationError,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "ToolExecutionError",
     "ToolFacadeError",
     "ToolNotFoundError",
+    "ToolOwnershipConflictError",
     "ToolUnavailableError",
     "ToolValidationError",
     "UpdateWikiSectionProposalRequest",
