@@ -52,11 +52,18 @@ uv --version
 
 ## 4.4 Install LifeOS
 
-Install the core package:
+Install the core package into the repository virtual environment and activate it:
 
 ```bash
 uv sync
+source .venv/bin/activate
 ```
+
+`uv sync` installs the local LifeOS repository in editable mode, so source
+changes are reflected without reinstalling it. Activate this environment in
+each new shell before running LifeOS commands. From another directory, use the
+absolute activation path, such as
+`source /absolute/path/to/lifeos/.venv/bin/activate`.
 
 Install all optional features and development tools:
 
@@ -82,8 +89,8 @@ not installed by any current extra.
 Verify the command:
 
 ```bash
-uv run lifeos --version
-uv run lifeos --help
+lifeos --version
+lifeos --help
 ```
 
 ## 4.5 Create a vault
@@ -177,17 +184,21 @@ Configuration rules:
 
 ## 4.8 Initialize and populate the registry
 
-The registry is explicit and disposable. From the LifeOS repository root, run:
+The registry is explicit and disposable. With the LifeOS repository virtual
+environment activated, set the absolute path to the configuration file and run:
 
 ```bash
-uv run python - <<'PY'
+LIFEOS_CONFIG=/absolute/path/to/LifeOS-vault/lifeos.yml
+
+python - "$LIFEOS_CONFIG" <<'PY'
+import sys
 from pathlib import Path
 
 from lifeos.config import load_config
 from lifeos.registry import Registry, register_proposals_scan, register_scan
 from lifeos.scanner import scan_vault
 
-config = load_config(Path("lifeos.yml"))
+config = load_config(Path(sys.argv[1]))
 registry = Registry(config.runtime_dir / "registry.db")
 registry.initialize()
 register_scan(registry, config.vault_root, scan_vault(config.vault_root))
@@ -212,16 +223,17 @@ No proprietary LifeOS Obsidian plugin is required for the core workflow. The fir
 
 ## 4.10 Verify the installation
 
-From the LifeOS application repository, where `lifeos.yml` exists:
+From the directory containing `lifeos.yml`, with the LifeOS repository virtual
+environment activated:
 
 ```bash
-uv run lifeos status
+lifeos status
 ```
 
 For machine-readable output:
 
 ```bash
-uv run lifeos status --json
+lifeos status --json
 ```
 
 A fresh installation may report missing graph or export generations. That is
@@ -230,25 +242,45 @@ state should be investigated before consequential operations.
 
 ## 4.11 Optional AI setup
 
-Install AI support:
+From the LifeOS application repository, install AI support and activate the
+updated environment:
 
 ```bash
+cd /absolute/path/to/lifeos
 uv sync --extra ai
+source .venv/bin/activate
 ```
 
-Set the provider credential required by your model, for example:
+The current `ai` extra installs the provider-neutral runtime but does not yet
+include the OpenAI client. When using an `openai:` model, install its provider
+dependency into the same environment:
+
+```bash
+uv pip install "pydantic-ai-slim[openai]"
+```
+
+In the same shell, set the provider credential required by your model, for
+example:
 
 ```bash
 export OPENAI_API_KEY="..."
 export LIFEOS_AI_MODEL="openai:gpt-4o"
+
+: "${OPENAI_API_KEY:?Set OPENAI_API_KEY first}"
+: "${LIFEOS_AI_MODEL:?Set LIFEOS_AI_MODEL first}"
 ```
 
-Before ingestion, make sure the source file has been registered. Then run:
+Before ingestion, make sure the source file has been registered. Change to the
+directory containing `lifeos.yml`, then run the command there. Source and target
+paths are relative to the vault configured in `lifeos.yml`.
 
 ```bash
-uv run lifeos ingest \
+cd /absolute/path/to/directory-containing-lifeos.yml
+
+lifeos ingest \
   study/example.md \
-  --target wiki/example.md
+  --target wiki/example.md \
+  --model "$LIFEOS_AI_MODEL"
 ```
 
 The result should be a draft proposal, not a direct wiki mutation.
@@ -264,13 +296,18 @@ uv sync --extra mcp
 Configure your MCP client to launch:
 
 ```bash
-uv run lifeos-mcp \
+lifeos-mcp \
   --config /absolute/path/to/lifeos.yml \
   --actor-id "your-trusted-identity"
 ```
 
 Keep the server local and use STDIO transport. Do not expose it as an
 unauthenticated network service.
+
+After the MCP client connects, an ingestion request such as “Ingest
+`study/example.md` into `wiki/example.md` using LifeOS” is routed through source
+reading and `ingestion_create_wiki_proposal`. The default result is a draft
+proposal. The server does not infer permission to submit, approve, or apply it.
 
 ## 4.13 Build the semantic retrieval index
 

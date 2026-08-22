@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from mcp.server.fastmcp.exceptions import ToolError
 
-from lifeos.mcp.server import create_mcp_server, _invoke_mcp_tool
+from lifeos.mcp.server import LIFEOS_MCP_INSTRUCTIONS, create_mcp_server, _invoke_mcp_tool
 from lifeos.facade.errors import (
     ToolAuthorizationError,
     ToolConflictError,
@@ -43,6 +43,54 @@ def test_mcp_names_are_unique() -> None:
     tools = list(server._tool_manager.list_tools())
     names = [t.name for t in tools]
     assert len(names) == len(set(names))
+
+
+def test_server_advertises_safe_ingestion_workflow() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+
+    assert server.instructions == LIFEOS_MCP_INSTRUCTIONS
+    assert "first call vault_read_markdown" in server.instructions
+    assert "then call ingestion_create_wiki_proposal" in server.instructions
+    assert "Stop after the draft proposal" in server.instructions
+    assert "Never call proposal_submit, proposal_approve, or proposal_apply" in server.instructions
+
+
+def test_tools_advertise_workflow_specific_descriptions() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
+
+    assert all(tool.description for tool in tools.values())
+    assert "before ingestion" in tools["vault_read_markdown"].description
+    assert "after vault_read_markdown" in tools["ingestion_create_wiki_proposal"].description
+    assert "creates a draft" in tools["ingestion_create_wiki_proposal"].description
+    assert "explicitly requests" in tools["proposal_submit"].description
+    assert "explicitly requests" in tools["proposal_approve"].description
+    assert "changes canonical vault content" in tools["proposal_apply"].description
+
+
+def test_tools_advertise_accurate_safety_annotations() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
+
+    assert tools["vault_read_markdown"].annotations.model_dump() == {
+        "title": "Read vault Markdown",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+    assert tools["ingestion_create_wiki_proposal"].annotations.destructiveHint is False
+    assert tools["ingestion_create_wiki_proposal"].annotations.idempotentHint is False
+    assert tools["proposal_submit"].annotations.destructiveHint is False
+    assert tools["proposal_approve"].annotations.destructiveHint is False
+    assert tools["proposal_apply"].annotations.destructiveHint is True
+    assert all(tool.annotations.openWorldHint is False for tool in tools.values())
 
 
 def test_tools_map_to_expected_facade_descriptors() -> None:

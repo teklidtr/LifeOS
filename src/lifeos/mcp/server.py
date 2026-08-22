@@ -9,8 +9,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.tools import Tool
 from pydantic import BaseModel, ConfigDict
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from lifeos.facade.consequential_tools import (
+    APPLY_PROPOSAL_DESCRIPTOR,
+    APPROVE_PROPOSAL_DESCRIPTOR,
+    SUBMIT_PROPOSAL_DESCRIPTOR,
     SubmitProposalRequest,
     ApproveProposalRequest,
     ApplyProposalRequest,
@@ -27,8 +31,12 @@ from lifeos.facade.errors import (
     ToolUnavailableError,
     ToolValidationError,
 )
-from lifeos.facade.proposal_tools import CreateWikiProposalRequest, create_wiki_proposal
-from lifeos.facade.read_only import ReadMarkdownRequest, read_markdown
+from lifeos.facade.proposal_tools import (
+    CREATE_WIKI_PROPOSAL_DESCRIPTOR,
+    CreateWikiProposalRequest,
+    create_wiki_proposal,
+)
+from lifeos.facade.read_only import READ_MARKDOWN_DESCRIPTOR, ReadMarkdownRequest, read_markdown
 from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.mcp.models import (
     ApplyProposalMCPResult,
@@ -43,9 +51,52 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+LIFEOS_MCP_INSTRUCTIONS = (
+    "LifeOS keeps Markdown canonical. For ingestion requests, first call "
+    "vault_read_markdown on the registered source, synthesize a grounded title and body "
+    "from that content, then call ingestion_create_wiki_proposal. Stop after the draft "
+    "proposal unless the user explicitly requests another exact lifecycle transition. "
+    "Never call proposal_submit, proposal_approve, or proposal_apply merely because an "
+    "ingestion was requested. Use vault-relative paths and never directly rewrite "
+    "canonical notes."
+)
 
-def _strict_tool(fn: Callable[..., object], *, name: str) -> Tool:
-    tool = Tool.from_function(fn, name=name)
+READ_MARKDOWN_MCP_DESCRIPTION = (
+    f"{READ_MARKDOWN_DESCRIPTOR.description} Use this before ingestion to inspect the "
+    "registered source; paths are vault-relative."
+)
+CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
+    f"{CREATE_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown and "
+    "supply a source-grounded title and body. This creates a draft and does not modify "
+    "the target wiki note."
+)
+SUBMIT_PROPOSAL_MCP_DESCRIPTION = (
+    f"{SUBMIT_PROPOSAL_DESCRIPTOR.description} Call only when the user explicitly requests "
+    "submission of that proposal."
+)
+APPROVE_PROPOSAL_MCP_DESCRIPTION = (
+    f"{APPROVE_PROPOSAL_DESCRIPTOR.description} Call only when the user explicitly requests "
+    "approval of that pending proposal."
+)
+APPLY_PROPOSAL_MCP_DESCRIPTION = (
+    f"{APPLY_PROPOSAL_DESCRIPTOR.description} This changes canonical vault content; call "
+    "only when the user explicitly requests application of that approved proposal."
+)
+
+
+def _strict_tool(
+    fn: Callable[..., object],
+    *,
+    name: str,
+    description: str,
+    annotations: ToolAnnotations,
+) -> Tool:
+    tool = Tool.from_function(
+        fn,
+        name=name,
+        description=description,
+        annotations=annotations,
+    )
     base_model = tool.fn_metadata.arg_model
     strict_model = cast(
         type[BaseModel],
@@ -177,26 +228,67 @@ def create_mcp_server(
 
     return FastMCP(
         "LifeOS",
+        instructions=LIFEOS_MCP_INSTRUCTIONS,
         tools=[
             _strict_tool(
                 vault_read_markdown_tool,
                 name="vault_read_markdown",
+                description=READ_MARKDOWN_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Read vault Markdown",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             _strict_tool(
                 ingestion_create_wiki_proposal_tool,
                 name="ingestion_create_wiki_proposal",
+                description=CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Create wiki ingestion proposal",
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=False,
+                    openWorldHint=False,
+                ),
             ),
             _strict_tool(
                 proposal_submit_tool,
                 name="proposal_submit",
+                description=SUBMIT_PROPOSAL_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Submit proposal",
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=False,
+                    openWorldHint=False,
+                ),
             ),
             _strict_tool(
                 proposal_approve_tool,
                 name="proposal_approve",
+                description=APPROVE_PROPOSAL_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Approve proposal",
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=False,
+                    openWorldHint=False,
+                ),
             ),
             _strict_tool(
                 proposal_apply_tool,
                 name="proposal_apply",
+                description=APPLY_PROPOSAL_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Apply proposal",
+                    readOnlyHint=False,
+                    destructiveHint=True,
+                    idempotentHint=False,
+                    openWorldHint=False,
+                ),
             ),
         ],
     )

@@ -456,6 +456,13 @@ confirmation.
 The server uses STDIO protocol output and should normally be launched by an
 MCP-compatible client rather than used as an interactive shell command.
 
+When an MCP client receives an ingestion request, the LifeOS server advertises
+the bounded workflow explicitly: read the registered source with
+`vault_read_markdown`, synthesize a source-grounded title and body, call
+`ingestion_create_wiki_proposal`, and stop at the resulting draft. Submission,
+approval, and application each require a separate explicit user request and
+retain trusted interactive authorization.
+
 ## 3.13 Graph views
 
 ### What it is
