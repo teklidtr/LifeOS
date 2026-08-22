@@ -9,6 +9,8 @@ from lifeos.registry.file_tracking import (
     validate_vault_path,
 )
 from lifeos.ingestion.drafts import SourceSnapshot
+from lifeos.ingestion.taxonomy import extract_source_taxonomy
+from lifeos.markdown.parser import parse_markdown_note
 
 @dataclass(frozen=True, slots=True)
 class VerifiedRegisteredSource:
@@ -73,8 +75,17 @@ def load_registered_source(
     elif comparison.state != FileRegistrationState.REGISTERED_UNCHANGED:
         raise OrchestrationError(f"Unexpected comparison state {comparison.state}")
 
+    try:
+        source_text = source_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        taxonomy = extract_source_taxonomy({})
+    else:
+        parsed = parse_markdown_note(target_file, content=source_text)
+        taxonomy = extract_source_taxonomy(parsed.frontmatter)
     snapshot = SourceSnapshot(
         path=source_path,
         content_hash=f"sha256:{raw_hash}",
+        tags=taxonomy.tags,
+        topics=taxonomy.topics,
     )
     return VerifiedRegisteredSource(source=snapshot, content=source_bytes)

@@ -37,13 +37,18 @@ def test_request_and_result_are_frozen_and_slotted() -> None:
 
 
 def test_valid_markdown_read(tmp_path: Path) -> None:
-    md_content = "---\ntitle: test\n---\n\n# Header\nBody text here.\n"
+    md_content = (
+        "---\ntitle: test\ntags: [existing, '#nested/topic']\n"
+        "topics: [better-topic]\nsecret: do-not-return\n---\n\n# Header\nBody text here.\n"
+    )
     (tmp_path / "valid.md").write_text(md_content, encoding="utf-8")
 
     result = read_markdown(vault_root=tmp_path, request=ReadMarkdownRequest(vault_path="valid.md"))
 
     assert result.vault_path == "valid.md"
     assert result.markdown_body == "\n# Header\nBody text here.\n"
+    assert result.source_tags == ("existing", "nested/topic")
+    assert result.source_topics == ("better-topic",)
     # Frontmatter is excluded and body is exact
 
 

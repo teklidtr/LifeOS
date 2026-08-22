@@ -8,6 +8,7 @@ import os
 import re
 
 from lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent
+from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.schema import (
     ProposalMetadata,
     ProposalStatus,
@@ -194,6 +195,42 @@ def _serialize_wiki_frontmatter(metadata: dict[str, Any]) -> str:
     return f"---\n{rendered}---\n"
 
 
+def _format_taxonomy(values: tuple[str, ...]) -> str:
+    return (
+        ", ".join("`" + value.replace("`", "\\`") + "`" for value in values)
+        if values
+        else "_(none)_"
+    )
+
+
+def _taxonomy_review(
+    *,
+    source: SourceSnapshot,
+    proposed_tags: tuple[str, ...],
+    rationale: str | None,
+) -> str:
+    return (
+        "\n\n## Tag review\n\n"
+        f"- Source `tags`: {_format_taxonomy(source.tags)}\n"
+        f"- Source `topics`: {_format_taxonomy(source.topics)}\n"
+        f"- Proposed canonical wiki `tags`: {_format_taxonomy(proposed_tags)}\n"
+        f"- Agent rationale: {rationale or '_(not provided)_'}\n\n"
+        "Source taxonomy is input evidence; only the reviewed proposed wiki tags become canonical."
+    )
+
+
+def _replace_generated_wiki_tags(target_content: str, tags: tuple[str, ...]) -> str:
+    parsed = parse_markdown_note(Path("generated-wiki.md"), content=target_content)
+    if any(finding.severity == "error" for finding in parsed.findings):
+        raise InvalidWikiSectionError("Generated wiki frontmatter is malformed")
+    metadata = dict(parsed.frontmatter)
+    if tags:
+        metadata["tags"] = list(tags)
+    else:
+        metadata.pop("tags", None)
+    return _serialize_wiki_frontmatter(metadata) + parsed.body
+
+
 def _build_generated_wiki_candidate(
     *, content: WikiProposalContent, source: SourceSnapshot, created_at: str
 ) -> str:
@@ -212,6 +249,7 @@ def _build_generated_wiki_candidate(
     )
     frontmatter = {
         "title": content.title,
+        **({"tags": list(content.tags)} if content.tags else {}),
         "lifeos_provenance": provenance_to_frontmatter_value(provenance),
     }
     candidate = _serialize_wiki_frontmatter(frontmatter) + content.body
@@ -227,12 +265,19 @@ def _build_wiki_section_operation(
     section_body: str,
     generator: ProvenanceGenerator,
     expected_generator_id: str | None,
+    proposed_tags: tuple[str, ...] | None = None,
 ) -> PatchHumanFile | ReplaceGeneratedFileV2:
     candidate = replace_wiki_section(
         target_content=target_content,
         heading=heading,
         section_body=section_body,
     )
+    if proposed_tags is not None:
+        if expected_generator_id is None:
+            raise InvalidWikiSectionError(
+                "Tags cannot be changed on a human-owned wiki target"
+            )
+        candidate = _replace_generated_wiki_tags(candidate, proposed_tags)
     if candidate == target_content:
         raise WikiSectionUnchangedError(
             f"Section already has the proposed content: {heading}"
@@ -309,7 +354,15 @@ def build_wiki_proposal(
     )
     
     # 5. Serialize proposal markdown
-    proposal_markdown_bytes = serialize_proposal_markdown(meta, f"Generates new wiki page at `{norm_target}`.")
+    proposal_body = (
+        f"Generates new wiki page at `{norm_target}`."
+        + _taxonomy_review(
+            source=source,
+            proposed_tags=content.tags,
+            rationale=content.tag_rationale,
+        )
+    )
+    proposal_markdown_bytes = serialize_proposal_markdown(meta, proposal_body)
     proposal_markdown_bytes = proposal_markdown_bytes.replace(b"\nreview_digest: null\n", b"\n")
 
     # 6. Construct and serialize patch
@@ -348,6 +401,8 @@ def build_wiki_section_update_proposal(
     proposal_id: str,
     created_at: str,
     expected_generator_id: str | None = None,
+    proposed_tags: tuple[str, ...] | None = None,
+    tag_rationale: str | None = None,
 ) -> WikiProposalDocuments:
     norm_target = validate_wiki_target_path(target_path)
     patch = _build_wiki_section_operation(
@@ -358,6 +413,7 @@ def build_wiki_section_update_proposal(
         section_body=section_body,
         generator=generator,
         expected_generator_id=expected_generator_id,
+        proposed_tags=proposed_tags,
     )
     document = PatchDocumentV2(
         schema_version=2,
@@ -401,10 +457,23 @@ def build_wiki_section_update_proposal(
             }
         },
     )
+    if proposed_tags is None:
+        change_summary = "All surrounding target content is preserved."
+    else:
+        change_summary = (
+            "The reviewed canonical tags are updated in the same generated-file "
+            "replacement; body content outside the selected section is preserved."
+        )
     proposal_body = (
         f"Updates the exact `{heading}` section in `{norm_target}` from the registered "
-        f"source `{source.path}`. All surrounding target content is preserved."
+        f"source `{source.path}`. {change_summary}"
     )
+    if proposed_tags is not None:
+        proposal_body += _taxonomy_review(
+            source=source,
+            proposed_tags=proposed_tags,
+            rationale=tag_rationale,
+        )
     proposal_markdown = serialize_proposal_markdown(metadata, proposal_body)
     proposal_markdown = proposal_markdown.replace(b"\nreview_digest: null\n", b"\n")
     return WikiProposalDocuments(
@@ -506,6 +575,11 @@ def build_compound_wiki_proposal(
         f"Creates the detailed wiki page `{norm_create_target}` and updates the exact "
         f"`{heading}` section in `{norm_update_target}` from the registered source "
         f"`{source.path}`. Both changes remain one atomic proposal."
+        + _taxonomy_review(
+            source=source,
+            proposed_tags=content.tags,
+            rationale=content.tag_rationale,
+        )
     )
     proposal_markdown = serialize_proposal_markdown(metadata, proposal_body)
     proposal_markdown = proposal_markdown.replace(b"\nreview_digest: null\n", b"\n")

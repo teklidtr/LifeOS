@@ -163,6 +163,46 @@ def test_candidate_markdown_parses_and_preserves_body(sample_content: WikiPropos
     assert parsed.body == "This is a test body.\nIt has multiple lines.\n"
     assert md_content.endswith("\n")
 
+
+def test_create_proposal_records_reviewed_tags_without_copying_source_taxonomy(
+    sample_content: WikiProposalContent,
+    sample_source: SourceSnapshot,
+) -> None:
+    source = replace(
+        sample_source,
+        tags=("weak-source-tag",),
+        topics=("Araç güvenliği", "Ehliyet sınavı"),
+    )
+    content = replace(
+        sample_content,
+        tags=("ilk-yardim", "ehliyet-sinavi", "arac-guvenligi"),
+        tag_rationale="Kaynağın geniş topics alanlarını sınava yönelik kanonik etiketlere dönüştürdüm.",
+    )
+
+    documents = build_wiki_proposal(
+        content=content,
+        source=source,
+        target_path="wiki/test.md",
+        proposal_id="prop-20260713T123000Z-abcdef12",
+        created_at="2026-07-13T12:30:00Z",
+    )
+
+    operation = json.loads(documents.patches_json)["operations"][0]
+    candidate = parse_markdown_note(
+        Path("wiki/test.md"), content=operation["new_content"]
+    )
+    assert candidate.frontmatter["tags"] == [
+        "ilk-yardim",
+        "ehliyet-sinavi",
+        "arac-guvenligi",
+    ]
+    assert "weak-source-tag" not in candidate.frontmatter["tags"]
+    proposal = documents.proposal_markdown.decode()
+    assert "Source `tags`: `weak-source-tag`" in proposal
+    assert "Source `topics`: `Araç güvenliği`, `Ehliyet sınavı`" in proposal
+    assert "Proposed canonical wiki `tags`" in proposal
+    assert content.tag_rationale in proposal
+
 def test_model_id_omission_remains_canonical(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
     new_gen = replace(sample_content.generator, model_id=None)
     new_content = replace(sample_content, generator=new_gen)
@@ -313,6 +353,46 @@ def test_section_update_builder_uses_generated_replacement_when_owned(
     )
 
 
+def test_generated_section_update_revises_tags_in_same_replacement(
+    sample_source: SourceSnapshot,
+) -> None:
+    original = (
+        "---\n"
+        "title: Note\n"
+        "tags:\n"
+        "- old-tag\n"
+        "---\n"
+        "# Note\n\n"
+        "## Selected\n\nOld.\n\n"
+        "## Keep\n\nSame.\n"
+    )
+    documents = build_wiki_section_update_proposal(
+        source=replace(sample_source, topics=("Better topic",)),
+        target_path="wiki/generated.md",
+        target_content=original,
+        target_content_hash="sha256:" + "b" * 64,
+        heading="Selected",
+        section_body="New.",
+        generator=ProvenanceGenerator("external", "2", "2", None),
+        proposal_id="prop-20260713T123000Z-abcdef12",
+        created_at="2026-07-13T12:30:00Z",
+        expected_generator_id="external",
+        proposed_tags=("new-tag", "better-topic"),
+        tag_rationale="The source topic is more specific than the old tag.",
+    )
+
+    operations = json.loads(documents.patches_json)["operations"]
+    assert len(operations) == 1
+    assert operations[0]["op"] == "replace_generated_file"
+    candidate = parse_markdown_note(
+        Path("wiki/generated.md"), content=operations[0]["new_content"]
+    )
+    assert candidate.frontmatter["tags"] == ["new-tag", "better-topic"]
+    assert "## Selected\n\nNew." in candidate.body
+    assert "## Keep\n\nSame." in candidate.body
+    assert "reviewed canonical tags are updated" in documents.proposal_markdown.decode()
+
+
 def test_section_update_builder_rejects_no_effect(sample_source: SourceSnapshot) -> None:
     original = "# Note\n\n## Selected\n\nSame.\n"
     with pytest.raises(WikiSectionUnchangedError):
@@ -373,6 +453,42 @@ def test_compound_builder_emits_create_then_hash_bound_section_patch(
         "update_target_path": "wiki/first-aid.md",
         "heading": "Equipment notes",
     }
+
+
+def test_compound_builder_includes_reviewed_tags_in_create_operation(
+    sample_content: WikiProposalContent,
+    sample_source: SourceSnapshot,
+) -> None:
+    content = replace(
+        sample_content,
+        tags=("first-aid", "driving-test"),
+        tag_rationale="More precise canonical tags than the source supplied.",
+    )
+    source = replace(sample_source, tags=("notes",), topics=("Road safety",))
+    original = "# First Aid\n\n## Equipment\n\nOld.\n"
+
+    documents = build_compound_wiki_proposal(
+        content=content,
+        source=source,
+        create_target_path="wiki/equipment.md",
+        update_target_path="wiki/first-aid.md",
+        update_target_content=original,
+        update_target_content_hash="sha256:" + "b" * 64,
+        heading="Equipment",
+        section_body="See [[equipment]].",
+        proposal_id="prop-20260713T123000Z-abcdef12",
+        created_at="2026-07-13T12:30:00Z",
+    )
+
+    operations = json.loads(documents.patches_json)["operations"]
+    candidate = parse_markdown_note(
+        Path("wiki/equipment.md"), content=operations[0]["new_content"]
+    )
+    assert candidate.frontmatter["tags"] == ["first-aid", "driving-test"]
+    proposal = documents.proposal_markdown.decode()
+    assert "Source `tags`: `notes`" in proposal
+    assert "Source `topics`: `Road safety`" in proposal
+    assert content.tag_rationale in proposal
 
 
 def test_compound_persistence_rejects_present_create_target(tmp_path: Path) -> None:

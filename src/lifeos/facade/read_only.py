@@ -8,6 +8,7 @@ from lifeos.facade.errors import (
 )
 from lifeos.facade.models import ToolDescriptor, ToolEffect
 from lifeos.markdown.parser import parse_markdown_note
+from lifeos.ingestion.taxonomy import extract_source_taxonomy
 from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
 
@@ -27,6 +28,8 @@ class ReadMarkdownRequest:
 class ReadMarkdownResult:
     vault_path: str
     markdown_body: str
+    source_tags: tuple[str, ...] = ()
+    source_topics: tuple[str, ...] = ()
 
 
 def read_markdown(
@@ -57,8 +60,11 @@ def read_markdown(
         raise ToolExecutionError("Failed to read file") from exc
 
     parsed = parse_markdown_note(source.path, content=source.content)
+    taxonomy = extract_source_taxonomy(parsed.frontmatter)
 
     return ReadMarkdownResult(
         vault_path=request.vault_path,
         markdown_body=parsed.body,
+        source_tags=taxonomy.tags,
+        source_topics=taxonomy.topics,
     )

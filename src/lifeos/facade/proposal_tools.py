@@ -43,6 +43,11 @@ from lifeos.ingestion.proposals import (
 from lifeos.proposals.schema import generate_proposal_id
 from lifeos.ingestion.drafts import WikiProposalContent
 from lifeos.ingestion.provenance import ProvenanceGenerator
+from lifeos.ingestion.taxonomy import (
+    TagValidationError,
+    validate_proposed_tags,
+    validate_tag_rationale,
+)
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.registry.file_tracking import hash_file_content
 from lifeos.vault import VaultAccessError, read_vault_markdown
@@ -79,7 +84,7 @@ COMPOUND_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
 GENERATOR_ID = "lifeos.facade.external_agent"
 GENERATOR_VERSION = "1"
 # REQUEST_SCHEMA_VERSION versions the external-agent supplied content request contract.
-REQUEST_SCHEMA_VERSION = "1"
+REQUEST_SCHEMA_VERSION = "2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +93,8 @@ class CreateWikiProposalRequest:
     target_path: str
     title: str
     body: str
+    tags: tuple[str, ...] = ()
+    tag_rationale: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.title, str):
@@ -101,6 +108,15 @@ class CreateWikiProposalRequest:
             raise TypeError("body must be a string")
         if not self.body or self.body.isspace():
             raise ValueError("body cannot be empty or whitespace-only")
+        try:
+            object.__setattr__(self, "tags", validate_proposed_tags(self.tags))
+            object.__setattr__(
+                self,
+                "tag_rationale",
+                validate_tag_rationale(self.tag_rationale),
+            )
+        except TagValidationError as error:
+            raise ValueError(str(error)) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +133,8 @@ class UpdateWikiSectionProposalRequest:
     target_path: str
     heading: str
     body: str
+    tags: tuple[str, ...] | None = None
+    tag_rationale: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.heading, str):
@@ -134,6 +152,18 @@ class UpdateWikiSectionProposalRequest:
             raise TypeError("body must be a string")
         if not self.body or self.body.isspace():
             raise ValueError("body cannot be empty or whitespace-only")
+        try:
+            if self.tags is not None:
+                object.__setattr__(self, "tags", validate_proposed_tags(self.tags))
+            object.__setattr__(
+                self,
+                "tag_rationale",
+                validate_tag_rationale(self.tag_rationale),
+            )
+        except TagValidationError as error:
+            raise ValueError(str(error)) from error
+        if self.tags is None and self.tag_rationale is not None:
+            raise ValueError("tag_rationale requires an explicit tags list")
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +184,8 @@ class CompoundWikiProposalRequest:
     update_target_path: str
     update_heading: str
     update_body: str
+    create_tags: tuple[str, ...] = ()
+    create_tag_rationale: str | None = None
 
     def __post_init__(self) -> None:
         CreateWikiProposalRequest(
@@ -161,6 +193,8 @@ class CompoundWikiProposalRequest:
             target_path=self.create_target_path,
             title=self.create_title,
             body=self.create_body,
+            tags=self.create_tags,
+            tag_rationale=self.create_tag_rationale,
         )
         UpdateWikiSectionProposalRequest(
             source_path=self.source_path,
@@ -170,6 +204,19 @@ class CompoundWikiProposalRequest:
         )
         if self.create_target_path == self.update_target_path:
             raise ValueError("create and update targets must be different")
+        try:
+            object.__setattr__(
+                self,
+                "create_tags",
+                validate_proposed_tags(self.create_tags),
+            )
+            object.__setattr__(
+                self,
+                "create_tag_rationale",
+                validate_tag_rationale(self.create_tag_rationale),
+            )
+        except TagValidationError as error:
+            raise ValueError(str(error)) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +348,8 @@ def create_wiki_proposal(
         title=request.title,
         body=request.body,
         generator=generator,
+        tags=request.tags,
+        tag_rationale=request.tag_rationale,
     )
 
     # 4. Call clock exactly once
@@ -393,6 +442,10 @@ def update_wiki_section_proposal(
         target_content=target.content_bytes,
         ownership=ownership,
     )
+    if request.tags is not None and ownership_entry is None:
+        raise ToolValidationError(
+            "Ingestion cannot change tags on a human-owned wiki target"
+        )
     if ownership_entry is None and parse_markdown_note(
         Path(target_path), content=target.content
     ).managed_blocks:
@@ -428,6 +481,8 @@ def update_wiki_section_proposal(
             expected_generator_id=(
                 ownership_entry.generator_id if ownership_entry is not None else None
             ),
+            proposed_tags=request.tags,
+            tag_rationale=request.tag_rationale,
         )
     except InvalidWikiSectionError as e:
         raise ToolValidationError("Invalid or ambiguous wiki section") from e
@@ -518,6 +573,8 @@ def create_wiki_and_update_section_proposal(
         title=request.create_title,
         body=request.create_body,
         generator=generator,
+        tags=request.create_tags,
+        tag_rationale=request.create_tag_rationale,
     )
     now = clock_fn()
     proposal_id = generate_proposal_id(

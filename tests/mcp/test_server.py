@@ -152,6 +152,8 @@ def test_update_ingestion_schema_exposes_only_bounded_fields() -> None:
         "target_path",
         "heading",
         "body",
+        "tags",
+        "tag_rationale",
     }
     assert tool.parameters["additionalProperties"] is False
 
@@ -172,6 +174,8 @@ def test_compound_ingestion_schema_exposes_only_bounded_fields() -> None:
         "update_target_path",
         "update_heading",
         "update_body",
+        "create_tags",
+        "create_tag_rationale",
     }
     assert tool.parameters["additionalProperties"] is False
 
@@ -204,7 +208,12 @@ def test_registry_refresh_delegates_to_facade(mock_facade: MagicMock) -> None:
 
 @patch("lifeos.mcp.server.read_markdown")
 def test_read_markdown_delegates_to_facade(mock_facade) -> None:
-    mock_facade.return_value = MagicMock(vault_path="test.md", markdown_body="# test")
+    mock_facade.return_value = MagicMock(
+        vault_path="test.md",
+        markdown_body="# test",
+        source_tags=("tag",),
+        source_topics=("topic",),
+    )
 
     registry = MagicMock()
     authorizer = MagicMock()
@@ -216,7 +225,12 @@ def test_read_markdown_delegates_to_facade(mock_facade) -> None:
     mock_facade.assert_called_once_with(
         vault_root=Path("/fake"), request=ReadMarkdownRequest(vault_path="test.md")
     )
-    assert res == {"vault_path": "test.md", "markdown_body": "# test"}
+    assert res == {
+        "vault_path": "test.md",
+        "markdown_body": "# test",
+        "source_tags": ["tag"],
+        "source_topics": ["topic"],
+    }
 
 
 @patch("lifeos.mcp.server.create_wiki_proposal")
@@ -481,7 +495,12 @@ def test_mcp_outputs_have_explicit_structured_schemas() -> None:
     # Ensure they are returning TypedDicts instead of plain dicts
     from lifeos.mcp.models import ReadMarkdownMCPResult, RegistryRefreshMCPResult
 
-    assert ReadMarkdownMCPResult.__annotations__ == {"vault_path": str, "markdown_body": str}
+    assert ReadMarkdownMCPResult.__annotations__ == {
+        "vault_path": str,
+        "markdown_body": str,
+        "source_tags": list[str],
+        "source_topics": list[str],
+    }
     assert RegistryRefreshMCPResult.__annotations__ == {
         "new": list[str],
         "modified": list[str],

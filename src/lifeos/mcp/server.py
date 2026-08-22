@@ -68,7 +68,10 @@ T = TypeVar("T")
 LIFEOS_MCP_INSTRUCTIONS = (
     "LifeOS keeps Markdown canonical. For ingestion requests, first call registry_refresh "
     "to register the source's current path and hash, then call vault_read_markdown for "
-    "the source. To create an absent wiki target, synthesize a grounded title and body "
+    "the source. Evaluate the returned source_tags and source_topics as input evidence; "
+    "they may be retained, removed, combined, or supplemented. To create an absent wiki "
+    "target, synthesize a grounded title, body, optional canonical tags, and a concise tag "
+    "rationale "
     "and call ingestion_create_wiki_proposal. When one ingestion should both create a "
     "detailed wiki page and update one exact section in an existing wiki note, also read "
     "that existing target and call ingestion_create_wiki_and_update_section_proposal. "
@@ -211,12 +214,22 @@ def create_mcp_server(
             res = read_markdown(
                 vault_root=vault_root, request=ReadMarkdownRequest(vault_path=vault_path)
             )
-            return {"vault_path": res.vault_path, "markdown_body": res.markdown_body}
+            return {
+                "vault_path": res.vault_path,
+                "markdown_body": res.markdown_body,
+                "source_tags": list(res.source_tags),
+                "source_topics": list(res.source_topics),
+            }
 
         return _invoke_mcp_tool(op)
 
     def ingestion_create_wiki_proposal_tool(
-        source_path: str, target_path: str, title: str, body: str
+        source_path: str,
+        target_path: str,
+        title: str,
+        body: str,
+        tags: list[str] | None = None,
+        tag_rationale: str | None = None,
     ) -> CreateWikiProposalMCPResult:
         def op() -> CreateWikiProposalMCPResult:
             res = create_wiki_proposal(
@@ -227,6 +240,8 @@ def create_mcp_server(
                     target_path=target_path,
                     title=title,
                     body=body,
+                    tags=tuple(tags or ()),
+                    tag_rationale=tag_rationale,
                 ),
             )
             return {
@@ -239,7 +254,12 @@ def create_mcp_server(
         return _invoke_mcp_tool(op)
 
     def ingestion_update_wiki_section_proposal_tool(
-        source_path: str, target_path: str, heading: str, body: str
+        source_path: str,
+        target_path: str,
+        heading: str,
+        body: str,
+        tags: list[str] | None = None,
+        tag_rationale: str | None = None,
     ) -> UpdateWikiSectionProposalMCPResult:
         def op() -> UpdateWikiSectionProposalMCPResult:
             res = update_wiki_section_proposal(
@@ -250,6 +270,8 @@ def create_mcp_server(
                     target_path=target_path,
                     heading=heading,
                     body=body,
+                    tags=None if tags is None else tuple(tags),
+                    tag_rationale=tag_rationale,
                 ),
             )
             return {
@@ -270,6 +292,8 @@ def create_mcp_server(
         update_target_path: str,
         update_heading: str,
         update_body: str,
+        create_tags: list[str] | None = None,
+        create_tag_rationale: str | None = None,
     ) -> CompoundWikiProposalMCPResult:
         def op() -> CompoundWikiProposalMCPResult:
             res = create_wiki_and_update_section_proposal(
@@ -283,6 +307,8 @@ def create_mcp_server(
                     update_target_path=update_target_path,
                     update_heading=update_heading,
                     update_body=update_body,
+                    create_tags=tuple(create_tags or ()),
+                    create_tag_rationale=create_tag_rationale,
                 ),
             )
             return {

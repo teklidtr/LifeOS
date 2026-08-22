@@ -114,6 +114,8 @@ def test_request_and_result_are_frozen_and_slotted() -> None:
         "target_path",
         "title",
         "body",
+        "tags",
+        "tag_rationale",
     }
     
     req = CreateWikiProposalRequest(source_path="src.md", target_path="wiki/target.md", title="Title", body="body")
@@ -162,6 +164,23 @@ def test_request_rejects_empty_or_whitespace_only_body(empty_body: str) -> None:
 def test_request_preserves_body_exactly() -> None:
     req = CreateWikiProposalRequest(source_path="src", target_path="wiki", title="Title", body="  \n Body  \n\r")
     assert req.body == "  \n Body  \n\r"
+
+
+def test_request_validates_bounded_canonical_tags() -> None:
+    request = CreateWikiProposalRequest(
+        source_path="src",
+        target_path="wiki/target.md",
+        title="Title",
+        body="Body",
+        tags=("ehliyet", "ilk-yardım", "araç-ekipmanı"),
+        tag_rationale="Replaces generic source taxonomy with specific concepts.",
+    )
+    assert request.tags == ("ehliyet", "ilk-yardım", "araç-ekipmanı")
+
+    with pytest.raises(ValueError, match="lowercase"):
+        CreateWikiProposalRequest("src", "wiki/x.md", "Title", "Body", ("Ehliyet",))
+    with pytest.raises(ValueError, match="duplicates"):
+        CreateWikiProposalRequest("src", "wiki/x.md", "Title", "Body", ("ehliyet", "ehliyet"))
 
 
 def test_update_request_is_bounded_to_one_heading_and_body() -> None:
@@ -490,6 +509,35 @@ def test_real_happy_path_updates_one_existing_wiki_section(tmp_path: Path) -> No
     candidate = apply_diff(target_bytes.decode(), operation.unified_diff)
     assert "## Ekipman notları\n\nYeni doğrulanmış liste." in candidate
     assert "## Güvenlik\n\nKorunur." in candidate
+
+
+def test_human_owned_wiki_rejects_ingestion_tag_changes(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    _write_ownership(vault_root)
+    registry = _registered_source(vault_root, tmp_path)
+    target = vault_root / "wiki" / "human.md"
+    target.write_text("# Human\n\n## Selected\n\nOld.\n")
+
+    with pytest.raises(
+        ToolValidationError,
+        match="cannot change tags on a human-owned wiki target",
+    ):
+        update_wiki_section_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=UpdateWikiSectionProposalRequest(
+                source_path="study/source.md",
+                target_path="wiki/human.md",
+                heading="Selected",
+                body="New.",
+                tags=("new-tag",),
+                tag_rationale="A newly proposed canonical tag.",
+            ),
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
 
 
 def test_real_happy_path_creates_compound_wiki_draft(tmp_path: Path) -> None:

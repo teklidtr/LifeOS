@@ -6,6 +6,8 @@ from typing import Literal, TypedDict
 class ReadMarkdownMCPResult(TypedDict):
     vault_path: str
     markdown_body: str
+    source_tags: list[str]
+    source_topics: list[str]
 
 
 class RegistryRefreshMCPResult(TypedDict):

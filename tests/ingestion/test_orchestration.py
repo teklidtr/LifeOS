@@ -60,6 +60,31 @@ def test_registered_unchanged_source_returns_exact_bytes_and_hash(
     assert verified.content == content
     assert verified.source.path == source_path
     assert verified.source.content_hash == f"sha256:{hash_file_content(content)}"
+    assert verified.source.tags == ()
+    assert verified.source.topics == ()
+
+
+def test_registered_source_exposes_only_tags_and_topics(
+    registry: Registry, vault_root: Path
+) -> None:
+    source_path = "study/tagged.md"
+    content = (
+        b"---\ntags: [existing, '#nested/topic']\ntopics: [new-topic]\n"
+        b"secret: hidden\n---\nBody\n"
+    )
+    target = vault_root / source_path
+    target.parent.mkdir()
+    target.write_bytes(content)
+    _register(registry, vault_root, source_path, content)
+
+    verified = load_registered_source(
+        registry=registry,
+        vault_root=vault_root,
+        source_path=source_path,
+    )
+
+    assert verified.source.tags == ("existing", "nested/topic")
+    assert verified.source.topics == ("new-topic",)
 
 
 @pytest.mark.parametrize("source_path", ["/absolute.md", "../test.md", r"dir\test.md"])
