@@ -88,6 +88,8 @@ def test_release_is_reviewed_and_applied_as_a_proposal(tmp_path: Path) -> None:
     service = DesktopProposalService(vault_root=tmp_path, actor_id="tester")
     inspection = service.inspect(result.proposal_id)
     assert f'-    "{TARGET}": {{' in inspection.operations[0].unified_diff
+    assert inspection.operations[0].preview_source == "snapshot"
+    reviewed_diff = inspection.operations[0].unified_diff
     challenge = service.prepare(proposal_id=result.proposal_id, action="accept")
     applied = service.execute(
         proposal_id=result.proposal_id,
@@ -99,6 +101,10 @@ def test_release_is_reviewed_and_applied_as_a_proposal(tmp_path: Path) -> None:
     assert applied["changed_paths"] == ("system/generated-ownership.json",)
     assert json.loads(manifest.read_text(encoding="utf-8"))["owned_files"] == {}
     assert list_orphaned_generated_ownership(tmp_path) == ()
+    applied_inspection = service.inspect(result.proposal_id)
+    assert applied_inspection.operations[0].unified_diff == reviewed_diff
+    assert applied_inspection.operations[0].preview_error is None
+    assert applied_inspection.operations[0].preview_source == "snapshot"
 
 
 def test_release_proposal_becomes_stale_when_target_is_restored(tmp_path: Path) -> None:

@@ -9,7 +9,7 @@ import os
 import re
 import shutil
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
@@ -19,10 +19,11 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import CreateFile, PatchDocumentV2, PatchHumanFile, serialize_patch_json_bytes
 from lifeos.proposals.schema import ProposalMetadata, ProposalRisk, ProposalStatus, generate_proposal_id
+from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
 from .contracts import CopilotIndex, PlanOption
-from .decomposition import DecompositionResult, GeneratedAction
+from .decomposition import DecompositionResult
 from .sessions import PlanningSessionService, SessionConflictError
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,127}$")
@@ -389,6 +390,10 @@ def _proposal_body(request: CopilotProposalRequest, option: PlanOption, mileston
 
 
 def _publish(*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes) -> None:
+    review_json = build_review_snapshot_bytes_from_patches(
+        vault_root=vault_root,
+        patches_json=patches_json,
+    )
     root = vault_root / "proposals"
     root.mkdir(parents=True, exist_ok=True)
     proposal_dir = root / proposal_id
@@ -401,6 +406,7 @@ def _publish(*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, pa
         fd = os.open(proposal_dir, os.O_RDONLY | os.O_DIRECTORY)
         atomic_write_file_secure(fd, "proposal.md", proposal_markdown)
         atomic_write_file_secure(fd, "patches.json", patches_json)
+        atomic_write_file_secure(fd, "review.json", review_json)
         published = True
     except (OSError, AtomicWriteError) as exc:
         raise CopilotProposalError(f"could not publish copilot proposal: {exc}") from exc

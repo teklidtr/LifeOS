@@ -15,6 +15,11 @@ from .schema import (
 )
 from .loader import LoadedProposal
 from .patches import AnyPatchDocument, serialize_patch_document
+from .review_snapshot import (
+    REVIEW_SNAPSHOT_FILENAME,
+    ProposalReviewSnapshot,
+    serialize_review_snapshot,
+)
 from .._atomic_write import atomic_write_file_secure, AtomicWriteError
 from .._secure_io import open_directory_secure, SecureIOError, read_file_secure
 
@@ -89,10 +94,13 @@ def serialize_proposal_markdown(metadata: ProposalMetadata, body: str) -> bytes:
 
 
 def compute_review_digest(
-    metadata: ProposalMetadata, body: str, patch_document: AnyPatchDocument
+    metadata: ProposalMetadata,
+    body: str,
+    patch_document: AnyPatchDocument,
+    review_snapshot: ProposalReviewSnapshot | None = None,
 ) -> str:
     env = {
-        "review_schema_version": 1,
+        "review_schema_version": 2 if review_snapshot is not None else 1,
         "metadata": {
             "schema_version": metadata.schema_version,
             "id": metadata.id,
@@ -109,6 +117,8 @@ def compute_review_digest(
         "body": body,
         "patch_document": serialize_patch_document(patch_document),
     }
+    if review_snapshot is not None:
+        env["review_snapshot"] = serialize_review_snapshot(review_snapshot)
 
     digest_bytes = json.dumps(
         env,
@@ -253,6 +263,27 @@ def _transition_persistent(
                 "transition_in_progress", None, "A transition lock already exists"
             ) from e
 
+        def read_review_hash() -> str | None:
+            try:
+                review_bytes = read_file_secure(
+                    REVIEW_SNAPSHOT_FILENAME,
+                    Path(proposal.proposal_dir),
+                    prop_fd,
+                )
+            except SecureIOError as error:
+                if error.code == "open_failed" and "No such file" in error.message:
+                    return None
+                raise TransitionError("read_failed", None, error.message) from error
+            return f"sha256:{hashlib.sha256(review_bytes).hexdigest()}"
+
+        def verify_review_source(*, timing: str) -> None:
+            if read_review_hash() != proposal.review_snapshot_source_hash:
+                raise TransitionError(
+                    "changed_review_snapshot_source",
+                    None,
+                    f"{REVIEW_SNAPSHOT_FILENAME} changed {timing}",
+                )
+
         # Re-read and re-hash source
         try:
             md_bytes = read_file_secure("proposal.md", Path(proposal.proposal_dir), prop_fd)
@@ -271,6 +302,7 @@ def _transition_persistent(
             raise TransitionError(
                 "changed_patch_source", None, "patches.json changed after loading"
             )
+        verify_review_source(timing="after loading")
 
         # Re-parse validation
         try:
@@ -297,7 +329,10 @@ def _transition_persistent(
 
         # Mutate
         current_digest = compute_review_digest(
-            current_metadata, proposal.body, proposal.patch_document
+            current_metadata,
+            proposal.body,
+            proposal.patch_document,
+            proposal.review_snapshot,
         )
         new_metadata = mutator(current_metadata, current_digest)
 
@@ -323,6 +358,7 @@ def _transition_persistent(
                 raise TransitionError(
                     "changed_patch_source", None, "patches.json changed immediately before write"
                 )
+            verify_review_source(timing="immediately before write")
 
         try:
             durability = atomic_write_file_secure(

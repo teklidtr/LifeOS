@@ -3,6 +3,11 @@ import os
 from pathlib import Path
 
 from lifeos.proposals.loader import load_proposals
+from lifeos.proposals.patches import PatchDocument, serialize_patch_json_bytes
+from lifeos.proposals.review_snapshot import (
+    build_review_snapshot,
+    serialize_review_snapshot_bytes,
+)
 
 def test_load_empty_proposals(tmp_path: Path) -> None:
     root = tmp_path / "proposals"
@@ -167,3 +172,41 @@ def test_v2_loader_integration(tmp_path: Path) -> None:
     res = load_proposals(root)
     assert len(res.proposals) == 0
     assert any(f.code == "noncanonical_json" for f in res.findings)
+
+
+def test_loader_validates_optional_review_snapshot(tmp_path: Path) -> None:
+    root = tmp_path / "proposals"
+    root.mkdir()
+    pid = "prop-20260712T120000Z-abcdef12"
+    proposal_dir = root / pid
+    proposal_dir.mkdir()
+    proposal_dir.joinpath("proposal.md").write_text(
+        f"---\nid: '{pid}'\ntitle: test\ndescription: d\nstatus: draft\nrisk: low\n"
+        "created_at: '2026-07-12T12:00:00Z'\ncreated_by: system\n"
+        "related_goals: []\nrelated_sources: []\nextensions: {}\n"
+        "schema_version: 1\npatch_schema_version: 1\n---\nBody\n",
+        encoding="utf-8",
+    )
+    document = PatchDocument(1, pid, ())
+    proposal_dir.joinpath("patches.json").write_bytes(
+        serialize_patch_json_bytes(document)
+    )
+    snapshot = build_review_snapshot(vault_root=tmp_path, patch_document=document)
+    proposal_dir.joinpath("review.json").write_bytes(
+        serialize_review_snapshot_bytes(snapshot)
+    )
+
+    loaded = load_proposals(root)
+
+    assert not loaded.findings
+    assert loaded.proposals[0].review_snapshot == snapshot
+    assert loaded.proposals[0].review_snapshot_source_hash is not None
+
+    content = proposal_dir.joinpath("review.json").read_text(encoding="utf-8")
+    proposal_dir.joinpath("review.json").write_text(
+        content.replace('"proposal_id":"', '"proposal_id":"tampered-'),
+        encoding="utf-8",
+    )
+    rejected = load_proposals(root)
+    assert rejected.proposals == ()
+    assert any(f.code == "proposal_id_mismatch" for f in rejected.findings)

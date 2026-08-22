@@ -26,6 +26,7 @@ from lifeos.proposals.schema import (
     ProposalStatus,
     generate_proposal_id,
 )
+from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
 from .artifact import ConversationArtifactService
@@ -267,6 +268,11 @@ class ConversationProposalService:
         preview, patch_document, _metadata, proposal_markdown = self.preview(request, now=now)
         proposals_root = self.vault_root / "proposals"
         proposal_dir = proposals_root / preview.proposal_id
+        patches_json = serialize_patch_json_bytes(patch_document)
+        review_json = build_review_snapshot_bytes_from_patches(
+            vault_root=self.vault_root,
+            patches_json=patches_json,
+        )
         proposals_root.mkdir(parents=True, exist_ok=True)
         created = False
         published = False
@@ -279,9 +285,8 @@ class ConversationProposalService:
                 os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
             )
             atomic_write_file_secure(directory_fd, "proposal.md", proposal_markdown)
-            atomic_write_file_secure(
-                directory_fd, "patches.json", serialize_patch_json_bytes(patch_document)
-            )
+            atomic_write_file_secure(directory_fd, "patches.json", patches_json)
+            atomic_write_file_secure(directory_fd, "review.json", review_json)
             published = True
         except FileExistsError as exc:
             raise ConversationError("proposal_exists", "Conversation proposal already exists.") from exc

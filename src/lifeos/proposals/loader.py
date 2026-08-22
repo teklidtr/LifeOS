@@ -13,6 +13,12 @@ from .patches import (
     serialize_patch_json_bytes,
     validate_patch_document,
 )
+from .review_snapshot import (
+    REVIEW_SNAPSHOT_FILENAME,
+    ProposalReviewSnapshot,
+    ReviewSnapshotError,
+    parse_review_snapshot_bytes,
+)
 from .schema import (
     ProposalMetadata,
     ProposalSchemaError,
@@ -40,6 +46,9 @@ class LoadedProposal:
     metadata: ProposalMetadata
     patch_document: AnyPatchDocument
     body: str
+    review_snapshot_path: str | None = None
+    review_snapshot_source_hash: str | None = None
+    review_snapshot: ProposalReviewSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +92,7 @@ def _read_secure_wrapper(
             field_path=None,
             message=e.message,
         )
+
 
 def _sort_findings(findings: list[ProposalLoadFinding]) -> tuple[ProposalLoadFinding, ...]:
     findings.sort(
@@ -169,7 +179,11 @@ def load_proposal_directory(
                 it = os.scandir(str(proposal_dir))
             with it:
                 for entry in it:
-                    if entry.name not in ("proposal.md", "patches.json"):
+                    if entry.name not in (
+                        "proposal.md",
+                        "patches.json",
+                        REVIEW_SNAPSHOT_FILENAME,
+                    ):
                         findings.append(
                             ProposalLoadFinding(
                                 severity="warning",
@@ -215,6 +229,29 @@ def load_proposal_directory(
                         message=json_finding.message,
                     )
                 )
+
+            review_path = f"{proposal_dir.name}/{REVIEW_SNAPSHOT_FILENAME}"
+            try:
+                review_bytes = read_file_secure(
+                    REVIEW_SNAPSHOT_FILENAME,
+                    proposal_dir,
+                    prop_fd
+                    if getattr(os, "open") in getattr(os, "supports_dir_fd", set())
+                    else None,
+                )
+            except SecureIOError as error:
+                if error.code == "open_failed" and "No such file" in error.message:
+                    review_bytes = None
+                else:
+                    findings.append(
+                        ProposalLoadFinding(
+                            severity="error",
+                            code=error.code,
+                            proposal_path=review_path,
+                            field_path=None,
+                            message=error.message,
+                        )
+                    )
 
         finally:
             os.close(prop_fd)
@@ -346,6 +383,31 @@ def load_proposal_directory(
         )
         return ProposalLoadResult(None, _sort_findings(findings))
 
+    review_snapshot = None
+    review_snapshot_source_hash = None
+    if review_bytes is not None:
+        try:
+            review_snapshot = parse_review_snapshot_bytes(
+                review_bytes,
+                patch_document=patch_doc,
+            )
+        except ReviewSnapshotError as error:
+            findings.append(
+                ProposalLoadFinding(
+                    severity="error",
+                    code=error.code,
+                    proposal_path=review_path,
+                    field_path=error.field_path,
+                    message=error.message,
+                )
+            )
+            return ProposalLoadResult(None, _sort_findings(findings))
+        import hashlib
+
+        review_snapshot_source_hash = (
+            f"sha256:{hashlib.sha256(review_bytes).hexdigest()}"
+        )
+
     # Cross-document invariants
     if metadata.id != proposal_dir.name:
         findings.append(
@@ -405,6 +467,9 @@ def load_proposal_directory(
         metadata=metadata,
         patch_document=patch_doc,
         body=body_str,
+        review_snapshot_path=review_path if review_snapshot is not None else None,
+        review_snapshot_source_hash=review_snapshot_source_hash,
+        review_snapshot=review_snapshot,
     )
     return ProposalLoadResult(proposal, _sort_findings(findings))
 

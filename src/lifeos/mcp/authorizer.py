@@ -44,6 +44,7 @@ class InteractiveTtyAuthorizer(ConsequentialAuthorizer):
             proposal.metadata,
             proposal.body,
             proposal.patch_document,
+            proposal.review_snapshot,
         )
 
         if request.action in {ConsequentialAction.APPROVE, ConsequentialAction.APPLY}:

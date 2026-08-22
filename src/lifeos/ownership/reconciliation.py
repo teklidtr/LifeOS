@@ -23,6 +23,7 @@ from lifeos.proposals.schema import (
     ProposalStatus,
     generate_proposal_id,
 )
+from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 
 from .manifest import DEFAULT_OWNERSHIP_MANIFEST_PATH, GeneratedOwnership, ManifestEntry
 
@@ -195,6 +196,10 @@ def _publish_proposal(
     proposal_markdown: bytes,
     patches_json: bytes,
 ) -> Path:
+    review_json = build_review_snapshot_bytes_from_patches(
+        vault_root=vault_root,
+        patches_json=patches_json,
+    )
     proposals_root = vault_root / "proposals"
     proposals_root.mkdir(parents=True, exist_ok=True)
     proposal_dir = proposals_root / proposal_id
@@ -207,6 +212,7 @@ def _publish_proposal(
         directory_fd = os.open(proposal_dir, os.O_RDONLY | os.O_DIRECTORY)
         atomic_write_file_secure(directory_fd, "proposal.md", proposal_markdown)
         atomic_write_file_secure(directory_fd, "patches.json", patches_json)
+        atomic_write_file_secure(directory_fd, "review.json", review_json)
         published = True
     except (OSError, AtomicWriteError) as error:
         raise OwnershipReconciliationError(

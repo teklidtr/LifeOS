@@ -204,7 +204,10 @@ def approve_proposal_tool(
 
     stored_digest = proposal.metadata.review_digest
     current_digest = compute_review_digest(
-        proposal.metadata, proposal.body, proposal.patch_document
+        proposal.metadata,
+        proposal.body,
+        proposal.patch_document,
+        proposal.review_snapshot,
     )
 
     if not stored_digest:
@@ -262,7 +265,10 @@ def apply_proposal_tool(
 
     # 3. Compute canonical digest from currently loaded proposal
     current_digest = compute_review_digest(
-        proposal.metadata, proposal.body, proposal.patch_document
+        proposal.metadata,
+        proposal.body,
+        proposal.patch_document,
+        proposal.review_snapshot,
     )
 
     # 4. Require stored review_digest is present
@@ -307,6 +313,7 @@ def apply_proposal_tool(
         fresh_load_res.proposal.metadata,
         fresh_load_res.proposal.body,
         fresh_load_res.proposal.patch_document,
+        fresh_load_res.proposal.review_snapshot,
     )
     if fresh_actual_digest != current_digest:
         raise ToolExecutionError("Proposal lock identity mismatch")
@@ -350,6 +357,7 @@ def accept_proposal_tool(
         proposal.metadata,
         proposal.body,
         proposal.patch_document,
+        proposal.review_snapshot,
     )
     if proposal.metadata.status.value != "draft":
         if proposal.metadata.review_digest != accepted_digest:
@@ -383,6 +391,7 @@ def accept_proposal_tool(
             reloaded.metadata,
             reloaded.body,
             reloaded.patch_document,
+            reloaded.review_snapshot,
         )
         if current_digest != accepted_digest:
             raise ToolConflictError("Proposal changed after acceptance")

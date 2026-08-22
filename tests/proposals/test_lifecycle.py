@@ -9,6 +9,10 @@ from lifeos.proposals import (
 )
 from lifeos.proposals.lifecycle import serialize_proposal_markdown, compute_review_digest
 from lifeos.proposals.patches import PatchDocument
+from lifeos.proposals.review_snapshot import (
+    OperationReviewSnapshot,
+    ProposalReviewSnapshot,
+)
 
 
 def _make_meta(**kwargs) -> ProposalMetadata:
@@ -101,6 +105,36 @@ def test_compute_review_digest():
     doc = PatchDocument(1, "prop-20260713T000000Z-a1b2c3d4", ())
     d = compute_review_digest(meta, "body", doc)
     assert d.startswith("sha256:")
+
+
+def test_review_digest_binds_immutable_snapshot() -> None:
+    meta = _make_meta()
+    doc = PatchDocument(1, "prop-20260713T000000Z-a1b2c3d4", ())
+    snapshot = ProposalReviewSnapshot(
+        schema_version=1,
+        proposal_id=doc.proposal_id,
+        patches_hash=f"sha256:{'0' * 64}",
+        operations=(),
+    )
+    changed = ProposalReviewSnapshot(
+        schema_version=1,
+        proposal_id=doc.proposal_id,
+        patches_hash=snapshot.patches_hash,
+        operations=(OperationReviewSnapshot("op", "create_file", "x.md", "+changed"),),
+    )
+
+    assert compute_review_digest(meta, "body", doc, snapshot) != compute_review_digest(
+        meta,
+        "body",
+        doc,
+        changed,
+    )
+    assert compute_review_digest(meta, "body", doc) != compute_review_digest(
+        meta,
+        "body",
+        doc,
+        snapshot,
+    )
 
 
 def test_compute_review_digest_supports_nested_extensions():

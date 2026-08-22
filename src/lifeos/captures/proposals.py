@@ -26,6 +26,7 @@ from lifeos.proposals.schema import (
     ProposalStatus,
     generate_proposal_id,
 )
+from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
 from .artifact import CaptureArtifactService
@@ -197,6 +198,11 @@ class CaptureProposalService:
     ) -> dict[str, object]:
         preview, patch, markdown = self.preview(request, now=now)
         target = self.vault_root / "proposals" / preview.proposal_id
+        patches_json = serialize_patch_json_bytes(patch)
+        review_json = build_review_snapshot_bytes_from_patches(
+            vault_root=self.vault_root,
+            patches_json=patches_json,
+        )
         target.parent.mkdir(parents=True, exist_ok=True)
         created = False
         published = False
@@ -208,7 +214,8 @@ class CaptureProposalService:
                 target, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
             )
             atomic_write_file_secure(fd, "proposal.md", markdown)
-            atomic_write_file_secure(fd, "patches.json", serialize_patch_json_bytes(patch))
+            atomic_write_file_secure(fd, "patches.json", patches_json)
+            atomic_write_file_secure(fd, "review.json", review_json)
             published = True
         except FileExistsError as exc:
             raise CaptureError(

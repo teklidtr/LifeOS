@@ -20,6 +20,7 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import PatchDocumentV2, PatchHumanFile, serialize_patch_json_bytes
 from lifeos.proposals.schema import ProposalMetadata, ProposalRisk, ProposalStatus, generate_proposal_id
+from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
 from .contracts import PlanOption, PlanRecord, build_copilot_index
@@ -584,6 +585,10 @@ def _diff(before: str, after: str, path: str) -> str:
 
 
 def _publish(*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes) -> None:
+    review_json = build_review_snapshot_bytes_from_patches(
+        vault_root=vault_root,
+        patches_json=patches_json,
+    )
     root = vault_root / "proposals"
     root.mkdir(parents=True, exist_ok=True)
     target = root / proposal_id
@@ -596,6 +601,7 @@ def _publish(*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, pa
         fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
         atomic_write_file_secure(fd, "proposal.md", proposal_markdown)
         atomic_write_file_secure(fd, "patches.json", patches_json)
+        atomic_write_file_secure(fd, "review.json", review_json)
         published = True
     except (OSError, AtomicWriteError) as exc:
         raise ReplanningError(f"could not publish replanning proposal: {exc}") from exc

@@ -40,6 +40,7 @@ from ..ownership.manifest import (
 from .lifecycle import serialize_proposal_markdown
 from .loader import LoadedProposal
 from .patches import CreateGeneratedFile, PatchOperation, ReplaceGeneratedFile
+from .review_snapshot import REVIEW_SNAPSHOT_FILENAME
 from .recovery import (
     RECOVERY_SCHEMA_VERSION,
     RecoveryCorruptStateError,
@@ -368,6 +369,58 @@ def _validate_application_proposal(
         outcome,
         code=ApplicationErrorCode.PREFLIGHT_FAILED,
     )
+
+
+def _validate_proposal_sources_locked(
+    proposal: LoadedProposal,
+    *,
+    prop_fd: int,
+    vault_root: Path,
+    outcome: ProposalApplicationResult,
+) -> None:
+    expected_sources = (
+        ("proposal.md", proposal.proposal_source_hash),
+        ("patches.json", proposal.patches_source_hash),
+    )
+    for filename, expected_hash in expected_sources:
+        try:
+            content = read_file_secure(filename, vault_root, dir_fd=prop_fd)
+        except SecureIOError as error:
+            raise ApplicationError(
+                f"Could not verify {filename}",
+                outcome,
+                code=ApplicationErrorCode.VALIDATION_ERROR,
+            ) from error
+        if _prefixed_hash(content) != expected_hash:
+            raise ApplicationError(
+                f"{filename} changed after proposal loading",
+                outcome,
+                code=ApplicationErrorCode.VALIDATION_ERROR,
+            )
+
+    try:
+        review_content = read_file_secure(
+            REVIEW_SNAPSHOT_FILENAME,
+            vault_root,
+            dir_fd=prop_fd,
+        )
+    except SecureIOError as error:
+        if error.code == "open_failed" and "No such file" in error.message:
+            review_hash = None
+        else:
+            raise ApplicationError(
+                f"Could not verify {REVIEW_SNAPSHOT_FILENAME}",
+                outcome,
+                code=ApplicationErrorCode.VALIDATION_ERROR,
+            ) from error
+    else:
+        review_hash = _prefixed_hash(review_content)
+    if review_hash != proposal.review_snapshot_source_hash:
+        raise ApplicationError(
+            f"{REVIEW_SNAPSHOT_FILENAME} changed after proposal loading",
+            outcome,
+            code=ApplicationErrorCode.VALIDATION_ERROR,
+        )
 
 
 def _candidate_for_operation(
@@ -1069,6 +1122,12 @@ def _execute_application_transaction(
                 code=ApplicationErrorCode.LOCK_ERROR,
             ) from error
 
+        _validate_proposal_sources_locked(
+            proposal,
+            prop_fd=prop_fd,
+            vault_root=vault_root,
+            outcome=outcome,
+        )
         _validate_application_proposal(proposal, vault_root=vault_root, outcome=outcome)
 
         try:

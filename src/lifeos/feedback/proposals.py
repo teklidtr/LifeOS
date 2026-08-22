@@ -19,6 +19,7 @@ from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.loader import load_proposal_directory
 from lifeos.proposals.patches import PatchDocumentV2, PatchHumanFile, serialize_patch_json_bytes
 from lifeos.proposals.schema import ProposalMetadata, ProposalRisk, ProposalStatus, generate_proposal_id
+from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
 FeedbackProposalKind = Literal[
@@ -291,6 +292,10 @@ def create_feedback_proposal(
     )
     proposal_markdown = serialize_proposal_markdown(metadata, _proposal_body(request))
     patches_json = serialize_patch_json_bytes(patch_document)
+    review_json = build_review_snapshot_bytes_from_patches(
+        vault_root=vault_root,
+        patches_json=patches_json,
+    )
     proposal_dir = proposals_root / proposal_id
     proposals_root.mkdir(parents=True, exist_ok=True)
     created = False
@@ -302,6 +307,7 @@ def create_feedback_proposal(
         dir_fd = os.open(proposal_dir, os.O_RDONLY | os.O_DIRECTORY)
         atomic_write_file_secure(dir_fd, "proposal.md", proposal_markdown)
         atomic_write_file_secure(dir_fd, "patches.json", patches_json)
+        atomic_write_file_secure(dir_fd, "review.json", review_json)
         published = True
     except (OSError, AtomicWriteError) as exc:
         raise FeedbackProposalError(f"Could not publish feedback proposal: {exc}") from exc

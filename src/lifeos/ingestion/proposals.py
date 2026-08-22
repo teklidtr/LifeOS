@@ -21,6 +21,7 @@ from lifeos.proposals.patches import (
     ReplaceGeneratedFileV2,
     serialize_patch_json_bytes,
 )
+from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.registry.file_tracking import validate_vault_path
 from lifeos.ingestion.provenance import provenance_to_frontmatter_value, LifeOSProvenance, ProvenanceSource, ProvenanceGenerator
 from lifeos._atomic_write import atomic_write_file_secure
@@ -522,6 +523,10 @@ def _persist_proposal_documents(
     proposals_root: Path,
     documents: WikiProposalDocuments | CompoundWikiProposalDocuments,
 ) -> Path:
+    review_json = build_review_snapshot_bytes_from_patches(
+        vault_root=proposals_root.parent,
+        patches_json=documents.patches_json,
+    )
     proposal_dir = proposals_root / documents.proposal_id
     proposal_created = False
     publication_complete = False
@@ -540,6 +545,7 @@ def _persist_proposal_documents(
             dir_fd = os.open(proposal_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
             atomic_write_file_secure(dir_fd, "proposal.md", documents.proposal_markdown)
             atomic_write_file_secure(dir_fd, "patches.json", documents.patches_json)
+            atomic_write_file_secure(dir_fd, "review.json", review_json)
             publication_complete = True
         except OSError as e:
             raise ProposalPublicationError(f"Failed to write proposal files: {e}") from e
