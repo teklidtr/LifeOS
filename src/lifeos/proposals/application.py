@@ -24,6 +24,7 @@ from .._transaction_files import (
     cleanup_staging,
     create_hardlink_backup,
     create_staging_file,
+    fsync_directory,
     get_target_identity,
     publish_creation,
     publish_replacement,
@@ -31,6 +32,7 @@ from .._transaction_files import (
     rollback_replacement,
 )
 from ..markdown.parser import parse_markdown_note
+from ..wiki.layout import is_lazy_wiki_role_parent
 from ..ownership.manifest import (
     DEFAULT_OWNERSHIP_MANIFEST_PATH,
     GeneratedOwnership,
@@ -421,6 +423,67 @@ def _validate_proposal_sources_locked(
             outcome,
             code=ApplicationErrorCode.VALIDATION_ERROR,
         )
+
+
+def _open_or_create_target_parent(
+    *,
+    vault_root: Path,
+    root_fd: int,
+    parent_relative: str,
+    operation: PatchOperation,
+) -> ParentDescriptor:
+    try:
+        parent_fd = open_directory_secure(vault_root / parent_relative)
+    except SecureIOError as open_error:
+        if not (
+            operation.op == "create_generated_file"
+            and is_lazy_wiki_role_parent(parent_relative)
+        ):
+            raise open_error
+
+        parent_path = Path(parent_relative)
+        if parent_path.parent.as_posix() != "wiki":
+            raise open_error
+        try:
+            wiki_fd = open_directory_secure(vault_root / "wiki", dir_fd=root_fd)
+        except SecureIOError:
+            raise open_error
+        try:
+            try:
+                os.mkdir(parent_path.name, 0o755, dir_fd=wiki_fd)
+            except FileExistsError:
+                pass
+            except OSError as error:
+                raise SecureIOError(
+                    code="dir_create_failed",
+                    message=(
+                        "Failed to lazily create wiki role directory: "
+                        f"{error.strerror}"
+                    ),
+                ) from error
+            sync_result = fsync_directory(wiki_fd)
+            if sync_result.state == DirectorySyncState.FAILED:
+                raise SecureIOError(
+                    code="dir_sync_failed",
+                    message=(
+                        "Failed to sync lazily created wiki role directory: "
+                        f"{sync_result.errno_name}"
+                    ),
+                )
+            parent_fd = open_directory_secure(
+                Path(parent_path.name),
+                dir_fd=wiki_fd,
+            )
+        finally:
+            os.close(wiki_fd)
+
+    parent_stat = os.fstat(parent_fd)
+    return ParentDescriptor(
+        fd=parent_fd,
+        dev=parent_stat.st_dev,
+        ino=parent_stat.st_ino,
+        path=parent_relative,
+    )
 
 
 def _candidate_for_operation(
@@ -1172,20 +1235,18 @@ def _execute_application_transaction(
             parent_relative = str(Path(target_path).parent)
             if parent_relative not in parent_descriptors:
                 try:
-                    parent_fd = open_directory_secure(vault_root / parent_relative)
-                    parent_stat = os.fstat(parent_fd)
+                    parent_descriptors[parent_relative] = _open_or_create_target_parent(
+                        vault_root=vault_root,
+                        root_fd=root_fd,
+                        parent_relative=parent_relative,
+                        operation=op,
+                    )
                 except SecureIOError as error:
                     raise ApplicationError(
                         "Missing target parent directory",
                         outcome,
                         code=ApplicationErrorCode.TARGET_CONFLICT,
                     ) from error
-                parent_descriptors[parent_relative] = ParentDescriptor(
-                    fd=parent_fd,
-                    dev=parent_stat.st_dev,
-                    ino=parent_stat.st_ino,
-                    path=parent_relative,
-                )
 
         manifest_bytes: Optional[bytes] = None
         if "system" in parent_descriptors:

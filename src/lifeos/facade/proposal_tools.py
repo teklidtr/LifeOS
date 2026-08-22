@@ -43,6 +43,11 @@ from lifeos.ingestion.proposals import (
 from lifeos.proposals.schema import generate_proposal_id
 from lifeos.ingestion.drafts import WikiProposalContent
 from lifeos.ingestion.provenance import ProvenanceGenerator
+from lifeos.wiki.layout import (
+    WikiLayoutError,
+    WikiPageKind,
+    typed_wiki_target,
+)
 from lifeos.ingestion.taxonomy import (
     TagValidationError,
     validate_proposed_tags,
@@ -84,17 +89,19 @@ COMPOUND_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
 GENERATOR_ID = "lifeos.facade.external_agent"
 GENERATOR_VERSION = "1"
 # REQUEST_SCHEMA_VERSION versions the external-agent supplied content request contract.
-REQUEST_SCHEMA_VERSION = "2"
+REQUEST_SCHEMA_VERSION = "3"
 
 
 @dataclass(frozen=True, slots=True)
 class CreateWikiProposalRequest:
     source_path: str
-    target_path: str
+    target_path: str | None
     title: str
     body: str
     tags: tuple[str, ...] = ()
     tag_rationale: str | None = None
+    page_kind: WikiPageKind | None = None
+    slug: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.title, str):
@@ -115,7 +122,13 @@ class CreateWikiProposalRequest:
                 "tag_rationale",
                 validate_tag_rationale(self.tag_rationale),
             )
-        except TagValidationError as error:
+            if (self.page_kind is None) != (self.slug is None):
+                raise WikiLayoutError("page_kind and slug must be supplied together")
+            if self.page_kind is not None and self.slug is not None:
+                typed_wiki_target(self.page_kind, self.slug)
+            if self.target_path is None and self.page_kind is None:
+                raise WikiLayoutError("target_path or page_kind+slug is required")
+        except (TagValidationError, WikiLayoutError) as error:
             raise ValueError(str(error)) from error
 
 
@@ -178,7 +191,7 @@ class UpdateWikiSectionProposalResult:
 @dataclass(frozen=True, slots=True)
 class CompoundWikiProposalRequest:
     source_path: str
-    create_target_path: str
+    create_target_path: str | None
     create_title: str
     create_body: str
     update_target_path: str
@@ -186,6 +199,8 @@ class CompoundWikiProposalRequest:
     update_body: str
     create_tags: tuple[str, ...] = ()
     create_tag_rationale: str | None = None
+    create_page_kind: WikiPageKind | None = None
+    create_slug: str | None = None
 
     def __post_init__(self) -> None:
         CreateWikiProposalRequest(
@@ -195,6 +210,8 @@ class CompoundWikiProposalRequest:
             body=self.create_body,
             tags=self.create_tags,
             tag_rationale=self.create_tag_rationale,
+            page_kind=self.create_page_kind,
+            slug=self.create_slug,
         )
         UpdateWikiSectionProposalRequest(
             source_path=self.source_path,
@@ -202,7 +219,10 @@ class CompoundWikiProposalRequest:
             heading=self.update_heading,
             body=self.update_body,
         )
-        if self.create_target_path == self.update_target_path:
+        if (
+            self.create_target_path is not None
+            and self.create_target_path == self.update_target_path
+        ):
             raise ValueError("create and update targets must be different")
         try:
             object.__setattr__(
@@ -309,6 +329,32 @@ def _classify_update_target_ownership(
     return entry
 
 
+def _resolve_create_wiki_target(
+    *,
+    target_path: str | None,
+    page_kind: WikiPageKind | None,
+    slug: str | None,
+) -> str:
+    try:
+        if page_kind is None and slug is None:
+            if target_path is None:
+                raise WikiLayoutError("target_path or page_kind+slug is required")
+            return validate_wiki_target_path(target_path)
+        if page_kind is None or slug is None:
+            raise WikiLayoutError("page_kind and slug must be supplied together")
+        derived = typed_wiki_target(page_kind, slug)
+        if target_path is None:
+            return derived
+        explicit = validate_wiki_target_path(target_path)
+        if explicit != derived:
+            raise WikiLayoutError(
+                f"target_path must match the typed wiki target {derived}"
+            )
+        return derived
+    except (FileTrackingError, InvalidWikiTargetError, WikiLayoutError) as error:
+        raise ToolValidationError("Invalid wiki target path or typed routing") from error
+
+
 def create_wiki_proposal(
     *,
     vault_root: Path,
@@ -324,10 +370,11 @@ def create_wiki_proposal(
         source_path=request.source_path,
     )
 
-    try:
-        target_path = validate_wiki_target_path(request.target_path)
-    except (FileTrackingError, InvalidWikiTargetError) as e:
-        raise ToolValidationError("Invalid wiki target path") from e
+    target_path = _resolve_create_wiki_target(
+        target_path=request.target_path,
+        page_kind=request.page_kind,
+        slug=request.slug,
+    )
     ownership = _load_generated_ownership(vault_root=vault_root)
     _check_create_target_ownership(
         vault_root=vault_root,
@@ -522,8 +569,12 @@ def create_wiki_and_update_section_proposal(
         source_path=request.source_path,
     )
 
+    create_target_path = _resolve_create_wiki_target(
+        target_path=request.create_target_path,
+        page_kind=request.create_page_kind,
+        slug=request.create_slug,
+    )
     try:
-        create_target_path = validate_wiki_target_path(request.create_target_path)
         update_target_path = validate_wiki_target_path(request.update_target_path)
     except (FileTrackingError, InvalidWikiTargetError) as e:
         raise ToolValidationError("Invalid wiki target path") from e

@@ -8,6 +8,7 @@ from lifeos.proposals import (
     LoadedProposal,
     PatchDocument,
     PatchOperation,
+    CreateGeneratedFile,
     CreateFile,
     PatchHumanFile,
     ReplaceGeneratedFile,
@@ -421,6 +422,50 @@ def test_missing_parent(tmp_path: Path) -> None:
 
     assert res.operations[0].state == "invalid"
     assert res.operations[0].findings[0].code == "missing_parent"
+
+
+def test_standard_generated_wiki_role_parent_may_be_missing(tmp_path: Path) -> None:
+    manifest_path = tmp_path / DEFAULT_OWNERSHIP_MANIFEST_PATH
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text('{"schema_version": 1, "owned_files": {}}')
+    (tmp_path / "wiki").mkdir()
+
+    operation = CreateGeneratedFile(
+        id="op-1",
+        target_path="wiki/concepts/active-recall.md",
+        expected_target_state="absent",
+        generator_id="gen1",
+        new_content="content",
+    )
+    result = preflight_proposal(
+        _make_dummy_proposal([operation]),
+        vault_root=tmp_path,
+    )
+
+    assert result.operations[0].state == "valid"
+    assert not (tmp_path / "wiki" / "concepts").exists()
+
+
+def test_arbitrary_generated_wiki_parent_remains_invalid(tmp_path: Path) -> None:
+    manifest_path = tmp_path / DEFAULT_OWNERSHIP_MANIFEST_PATH
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text('{"schema_version": 1, "owned_files": {}}')
+    (tmp_path / "wiki").mkdir()
+
+    operation = CreateGeneratedFile(
+        id="op-1",
+        target_path="wiki/topics/active-recall.md",
+        expected_target_state="absent",
+        generator_id="gen1",
+        new_content="content",
+    )
+    result = preflight_proposal(
+        _make_dummy_proposal([operation]),
+        vault_root=tmp_path,
+    )
+
+    assert result.operations[0].state == "invalid"
+    assert result.operations[0].findings[0].code == "missing_parent"
 
 
 def test_invalid_max_bytes(tmp_path: Path) -> None:

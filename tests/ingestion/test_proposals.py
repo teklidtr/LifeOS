@@ -164,6 +164,37 @@ def test_candidate_markdown_parses_and_preserves_body(sample_content: WikiPropos
     assert md_content.endswith("\n")
 
 
+@pytest.mark.parametrize(
+    ("target_path", "expected_type"),
+    [
+        ("wiki/sources/example.md", "source"),
+        ("wiki/entities/example.md", "entity"),
+        ("wiki/concepts/example.md", "concept"),
+        ("wiki/syntheses/example.md", "synthesis"),
+        ("wiki/example.md", None),
+    ],
+)
+def test_generated_candidate_records_structural_wiki_role(
+    sample_content: WikiProposalContent,
+    sample_source: SourceSnapshot,
+    target_path: str,
+    expected_type: str | None,
+) -> None:
+    doc = build_wiki_proposal(
+        content=sample_content,
+        source=sample_source,
+        target_path=target_path,
+        proposal_id="prop-20260713T123000Z-abcdef12",
+        created_at="2026-07-13T12:30:00Z",
+    )
+    candidate = parse_markdown_note(
+        Path(target_path),
+        content=json.loads(doc.patches_json)["operations"][0]["new_content"],
+    )
+
+    assert candidate.frontmatter.get("type") == expected_type
+
+
 def test_create_proposal_records_reviewed_tags_without_copying_source_taxonomy(
     sample_content: WikiProposalContent,
     sample_source: SourceSnapshot,

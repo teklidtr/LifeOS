@@ -155,6 +155,35 @@ def test_missing_parent_rejection(tmp_path):
     assert not (vault_root / "missing").exists()
 
 
+def test_generated_wiki_role_parent_is_created_lazily(tmp_path):
+    meta = _make_meta()
+    op = CreateGeneratedFileV2(
+        "op-1",
+        "wiki/concepts/active-recall.md",
+        "absent",
+        "gen-1",
+        "v1",
+        "hello",
+    )
+    doc = PatchDocumentV2(2, meta.id, (op,))
+
+    vault_root, proposals_root, prop_dir = _setup_proposal(tmp_path, meta, doc)
+    (vault_root / "wiki").mkdir()
+    loaded = load_proposal_directory(prop_dir, proposals_root=proposals_root)
+    assert loaded.proposal is not None
+    assert not (vault_root / "wiki" / "concepts").exists()
+
+    result = apply_proposal(
+        loaded.proposal,
+        vault_root=vault_root,
+        applied_by="admin",
+        applied_at="2026-07-13T03:00:00Z",
+    )
+
+    assert result.new_status == ProposalStatus.APPLIED
+    assert (vault_root / "wiki" / "concepts" / "active-recall.md").read_text() == "hello"
+
+
 # 3. Same-directory hardlink backups, backup identity and hash
 def test_hardlink_backups(tmp_path, monkeypatch):
     meta = _make_meta()

@@ -116,6 +116,8 @@ def test_request_and_result_are_frozen_and_slotted() -> None:
         "body",
         "tags",
         "tag_rationale",
+        "page_kind",
+        "slug",
     }
     
     req = CreateWikiProposalRequest(source_path="src.md", target_path="wiki/target.md", title="Title", body="body")
@@ -164,6 +166,43 @@ def test_request_rejects_empty_or_whitespace_only_body(empty_body: str) -> None:
 def test_request_preserves_body_exactly() -> None:
     req = CreateWikiProposalRequest(source_path="src", target_path="wiki", title="Title", body="  \n Body  \n\r")
     assert req.body == "  \n Body  \n\r"
+
+
+def test_request_accepts_typed_wiki_routing_without_explicit_target() -> None:
+    request = CreateWikiProposalRequest(
+        source_path="study/source.md",
+        target_path=None,
+        title="Active Recall",
+        body="Durable concept note.",
+        page_kind="concept",
+        slug="active-recall",
+    )
+
+    assert request.page_kind == "concept"
+    assert request.slug == "active-recall"
+
+
+@pytest.mark.parametrize(
+    ("page_kind", "slug", "message"),
+    [
+        ("concept", None, "supplied together"),
+        (None, "active-recall", "supplied together"),
+        ("concept", "Active Recall", "lowercase ASCII kebab-case"),
+        ("topic", "active-recall", "page_kind must be one of"),
+    ],
+)
+def test_request_rejects_invalid_typed_wiki_routing(
+    page_kind: str | None, slug: str | None, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        CreateWikiProposalRequest(
+            source_path="study/source.md",
+            target_path=None,
+            title="Active Recall",
+            body="Durable concept note.",
+            page_kind=page_kind,  # type: ignore[arg-type]
+            slug=slug,
+        )
 
 
 def test_request_validates_bounded_canonical_tags() -> None:
@@ -367,6 +406,68 @@ def test_facade_uses_verified_source_without_decoding_or_parsing_it(tmp_path: Pa
         create_wiki_proposal(vault_root=vault_root, registry=registry, request=req)
         assert mock_build.call_args.kwargs["source"] == SourceSnapshot("src.md", "hash")
 
+
+def test_facade_derives_typed_wiki_target(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    _write_ownership(vault_root)
+    registry = Registry(tmp_path / "registry.db")
+    request = CreateWikiProposalRequest(
+        source_path="src.md",
+        target_path=None,
+        title="Active Recall",
+        body="Durable concept note.",
+        page_kind="concept",
+        slug="active-recall",
+    )
+
+    with patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load, \
+         patch("lifeos.facade.proposal_tools.build_wiki_proposal") as mock_build, \
+         patch("lifeos.facade.proposal_tools.persist_wiki_proposal") as mock_persist, \
+         patch("lifeos.facade.proposal_tools.generate_proposal_id", return_value="id"):
+        mock_load.return_value = VerifiedRegisteredSource(
+            source=SourceSnapshot("src.md", "hash"),
+            content=b"content",
+        )
+        mock_build.return_value = WikiProposalDocuments(
+            "id",
+            "wiki/concepts/active-recall.md",
+            b"doc",
+            b"patch",
+        )
+        mock_persist.return_value = vault_root / "proposals" / "id"
+
+        result = create_wiki_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=request,
+        )
+
+    assert mock_build.call_args.kwargs["target_path"] == "wiki/concepts/active-recall.md"
+    assert result.target_path == "wiki/concepts/active-recall.md"
+
+
+def test_facade_rejects_mismatched_explicit_and_typed_wiki_target(tmp_path: Path) -> None:
+    request = CreateWikiProposalRequest(
+        source_path="src.md",
+        target_path="wiki/entities/active-recall.md",
+        title="Active Recall",
+        body="Durable concept note.",
+        page_kind="concept",
+        slug="active-recall",
+    )
+
+    with patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load:
+        mock_load.return_value = VerifiedRegisteredSource(
+            source=SourceSnapshot("src.md", "hash"),
+            content=b"content",
+        )
+        with pytest.raises(ToolValidationError, match="typed routing"):
+            create_wiki_proposal(
+                vault_root=tmp_path,
+                registry=Registry(tmp_path / "registry.db"),
+                request=request,
+            )
+
 def test_real_happy_path_facade(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
     vault_root.mkdir()
@@ -441,6 +542,7 @@ def test_real_happy_path_facade(tmp_path: Path) -> None:
     prov = parsed.frontmatter["lifeos_provenance"]
     assert prov["generator"]["id"] == "lifeos.facade.external_agent"
     assert prov["generator"]["version"] == "1"
+    assert prov["generator"]["prompt_schema_version"] == "3"
     assert "model_id" not in prov["generator"]
     assert prov["sources"][0]["path"] == "src.md"
     assert prov["sources"][0]["content_hash"] == f"sha256:{content_hash}"
@@ -572,20 +674,23 @@ def test_real_happy_path_creates_compound_wiki_draft(tmp_path: Path) -> None:
         vault_root=vault_root,
         registry=registry,
         request=CompoundWikiProposalRequest(
-            "study/source.md",
-            "wiki/equipment.md",
-            "Equipment",
-            "Verified detailed list.",
-            "wiki/first-aid.md",
-            "Equipment notes",
-            "See [[equipment]] for the verified list.",
+            source_path="study/source.md",
+            create_target_path=None,
+            create_title="Equipment",
+            create_body="Verified detailed list.",
+            update_target_path="wiki/first-aid.md",
+            update_heading="Equipment notes",
+            update_body="See [[equipment]] for the verified list.",
+            create_page_kind="entity",
+            create_slug="equipment",
         ),
         clock_fn=lambda: datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
         random_suffix_fn=lambda: "abcdef12",
     )
 
     assert result.status == "draft"
-    assert not (vault_root / "wiki" / "equipment.md").exists()
+    assert result.create_target_path == "wiki/entities/equipment.md"
+    assert not (vault_root / "wiki" / "entities" / "equipment.md").exists()
     assert update_path.read_bytes() == update_bytes
 
     from lifeos.proposals.loader import load_proposal_directory

@@ -8,6 +8,7 @@ import os
 import re
 
 from lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent
+from lifeos.wiki.layout import infer_wiki_page_kind
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.schema import (
     ProposalMetadata,
@@ -232,7 +233,11 @@ def _replace_generated_wiki_tags(target_content: str, tags: tuple[str, ...]) -> 
 
 
 def _build_generated_wiki_candidate(
-    *, content: WikiProposalContent, source: SourceSnapshot, created_at: str
+    *,
+    content: WikiProposalContent,
+    source: SourceSnapshot,
+    target_path: str,
+    created_at: str,
 ) -> str:
     provenance = LifeOSProvenance(
         schema_version=1,
@@ -247,8 +252,10 @@ def _build_generated_wiki_candidate(
         ),
         created_at=created_at,
     )
+    page_kind = infer_wiki_page_kind(target_path)
     frontmatter = {
         "title": content.title,
+        **({"type": page_kind} if page_kind is not None else {}),
         **({"tags": list(content.tags)} if content.tags else {}),
         "lifeos_provenance": provenance_to_frontmatter_value(provenance),
     }
@@ -321,6 +328,7 @@ def build_wiki_proposal(
     candidate_markdown = _build_generated_wiki_candidate(
         content=content,
         source=source,
+        target_path=norm_target,
         created_at=created_at,
     )
 
@@ -506,6 +514,7 @@ def build_compound_wiki_proposal(
     candidate_markdown = _build_generated_wiki_candidate(
         content=content,
         source=source,
+        target_path=norm_create_target,
         created_at=created_at,
     )
     create_patch = CreateGeneratedFileV2(

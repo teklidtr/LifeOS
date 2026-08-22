@@ -9,6 +9,7 @@ from .._secure_io import SecureIOError, hash_file_secure, open_directory_secure,
 from ..markdown.parser import parse_markdown_note
 from ..ownership import DEFAULT_OWNERSHIP_MANIFEST_PATH
 from ..ownership.manifest import GeneratedOwnership, ManifestError
+from ..wiki.layout import is_lazy_wiki_role_parent
 from .loader import LoadedProposal
 from .patches import PatchOperation
 
@@ -502,6 +503,13 @@ def _evaluate_operation(
                             ),
                         )
                     if not curr.exists():
+                        missing_relative = curr.relative_to(vault_root).as_posix()
+                        if (
+                            op.op == "create_generated_file"
+                            and missing_relative == parent.as_posix()
+                            and is_lazy_wiki_role_parent(missing_relative)
+                        ):
+                            break
                         return OperationPreflightResult(
                             operation_id=op.id,
                             target_path=target_path,

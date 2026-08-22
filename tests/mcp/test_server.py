@@ -67,6 +67,8 @@ def test_server_advertises_safe_ingestion_workflow() -> None:
     assert "call ingestion_update_wiki_section_proposal" in server.instructions
     assert "selects a human patch or generated replacement" in server.instructions
     assert "restore-or-release remediation" in server.instructions
+    assert "page_kind + slug" in server.instructions
+    assert "not a domain ontology" in server.instructions
     assert "Stop after the draft proposal" in server.instructions
     assert "Never call proposal_submit, proposal_approve, or proposal_apply" in server.instructions
 
@@ -158,6 +160,25 @@ def test_update_ingestion_schema_exposes_only_bounded_fields() -> None:
     assert tool.parameters["additionalProperties"] is False
 
 
+def test_create_ingestion_schema_exposes_typed_and_legacy_routing_fields() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tool = server._tool_manager.get_tool("ingestion_create_wiki_proposal")
+
+    assert set(tool.parameters["properties"]) == {
+        "source_path",
+        "target_path",
+        "title",
+        "body",
+        "page_kind",
+        "slug",
+        "tags",
+        "tag_rationale",
+    }
+    assert tool.parameters["additionalProperties"] is False
+
+
 def test_compound_ingestion_schema_exposes_only_bounded_fields() -> None:
     server = create_mcp_server(
         vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
@@ -176,6 +197,8 @@ def test_compound_ingestion_schema_exposes_only_bounded_fields() -> None:
         "update_body",
         "create_tags",
         "create_tag_rationale",
+        "create_page_kind",
+        "create_slug",
     }
     assert tool.parameters["additionalProperties"] is False
 
@@ -262,6 +285,41 @@ def test_create_wiki_proposal_delegates_to_facade(mock_facade) -> None:
         "target_path": "target/path",
         "status": "draft",
     }
+
+
+@patch("lifeos.mcp.server.create_wiki_proposal")
+def test_create_wiki_proposal_accepts_typed_routing(mock_facade) -> None:
+    mock_facade.return_value = MagicMock(
+        proposal_id="prop1",
+        proposal_path="prop/path",
+        target_path="wiki/concepts/active-recall.md",
+    )
+    registry = MagicMock()
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+    )
+
+    result = server._tool_manager.get_tool("ingestion_create_wiki_proposal").fn(
+        source_path="study/source.md",
+        title="Active Recall",
+        body="Durable concept note.",
+        page_kind="concept",
+        slug="active-recall",
+    )
+
+    mock_facade.assert_called_once_with(
+        vault_root=Path("/fake"),
+        registry=registry,
+        request=CreateWikiProposalRequest(
+            source_path="study/source.md",
+            target_path=None,
+            title="Active Recall",
+            body="Durable concept note.",
+            page_kind="concept",
+            slug="active-recall",
+        ),
+    )
+    assert result["target_path"] == "wiki/concepts/active-recall.md"
 
 
 @patch("lifeos.mcp.server.update_wiki_section_proposal")

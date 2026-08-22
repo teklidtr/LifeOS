@@ -60,6 +60,7 @@ from lifeos.mcp.models import (
     UpdateWikiSectionProposalMCPResult,
 )
 from lifeos.registry import Registry
+from lifeos.wiki.layout import WikiPageKind
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +70,13 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "LifeOS keeps Markdown canonical. For ingestion requests, first call registry_refresh "
     "to register the source's current path and hash, then call vault_read_markdown for "
     "the source. Evaluate the returned source_tags and source_topics as input evidence; "
-    "they may be retained, removed, combined, or supplemented. To create an absent wiki "
-    "target, synthesize a grounded title, body, optional canonical tags, and a concise tag "
-    "rationale "
-    "and call ingestion_create_wiki_proposal. When one ingestion should both create a "
+    "they may be retained, removed, combined, or supplemented. For a newly generated wiki "
+    "page, prefer typed routing with page_kind + slug: source -> wiki/sources/, entity -> "
+    "wiki/entities/, concept -> wiki/concepts/, synthesis -> wiki/syntheses/. These are small "
+    "filing roles, not a domain ontology; do not create a page for every noun or tag. "
+    "Use explicit target_path only for legacy or deliberately custom wiki paths. Synthesize a "
+    "grounded title, body, optional canonical tags, and a concise tag rationale and call "
+    "ingestion_create_wiki_proposal. When one ingestion should both create a "
     "detailed wiki page and update one exact section in an existing wiki note, also read "
     "that existing target and call ingestion_create_wiki_and_update_section_proposal. "
     "To update only an existing wiki note, also read "
@@ -98,8 +102,9 @@ READ_MARKDOWN_MCP_DESCRIPTION = (
 )
 CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{CREATE_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown and "
-    "supply a source-grounded title and body. This creates a draft and does not modify "
-    "the target wiki note."
+    "supply a source-grounded title and body. Prefer page_kind+slug for a new generated "
+    "source, entity, concept, or synthesis page; target_path remains a compatibility escape "
+    "hatch. This creates a draft and does not modify the target wiki note."
 )
 UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
     f"{UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
@@ -110,7 +115,8 @@ UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
 COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
     "has inspected both the registered source and existing update target. Supply the "
-    "absent create target with its grounded title and body, plus one exact heading and "
+    "absent create target with its grounded title and body, preferably routed by "
+    "create_page_kind+create_slug, plus one exact heading and "
     "replacement body for the existing target. LifeOS selects the update operation from "
     "canonical ownership. This creates one atomic two-operation draft and does not modify "
     "either target."
@@ -225,9 +231,11 @@ def create_mcp_server(
 
     def ingestion_create_wiki_proposal_tool(
         source_path: str,
-        target_path: str,
         title: str,
         body: str,
+        target_path: str | None = None,
+        page_kind: WikiPageKind | None = None,
+        slug: str | None = None,
         tags: list[str] | None = None,
         tag_rationale: str | None = None,
     ) -> CreateWikiProposalMCPResult:
@@ -242,6 +250,8 @@ def create_mcp_server(
                     body=body,
                     tags=tuple(tags or ()),
                     tag_rationale=tag_rationale,
+                    page_kind=page_kind,
+                    slug=slug,
                 ),
             )
             return {
@@ -286,12 +296,14 @@ def create_mcp_server(
 
     def ingestion_create_wiki_and_update_section_proposal_tool(
         source_path: str,
-        create_target_path: str,
         create_title: str,
         create_body: str,
         update_target_path: str,
         update_heading: str,
         update_body: str,
+        create_target_path: str | None = None,
+        create_page_kind: WikiPageKind | None = None,
+        create_slug: str | None = None,
         create_tags: list[str] | None = None,
         create_tag_rationale: str | None = None,
     ) -> CompoundWikiProposalMCPResult:
@@ -309,6 +321,8 @@ def create_mcp_server(
                     update_body=update_body,
                     create_tags=tuple(create_tags or ()),
                     create_tag_rationale=create_tag_rationale,
+                    create_page_kind=create_page_kind,
+                    create_slug=create_slug,
                 ),
             )
             return {
