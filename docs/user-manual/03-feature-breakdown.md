@@ -393,6 +393,10 @@ registry_refresh
       vault_read_markdown on the target
       → agent synthesizes that exact section's replacement body
       → ingestion_update_wiki_section_proposal
+  → if a detailed page must be created and an existing section must point to it:
+      vault_read_markdown on the existing target
+      → agent synthesizes both bounded bodies
+      → ingestion_create_wiki_and_update_section_proposal
   → stop at draft
 ```
 
@@ -485,8 +489,11 @@ the bounded workflow explicitly: refresh the disposable registry with
 synthesize a source-grounded title and body, call
 `ingestion_create_wiki_proposal` for an absent target, or read the existing
 target and call `ingestion_update_wiki_section_proposal` for one exact section.
-Both paths stop at the resulting draft. Submission, approval, and application
-each require a separate explicit user request and retain trusted interactive
+When one ingestion should do both, call
+`ingestion_create_wiki_and_update_section_proposal`; its single draft contains
+one generated-page creation followed by one hash-bound human-file patch. All
+paths stop at the resulting draft. Submission, approval, and application each
+require a separate explicit user request and retain trusted interactive
 authorization.
 
 ## 3.13 Graph views

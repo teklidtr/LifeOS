@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1622
 title: Add compound wiki ingestion proposals
-status: in-progress
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1613
@@ -67,3 +67,28 @@ git diff --check
 - DD-031 and DD-034: proposal state and validation remain canonical and fail closed.
 - DD-079: agent-assisted ingestion remains MCP-only and stops at draft.
 - `docs/safety-and-ownership.md`: human-owned wiki content is never silently rewritten.
+
+# Implementation record
+
+- Added `build_compound_wiki_proposal` with one ordered
+  `create_generated_file` and one base-hash-bound `patch_human_file` operation.
+- Added the typed `CompoundWikiProposalRequest` facade contract and
+  `ingestion_create_wiki_and_update_section_proposal` MCP tool.
+- Kept create-only and update-only ingestion tools unchanged and documented the
+  explicit three-way routing decision.
+- Reused canonical source verification, generated-page provenance, exact ATX
+  heading replacement, proposal publication, authorization, recovery, and
+  application boundaries.
+- Rejected present create targets, missing update targets, identical targets,
+  invalid or unchanged sections, and managed-block update targets before draft
+  publication.
+
+# Validation record
+
+- Focused ingestion, facade, MCP, and lifecycle suites: 164 passed.
+- Full regression suite: 1,399 passed in the sandbox; the sole blocked UNIX
+  socket case passed separately with system permission, for 1,400 passing tests.
+- Task-scoped Ruff: passed.
+- Strict mypy across changed source files: passed.
+- Manual links across 14 chapters: passed.
+- `git diff --check`: passed.

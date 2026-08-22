@@ -406,7 +406,9 @@ explicitly registered source through the local STDIO MCP adapter, synthesizes a
 grounded result, and calls a bounded proposal-producing tool. An absent wiki
 target uses title-and-body creation. An existing human-owned wiki note uses an
 explicit single-heading replacement whose patch is bound to the current target
-hash; LifeOS does not perform autonomous whole-note merging. LifeOS independently
-verifies the source and owns hashes, proposal identity, provenance, lifecycle
-state, and persistence. Ingestion stops at draft unless the user separately
-requests an exact lifecycle transition.
+hash. When one ingestion needs both outcomes, the same bounded inputs produce one
+atomic proposal with exactly one generated-file creation and one exact-section
+human patch; LifeOS still does not perform autonomous whole-note merging. LifeOS
+independently verifies the source and owns hashes, proposal identity, provenance,
+lifecycle state, and persistence. Ingestion stops at draft unless the user
+separately requests an exact lifecycle transition.

@@ -126,7 +126,9 @@ and near-term work concrete.
    and calls `ingestion_create_wiki_proposal`. For an existing note, identify the
    one heading to update; the agent reads that target and calls
    `ingestion_update_wiki_section_proposal` with the heading text and replacement
-   body.
+   body. If both a detailed page and an existing-section update belong to the
+   same ingestion, use `ingestion_create_wiki_and_update_section_proposal` so
+   both operations remain in one atomic draft.
 6. Review the resulting draft proposal. Ingestion does not submit, approve, or
    apply it.
 

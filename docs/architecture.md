@@ -58,8 +58,12 @@ registered source, and synthesize a grounded draft. For an absent wiki target,
 the agent submits only bounded title and body fields. For an existing human-owned
 wiki note, it may submit one exact ATX heading and its replacement body; LifeOS
 constructs a base-hash-bound `patch_human_file` proposal while preserving all
-surrounding bytes. LifeOS independently owns source verification, hashes,
-proposal identity, provenance, lifecycle state, and persistence.
+surrounding bytes. When the same ingestion should create a detailed page and
+update one exact section in an existing note, the agent may submit both bounded
+payloads together; LifeOS emits one atomic proposal containing an ordered
+`create_generated_file` followed by `patch_human_file`. LifeOS independently owns
+source verification, hashes, proposal identity, provenance, lifecycle state, and
+persistence.
 
 ### Human layer
 

@@ -18,9 +18,11 @@ ingest the registered vault-relative source into an explicit `wiki/` target.
 The agent must call `registry_refresh`, then `vault_read_markdown`. It follows
 with `ingestion_create_wiki_proposal` when the target is absent. For one section
 of an existing target, it also reads the target and calls
-`ingestion_update_wiki_section_proposal`. Both paths stop at the resulting
-draft. Refreshing first ensures moved or changed sources have current registry
-paths and hashes.
+`ingestion_update_wiki_section_proposal`. When the intended review must both
+create a detailed page and update an existing section, use
+`ingestion_create_wiki_and_update_section_proposal`; it produces one draft with
+two ordered operations. All paths stop at the resulting draft. Refreshing first
+ensures moved or changed sources have current registry paths and hashes.
 
 The section-update tool requires one unique ATX heading, supplied without `#`
 markers. If the heading is missing or duplicated, choose a more precise target

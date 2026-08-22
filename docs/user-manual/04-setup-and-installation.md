@@ -260,6 +260,13 @@ its replacement body. Supply heading text without `#` markers. This produces a
 base-hash-bound draft patch and preserves the rest of the note; it does not
 perform a whole-note semantic merge.
 
+If the source deserves a new detailed wiki page and an existing wiki section
+must be updated in the same review, read the existing target and use
+`ingestion_create_wiki_and_update_section_proposal`. Supply the absent create
+target with its title and body plus the existing target's exact heading and
+replacement body. The result is one draft with two ordered operations; neither
+target changes before the ordinary submit, approve, and apply lifecycle.
+
 This is the only supported agent-assisted ingestion route. The connected agent
 supplies semantic interpretation; LifeOS does not accept a model name, provider
 API key, or environment-based model configuration. The MCP workflow refreshes
