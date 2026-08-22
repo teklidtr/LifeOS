@@ -404,11 +404,13 @@ LifeOS does not embed an ingestion model runtime, accept provider API keys, or
 expose a standalone semantic-ingestion CLI command. An external agent reads an
 explicitly registered source through the local STDIO MCP adapter, synthesizes a
 grounded result, and calls a bounded proposal-producing tool. An absent wiki
-target uses title-and-body creation. An existing human-owned wiki note uses an
-explicit single-heading replacement whose patch is bound to the current target
-hash. When one ingestion needs both outcomes, the same bounded inputs produce one
-atomic proposal with exactly one generated-file creation and one exact-section
-human patch; LifeOS still does not perform autonomous whole-note merging. LifeOS
+target uses title-and-body creation. An existing wiki note uses an explicit
+single-heading replacement bound to the current target hash. The canonical
+ownership manifest determines whether that replacement is represented as a
+human-file patch or a generated-file replacement. When one ingestion needs both
+outcomes, the same bounded inputs produce one atomic proposal with exactly one
+generated-file creation and one ownership-aware exact-section update; LifeOS
+still does not perform autonomous semantic merging. LifeOS
 independently verifies the source and owns hashes, proposal identity, provenance,
 lifecycle state, and persistence. Ingestion stops at draft unless the user
 separately requests an exact lifecycle transition.
@@ -423,3 +425,15 @@ reloads and rechecks the proposal between transitions, and retains the full
 application-time target, ownership, preflight, and recovery checks. A failure
 stops at the last durable state. Low-level lifecycle operations remain available
 for compatibility, and MCP ingestion continues to stop at draft.
+
+## DD-081: Ingestion proposal operations are ownership-aware before publication
+
+Every ingestion proposal builder reads the canonical generated-ownership manifest
+before it persists a draft. An absent target with no ownership entry may use
+`create_generated_file`; an absent target with a retained entry is an orphan and
+is refused with restore-or-release guidance. An existing target without an entry
+uses an exact `patch_human_file`. An existing target owned by the same ingestion
+generator, whose raw hash still matches the manifest, uses
+`replace_generated_file` with a deterministic exact-section candidate. Generator
+or hash mismatches fail closed. Compound ingestion applies the same classification
+to its update target. Registry refresh never repairs or deletes durable ownership.

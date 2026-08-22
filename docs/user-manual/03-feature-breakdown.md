@@ -406,10 +406,13 @@ The MCP adapter reads the canonical source through the bounded facade. The
 external agent interprets the source, while LifeOS verifies its registered
 identity and current hash, validates the supplied fields, creates a draft
 proposal, and records provenance. Existing-note updates require one unique ATX
-heading (the heading text is supplied without `#` markers) and produce a
-base-hash-bound human-file patch that preserves every surrounding section. It
-does not directly overwrite the target wiki page, and ingestion alone never
-implies permission to submit, approve, or apply the proposal.
+heading (the heading text is supplied without `#` markers). LifeOS checks the
+canonical ownership manifest before publishing the draft. Human-owned targets
+produce a base-hash-bound human-file patch; unchanged targets owned by the same
+ingestion generator produce a generated-file replacement derived from the same
+exact-section edit. Both preserve every surrounding section. It does not directly
+overwrite the target wiki page, and ingestion alone never implies permission to
+submit, approve, or apply the proposal.
 
 ## 3.11 Proposal lifecycle, ownership, and recovery
 
@@ -491,10 +494,12 @@ synthesize a source-grounded title and body, call
 target and call `ingestion_update_wiki_section_proposal` for one exact section.
 When one ingestion should do both, call
 `ingestion_create_wiki_and_update_section_proposal`; its single draft contains
-one generated-page creation followed by one hash-bound human-file patch. All
-paths stop at the resulting draft. Submission, approval, and application each
-require a separate explicit user request and retain trusted interactive
-authorization.
+one generated-page creation followed by the ownership-appropriate hash-bound
+update. An orphaned ownership entry, a generator mismatch, an ownership hash
+mismatch, or a missing ownership manifest prevents draft publication and returns
+bounded remediation. All paths stop at the resulting draft. Submission,
+approval, and application each require a separate explicit user request and
+retain trusted interactive authorization.
 
 ## 3.13 Graph views
 

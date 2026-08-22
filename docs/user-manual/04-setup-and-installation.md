@@ -257,8 +257,10 @@ server does not infer permission to submit, approve, or apply it.
 If the explicit wiki target already exists, read it with `vault_read_markdown`
 and use `ingestion_update_wiki_section_proposal` with one unique ATX heading and
 its replacement body. Supply heading text without `#` markers. This produces a
-base-hash-bound draft patch and preserves the rest of the note; it does not
-perform a whole-note semantic merge.
+base-hash-bound draft and preserves the rest of the note. LifeOS selects
+`patch_human_file` for a human-owned note or `replace_generated_file` for an
+unchanged note owned by the same ingestion generator; it does not perform a
+whole-note semantic merge.
 
 If the source deserves a new detailed wiki page and an existing wiki section
 must be updated in the same review, read the existing target and use
@@ -266,6 +268,11 @@ must be updated in the same review, read the existing target and use
 target with its title and body plus the existing target's exact heading and
 replacement body. The result is one draft with two ordered operations; neither
 target changes before the ordinary submit, approve, and apply lifecycle.
+
+The canonical ownership manifest must exist. If an absent create target retains
+an ownership entry, the tool reports an orphan and writes no draft. Restore the
+file or use the explicit ownership-release remediation when available; registry
+refresh intentionally does not remove durable ownership.
 
 This is the only supported agent-assisted ingestion route. The connected agent
 supplies semantic interpretation; LifeOS does not accept a model name, provider

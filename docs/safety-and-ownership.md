@@ -13,6 +13,13 @@ Agents may replace only content inside valid managed markers.
 ### Fully generated files
 
 A generator may replace the whole file only when ownership is recorded in the canonical Git-tracked manifest at `system/generated-ownership.json`.
+For bounded ingestion updates, LifeOS may derive that replacement by changing one
+exact heading while preserving the rest of the generated file. The manifest
+generator and raw content hash must both match before a draft is published.
+
+If a generated file is manually deleted, its ownership entry is not disposable.
+Ingestion reports the orphan and requires an explicit restore or ownership-release
+decision; registry refresh never removes the entry.
 
 ### System policy
 

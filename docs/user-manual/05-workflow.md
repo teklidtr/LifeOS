@@ -126,11 +126,17 @@ and near-term work concrete.
    and calls `ingestion_create_wiki_proposal`. For an existing note, identify the
    one heading to update; the agent reads that target and calls
    `ingestion_update_wiki_section_proposal` with the heading text and replacement
-   body. If both a detailed page and an existing-section update belong to the
-   same ingestion, use `ingestion_create_wiki_and_update_section_proposal` so
-   both operations remain in one atomic draft.
+   body. LifeOS reads canonical ownership and emits either a human-file patch or
+   a generated-file replacement; the agent does not choose that operation. If
+   both a detailed page and an existing-section update belong to the same
+   ingestion, use `ingestion_create_wiki_and_update_section_proposal` so both
+   operations remain in one atomic draft.
 6. Review the resulting draft proposal. Ingestion does not submit, approve, or
    apply it.
+
+If an absent target still has a generated-ownership entry, ingestion stops
+without creating a draft. Restore the generated file or explicitly release its
+ownership; `registry_refresh` cannot make that durable decision.
 
 ### Capture a flashcard
 
