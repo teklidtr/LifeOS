@@ -523,10 +523,6 @@ def _persist_proposal_documents(
     proposals_root: Path,
     documents: WikiProposalDocuments | CompoundWikiProposalDocuments,
 ) -> Path:
-    review_json = build_review_snapshot_bytes_from_patches(
-        vault_root=proposals_root.parent,
-        patches_json=documents.patches_json,
-    )
     proposal_dir = proposals_root / documents.proposal_id
     proposal_created = False
     publication_complete = False
@@ -545,6 +541,10 @@ def _persist_proposal_documents(
             dir_fd = os.open(proposal_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
             atomic_write_file_secure(dir_fd, "proposal.md", documents.proposal_markdown)
             atomic_write_file_secure(dir_fd, "patches.json", documents.patches_json)
+            review_json = build_review_snapshot_bytes_from_patches(
+                vault_root=proposals_root.parent,
+                patches_json=documents.patches_json,
+            )
             atomic_write_file_secure(dir_fd, "review.json", review_json)
             publication_complete = True
         except OSError as e:
