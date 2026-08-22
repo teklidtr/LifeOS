@@ -1,6 +1,6 @@
 import { BridgeClient } from "./protocol.js";
 
-export type ProposalAction = "submit" | "approve" | "apply" | "reject";
+export type ProposalAction = "accept" | "submit" | "approve" | "apply" | "reject";
 
 export interface ProposalOperationInspection {
   operation_id: string;
@@ -113,9 +113,8 @@ export function parseProposalDiff(unifiedDiff: string): ProposalDiffLine[] {
 }
 
 export function proposalActionsForStatus(status: string): ProposalAction[] {
-  if (status === "draft") return ["submit"];
-  if (status === "pending") return ["approve", "reject"];
-  if (status === "approved") return ["apply", "reject"];
+  if (status === "draft") return ["accept"];
+  if (status === "pending" || status === "approved") return ["accept", "reject"];
   return [];
 }
 
@@ -311,7 +310,15 @@ export class ProposalWorkspaceController {
         });
         return;
       }
-      this.fail(`Could not ${action} the proposal.`, error);
+      const message = error instanceof Error ? error.message : "Unexpected bridge error.";
+      await this.load(selected.proposal_id);
+      this.update({
+        ...this.state,
+        kind: "error",
+        detail: `Could not ${action} the proposal. ${message}`,
+        busy: undefined,
+        announcement: `Could not ${action} the proposal. ${message}`,
+      });
     }
   }
 

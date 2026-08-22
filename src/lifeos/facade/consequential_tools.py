@@ -46,7 +46,6 @@ APPLY_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     effect=ToolEffect.CONSEQUENTIAL,
 )
 
-
 @dataclass(frozen=True, slots=True)
 class SubmitProposalRequest:
     proposal_id: str
@@ -81,6 +80,19 @@ class ApplyProposalResult:
     proposal_id: str
     status: Literal["applied"]
     changed_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptProposalRequest:
+    proposal_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptProposalResult:
+    proposal_id: str
+    status: Literal["applied"]
+    changed_paths: tuple[str, ...]
+    completed_transitions: tuple[str, ...]
 
 
 def _utc_now() -> datetime:
@@ -315,4 +327,116 @@ def apply_proposal_tool(
         proposal_id=res.proposal_id,
         status="applied",
         changed_paths=tuple(Path(p).as_posix() for p in res.changed_paths),
+    )
+
+
+def accept_proposal_tool(
+    *,
+    vault_root: Path,
+    request: AcceptProposalRequest,
+    authorizer: ConsequentialAuthorizer,
+    clock_fn: Callable[[], datetime] = _utc_now,
+) -> AcceptProposalResult:
+    """Accept and apply one unchanged proposal with one exact UI authorization."""
+
+    proposals_root = vault_root / "proposals"
+    proposal = _load_proposal(request.proposal_id, proposals_root)
+    if proposal.metadata.status.value not in ("draft", "pending", "approved"):
+        raise ToolConflictError(
+            f"Cannot accept from {proposal.metadata.status.value}"
+        )
+
+    accepted_digest = compute_review_digest(
+        proposal.metadata,
+        proposal.body,
+        proposal.patch_document,
+    )
+    if proposal.metadata.status.value != "draft":
+        if proposal.metadata.review_digest != accepted_digest:
+            raise ToolConflictError(
+                "Current proposal content does not match stored review digest"
+            )
+
+    try:
+        grant = authorizer.authorize(
+            ConsequentialAuthorizationRequest(
+                action=ConsequentialAction.APPLY,
+                proposal_id=request.proposal_id,
+                review_digest=accepted_digest,
+            )
+        )
+    except AuthorizationDeniedError as exc:
+        raise ToolAuthorizationError(
+            "Consequential operation was not authorized"
+        ) from exc
+    except AuthorizationUnavailableError as exc:
+        raise ToolUnavailableError(
+            "Authorization service is unavailable"
+        ) from exc
+
+    timestamp = _format_time(clock_fn())
+    completed: list[str] = []
+
+    def reload_accepted() -> LoadedProposal:
+        reloaded = _load_proposal(request.proposal_id, proposals_root)
+        current_digest = compute_review_digest(
+            reloaded.metadata,
+            reloaded.body,
+            reloaded.patch_document,
+        )
+        if current_digest != accepted_digest:
+            raise ToolConflictError("Proposal changed after acceptance")
+        if (
+            reloaded.metadata.status.value != "draft"
+            and reloaded.metadata.review_digest != accepted_digest
+        ):
+            raise ToolConflictError(
+                "Stored review digest changed after acceptance"
+            )
+        return reloaded
+
+    try:
+        if proposal.metadata.status.value == "draft":
+            submit_proposal_for_review(
+                proposal,
+                proposals_root=proposals_root,
+                submitted_by=grant.actor_id,
+                submitted_at=timestamp,
+            )
+            completed.append("submitted")
+            proposal = reload_accepted()
+
+        if proposal.metadata.status.value == "pending":
+            approve_proposal(
+                proposal,
+                proposals_root=proposals_root,
+                approved_by=grant.actor_id,
+                approved_at=timestamp,
+            )
+            completed.append("approved")
+            proposal = reload_accepted()
+    except TransitionError as exc:
+        raise _map_lifecycle_error(exc) from exc
+
+    if proposal.metadata.status.value != "approved":
+        raise ToolConflictError(
+            f"Cannot apply accepted proposal from {proposal.metadata.status.value}"
+        )
+
+    try:
+        result = apply_proposal(
+            proposal,
+            vault_root=vault_root,
+            applied_by=grant.actor_id,
+            applied_at=timestamp,
+        )
+    except ApplicationError as exc:
+        raise _map_application_error(exc) from exc
+    completed.append("applied")
+
+    return AcceptProposalResult(
+        proposal_id=result.proposal_id,
+        status="applied",
+        changed_paths=tuple(Path(path).as_posix() for path in result.changed_paths),
+        completed_transitions=tuple(completed),
     )

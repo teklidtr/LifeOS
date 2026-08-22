@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 from lifeos.facade.authorization import AuthorizedPrincipal, ConsequentialAction, ConsequentialAuthorizationRequest, ConsequentialAuthorizer, AuthorizationDeniedError
-from lifeos.facade.consequential_tools import ApplyProposalRequest, ApproveProposalRequest, SubmitProposalRequest, apply_proposal_tool, approve_proposal_tool, submit_proposal_tool
+from lifeos.facade.consequential_tools import AcceptProposalRequest, ApplyProposalRequest, ApproveProposalRequest, SubmitProposalRequest, accept_proposal_tool, apply_proposal_tool, approve_proposal_tool, submit_proposal_tool
 from lifeos.facade.errors import ToolFacadeError
 from lifeos.proposals.lifecycle import compute_review_digest, reject_proposal
 from lifeos.proposals.loader import load_proposal_directory
 from lifeos.markdown.parser import parse_markdown_note
 
-ProposalAction = Literal["submit", "approve", "apply", "reject"]
+ProposalAction = Literal["accept", "submit", "approve", "apply", "reject"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +191,10 @@ class DesktopProposalService:
 
     def prepare(self, *, proposal_id: str, action: ProposalAction) -> ConfirmationChallenge:
         inspection = self.inspect(proposal_id)
+        if action == "accept" and inspection.status not in ("draft", "pending", "approved"):
+            raise ValueError(f"Cannot accept a {inspection.status} proposal")
         action_enum = {
+            "accept": ConsequentialAction.APPLY,
             "submit": ConsequentialAction.SUBMIT,
             "approve": ConsequentialAction.APPROVE,
             "apply": ConsequentialAction.APPLY,
@@ -204,6 +207,8 @@ class DesktopProposalService:
     def execute(self, *, proposal_id: str, action: ProposalAction, token: str, reason: str | None = None) -> dict[str, Any]:
         self.authorizer.activate(token)
         try:
+            if action == "accept":
+                return asdict(accept_proposal_tool(vault_root=self.vault_root, request=AcceptProposalRequest(proposal_id), authorizer=self.authorizer))
             if action == "submit":
                 return asdict(submit_proposal_tool(vault_root=self.vault_root, request=SubmitProposalRequest(proposal_id), authorizer=self.authorizer))
             if action == "approve":

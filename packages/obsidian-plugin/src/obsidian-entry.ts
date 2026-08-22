@@ -41,6 +41,7 @@ const VIEW_DETAILS: Record<string, { title: string; icon: string }> = {
 };
 
 const ACTION_LABELS: Record<ProposalAction, string> = {
+  accept: "Accept changes",
   submit: "Submit",
   approve: "Approve",
   apply: "Apply",
@@ -249,8 +250,8 @@ class LifeOSProposalItemView extends ItemView {
       controls.setAttr("aria-label", "Proposal lifecycle actions");
       for (const action of actions) {
         const button = controls.createEl("button", { text: ACTION_LABELS[action] });
-        if (action === "approve") button.addClass("mod-cta");
-        if (action === "apply" || action === "reject") button.addClass("mod-warning");
+        if (action === "accept") button.addClass("mod-cta");
+        if (action === "reject") button.addClass("mod-warning");
         button.disabled = this.controller.state.busy !== undefined;
         button.addEventListener("click", () => { void this.controller.execute(action); });
       }
@@ -360,13 +361,19 @@ class ProposalConfirmationModal extends Modal {
 
   onOpen(): void {
     const action = ACTION_LABELS[this.challenge.action];
-    this.setTitle(`${action} proposal?`);
+    this.setTitle(
+      this.challenge.action === "accept" ? "Accept and apply changes?" : `${action} proposal?`,
+    );
     this.contentEl.createEl("p", {
-      text: `${action} “${this.inspection.title || this.inspection.proposal_id}”.`,
+      text: this.challenge.action === "accept"
+        ? `Accept and apply “${this.inspection.title || this.inspection.proposal_id}”.`
+        : `${action} “${this.inspection.title || this.inspection.proposal_id}”.`,
     });
     this.contentEl.createEl("p", {
-      text: this.challenge.action === "apply"
-        ? "Applying changes canonical vault content. Approval and application remain separate actions."
+      text: this.challenge.action === "accept"
+        ? "One confirmation accepts this exact review and applies it. LifeOS still checks every lifecycle transition, the review digest, and current target hashes."
+        : this.challenge.action === "apply"
+        ? "Applying changes modifies canonical vault content."
         : "This action changes the proposal lifecycle state.",
     });
     this.contentEl.createEl("p", {
@@ -377,8 +384,14 @@ class ProposalConfirmationModal extends Modal {
     const controls = this.contentEl.createDiv({ cls: "modal-button-container" });
     const cancel = controls.createEl("button", { text: "Cancel" });
     cancel.addEventListener("click", () => this.finish(false));
-    const confirm = controls.createEl("button", { text: `${action} proposal` });
-    confirm.addClass(this.challenge.action === "approve" ? "mod-cta" : "mod-warning");
+    const confirm = controls.createEl("button", {
+      text: this.challenge.action === "accept" ? action : `${action} proposal`,
+    });
+    confirm.addClass(
+      this.challenge.action === "accept" || this.challenge.action === "approve"
+        ? "mod-cta"
+        : "mod-warning",
+    );
     confirm.addEventListener("click", () => this.finish(true));
     confirm.focus();
   }

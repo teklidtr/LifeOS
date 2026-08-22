@@ -13,6 +13,8 @@ test("production artifact is a self-contained Obsidian CommonJS plugin", async (
   assert.match(source, /lifeos-open-proposals/);
   assert.match(source, /LifeOS Proposals/);
   assert.match(source, /Changes/);
+  assert.match(source, /Accept changes/);
+  assert.match(source, /One confirmation accepts this exact review/);
   assert.doesNotMatch(source, /Typed operations/);
   assert.match(source, /Created/);
 

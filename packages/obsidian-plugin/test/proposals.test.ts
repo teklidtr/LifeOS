@@ -86,12 +86,13 @@ function inspection(
 class WorkspaceClient implements BridgeClient {
   calls: string[] = [];
   status = "draft";
+  failAcceptance = false;
 
   async start(_settings: LifeOSSettings): Promise<HandshakeResult> {
     throw new Error("not used in this test");
   }
 
-  async call<T>(method: string, _params: Record<string, unknown>): Promise<T> {
+  async call<T>(method: string, params: Record<string, unknown>): Promise<T> {
     this.calls.push(method);
     if (method === "proposal.list") return [inspection("p", this.status)] as T;
     if (method === "proposal.inspect") return inspection("p", this.status) as T;
@@ -99,13 +100,17 @@ class WorkspaceClient implements BridgeClient {
       return {
         token: "t",
         proposal_id: "p",
-        action: "submit",
+        action: params.action,
         review_digest: "d",
         expires_at: "x",
       } as T;
     }
     if (method === "proposal.execute") {
-      this.status = "pending";
+      if (params.action === "accept" && this.failAcceptance) {
+        this.status = "approved";
+        throw new Error("Target changed before application.");
+      }
+      this.status = params.action === "accept" ? "applied" : "pending";
       return { proposal_id: "p", status: this.status } as T;
     }
     throw new Error(`Unexpected method ${method}`);
@@ -169,9 +174,9 @@ test("proposal helpers group lifecycle states and expose only valid actions", ()
     ["approved", ["approved"]],
     ["custom", ["custom"]],
   ]);
-  assert.deepEqual(proposalActionsForStatus("draft"), ["submit"]);
-  assert.deepEqual(proposalActionsForStatus("pending"), ["approve", "reject"]);
-  assert.deepEqual(proposalActionsForStatus("approved"), ["apply", "reject"]);
+  assert.deepEqual(proposalActionsForStatus("draft"), ["accept"]);
+  assert.deepEqual(proposalActionsForStatus("pending"), ["accept", "reject"]);
+  assert.deepEqual(proposalActionsForStatus("approved"), ["accept", "reject"]);
   assert.deepEqual(proposalActionsForStatus("applied"), []);
 });
 
@@ -210,7 +215,7 @@ test("proposal diff parser tracks GitHub-style line kinds and line numbers", () 
   ]);
 });
 
-test("proposal workspace loads, executes through confirmation, and refreshes", async () => {
+test("proposal workspace accepts through one confirmation and refreshes", async () => {
   const client = new WorkspaceClient();
   const workspace = new ProposalWorkspaceController(client, async () => true);
   const announcements: string[] = [];
@@ -222,10 +227,10 @@ test("proposal workspace loads, executes through confirmation, and refreshes", a
   assert.equal(workspace.state.kind, "ready");
   assert.equal(workspace.state.selected?.status, "draft");
 
-  await workspace.execute("submit");
+  await workspace.execute("accept");
 
   assert.equal(workspace.state.kind, "ready");
-  assert.equal(workspace.state.selected?.status, "pending");
+  assert.equal(workspace.state.selected?.status, "applied");
   assert.deepEqual(client.calls, [
     "proposal.list",
     "proposal.inspect",
@@ -234,7 +239,7 @@ test("proposal workspace loads, executes through confirmation, and refreshes", a
     "proposal.execute",
     "proposal.list",
   ]);
-  assert.equal(announcements.at(-1), "Proposal p submit completed.");
+  assert.equal(announcements.at(-1), "Proposal p accept completed.");
   unsubscribe();
 });
 
@@ -243,9 +248,23 @@ test("cancelled workspace confirmation makes no change and does not execute", as
   const workspace = new ProposalWorkspaceController(client, async () => false);
   await workspace.load();
 
-  await workspace.execute("submit");
+  await workspace.execute("accept");
 
   assert.equal(workspace.state.kind, "ready");
   assert.equal(workspace.state.announcement, "Confirmation cancelled. No changes were made.");
   assert.equal(client.calls.includes("proposal.execute"), false);
+});
+
+test("failed acceptance refreshes the last durable lifecycle state", async () => {
+  const client = new WorkspaceClient();
+  client.failAcceptance = true;
+  const workspace = new ProposalWorkspaceController(client, async () => true);
+  await workspace.load();
+
+  await workspace.execute("accept");
+
+  assert.equal(workspace.state.kind, "error");
+  assert.equal(workspace.state.selected?.status, "approved");
+  assert.match(workspace.state.detail, /Target changed before application/);
+  assert.deepEqual(client.calls.slice(-2), ["proposal.execute", "proposal.list"]);
 });

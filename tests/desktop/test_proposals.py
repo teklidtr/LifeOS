@@ -234,3 +234,203 @@ def test_stale_replacement_diff_degrades_without_hiding_proposal(tmp_path: Path)
         "Diff preview unavailable: target content no longer matches the proposal base hash"
     )
     assert [proposal.proposal_id for proposal in service.list()] == [proposal_id]
+
+
+def _write_acceptance_draft(vault_root: Path, proposal_id: str) -> Path:
+    (vault_root / "wiki").mkdir(parents=True)
+    (vault_root / "system").mkdir(parents=True)
+    (vault_root / "system" / "generated-ownership.json").write_text(
+        '{"schema_version": 1, "owned_files": {}}',
+        encoding="utf-8",
+    )
+    proposal_dir = vault_root / "proposals" / proposal_id
+    proposal_dir.mkdir(parents=True)
+    proposal_dir.joinpath("proposal.md").write_text(
+        "\n".join(
+            (
+                "---",
+                f'id: "{proposal_id}"',
+                'title: "Accept in one step"',
+                'description: "Composite desktop acceptance"',
+                "status: draft",
+                "risk: medium",
+                'created_at: "2026-08-22T00:00:00Z"',
+                'created_by: "test"',
+                "related_goals: []",
+                "related_sources: []",
+                "extensions: {}",
+                "schema_version: 1",
+                "patch_schema_version: 1",
+                "---",
+                "Reviewed body",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    proposal_dir.joinpath("patches.json").write_text(
+        json.dumps(
+            {
+                "operations": [
+                    {
+                        "expected_target_state": "absent",
+                        "id": "op-create-accepted",
+                        "new_content": "# Accepted\n",
+                        "op": "create_file",
+                        "target_path": "wiki/accepted.md",
+                    }
+                ],
+                "proposal_id": proposal_id,
+                "schema_version": 1,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return proposal_dir
+
+
+def test_one_confirmation_accepts_and_applies_draft(tmp_path: Path) -> None:
+    proposal_id = "prop-20260822T160000Z-1234abcd"
+    proposal_dir = _write_acceptance_draft(tmp_path, proposal_id)
+    service = DesktopProposalService(vault_root=tmp_path, actor_id="me")
+
+    challenge = service.prepare(proposal_id=proposal_id, action="accept")
+    result = service.execute(
+        proposal_id=proposal_id,
+        action="accept",
+        token=challenge.token,
+    )
+
+    assert result == {
+        "proposal_id": proposal_id,
+        "status": "applied",
+        "changed_paths": ("wiki/accepted.md",),
+        "completed_transitions": ("submitted", "approved", "applied"),
+    }
+    assert (tmp_path / "wiki/accepted.md").read_text(encoding="utf-8") == "# Accepted\n"
+    applied = load_proposal_directory(
+        proposal_dir,
+        proposals_root=tmp_path / "proposals",
+    ).proposal
+    assert applied is not None
+    assert applied.metadata.status.value == "applied"
+
+    with pytest.raises(AuthorizationDeniedError):
+        service.execute(
+            proposal_id=proposal_id,
+            action="accept",
+            token=challenge.token,
+        )
+
+
+def test_acceptance_fails_when_proposal_changes_after_confirmation(tmp_path: Path) -> None:
+    proposal_id = "prop-20260822T160100Z-1234abcd"
+    proposal_dir = _write_acceptance_draft(tmp_path, proposal_id)
+    service = DesktopProposalService(vault_root=tmp_path, actor_id="me")
+    challenge = service.prepare(proposal_id=proposal_id, action="accept")
+    proposal_path = proposal_dir / "proposal.md"
+    proposal_path.write_text(
+        proposal_path.read_text(encoding="utf-8").replace(
+            "Reviewed body",
+            "Changed after review",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="not authorized"):
+        service.execute(
+            proposal_id=proposal_id,
+            action="accept",
+            token=challenge.token,
+        )
+
+    assert not (tmp_path / "wiki/accepted.md").exists()
+    unchanged = load_proposal_directory(
+        proposal_dir,
+        proposals_root=tmp_path / "proposals",
+    ).proposal
+    assert unchanged is not None
+    assert unchanged.metadata.status.value == "draft"
+
+
+def test_acceptance_stops_at_approved_when_target_becomes_stale(tmp_path: Path) -> None:
+    proposal_id = "prop-20260822T160200Z-1234abcd"
+    proposal_dir = tmp_path / "proposals" / proposal_id
+    proposal_dir.mkdir(parents=True)
+    target = tmp_path / "wiki/existing.md"
+    target.parent.mkdir(parents=True)
+    original = "Original\n"
+    target.write_text(original, encoding="utf-8")
+    (tmp_path / "system").mkdir()
+    (tmp_path / "system/generated-ownership.json").write_text(
+        '{"schema_version": 1, "owned_files": {}}',
+        encoding="utf-8",
+    )
+    proposal_dir.joinpath("proposal.md").write_text(
+        "\n".join(
+            (
+                "---",
+                f'id: "{proposal_id}"',
+                'title: "Stale accepted target"',
+                'description: "Stops before application"',
+                "status: draft",
+                "risk: medium",
+                'created_at: "2026-08-22T00:00:00Z"',
+                'created_by: "test"',
+                "related_goals: []",
+                "related_sources: []",
+                "extensions: {}",
+                "schema_version: 1",
+                "patch_schema_version: 1",
+                "---",
+                "Reviewed body",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    proposal_dir.joinpath("patches.json").write_text(
+        json.dumps(
+            {
+                "operations": [
+                    {
+                        "base_hash": (
+                            "sha256:"
+                            f"{hashlib.sha256(original.encode('utf-8')).hexdigest()}"
+                        ),
+                        "id": "op-update-existing",
+                        "op": "patch_human_file",
+                        "target_path": "wiki/existing.md",
+                        "unified_diff": "@@ -1 +1 @@\n-Original\n+Accepted\n",
+                    }
+                ],
+                "proposal_id": proposal_id,
+                "schema_version": 1,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    service = DesktopProposalService(vault_root=tmp_path, actor_id="me")
+    challenge = service.prepare(proposal_id=proposal_id, action="accept")
+    target.write_text("Concurrent edit\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="application"):
+        service.execute(
+            proposal_id=proposal_id,
+            action="accept",
+            token=challenge.token,
+        )
+
+    assert target.read_text(encoding="utf-8") == "Concurrent edit\n"
+    stopped = load_proposal_directory(
+        proposal_dir,
+        proposals_root=tmp_path / "proposals",
+    ).proposal
+    assert stopped is not None
+    assert stopped.metadata.status.value == "approved"
