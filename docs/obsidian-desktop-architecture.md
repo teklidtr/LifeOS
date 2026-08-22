@@ -100,6 +100,13 @@ Writes are atomic. Multi-file consequential changes remain proposals and use the
 recovery journal. Ordinary direct human actions are narrowly targeted mutations that
 preserve unrelated frontmatter and body text.
 
+An incomplete recovery journal verifies canonical files against its recorded phase and
+fails closed on any mismatch. A structurally valid `complete` journal is already terminal:
+the next application removes it without comparing canonical content that the user may have
+legitimately changed after the earlier commit. Durable generated ownership remains a
+separate application-time preflight check and is never repaired from disposable recovery
+state.
+
 The proposal workspace exposes one **Accept changes** action for draft, pending, and
 approved proposals. Its single interactive confirmation is bound to the exact review
 digest. Python executes only the remaining submit, approve, and apply transitions,
@@ -114,6 +121,7 @@ sequence succeeded.
 |---|---|---|
 | Python missing | unavailable | Setup view shows executable guidance; vault remains editable |
 | Bridge crash | unavailable | Pending calls fail; safe bounded restart is offered |
+| Request implementation failure | error | One redacted typed error is returned; the bridge stays available for later requests |
 | Stale file | stale | Action is not applied; reload and compare are offered |
 | Blocked recovery | blocked | Canonical writes disabled; recovery details remain visible |
 | Protocol mismatch | unsupported | No partial operation; compatible versions are shown |
