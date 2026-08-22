@@ -22,6 +22,7 @@ class ProposalInspection:
     proposal_id: str
     status: str
     title: str
+    created_at: str
     description: str
     body: str
     review_digest: str
@@ -104,15 +105,18 @@ class DesktopProposalService:
             for operation in proposal.patch_document.operations
         )
         return ProposalInspection(
-            proposal_id,
-            proposal.metadata.status.value,
-            proposal.metadata.title,
-            proposal.metadata.description,
-            proposal.body,
-            digest,
-            operations,
-            proposal.metadata.related_sources,
-            tuple(f"{finding.code}: {finding.message}" for finding in loaded.findings),
+            proposal_id=proposal_id,
+            status=proposal.metadata.status.value,
+            title=proposal.metadata.title,
+            created_at=proposal.metadata.created_at,
+            description=proposal.metadata.description,
+            body=proposal.body,
+            review_digest=digest,
+            operations=operations,
+            related_sources=proposal.metadata.related_sources,
+            findings=tuple(
+                f"{finding.code}: {finding.message}" for finding in loaded.findings
+            ),
         )
 
     def prepare(self, *, proposal_id: str, action: ProposalAction) -> ConfirmationChallenge:

@@ -140,6 +140,15 @@ button.lifeos-proposals__proposal small {
   overflow-wrap: anywhere;
 }
 
+button.lifeos-proposals__proposal .lifeos-proposals__created-at {
+  color: var(--text-muted);
+}
+
+button.lifeos-proposals__proposal[aria-current="true"] .lifeos-proposals__created-at {
+  color: inherit;
+  opacity: 0.8;
+}
+
 button.lifeos-proposals__proposal[aria-current="true"] {
   background: var(--interactive-accent);
   color: var(--text-on-accent);

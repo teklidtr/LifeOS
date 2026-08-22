@@ -6,6 +6,7 @@ export interface ProposalInspection {
   proposal_id: string;
   status: string;
   title: string;
+  created_at: string;
   description: string;
   body: string;
   review_digest: string;
@@ -54,6 +55,25 @@ export function proposalActionsForStatus(status: string): ProposalAction[] {
   return [];
 }
 
+export function formatProposalTimestamp(
+  timestamp: string,
+  locale?: Intl.LocalesArgument,
+  timeZone?: string,
+): string {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return timestamp;
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    ...(timeZone ? { timeZone } : {}),
+  }).format(parsed);
+}
+
+function timestampRank(timestamp: string): number {
+  const rank = Date.parse(timestamp);
+  return Number.isNaN(rank) ? Number.NEGATIVE_INFINITY : rank;
+}
+
 export function groupProposalsByStatus(
   proposals: readonly ProposalInspection[],
 ): Array<{ status: string; proposals: ProposalInspection[] }> {
@@ -74,9 +94,12 @@ export function groupProposalsByStatus(
     })
     .map(([status, items]) => ({
       status,
-      proposals: [...items].sort((left, right) =>
-        left.title.localeCompare(right.title) || left.proposal_id.localeCompare(right.proposal_id)
-      ),
+      proposals: [...items].sort((left, right) => {
+        const newestFirst = timestampRank(right.created_at) - timestampRank(left.created_at);
+        return newestFirst
+          || left.title.localeCompare(right.title)
+          || left.proposal_id.localeCompare(right.proposal_id);
+      }),
     }));
 }
 

@@ -9,6 +9,7 @@ import {
   ProposalController,
   ProposalInspection,
   ProposalWorkspaceController,
+  formatProposalTimestamp,
   groupProposalsByStatus,
   proposalActionsForStatus,
 } from "../src/index.js";
@@ -28,6 +29,7 @@ class Client implements BridgeClient {
         proposal_id: "p",
         status: "pending",
         title: "P",
+        created_at: "2026-08-22T12:00:00Z",
         description: "D",
         body: "B",
         review_digest: this.digest,
@@ -59,11 +61,13 @@ function inspection(
   id: string,
   status: string,
   title = id,
+  createdAt = "2026-08-22T12:00:00Z",
 ): ProposalInspection {
   return {
     proposal_id: id,
     status,
     title,
+    created_at: createdAt,
     description: `Description for ${id}`,
     body: `Body for ${id}`,
     review_digest: "d",
@@ -146,8 +150,8 @@ test("changed proposal invalidates confirmation", async () => {
 test("proposal helpers group lifecycle states and expose only valid actions", () => {
   const groups = groupProposalsByStatus([
     inspection("approved", "approved"),
-    inspection("draft-z", "draft", "Z"),
-    inspection("draft-a", "draft", "A"),
+    inspection("draft-old", "draft", "A", "2026-08-22T10:00:00Z"),
+    inspection("draft-new", "draft", "Z", "2026-08-22T11:00:00Z"),
     inspection("custom", "custom"),
   ]);
 
@@ -155,7 +159,7 @@ test("proposal helpers group lifecycle states and expose only valid actions", ()
     group.status,
     group.proposals.map((proposal) => proposal.proposal_id),
   ]), [
-    ["draft", ["draft-a", "draft-z"]],
+    ["draft", ["draft-new", "draft-old"]],
     ["approved", ["approved"]],
     ["custom", ["custom"]],
   ]);
@@ -163,6 +167,14 @@ test("proposal helpers group lifecycle states and expose only valid actions", ()
   assert.deepEqual(proposalActionsForStatus("pending"), ["approve", "reject"]);
   assert.deepEqual(proposalActionsForStatus("approved"), ["apply", "reject"]);
   assert.deepEqual(proposalActionsForStatus("applied"), []);
+});
+
+test("proposal timestamps format locally and preserve malformed values", () => {
+  assert.equal(
+    formatProposalTimestamp("2026-08-22T12:23:09Z", "tr-TR", "Europe/Istanbul"),
+    "22 Ağu 2026 15:23",
+  );
+  assert.equal(formatProposalTimestamp("not-a-date", "tr-TR"), "not-a-date");
 });
 
 test("proposal workspace loads, executes through confirmation, and refreshes", async () => {

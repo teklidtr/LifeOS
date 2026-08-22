@@ -13,6 +13,7 @@ test("production artifact is a self-contained Obsidian CommonJS plugin", async (
   assert.match(source, /lifeos-open-proposals/);
   assert.match(source, /LifeOS Proposals/);
   assert.match(source, /Typed operations/);
+  assert.match(source, /Created/);
 
   class Plugin {}
   class PluginSettingTab {}
@@ -61,6 +62,7 @@ test("proposal workspace artifact wraps long review text within its columns", as
   assert.match(styles, /button\.lifeos-proposals__proposal\s*{[^}]*overflow-wrap:\s*anywhere/s);
   assert.match(styles, /button\.lifeos-proposals__proposal\s*{[^}]*height:\s*auto/s);
   assert.match(styles, /button\.lifeos-proposals__proposal\s*{[^}]*min-height:\s*var\(--input-height\)/s);
+  assert.match(styles, /\.lifeos-proposals__created-at\s*{[^}]*color:\s*var\(--text-muted\)/s);
   assert.match(styles, /\.lifeos-proposals__detail h3,[^{]*{[^}]*word-break:\s*break-word/s);
   assert.match(styles, /@container lifeos-proposals \(max-width:\s*48rem\)/);
 });

@@ -17,6 +17,7 @@ import {
 
 import {
   type ConfirmationChallenge,
+  formatProposalTimestamp,
   groupProposalsByStatus,
   LifeOSPlugin as LifeOSController,
   type ObsidianHost,
@@ -209,6 +210,10 @@ class LifeOSProposalItemView extends ItemView {
           },
         });
         button.createEl("small", { text: proposal.proposal_id });
+        button.createEl("small", {
+          cls: "lifeos-proposals__created-at",
+          text: `Created ${formatProposalTimestamp(proposal.created_at)}`,
+        });
         button.disabled = state.busy !== undefined;
         button.addEventListener("click", () => { void this.controller.select(proposal.proposal_id); });
       }
@@ -230,6 +235,11 @@ class LifeOSProposalItemView extends ItemView {
     const metadata = container.createEl("dl", { cls: "lifeos-proposals__metadata" });
     this.renderMetadata(metadata, "Proposal ID", inspection.proposal_id);
     this.renderMetadata(metadata, "Status", inspection.status);
+    this.renderMetadata(
+      metadata,
+      "Created",
+      formatProposalTimestamp(inspection.created_at),
+    );
     this.renderMetadata(metadata, "Review digest", inspection.review_digest);
 
     const actions = proposalActionsForStatus(inspection.status);

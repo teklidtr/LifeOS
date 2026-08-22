@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1621
 title: Show proposal creation dates in Obsidian
-status: in-progress
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1614
@@ -58,3 +58,26 @@ git diff --check
 - DD-031: Proposal lifecycle metadata remains canonical Markdown.
 - DD-036: Obsidian is the primary interface and Python owns proposal semantics.
 - DD-037: The plugin remains a thin client over the desktop bridge.
+
+# Implementation record
+
+- Added canonical `created_at` to the desktop proposal inspection returned by
+  `proposal.list` and `proposal.inspect`.
+- Added a resilient local date/time formatter for the Obsidian client; malformed
+  values remain visible as their original strings.
+- Rendered creation time on proposal-list rows and in selected-proposal metadata.
+- Sorted proposals newest-first within each lifecycle group with stable title
+  and proposal-ID tie-breakers.
+- Rebuilt and installed the verified JavaScript, stylesheet, and manifest in the
+  configured LifeOS vault.
+
+# Validation record
+
+- Focused desktop proposal tests: 3 passed.
+- Python Ruff and strict mypy checks: passed.
+- Obsidian plugin typecheck: passed.
+- Obsidian plugin tests: 50 passed.
+- Production plugin build: passed.
+- Artifact tests: 2 passed.
+- Installed plugin artifacts match the verified build byte-for-byte.
+- `git diff --check`: passed.
