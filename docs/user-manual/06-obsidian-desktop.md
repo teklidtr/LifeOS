@@ -80,9 +80,16 @@ Markdown notes with durable phases, answers, decisions, continuity, and human-ow
 reflection. Refresh replaces managed evidence only and rejects concurrent edits.
 
 Review suggestions that affect another canonical note create ordinary draft proposals.
-Proposal screens show exact operations and a Python-computed digest. **Approve** and
-**Apply** require separate explicit confirmations. A changed proposal invalidates the UI
-review immediately. See [First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
+Run **Open Proposals** from the command palette to open the dedicated proposal
+workspace. Proposals are grouped by lifecycle state. Select one to inspect its
+rationale, body, source paths, exact typed operations, Python-computed review
+digest, and validation findings.
+
+Use **Submit** to move a draft into review, then separately use **Approve** and
+**Apply**. Pending or approved proposals may be **Rejected**. Every action opens
+an explicit confirmation dialog, and the plugin re-inspects the proposal before
+execution. If its digest changed after review, the action fails without changing
+canonical content. See [First-Class Daily and Weekly Reviews](10-first-class-reviews.md).
 
 ## Personal experiments
 

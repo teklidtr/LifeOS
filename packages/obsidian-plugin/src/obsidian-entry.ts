@@ -1,10 +1,13 @@
 import { join } from "node:path";
 
 import {
+  App,
   FileSystemAdapter,
   getAllTags,
   ItemView,
+  MarkdownRenderer,
   MarkdownView,
+  Modal,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -13,8 +16,14 @@ import {
 } from "obsidian";
 
 import {
+  type ConfirmationChallenge,
+  groupProposalsByStatus,
   LifeOSPlugin as LifeOSController,
   type ObsidianHost,
+  type ProposalAction,
+  type ProposalInspection,
+  proposalActionsForStatus,
+  type ProposalWorkspaceController,
 } from "./index.js";
 import type { LifeOSSettings } from "./protocol.js";
 import { StdioBridgeClient } from "./stdio-bridge-client.js";
@@ -26,6 +35,14 @@ const VIEW_DETAILS: Record<string, { title: string; icon: string }> = {
   [LifeOSController.KNOWLEDGE_CONVERSATION_VIEW_TYPE]: { title: "Knowledge Conversation", icon: "messages-square" },
   [LifeOSController.EXPERIMENT_VIEW_TYPE]: { title: "Personal Experiments", icon: "flask-conical" },
   [LifeOSController.RICH_CAPTURE_VIEW_TYPE]: { title: "Rich Capture", icon: "camera" },
+  [LifeOSController.PROPOSAL_VIEW_TYPE]: { title: "LifeOS Proposals", icon: "file-check-2" },
+};
+
+const ACTION_LABELS: Record<ProposalAction, string> = {
+  submit: "Submit",
+  approve: "Approve",
+  apply: "Apply",
+  reject: "Reject",
 };
 
 function defaultSettings(plugin: Plugin): LifeOSSettings {
@@ -117,6 +134,215 @@ class LifeOSItemView extends ItemView {
   }
 }
 
+class LifeOSProposalItemView extends ItemView {
+  private unsubscribe?: () => void;
+
+  constructor(
+    leaf: WorkspaceLeaf,
+    private readonly controller: ProposalWorkspaceController,
+  ) {
+    super(leaf);
+  }
+
+  getViewType(): string {
+    return LifeOSController.PROPOSAL_VIEW_TYPE;
+  }
+
+  getDisplayText(): string {
+    return VIEW_DETAILS[LifeOSController.PROPOSAL_VIEW_TYPE]?.title ?? "LifeOS Proposals";
+  }
+
+  getIcon(): string {
+    return VIEW_DETAILS[LifeOSController.PROPOSAL_VIEW_TYPE]?.icon ?? "file-check-2";
+  }
+
+  async onOpen(): Promise<void> {
+    this.unsubscribe = this.controller.subscribe(() => this.render());
+    await this.controller.load();
+  }
+
+  async onClose(): Promise<void> {
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+  }
+
+  private render(): void {
+    const state = this.controller.state;
+    this.contentEl.empty();
+    this.contentEl.addClass("lifeos-view", "lifeos-proposals");
+
+    const heading = this.contentEl.createDiv({ cls: "lifeos-proposals__heading" });
+    heading.createEl("h2", { text: this.getDisplayText() });
+    const refresh = heading.createEl("button", { text: "Refresh" });
+    refresh.disabled = state.busy !== undefined;
+    refresh.addEventListener("click", () => { void this.controller.load(); });
+
+    const status = this.contentEl.createEl("p", {
+      cls: `lifeos-state lifeos-state-${state.kind}`,
+      text: state.announcement ?? state.detail,
+    });
+    status.setAttr("role", "status");
+    status.setAttr("aria-live", "polite");
+
+    if (state.kind === "error") {
+      const retry = this.contentEl.createEl("button", { text: "Retry" });
+      retry.addEventListener("click", () => { void this.controller.load(); });
+    }
+    if (state.proposals.length === 0) return;
+
+    const workspace = this.contentEl.createDiv({ cls: "lifeos-proposals__workspace" });
+    const list = workspace.createEl("nav", {
+      cls: "lifeos-proposals__list",
+      attr: { "aria-label": "Proposals by lifecycle status" },
+    });
+    for (const group of groupProposalsByStatus(state.proposals)) {
+      const section = list.createEl("section");
+      section.createEl("h3", {
+        text: `${group.status[0]?.toUpperCase() ?? ""}${group.status.slice(1)} (${group.proposals.length})`,
+      });
+      for (const proposal of group.proposals) {
+        const button = section.createEl("button", {
+          cls: "lifeos-proposals__proposal",
+          text: proposal.title || proposal.proposal_id,
+          attr: {
+            "aria-current": state.selected?.proposal_id === proposal.proposal_id ? "true" : "false",
+          },
+        });
+        button.createEl("small", { text: proposal.proposal_id });
+        button.disabled = state.busy !== undefined;
+        button.addEventListener("click", () => { void this.controller.select(proposal.proposal_id); });
+      }
+    }
+
+    const detail = workspace.createEl("article", { cls: "lifeos-proposals__detail" });
+    const selected = state.selected;
+    if (!selected) {
+      detail.createEl("p", { text: "Select a proposal to inspect it." });
+      return;
+    }
+    this.renderInspection(detail, selected);
+  }
+
+  private renderInspection(container: HTMLElement, inspection: ProposalInspection): void {
+    container.createEl("h3", { text: inspection.title || inspection.proposal_id });
+    container.createEl("p", { text: inspection.description || "No description supplied." });
+
+    const metadata = container.createEl("dl", { cls: "lifeos-proposals__metadata" });
+    this.renderMetadata(metadata, "Proposal ID", inspection.proposal_id);
+    this.renderMetadata(metadata, "Status", inspection.status);
+    this.renderMetadata(metadata, "Review digest", inspection.review_digest);
+
+    const actions = proposalActionsForStatus(inspection.status);
+    if (actions.length > 0) {
+      const controls = container.createDiv({ cls: "lifeos-proposals__actions" });
+      controls.setAttr("aria-label", "Proposal lifecycle actions");
+      for (const action of actions) {
+        const button = controls.createEl("button", { text: ACTION_LABELS[action] });
+        if (action === "approve") button.addClass("mod-cta");
+        if (action === "apply" || action === "reject") button.addClass("mod-warning");
+        button.disabled = this.controller.state.busy !== undefined;
+        button.addEventListener("click", () => { void this.controller.execute(action); });
+      }
+    } else {
+      container.createEl("p", {
+        cls: "lifeos-proposals__terminal-state",
+        text: `This proposal is ${inspection.status}; no lifecycle action is available.`,
+      });
+    }
+
+    container.createEl("h4", { text: "Proposal body" });
+    const body = container.createDiv({ cls: "lifeos-proposals__body markdown-rendered" });
+    if (inspection.body.trim()) {
+      void MarkdownRenderer.render(this.app, inspection.body, body, "", this);
+    } else {
+      body.createEl("p", { text: "No proposal body supplied." });
+    }
+
+    container.createEl("h4", { text: "Related sources" });
+    this.renderStringList(container, inspection.related_sources, "No related sources recorded.");
+
+    container.createEl("h4", { text: "Typed operations" });
+    if (inspection.operations.length === 0) {
+      container.createEl("p", { text: "No operations recorded." });
+    } else {
+      inspection.operations.forEach((operation, index) => {
+        const operationContainer = container.createEl("section", {
+          cls: "lifeos-proposals__operation",
+        });
+        operationContainer.createEl("h5", { text: `Operation ${index + 1}` });
+        operationContainer.createEl("pre", { text: JSON.stringify(operation, null, 2) });
+      });
+    }
+
+    container.createEl("h4", { text: "Validation findings" });
+    this.renderStringList(container, inspection.findings, "No validation findings.");
+  }
+
+  private renderMetadata(container: HTMLElement, label: string, value: string): void {
+    container.createEl("dt", { text: label });
+    container.createEl("dd", { text: value || "Not available" });
+  }
+
+  private renderStringList(container: HTMLElement, values: string[], emptyText: string): void {
+    if (values.length === 0) {
+      container.createEl("p", { text: emptyText });
+      return;
+    }
+    const list = container.createEl("ul");
+    for (const value of values) list.createEl("li", { text: value });
+  }
+}
+
+class ProposalConfirmationModal extends Modal {
+  private settled = false;
+
+  constructor(
+    app: App,
+    private readonly challenge: ConfirmationChallenge,
+    private readonly inspection: ProposalInspection,
+    private readonly resolve: (confirmed: boolean) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const action = ACTION_LABELS[this.challenge.action];
+    this.setTitle(`${action} proposal?`);
+    this.contentEl.createEl("p", {
+      text: `${action} “${this.inspection.title || this.inspection.proposal_id}”.`,
+    });
+    this.contentEl.createEl("p", {
+      text: this.challenge.action === "apply"
+        ? "Applying changes canonical vault content. Approval and application remain separate actions."
+        : "This action changes the proposal lifecycle state.",
+    });
+    this.contentEl.createEl("p", {
+      cls: "lifeos-proposals__confirmation-digest",
+      text: `Reviewed digest: ${this.challenge.review_digest}`,
+    });
+
+    const controls = this.contentEl.createDiv({ cls: "modal-button-container" });
+    const cancel = controls.createEl("button", { text: "Cancel" });
+    cancel.addEventListener("click", () => this.finish(false));
+    const confirm = controls.createEl("button", { text: `${action} proposal` });
+    confirm.addClass(this.challenge.action === "approve" ? "mod-cta" : "mod-warning");
+    confirm.addEventListener("click", () => this.finish(true));
+    confirm.focus();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.settled) this.finish(false, false);
+  }
+
+  private finish(confirmed: boolean, close = true): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.resolve(confirmed);
+    if (close) this.close();
+  }
+}
+
 class ObsidianHostAdapter implements ObsidianHost {
   constructor(private readonly plugin: LifeOSObsidianPlugin) {}
 
@@ -132,7 +358,14 @@ class ObsidianHostAdapter implements ObsidianHost {
   }
 
   registerView(type: string, factory: () => unknown): () => void {
-    this.plugin.registerView(type, (leaf) => new LifeOSItemView(leaf, type, factory()));
+    this.plugin.registerView(type, (leaf) => {
+      const model = factory();
+      if (type === LifeOSController.PROPOSAL_VIEW_TYPE) {
+        const proposalView = model as { controller: ProposalWorkspaceController };
+        return new LifeOSProposalItemView(leaf, proposalView.controller);
+      }
+      return new LifeOSItemView(leaf, type, model);
+    });
     return () => {
       void this.plugin.app.workspace.detachLeavesOfType(type);
     };
@@ -168,6 +401,15 @@ class ObsidianHostAdapter implements ObsidianHost {
   openFilePath(path: string): void {
     const file = this.plugin.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) void this.plugin.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  confirmProposal(
+    challenge: ConfirmationChallenge,
+    inspection: ProposalInspection,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      new ProposalConfirmationModal(this.plugin.app, challenge, inspection, resolve).open();
+    });
   }
 
   private async openViewAsync(type: string): Promise<void> {

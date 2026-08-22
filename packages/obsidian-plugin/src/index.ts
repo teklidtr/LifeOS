@@ -8,6 +8,11 @@ import { emptyScope } from "./knowledge-conversation.js";
 import { ExperimentWorkspaceController, ExperimentWorkspaceOrigin } from "./experiment-workspace.js";
 import { RichCaptureOrigin, RichCaptureWorkspaceController } from "./rich-capture-workspace.js";
 import { CaptureType } from "./rich-capture.js";
+import {
+  ConfirmationChallenge,
+  ProposalInspection,
+  ProposalWorkspaceController,
+} from "./proposals.js";
 
 export interface ObsidianHost {
   addRibbonIcon(icon: string, title: string, callback: () => void): () => void;
@@ -20,6 +25,10 @@ export interface ObsidianHost {
   getActiveFolderPath?(): string | undefined;
   getActiveTag?(): string | undefined;
   openFilePath?(path: string): void;
+  confirmProposal?(
+    challenge: ConfirmationChallenge,
+    inspection: ProposalInspection,
+  ): Promise<boolean>;
 }
 
 export class LifeOSView {
@@ -58,6 +67,10 @@ export class RichCaptureWorkspaceView {
   refresh(): void { this.refreshCount += 1; }
 }
 
+export class ProposalWorkspaceView {
+  constructor(readonly controller: ProposalWorkspaceController) {}
+}
+
 export class LifeOSPlugin {
   static readonly VIEW_TYPE = "lifeos-today";
   static readonly COPILOT_VIEW_TYPE = "lifeos-goal-plan";
@@ -65,6 +78,7 @@ export class LifeOSPlugin {
   static readonly KNOWLEDGE_CONVERSATION_VIEW_TYPE = "lifeos-knowledge-conversation";
   static readonly EXPERIMENT_VIEW_TYPE = "lifeos-experiments";
   static readonly RICH_CAPTURE_VIEW_TYPE = "lifeos-rich-capture";
+  static readonly PROPOSAL_VIEW_TYPE = "lifeos-proposals";
   readonly view = new LifeOSView();
   readonly copilot: GoalPlanWorkspaceController;
   readonly copilotView: GoalPlanWorkspaceView;
@@ -76,6 +90,8 @@ export class LifeOSPlugin {
   readonly experimentView: ExperimentWorkspaceView;
   readonly richCaptures: RichCaptureWorkspaceController;
   readonly richCaptureView: RichCaptureWorkspaceView;
+  readonly proposals: ProposalWorkspaceController;
+  readonly proposalView: ProposalWorkspaceView;
   readonly connection: ConnectionManager;
   private disposers: Array<() => void> = [];
 
@@ -84,7 +100,10 @@ export class LifeOSPlugin {
     client: BridgeClient,
     readonly settings: LifeOSSettings,
   ) {
-    this.connection = new ConnectionManager(client, () => this.view.refresh());
+    this.connection = new ConnectionManager(client, () => {
+      this.view.refresh();
+      this.proposals.invalidate();
+    });
     this.copilot = new GoalPlanWorkspaceController(client);
     this.copilotView = new GoalPlanWorkspaceView(this.copilot);
     this.reviews = new ReviewWorkspaceController(client, (path) => this.host.openFilePath?.(path));
@@ -95,6 +114,12 @@ export class LifeOSPlugin {
     this.experimentView = new ExperimentWorkspaceView(this.experiments);
     this.richCaptures = new RichCaptureWorkspaceController(client, (path) => this.host.openFilePath?.(path));
     this.richCaptureView = new RichCaptureWorkspaceView(this.richCaptures);
+    this.proposals = new ProposalWorkspaceController(
+      client,
+      (challenge, inspection) => this.host.confirmProposal?.(challenge, inspection)
+        ?? Promise.resolve(false),
+    );
+    this.proposalView = new ProposalWorkspaceView(this.proposals);
   }
 
   async load(): Promise<void> {
@@ -104,6 +129,7 @@ export class LifeOSPlugin {
     this.disposers.push(this.host.registerView(LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE, () => this.knowledgeConversationView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.EXPERIMENT_VIEW_TYPE, () => this.experimentView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE, () => this.richCaptureView));
+    this.disposers.push(this.host.registerView(LifeOSPlugin.PROPOSAL_VIEW_TYPE, () => this.proposalView));
     this.disposers.push(this.host.addRibbonIcon("layout-dashboard", "Open LifeOS", () => this.openToday()));
     this.disposers.push(this.host.addRibbonIcon("messages-square", "Open Knowledge Conversation", () => this.openKnowledgeConversation("ribbon")));
     this.disposers.push(this.host.addRibbonIcon("flask-conical", "Open Personal Experiments", () => this.openExperiments("ribbon")));
@@ -166,6 +192,7 @@ export class LifeOSPlugin {
       this.openExperiments("history"); void this.experiments.loadHistory();
     }));
     this.disposers.push(this.host.addCommand("lifeos-open-rich-capture", "Open Rich Capture", () => this.openRichCapture("command-palette")));
+    this.disposers.push(this.host.addCommand("lifeos-open-proposals", "Open Proposals", () => this.openProposals()));
     this.disposers.push(this.host.addCommand("lifeos-quick-capture-meal", "Quick Capture Meal", () => this.openRichCapture("command-palette", "meal")));
     this.disposers.push(this.host.addCommand("lifeos-quick-capture-exercise", "Quick Capture Exercise", () => this.openRichCapture("command-palette", "exercise")));
     this.disposers.push(this.host.addCommand("lifeos-capture-selection", "Capture Selected Text", () => {
@@ -215,6 +242,10 @@ export class LifeOSPlugin {
   openRichCapture(origin: RichCaptureOrigin, captureType: CaptureType = "attachment", description = "", sourcePath?: string): void {
     this.richCaptures.prepare(origin, captureType, description, sourcePath);
     this.host.openView(LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE);
+  }
+
+  openProposals(): void {
+    this.host.openView(LifeOSPlugin.PROPOSAL_VIEW_TYPE);
   }
 
   private experimentOrigin(path?: string): ExperimentWorkspaceOrigin {
