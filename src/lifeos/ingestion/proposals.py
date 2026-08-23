@@ -13,6 +13,7 @@ import sys
 from typing import Any
 
 from lifeos.ingestion import _proposals_core as _core
+from lifeos.ingestion._proposals_core import *  # noqa: F403
 from lifeos.ingestion.drafts import SourceSnapshot
 from lifeos.ingestion.provenance import (
     LifeOSProvenance,
