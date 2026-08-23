@@ -103,19 +103,27 @@ _original_build_compounding_wiki_proposal = _core.build_compounding_wiki_proposa
 _original_build_study_learning_proposal = _core.build_study_learning_proposal
 
 
-def build_wiki_section_update_proposal(*, source: SourceSnapshot, **kwargs: Any) -> Any:
+def build_wiki_section_update_proposal(  # type: ignore[no-redef]
+    *, source: SourceSnapshot, **kwargs: Any
+) -> Any:
     return _with_source(_original_build_wiki_section_update_proposal, source=source, **kwargs)
 
 
-def build_compound_wiki_proposal(*, source: SourceSnapshot, **kwargs: Any) -> Any:
+def build_compound_wiki_proposal(  # type: ignore[no-redef]
+    *, source: SourceSnapshot, **kwargs: Any
+) -> Any:
     return _with_source(_original_build_compound_wiki_proposal, source=source, **kwargs)
 
 
-def build_compounding_wiki_proposal(*, source: SourceSnapshot, **kwargs: Any) -> Any:
+def build_compounding_wiki_proposal(  # type: ignore[no-redef]
+    *, source: SourceSnapshot, **kwargs: Any
+) -> Any:
     return _with_source(_original_build_compounding_wiki_proposal, source=source, **kwargs)
 
 
-def build_study_learning_proposal(*, source: SourceSnapshot, **kwargs: Any) -> Any:
+def build_study_learning_proposal(  # type: ignore[no-redef]
+    *, source: SourceSnapshot, **kwargs: Any
+) -> Any:
     return _with_source(_original_build_study_learning_proposal, source=source, **kwargs)
 
 
