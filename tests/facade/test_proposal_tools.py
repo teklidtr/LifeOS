@@ -19,17 +19,21 @@ from lifeos.facade.proposal_tools import (
     COMPOUND_WIKI_PROPOSAL_DESCRIPTOR,
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
     EVOLVE_WIKI_PROPOSAL_DESCRIPTOR,
+    STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR,
     UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
     CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
     EvolveWikiCreateRequest,
     EvolveWikiProposalRequest,
     EvolveWikiUpdateRequest,
+    StudyFlashcardCreateRequest,
+    EvolveStudyLearningProposalRequest,
     CreateWikiProposalResult,
     UpdateWikiSectionProposalRequest,
     create_wiki_and_update_section_proposal,
     create_wiki_proposal,
     evolve_wiki_proposal,
+    evolve_study_learning_proposal,
     update_wiki_section_proposal,
 )
 from lifeos.ingestion.orchestration import (
@@ -1122,3 +1126,136 @@ def test_evolve_wiki_builds_multi_target_agent_selected_draft(tmp_path: Path) ->
     proposal_text = (vault_root / result.proposal_path / "proposal.md").read_text()
     assert "Folder names are agent-selected organization" in proposal_text
     assert "Reuse the existing learning hub" in proposal_text
+
+
+@pytest.mark.parametrize("source_root", ["raw", "journal", "experiments", "goals", "study"])
+def test_evolve_wiki_accepts_registered_canonical_sources_across_vault_areas(
+    tmp_path: Path, source_root: str
+) -> None:
+    vault_root = tmp_path / source_root / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    source = vault_root / source_root / "source.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("Canonical evidence.\n", encoding="utf-8")
+    _write_ownership(vault_root)
+
+    registry = Registry(tmp_path / source_root / "registry.db")
+    registry.initialize()
+    from lifeos.registry.file_tracking import register_scan
+    from lifeos.scanner import VaultFile
+
+    register_scan(
+        registry,
+        vault_root,
+        [VaultFile(Path(f"{source_root}/source.md"), ".md", source.stat().st_size)],
+    )
+    result = evolve_wiki_proposal(
+        vault_root=vault_root,
+        registry=registry,
+        request=EvolveWikiProposalRequest(
+            source_path=f"{source_root}/source.md",
+            creates=(
+                EvolveWikiCreateRequest(
+                    target_path=f"wiki/{source_root}-insight.md",
+                    title=f"{source_root.title()} insight",
+                    body="Durable knowledge grounded in canonical evidence.",
+                    rationale="The evidence is worth preserving as reusable knowledge.",
+                ),
+            ),
+        ),
+        clock_fn=lambda: datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+        random_suffix_fn=lambda: "abcdef12",
+    )
+    assert result.status == "draft"
+    assert result.target_paths == (f"wiki/{source_root}-insight.md",)
+
+
+def test_study_learning_descriptor() -> None:
+    assert STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR.name == "study.evolve_learning_proposal"
+    assert STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
+
+
+def test_study_learning_proposal_combines_wiki_and_flashcards(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    for root in ("proposals", "wiki", "flashcards", "study"):
+        (vault_root / root).mkdir(parents=True, exist_ok=True)
+    _write_ownership(vault_root)
+    registry = _registered_source(vault_root, tmp_path)
+
+    result = evolve_study_learning_proposal(
+        vault_root=vault_root,
+        registry=registry,
+        request=EvolveStudyLearningProposalRequest(
+            source_path="study/source.md",
+            wiki_creates=(EvolveWikiCreateRequest(
+                target_path="wiki/traffic/right-of-way.md",
+                title="Right of way",
+                body="Durable explanation.",
+                rationale="This concept is reused across the study material.",
+            ),),
+            flashcards=(StudyFlashcardCreateRequest(
+                target_path="flashcards/driving-licence/right-of-way.md",
+                card_id="driving-right-of-way",
+                topic="Driving licence",
+                question="Who yields at an uncontrolled intersection?",
+                answer="Apply the reviewed right-of-way rule.",
+                rationale="This distinction is exam-relevant and easy to confuse.",
+                learning_context="Turkish driving licence exam",
+                knowledge_refs=("wiki/traffic/right-of-way.md",),
+            ),),
+        ),
+        clock_fn=lambda: datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
+        random_suffix_fn=lambda: "abcdef12",
+    )
+
+    assert result.status == "draft"
+    assert result.target_paths == (
+        "wiki/traffic/right-of-way.md",
+        "flashcards/driving-licence/right-of-way.md",
+    )
+    from lifeos.proposals.loader import load_proposal_directory
+    loaded = load_proposal_directory(
+        vault_root / result.proposal_path, proposals_root=vault_root / "proposals"
+    ).proposal
+    assert loaded is not None
+    assert [op.op for op in loaded.patch_document.operations] == [
+        "create_generated_file", "create_generated_file"
+    ]
+    card = loaded.patch_document.operations[1].new_content
+    assert "type: flashcard" in card
+    assert "learning_context: Turkish driving licence exam" in card
+    assert "study/source.md" in card
+    assert "wiki/traffic/right-of-way.md" in card
+    assert "due: '2026-08-23'" in card or "due: 2026-08-23" in card
+
+
+def test_study_learning_proposal_rejects_non_study_source(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    for root in ("proposals", "wiki", "flashcards", "raw"):
+        (vault_root / root).mkdir(parents=True, exist_ok=True)
+    _write_ownership(vault_root)
+    source = vault_root / "raw/source.md"
+    source.write_text("Raw source.\n", encoding="utf-8")
+    registry = Registry(tmp_path / "raw-registry.db")
+    registry.initialize()
+    from lifeos.registry.file_tracking import register_scan
+    from lifeos.scanner import VaultFile
+    register_scan(
+        registry,
+        vault_root,
+        [VaultFile(Path("raw/source.md"), ".md", source.stat().st_size)],
+    )
+
+    with pytest.raises(ToolValidationError, match="requires a registered source under study"):
+        evolve_study_learning_proposal(
+            vault_root=vault_root, registry=registry,
+            request=EvolveStudyLearningProposalRequest(
+                source_path="raw/source.md",
+                flashcards=(StudyFlashcardCreateRequest(
+                    target_path="flashcards/raw.md", card_id="raw-card", topic="Raw",
+                    question="Q?", answer="A", rationale="Explicit test rationale.",
+                    learning_context="raw",
+                ),),
+            ),
+        )

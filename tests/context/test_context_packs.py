@@ -154,3 +154,46 @@ def test_context_pack_does_not_claim_omissions_when_all_results_fit(tmp_path: Pa
 
     assert len(pack.sources) == 2
     assert "Results were limited to the top 2 sources." not in pack.omissions
+
+
+def test_context_pack_focus_path_is_included_without_lexical_match(tmp_path: Path) -> None:
+    _write_note(
+        tmp_path,
+        "study/driving-licence/intersections.md",
+        title="Intersections",
+        description="Priority rules.",
+        body="Uncontrolled junction priority and emergency vehicles.",
+    )
+    _write_note(
+        tmp_path,
+        "goals/pass-driving-licence.md",
+        title="Pass driving licence",
+        description="Prepare for the Turkish driving licence exam.",
+        body="Exam preparation goal.",
+    )
+    instructions = tmp_path / "system" / "instructions.yml"
+    instructions.parent.mkdir(exist_ok=True)
+    instructions.write_text(
+        "schema_version: 1\n"
+        "instructions:\n"
+        "  - id: driving-exam\n"
+        "    authority: system\n"
+        "    scope: path\n"
+        "    priority: 100\n"
+        "    text: Prioritize exam-relevant distinctions.\n"
+        "    paths: [study/driving-licence/**]\n",
+        encoding="utf-8",
+    )
+
+    pack = build_context_pack(
+        vault_root=tmp_path,
+        question="What should I remember for the exam?",
+        focus_paths=("study/driving-licence/intersections.md",),
+    )
+
+    assert pack.sources[0].path == "study/driving-licence/intersections.md"
+    assert "goals/pass-driving-licence.md" in {item.path for item in pack.sources}
+    assert [item.id for item in pack.instructions] == ["driving-exam"]
+    assert pack.instructions[0].applicable_sources == (
+        "study/driving-licence/intersections.md",
+    )

@@ -12,9 +12,12 @@ from lifeos.facade.models import ToolEffect
 from lifeos.facade.read_only import (
     READ_MARKDOWN_DESCRIPTOR,
     WIKI_SEARCH_DESCRIPTOR,
+    VAULT_CONTEXT_DESCRIPTOR,
     ReadMarkdownRequest,
     ReadMarkdownResult,
     WikiSearchRequest,
+    VaultContextRequest,
+    get_vault_context,
     read_markdown,
     search_wiki,
 )
@@ -257,3 +260,33 @@ def test_wiki_search_request_is_bounded() -> None:
         WikiSearchRequest(query="   ")
     with pytest.raises(ValueError, match="between 1 and 20"):
         WikiSearchRequest(query="learning", limit=21)
+
+
+def test_vault_context_is_read_only_and_applies_focus_path_instruction(tmp_path: Path) -> None:
+    source = tmp_path / "study/driving-licence/intersections.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("---\ntitle: Intersections\n---\nRules.\n", encoding="utf-8")
+    instructions = tmp_path / "system/instructions.yml"
+    instructions.parent.mkdir()
+    instructions.write_text(
+        "schema_version: 1\ninstructions:\n"
+        "  - id: driving-exam\n"
+        "    authority: system\n"
+        "    scope: path\n"
+        "    priority: 100\n"
+        "    text: Prioritize exam distinctions.\n"
+        "    paths: [study/driving-licence/**]\n",
+        encoding="utf-8",
+    )
+
+    result = get_vault_context(
+        vault_root=tmp_path,
+        request=VaultContextRequest(
+            question="exam priorities",
+            focus_paths=("study/driving-licence/intersections.md",),
+        ),
+    )
+
+    assert VAULT_CONTEXT_DESCRIPTOR.effect == ToolEffect.READ_ONLY
+    assert result.sources[0].path == "study/driving-licence/intersections.md"
+    assert [item.id for item in result.instructions] == ["driving-exam"]

@@ -36,23 +36,30 @@ from lifeos.facade.proposal_tools import (
     COMPOUND_WIKI_PROPOSAL_DESCRIPTOR,
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
     EVOLVE_WIKI_PROPOSAL_DESCRIPTOR,
+    STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR,
     UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
     CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
     EvolveWikiCreateRequest,
     EvolveWikiProposalRequest,
     EvolveWikiUpdateRequest,
+    StudyFlashcardCreateRequest,
+    EvolveStudyLearningProposalRequest,
     UpdateWikiSectionProposalRequest,
     create_wiki_and_update_section_proposal,
     create_wiki_proposal,
     evolve_wiki_proposal,
+    evolve_study_learning_proposal,
     update_wiki_section_proposal,
 )
 from lifeos.facade.read_only import (
     READ_MARKDOWN_DESCRIPTOR,
     WIKI_SEARCH_DESCRIPTOR,
+    VAULT_CONTEXT_DESCRIPTOR,
     ReadMarkdownRequest,
     WikiSearchRequest,
+    VaultContextRequest,
+    get_vault_context,
     read_markdown,
     search_wiki,
 )
@@ -72,8 +79,12 @@ from lifeos.mcp.models import (
     SubmitProposalMCPResult,
     UpdateWikiSectionProposalMCPResult,
     WikiSearchMCPResult,
+    VaultContextMCPResult,
+    StudyLearningProposalMCPResult,
+    RuntimeActivityMCPResult,
 )
 from lifeos.registry import Registry
+from lifeos.runtime import ActivityStore
 from lifeos.wiki.layout import WikiPageKind
 
 logger = logging.getLogger(__name__)
@@ -102,26 +113,42 @@ class EvolveWikiUpdateMCPInput(BaseModel):
     tags: list[str] | None = None
     tag_rationale: str | None = None
 
+
+class StudyFlashcardCreateMCPInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_path: str
+    card_id: str
+    topic: str
+    question: str
+    answer: str
+    rationale: str
+    learning_context: str
+    knowledge_refs: list[str] | None = None
+    estimated_seconds: int = 30
+
 LIFEOS_MCP_INSTRUCTIONS = (
-    "LifeOS keeps Markdown canonical and does not prescribe a universal wiki taxonomy. "
-    "For ingestion, first call registry_refresh, then vault_read_markdown for the registered "
-    "raw source. Search existing durable knowledge with wiki_search using the source's main "
-    "ideas, then read the relevant wiki hits before choosing mutations. Decide what would "
-    "make the wiki more useful: reuse existing notes when possible, create new notes or "
-    "folders only when they are durable and useful, and allow structure under wiki/ to "
-    "emerge from the vault rather than forcing entity/concept/source/synthesis folders. "
-    "raw/ is evidence; wiki/ is accumulated knowledge, so do not create wiki/source mirrors "
-    "merely to duplicate raw material. If the source adds no durable knowledge, create no "
-    "proposal. Otherwise prefer ingestion_evolve_wiki_proposal with 1..12 distinct, "
-    "source-grounded creates and/or exact-section updates, each with a concise rationale. "
-    "LifeOS selects human patches or generated replacements from canonical ownership and "
-    "keeps every consequential mutation reviewable. The older single-create, single-update, "
-    "typed page_kind routing, and fixed two-operation tools remain compatibility APIs, not "
-    "the preferred filing model. If ownership is orphaned, stop and report the "
-    "restore-or-release remediation. Stop after the draft proposal unless the user explicitly "
-    "requests another exact lifecycle transition. Never call proposal_submit, "
-    "proposal_approve, or proposal_apply merely because ingestion was requested. Use "
-    "vault-relative paths and never directly rewrite canonical notes."
+    "LifeOS keeps user-owned Markdown canonical and constrains mutations rather than "
+    "prescribing a universal semantic taxonomy. Application AGENTS.md governs LifeOS "
+    "development; it is not the runtime contract. Use vault_context when goals, study "
+    "purpose, journal context, experiments, or path-scoped system/instructions.yml rules "
+    "could change how a source should be interpreted. Folder location supplies context, "
+    "not permission: any registered canonical Markdown source may ground durable wiki "
+    "evolution when relevant. Before wiki mutation, refresh the registry as needed, read "
+    "the source, search existing durable knowledge with wiki_search, and read relevant hits. "
+    "Prefer reuse over creation and allow useful wiki folders to emerge from the vault. "
+    "If no durable knowledge changes, create no proposal. Otherwise use "
+    "ingestion_evolve_wiki_proposal for 1..12 reviewed wiki mutations. For a registered "
+    "study/ source, use vault_context first when learning purpose matters; "
+    "study_evolve_learning_proposal may combine selective flashcards with wiki evolution. "
+    "Flashcard selection should reflect the inferred learning context, such as exam relevance, "
+    "future prerequisites, conceptual leverage, mechanisms, or confusions, rather than "
+    "generating cards for every fact. Do not generate flashcards from non-study sources by "
+    "default. LifeOS verifies paths, hashes, ownership, provenance, operation bounds, review "
+    "snapshots, and atomic application. Stop after draft unless the user explicitly requests "
+    "an exact submit, approve, or apply transition. Never rewrite canonical notes directly "
+    "when a proposal workflow exists. runtime_activity is read-only disposable diagnostics "
+    "and contains routing metadata, not canonical note bodies."
 )
 
 
@@ -137,6 +164,21 @@ READ_MARKDOWN_MCP_DESCRIPTION = (
 WIKI_SEARCH_MCP_DESCRIPTION = (
     f"{WIKI_SEARCH_DESCRIPTOR.description} Search after reading a source and before choosing "
     "wiki targets. Results are restricted to wiki/ and are read-only."
+)
+VAULT_CONTEXT_MCP_DESCRIPTION = (
+    f"{VAULT_CONTEXT_DESCRIPTOR.description} Use explicit focus_paths for the source(s) the "
+    "user is working with so path/domain instructions apply even when lexical search would "
+    "not retrieve those files. This is read-only and grants no mutation authority."
+)
+STUDY_EVOLVE_LEARNING_MCP_DESCRIPTION = (
+    f"{STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR.description} Use only for a registered "
+    "study/ source after gathering relevant vault context. The external agent chooses which "
+    "facts merit retrieval practice for the inferred learning goal; LifeOS validates the "
+    "bounded reviewed mutations. This creates only a draft."
+)
+RUNTIME_ACTIVITY_MCP_DESCRIPTION = (
+    "Read recent disposable MCP routing/activity metadata for debugging. Records contain "
+    "tool names, paths, instruction IDs, proposal IDs and counts, not canonical Markdown bodies."
 )
 EVOLVE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{EVOLVE_WIKI_PROPOSAL_DESCRIPTOR.description} Prefer this after wiki_search and "
@@ -243,11 +285,20 @@ def _invoke_mcp_tool(operation: Callable[[], T]) -> T:
 
 
 def create_mcp_server(
-    *, vault_root: Path, registry: Registry, authorizer: ConsequentialAuthorizer
+    *,
+    vault_root: Path,
+    registry: Registry,
+    authorizer: ConsequentialAuthorizer,
+    runtime_dir: Path | None = None,
 ) -> FastMCP:
+    activity = ActivityStore(runtime_dir or (vault_root / ".lifeos"))
     def registry_refresh_tool() -> RegistryRefreshMCPResult:
         def op() -> RegistryRefreshMCPResult:
             result = refresh_registry(vault_root=vault_root, registry=registry)
+            activity.append(
+                tool="registry_refresh",
+                changed_paths=[*result.new, *result.modified, *result.deleted],
+            )
             return {
                 "new": list(result.new),
                 "modified": list(result.modified),
@@ -263,6 +314,7 @@ def create_mcp_server(
             res = read_markdown(
                 vault_root=vault_root, request=ReadMarkdownRequest(vault_path=vault_path)
             )
+            activity.append(tool="vault_read_markdown", source_paths=[res.vault_path])
             return {
                 "vault_path": res.vault_path,
                 "markdown_body": res.markdown_body,
@@ -272,10 +324,62 @@ def create_mcp_server(
 
         return _invoke_mcp_tool(op)
 
+    def vault_context_tool(
+        question: str, focus_paths: list[str] | None = None, limit: int = 8
+    ) -> VaultContextMCPResult:
+        def op() -> VaultContextMCPResult:
+            pack = get_vault_context(
+                vault_root=vault_root,
+                request=VaultContextRequest(
+                    question=question, focus_paths=tuple(focus_paths or ()), limit=limit
+                ),
+            )
+            activity.append(
+                tool="vault_context",
+                focus_paths=list(focus_paths or ()),
+                instruction_ids=[item.id for item in pack.instructions],
+                source_paths=[item.path for item in pack.sources],
+            )
+            return {
+                "question": pack.question,
+                "instructions": [
+                    {
+                        "id": item.id, "text": item.text, "authority": item.authority,
+                        "scope": item.scope, "priority": item.priority,
+                        "applicable_sources": list(item.applicable_sources),
+                        "applicability": list(item.applicability),
+                    }
+                    for item in pack.instructions
+                ],
+                "sources": [
+                    {
+                        "path": item.path, "title": item.title,
+                        "description": item.description, "excerpt": item.excerpt,
+                        "score": item.score,
+                    }
+                    for item in pack.sources
+                ],
+                "evidence_gaps": list(pack.evidence_gaps),
+                "omissions": list(pack.omissions),
+                "diagnostics": [
+                    {
+                        "code": item.code, "severity": item.severity,
+                        "source_path": item.source_path, "line": item.line,
+                        "message": item.message,
+                    }
+                    for item in pack.diagnostics
+                ],
+            }
+
+        return _invoke_mcp_tool(op)
+
     def wiki_search_tool(query: str, limit: int = 8) -> WikiSearchMCPResult:
         def op() -> WikiSearchMCPResult:
             result = search_wiki(
                 vault_root=vault_root, request=WikiSearchRequest(query=query, limit=limit)
+            )
+            activity.append(
+                tool="wiki_search", source_paths=[hit.path for hit in result.hits]
             )
             return {
                 "query": result.query,
@@ -328,12 +432,71 @@ def create_mcp_server(
                     ),
                 ),
             )
+            activity.append(
+                tool="ingestion_evolve_wiki_proposal", source_paths=[source_path],
+                proposal_id=result.proposal_id, target_paths=list(result.target_paths),
+                operation_count=result.operation_count,
+            )
             return {
                 "proposal_id": result.proposal_id,
                 "proposal_path": result.proposal_path,
                 "target_paths": list(result.target_paths),
                 "operation_count": result.operation_count,
                 "status": "draft",
+            }
+
+        return _invoke_mcp_tool(op)
+
+    def study_evolve_learning_proposal_tool(
+        source_path: str,
+        wiki_creates: list[EvolveWikiCreateMCPInput] | None = None,
+        wiki_updates: list[EvolveWikiUpdateMCPInput] | None = None,
+        flashcards: list[StudyFlashcardCreateMCPInput] | None = None,
+    ) -> StudyLearningProposalMCPResult:
+        def op() -> StudyLearningProposalMCPResult:
+            result = evolve_study_learning_proposal(
+                vault_root=vault_root,
+                registry=registry,
+                request=EvolveStudyLearningProposalRequest(
+                    source_path=source_path,
+                    wiki_creates=tuple(
+                        EvolveWikiCreateRequest(
+                            target_path=item.target_path, title=item.title, body=item.body,
+                            rationale=item.rationale, tags=tuple(item.tags or ()),
+                            tag_rationale=item.tag_rationale,
+                        )
+                        for item in wiki_creates or []
+                    ),
+                    wiki_updates=tuple(
+                        EvolveWikiUpdateRequest(
+                            target_path=item.target_path, heading=item.heading, body=item.body,
+                            rationale=item.rationale,
+                            tags=None if item.tags is None else tuple(item.tags),
+                            tag_rationale=item.tag_rationale,
+                        )
+                        for item in wiki_updates or []
+                    ),
+                    flashcards=tuple(
+                        StudyFlashcardCreateRequest(
+                            target_path=item.target_path, card_id=item.card_id, topic=item.topic,
+                            question=item.question, answer=item.answer, rationale=item.rationale,
+                            learning_context=item.learning_context,
+                            knowledge_refs=tuple(item.knowledge_refs or ()),
+                            estimated_seconds=item.estimated_seconds,
+                        )
+                        for item in flashcards or []
+                    ),
+                ),
+            )
+            activity.append(
+                tool="study_evolve_learning_proposal", source_paths=[source_path],
+                proposal_id=result.proposal_id, target_paths=list(result.target_paths),
+                operation_count=result.operation_count,
+            )
+            return {
+                "proposal_id": result.proposal_id, "proposal_path": result.proposal_path,
+                "target_paths": list(result.target_paths),
+                "operation_count": result.operation_count, "status": "draft",
             }
 
         return _invoke_mcp_tool(op)
@@ -362,6 +525,10 @@ def create_mcp_server(
                     page_kind=page_kind,
                     slug=slug,
                 ),
+            )
+            activity.append(
+                tool="ingestion_create_wiki_proposal", source_paths=[source_path],
+                proposal_id=res.proposal_id, target_paths=[res.target_path], operation_count=1,
             )
             return {
                 "proposal_id": res.proposal_id,
@@ -392,6 +559,10 @@ def create_mcp_server(
                     tags=None if tags is None else tuple(tags),
                     tag_rationale=tag_rationale,
                 ),
+            )
+            activity.append(
+                tool="ingestion_update_wiki_section_proposal", source_paths=[source_path],
+                proposal_id=res.proposal_id, target_paths=[res.target_path], operation_count=1,
             )
             return {
                 "proposal_id": res.proposal_id,
@@ -434,6 +605,11 @@ def create_mcp_server(
                     create_slug=create_slug,
                 ),
             )
+            activity.append(
+                tool="ingestion_create_wiki_and_update_section_proposal",
+                source_paths=[source_path], proposal_id=res.proposal_id,
+                target_paths=[res.create_target_path, res.update_target_path], operation_count=2,
+            )
             return {
                 "proposal_id": res.proposal_id,
                 "proposal_path": res.proposal_path,
@@ -452,6 +628,7 @@ def create_mcp_server(
                 authorizer=authorizer,
                 request=SubmitProposalRequest(proposal_id=proposal_id),
             )
+            activity.append(tool="proposal_submit", proposal_id=res.proposal_id)
             return {
                 "proposal_id": res.proposal_id,
                 "status": "pending",
@@ -467,6 +644,7 @@ def create_mcp_server(
                 authorizer=authorizer,
                 request=ApproveProposalRequest(proposal_id=proposal_id),
             )
+            activity.append(tool="proposal_approve", proposal_id=res.proposal_id)
             return {
                 "proposal_id": res.proposal_id,
                 "status": "approved",
@@ -482,6 +660,10 @@ def create_mcp_server(
                 authorizer=authorizer,
                 request=ApplyProposalRequest(proposal_id=proposal_id),
             )
+            activity.append(
+                tool="proposal_apply", proposal_id=res.proposal_id,
+                changed_paths=list(res.changed_paths),
+            )
             return {
                 "proposal_id": res.proposal_id,
                 "status": "applied",
@@ -489,6 +671,27 @@ def create_mcp_server(
             }
 
         return _invoke_mcp_tool(op)
+
+    def runtime_activity_tool(limit: int = 20) -> RuntimeActivityMCPResult:
+        try:
+            records = activity.read(limit=limit)
+        except ValueError as error:
+            raise ToolError("Invalid LifeOS tool arguments") from error
+        return {
+            "records": [
+                {
+                    "timestamp": item.timestamp, "tool": item.tool,
+                    "focus_paths": list(item.focus_paths),
+                    "instruction_ids": list(item.instruction_ids),
+                    "source_paths": list(item.source_paths),
+                    "proposal_id": item.proposal_id,
+                    "target_paths": list(item.target_paths),
+                    "changed_paths": list(item.changed_paths),
+                    "operation_count": item.operation_count,
+                }
+                for item in records
+            ]
+        }
 
     return FastMCP(
         "LifeOS",
@@ -519,6 +722,16 @@ def create_mcp_server(
                 ),
             ),
             _strict_tool(
+                vault_context_tool,
+                name="vault_context",
+                description=VAULT_CONTEXT_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Build vault context",
+                    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            _strict_tool(
                 wiki_search_tool,
                 name="wiki_search",
                 description=WIKI_SEARCH_MCP_DESCRIPTION,
@@ -539,6 +752,16 @@ def create_mcp_server(
                     readOnlyHint=False,
                     destructiveHint=False,
                     idempotentHint=False,
+                    openWorldHint=False,
+                ),
+            ),
+            _strict_tool(
+                study_evolve_learning_proposal_tool,
+                name="study_evolve_learning_proposal",
+                description=STUDY_EVOLVE_LEARNING_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Evolve study learning",
+                    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
                     openWorldHint=False,
                 ),
             ),
@@ -575,6 +798,16 @@ def create_mcp_server(
                     readOnlyHint=False,
                     destructiveHint=False,
                     idempotentHint=False,
+                    openWorldHint=False,
+                ),
+            ),
+            _strict_tool(
+                runtime_activity_tool,
+                name="runtime_activity",
+                description=RUNTIME_ACTIVITY_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Inspect LifeOS runtime activity",
+                    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
                     openWorldHint=False,
                 ),
             ),

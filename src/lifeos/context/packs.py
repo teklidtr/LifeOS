@@ -11,6 +11,7 @@ from lifeos.context.search import (
     ContextSearchError,
     SearchResult,
     lexical_search_report,
+    focused_search_results,
 )
 from lifeos.diagnostics import DomainDiagnostic
 
@@ -34,16 +35,23 @@ def build_context_pack(
     vault_root: Path,
     question: str,
     limit: int = 8,
+    focus_paths: tuple[str, ...] = (),
 ) -> ContextPack:
     if type(limit) is not int or limit <= 0:
         raise ContextSearchError("limit must be a positive integer")
+    focused = focused_search_results(vault_root=vault_root, paths=focus_paths)
+    if len(focused) > limit:
+        raise ContextSearchError("focus_paths cannot exceed the context source limit")
     search_report = lexical_search_report(
         vault_root=vault_root,
         query=question,
-        limit=limit + 1,
+        limit=limit + len(focused) + 1,
     )
-    limited = len(search_report.results) > limit
-    sources = search_report.results[:limit]
+    focused_paths = {item.path for item in focused}
+    lexical = tuple(item for item in search_report.results if item.path not in focused_paths)
+    remaining = max(0, limit - len(focused))
+    limited = len(lexical) > remaining
+    sources = (*focused, *lexical[:remaining])
     instruction_report = load_instruction_report(
         vault_root=vault_root,
         question=question,

@@ -482,3 +482,40 @@ def test_invalid_max_bytes(tmp_path: Path) -> None:
     res = preflight_proposal(prop, vault_root=tmp_path, max_inspection_bytes=True) # type: ignore
     assert res.state == "invalid"
     assert res.findings[0].code == "invalid_inspection_limit"
+
+
+def test_agent_selected_generated_flashcard_parent_may_be_missing(tmp_path: Path) -> None:
+    manifest_path = tmp_path / DEFAULT_OWNERSHIP_MANIFEST_PATH
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text('{"schema_version": 1, "owned_files": {}}')
+    (tmp_path / "flashcards").mkdir()
+
+    operation = CreateGeneratedFile(
+        id="op-1",
+        target_path="flashcards/driving-licence/traffic/right-of-way.md",
+        expected_target_state="absent",
+        generator_id="gen1",
+        new_content="content",
+    )
+    result = preflight_proposal(_make_dummy_proposal([operation]), vault_root=tmp_path)
+
+    assert result.operations[0].state == "valid"
+    assert not (tmp_path / "flashcards" / "driving-licence").exists()
+
+
+def test_generated_flashcard_missing_canonical_root_is_invalid(tmp_path: Path) -> None:
+    manifest_path = tmp_path / DEFAULT_OWNERSHIP_MANIFEST_PATH
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text('{"schema_version": 1, "owned_files": {}}')
+
+    operation = CreateGeneratedFile(
+        id="op-1",
+        target_path="flashcards/driving-licence/right-of-way.md",
+        expected_target_state="absent",
+        generator_id="gen1",
+        new_content="content",
+    )
+    result = preflight_proposal(_make_dummy_proposal([operation]), vault_root=tmp_path)
+
+    assert result.operations[0].state == "invalid"
+    assert result.operations[0].findings[0].code == "missing_parent"

@@ -29,11 +29,14 @@ from lifeos.ingestion.proposals import (
     MAX_COMPOUNDING_WIKI_OPERATIONS,
     PreparedWikiCreateMutation,
     PreparedWikiSectionUpdateMutation,
+    PreparedFlashcardCreateMutation,
     build_compounding_wiki_proposal,
+    build_study_learning_proposal,
     build_compound_wiki_proposal,
     build_wiki_section_update_proposal,
     build_wiki_proposal,
     persist_compounding_wiki_proposal,
+    persist_study_learning_proposal,
     persist_compound_wiki_proposal,
     persist_wiki_section_update_proposal,
     persist_wiki_proposal,
@@ -44,6 +47,7 @@ from lifeos.ingestion.proposals import (
     ProposalAlreadyExistsError,
     ProposalPublicationError,
     validate_wiki_target_path,
+    validate_flashcard_target_path,
 )
 from lifeos.proposals.schema import generate_proposal_id
 from lifeos.ingestion.drafts import WikiProposalContent
@@ -96,6 +100,15 @@ EVOLVE_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     description=(
         "Create one bounded atomic draft containing several agent-selected wiki "
         "creations and exact-section updates."
+    ),
+    effect=ToolEffect.PROPOSAL_PRODUCING,
+)
+
+STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR = ToolDescriptor(
+    name="study.evolve_learning_proposal",
+    description=(
+        "Create one bounded atomic draft from a registered study source, combining "
+        "agent-selected wiki evolution with selective generated flashcards."
     ),
     effect=ToolEffect.PROPOSAL_PRODUCING,
 )
@@ -347,6 +360,67 @@ class EvolveWikiProposalResult:
     status: Literal["draft"]
 
 
+@dataclass(frozen=True, slots=True)
+class StudyFlashcardCreateRequest:
+    target_path: str
+    card_id: str
+    topic: str
+    question: str
+    answer: str
+    rationale: str
+    learning_context: str
+    knowledge_refs: tuple[str, ...] = ()
+    estimated_seconds: int = 30
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "target_path", "card_id", "topic", "question", "answer", "learning_context"
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip() or value != value.strip():
+                raise ValueError(f"{field_name} must be a trimmed non-empty string")
+        object.__setattr__(self, "rationale", _validate_mutation_rationale(self.rationale))
+        if len(self.learning_context) > 300:
+            raise ValueError("learning_context cannot exceed 300 characters")
+        if type(self.estimated_seconds) is not int or not 1 <= self.estimated_seconds <= 3600:
+            raise ValueError("estimated_seconds must be an integer from 1 to 3600")
+        if len(set(self.knowledge_refs)) != len(self.knowledge_refs):
+            raise ValueError("knowledge_refs must not contain duplicates")
+        for ref in self.knowledge_refs:
+            if not isinstance(ref, str) or not ref.strip() or ref != ref.strip():
+                raise ValueError("knowledge_refs must contain trimmed non-empty strings")
+
+
+@dataclass(frozen=True, slots=True)
+class EvolveStudyLearningProposalRequest:
+    source_path: str
+    wiki_creates: tuple[EvolveWikiCreateRequest, ...] = ()
+    wiki_updates: tuple[EvolveWikiUpdateRequest, ...] = ()
+    flashcards: tuple[StudyFlashcardCreateRequest, ...] = ()
+
+    def __post_init__(self) -> None:
+        count = len(self.wiki_creates) + len(self.wiki_updates) + len(self.flashcards)
+        if not 1 <= count <= MAX_COMPOUNDING_WIKI_OPERATIONS:
+            raise ValueError(
+                f"study learning evolution requires 1..{MAX_COMPOUNDING_WIKI_OPERATIONS} mutations"
+            )
+        targets = [
+            item.target_path
+            for item in (*self.wiki_creates, *self.wiki_updates, *self.flashcards)
+        ]
+        if len(set(targets)) != len(targets):
+            raise ValueError("study learning mutations must use distinct target paths")
+
+
+@dataclass(frozen=True, slots=True)
+class EvolveStudyLearningProposalResult:
+    proposal_id: str
+    proposal_path: str
+    target_paths: tuple[str, ...]
+    operation_count: int
+    status: Literal["draft"]
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -396,11 +470,10 @@ def _check_create_target_ownership(
         return
     if (vault_root / target_path).exists():
         raise ToolOwnershipConflictError(
-            "Wiki target is generated-owned and already exists; use the "
-            "section-update ingestion tool"
+            "Generated target already exists and retains generated ownership"
         )
     raise ToolOwnershipConflictError(
-        "Wiki target is missing but retains generated ownership; restore the "
+        "Generated target is missing but retains generated ownership; restore the "
         "file or release ownership before creating it again"
     )
 
@@ -918,5 +991,137 @@ def evolve_wiki_proposal(
         proposal_path=persisted_path.relative_to(vault_root).as_posix(),
         target_paths=documents.target_paths,
         operation_count=len(documents.target_paths),
+        status="draft",
+    )
+
+
+def evolve_study_learning_proposal(
+    *,
+    vault_root: Path,
+    registry: Registry,
+    request: EvolveStudyLearningProposalRequest,
+    clock_fn: Callable[[], datetime] = _utc_now,
+    random_suffix_fn: Callable[[], str] = _random_suffix,
+) -> EvolveStudyLearningProposalResult:
+    """Create one reviewed study draft spanning wiki knowledge and selected flashcards."""
+    verified = _load_verified_source(
+        vault_root=vault_root, registry=registry, source_path=request.source_path
+    )
+    if not verified.source.path.startswith("study/"):
+        raise ToolValidationError(
+            "Context-aware flashcard evolution requires a registered source under study/"
+        )
+
+    ownership = _load_generated_ownership(vault_root=vault_root)
+    generator = ProvenanceGenerator(
+        id=GENERATOR_ID, version=GENERATOR_VERSION,
+        prompt_schema_version=REQUEST_SCHEMA_VERSION, model_id=None,
+    )
+    prepared_wiki: list[PreparedWikiCreateMutation | PreparedWikiSectionUpdateMutation] = []
+
+    for item in request.wiki_creates:
+        target_path = _resolve_create_wiki_target(
+            target_path=item.target_path, page_kind=None, slug=None
+        )
+        _check_create_target_ownership(
+            vault_root=vault_root, target_path=target_path, ownership=ownership
+        )
+        prepared_wiki.append(PreparedWikiCreateMutation(
+            target_path=target_path,
+            content=WikiProposalContent(
+                title=item.title, body=item.body, generator=generator,
+                tags=item.tags, tag_rationale=item.tag_rationale,
+            ),
+            rationale=item.rationale,
+        ))
+
+    for item in request.wiki_updates:
+        try:
+            target_path = validate_wiki_target_path(item.target_path)
+        except (FileTrackingError, InvalidWikiTargetError) as error:
+            raise ToolValidationError("Invalid wiki update target path") from error
+        ownership_entry = ownership.entries.get(target_path)
+        try:
+            target = read_vault_markdown(vault_root, target_path)
+        except VaultAccessError as error:
+            if error.code == "not-found":
+                if ownership_entry is not None:
+                    raise ToolOwnershipConflictError(
+                        "Wiki update target is missing but retains generated ownership"
+                    ) from error
+                raise ToolNotFoundError("Wiki update target is missing") from error
+            if error.code in {"invalid-path", "invalid-extension"}:
+                raise ToolValidationError("Invalid wiki update target path") from error
+            raise ToolExecutionError("Could not read wiki update target") from error
+        ownership_entry = _classify_update_target_ownership(
+            target_path=target_path, target_content=target.content_bytes, ownership=ownership
+        )
+        if item.tags is not None and ownership_entry is None:
+            raise ToolValidationError(
+                "Study ingestion cannot change tags on a human-owned wiki target"
+            )
+        if ownership_entry is None and parse_markdown_note(
+            Path(target_path), content=target.content
+        ).managed_blocks:
+            raise ToolValidationError(
+                "Wiki update target contains managed blocks and cannot use a human patch"
+            )
+        prepared_wiki.append(PreparedWikiSectionUpdateMutation(
+            target_path=target_path, target_content=target.content,
+            target_content_hash=f"sha256:{hash_file_content(target.content_bytes)}",
+            heading=item.heading, section_body=item.body, rationale=item.rationale,
+            expected_generator_id=(
+                ownership_entry.generator_id if ownership_entry is not None else None
+            ),
+            proposed_tags=item.tags,
+        ))
+
+    prepared_cards: list[PreparedFlashcardCreateMutation] = []
+    for item in request.flashcards:
+        try:
+            target_path = validate_flashcard_target_path(item.target_path)
+            for ref in item.knowledge_refs:
+                validate_wiki_target_path(ref)
+        except (FileTrackingError, InvalidWikiTargetError) as error:
+            raise ToolValidationError("Invalid flashcard target or knowledge reference") from error
+        _check_create_target_ownership(
+            vault_root=vault_root, target_path=target_path, ownership=ownership
+        )
+        prepared_cards.append(PreparedFlashcardCreateMutation(
+            target_path=target_path, card_id=item.card_id, topic=item.topic,
+            question=item.question, answer=item.answer, rationale=item.rationale,
+            learning_context=item.learning_context, knowledge_refs=item.knowledge_refs,
+            estimated_seconds=item.estimated_seconds,
+        ))
+
+    now = clock_fn()
+    proposal_id = generate_proposal_id(clock_fn=lambda: now, random_suffix_fn=random_suffix_fn)
+    created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        documents = build_study_learning_proposal(
+            source=verified.source, wiki_mutations=tuple(prepared_wiki),
+            flashcard_mutations=tuple(prepared_cards), generator=generator,
+            proposal_id=proposal_id, created_at=created_at,
+        )
+    except (InvalidWikiSectionError, InvalidWikiTargetError) as error:
+        raise ToolValidationError(str(error)) from error
+    except WikiSectionUnchangedError as error:
+        raise ToolConflictError("Wiki section already has the proposed content") from error
+
+    try:
+        persisted_path = persist_study_learning_proposal(
+            proposals_root=vault_root / "proposals", documents=documents
+        )
+    except WikiTargetExistsError as error:
+        raise ToolConflictError("A proposed study learning create target already exists") from error
+    except ProposalAlreadyExistsError as error:
+        raise ToolConflictError("Draft proposal already exists") from error
+    except ProposalPublicationError as error:
+        raise ToolExecutionError("Could not publish study learning draft") from error
+
+    return EvolveStudyLearningProposalResult(
+        proposal_id=proposal_id,
+        proposal_path=persisted_path.relative_to(vault_root).as_posix(),
+        target_paths=documents.target_paths, operation_count=len(documents.target_paths),
         status="draft",
     )

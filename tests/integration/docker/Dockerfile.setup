@@ -1,0 +1,17 @@
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app
+
+RUN uv sync --frozen --extra dev --extra mcp
+
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:${PATH}"
+ENV LIFEOS_INTEGRATION_CONSOLE_SCRIPT=1
+ENV LIFEOS_REQUIRE_MCP=1
+
+CMD ["bash", "scripts/validate-setup-integration.sh"]

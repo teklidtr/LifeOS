@@ -1261,3 +1261,33 @@ def test_failed_generated_create_removes_new_empty_wiki_parents(
         )
 
     assert not (vault_root / "wiki" / "learning").exists()
+
+
+def test_agent_selected_nested_flashcard_parent_is_created_lazily(tmp_path):
+    meta = _make_meta()
+    op = CreateGeneratedFileV2(
+        "op-1",
+        "flashcards/driving-licence/traffic/right-of-way.md",
+        "absent",
+        "gen-1",
+        "v1",
+        "hello",
+    )
+    doc = PatchDocumentV2(2, meta.id, (op,))
+
+    vault_root, proposals_root, prop_dir = _setup_proposal(tmp_path, meta, doc)
+    (vault_root / "flashcards").mkdir()
+    loaded = load_proposal_directory(prop_dir, proposals_root=proposals_root)
+    assert loaded.proposal is not None
+
+    result = apply_proposal(
+        loaded.proposal,
+        vault_root=vault_root,
+        applied_by="admin",
+        applied_at="2026-07-13T03:00:00Z",
+    )
+
+    assert result.new_status == ProposalStatus.APPLIED
+    assert (
+        vault_root / "flashcards" / "driving-licence" / "traffic" / "right-of-way.md"
+    ).read_text() == "hello"

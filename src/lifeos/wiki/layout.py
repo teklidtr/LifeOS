@@ -66,6 +66,22 @@ def is_lazy_wiki_role_parent(parent_path: str) -> bool:
     return parent_path in _FOLDER_TO_KIND
 
 MAX_EMERGENT_WIKI_PARENT_DEPTH = 6
+_GENERATED_EMERGENT_ROOTS = frozenset({"wiki", "flashcards"})
+
+
+def is_emergent_generated_parent(parent_path: str) -> bool:
+    """Return whether reviewed generated content may materialize this parent.
+
+    Semantic folder names are not enumerated. Only bounded nesting beneath an
+    already-existing canonical generated root is eligible for lazy creation.
+    """
+
+    normalized = PurePosixPath(parent_path)
+    parts = normalized.parts
+    if len(parts) < 2 or parts[0] not in _GENERATED_EMERGENT_ROOTS:
+        return False
+    nested_depth = len(parts) - 1
+    return nested_depth <= MAX_EMERGENT_WIKI_PARENT_DEPTH
 
 
 def is_emergent_wiki_parent(parent_path: str) -> bool:
@@ -77,8 +93,4 @@ def is_emergent_wiki_parent(parent_path: str) -> bool:
     """
 
     normalized = PurePosixPath(parent_path)
-    parts = normalized.parts
-    if len(parts) < 2 or parts[0] != "wiki":
-        return False
-    nested_depth = len(parts) - 1
-    return nested_depth <= MAX_EMERGENT_WIKI_PARENT_DEPTH
+    return normalized.parts[:1] == ("wiki",) and is_emergent_generated_parent(parent_path)

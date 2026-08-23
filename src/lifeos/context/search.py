@@ -10,7 +10,7 @@ from typing import Literal
 
 from lifeos.diagnostics import DomainDiagnostic, DiagnosticError, diagnostics_from_findings
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.vault import VaultAccessError, iter_vault_markdown
+from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
 
 _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 _FIELD_WEIGHTS: dict[str, tuple[int, int]] = {
@@ -201,6 +201,51 @@ def lexical_search_report(
     )
     return SearchReport(tuple(results[:limit]), deduped_diagnostics)
 
+
+
+def focused_search_results(
+    *,
+    vault_root: Path,
+    paths: tuple[str, ...],
+) -> tuple[SearchResult, ...]:
+    """Load explicitly focused canonical Markdown as deterministic context sources."""
+    if len(paths) > 8:
+        raise ContextSearchError("focus_paths may contain at most 8 paths")
+    if len(set(paths)) != len(paths):
+        raise ContextSearchError("focus_paths must not contain duplicates")
+
+    results: list[SearchResult] = []
+    for relative in paths:
+        if not isinstance(relative, str) or not relative.strip():
+            raise ContextSearchError("focus_paths must contain non-empty strings")
+        if relative != relative.strip():
+            raise ContextSearchError("focus_paths must not contain surrounding whitespace")
+        try:
+            source = read_vault_markdown(vault_root, relative)
+        except VaultAccessError as exc:
+            raise ContextSearchError(f"Invalid focus path {relative}: {exc}") from exc
+        parsed = parse_markdown_note(source.path, content=source.content)
+        diagnostics = diagnostics_from_findings(parsed.findings, vault_root=vault_root)
+        if diagnostics:
+            raise ContextSearchError(
+                f"Focused source {relative} has parse findings and cannot be used as context"
+            )
+        title = parsed.durable_fields.title or source.path.stem.replace("-", " ")
+        description = parsed.durable_fields.description or ""
+        body = " ".join(parsed.body.split())
+        excerpt = body[:260] + ("…" if len(body) > 260 else "")
+        results.append(
+            SearchResult(
+                path=relative,
+                title=title,
+                description=description,
+                excerpt=excerpt,
+                score=0,
+                matched_terms=(),
+                score_evidence=(),
+            )
+        )
+    return tuple(results)
 
 def lexical_search(
     *,

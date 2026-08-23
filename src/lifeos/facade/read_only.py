@@ -8,7 +8,12 @@ from lifeos.facade.errors import (
 )
 from lifeos.facade.models import ToolDescriptor, ToolEffect
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.context import ContextSearchError, lexical_search_report
+from lifeos.context import (
+    ContextPack,
+    ContextSearchError,
+    build_context_pack,
+    lexical_search_report,
+)
 from lifeos.ingestion.taxonomy import extract_source_taxonomy
 from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
@@ -22,6 +27,15 @@ READ_MARKDOWN_DESCRIPTOR = ToolDescriptor(
 WIKI_SEARCH_DESCRIPTOR = ToolDescriptor(
     name="wiki.search",
     description="Search durable wiki Markdown before choosing ingestion targets.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+VAULT_CONTEXT_DESCRIPTOR = ToolDescriptor(
+    name="vault.context",
+    description=(
+        "Build a bounded reasoning context from explicit focus paths, applicable vault "
+        "instructions, and relevant canonical Markdown."
+    ),
     effect=ToolEffect.READ_ONLY,
 )
 
@@ -133,3 +147,44 @@ def search_wiki(
             for item in report.results
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class VaultContextRequest:
+    question: str
+    focus_paths: tuple[str, ...] = ()
+    limit: int = 8
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.question, str) or not self.question.strip():
+            raise ValueError("question must be a non-empty string")
+        if self.question != self.question.strip():
+            raise ValueError("question must not contain surrounding whitespace")
+        if type(self.limit) is not int or not 1 <= self.limit <= 20:
+            raise ValueError("limit must be an integer between 1 and 20")
+        if len(self.focus_paths) > 8:
+            raise ValueError("focus_paths may contain at most 8 paths")
+        if len(set(self.focus_paths)) != len(self.focus_paths):
+            raise ValueError("focus_paths must not contain duplicates")
+        for path in self.focus_paths:
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("focus_paths must contain non-empty strings")
+            if path != path.strip():
+                raise ValueError("focus_paths must not contain surrounding whitespace")
+
+
+def get_vault_context(
+    *,
+    vault_root: Path,
+    request: VaultContextRequest,
+) -> ContextPack:
+    """Build inspectable context without granting mutation authority."""
+    try:
+        return build_context_pack(
+            vault_root=vault_root,
+            question=request.question,
+            limit=request.limit,
+            focus_paths=request.focus_paths,
+        )
+    except ContextSearchError as exc:
+        raise ToolValidationError(str(exc)) from exc

@@ -55,6 +55,18 @@ def validate_wiki_target_path(target_path: str) -> str:
     validate_vault_path(target_path)
     return norm_target
 
+
+def validate_flashcard_target_path(target_path: str) -> str:
+    norm_target = str(PurePosixPath(target_path))
+    if not norm_target.startswith("flashcards/"):
+        raise InvalidWikiTargetError(
+            f"Flashcard target path must be within the canonical flashcards area: {target_path}"
+        )
+    validate_vault_path(target_path)
+    if not norm_target.endswith(".md"):
+        raise InvalidWikiTargetError("Flashcard targets must be Markdown files")
+    return norm_target
+
 @dataclass(frozen=True, slots=True)
 class WikiProposalDocuments:
     proposal_id: str
@@ -99,6 +111,28 @@ PreparedWikiMutation = PreparedWikiCreateMutation | PreparedWikiSectionUpdateMut
 
 @dataclass(frozen=True, slots=True)
 class CompoundingWikiProposalDocuments:
+    proposal_id: str
+    target_paths: tuple[str, ...]
+    create_target_paths: tuple[str, ...]
+    proposal_markdown: bytes
+    patches_json: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedFlashcardCreateMutation:
+    target_path: str
+    card_id: str
+    topic: str
+    question: str
+    answer: str
+    rationale: str
+    learning_context: str
+    knowledge_refs: tuple[str, ...] = ()
+    estimated_seconds: int = 30
+
+
+@dataclass(frozen=True, slots=True)
+class StudyLearningProposalDocuments:
     proposal_id: str
     target_paths: tuple[str, ...]
     create_target_paths: tuple[str, ...]
@@ -295,6 +329,37 @@ def _build_generated_wiki_candidate(
     }
     candidate = _serialize_wiki_frontmatter(frontmatter) + content.body
     return candidate if candidate.endswith("\n") else candidate + "\n"
+
+
+def _build_generated_flashcard_candidate(
+    *,
+    mutation: PreparedFlashcardCreateMutation,
+    source: SourceSnapshot,
+    generator: ProvenanceGenerator,
+    created_at: str,
+) -> str:
+    provenance = LifeOSProvenance(
+        schema_version=1,
+        sources=(ProvenanceSource(path=source.path, content_hash=source.content_hash),),
+        generator=generator,
+        created_at=created_at,
+    )
+    source_refs = tuple(dict.fromkeys((source.path, *mutation.knowledge_refs)))
+    frontmatter = {
+        "id": mutation.card_id,
+        "type": "flashcard",
+        "status": "active",
+        "topic": mutation.topic,
+        "question": mutation.question,
+        "answer": mutation.answer,
+        "due": created_at[:10],
+        "estimated_seconds": mutation.estimated_seconds,
+        "source_refs": list(source_refs),
+        "learning_context": mutation.learning_context,
+        "selection_rationale": mutation.rationale,
+        "lifeos_provenance": provenance_to_frontmatter_value(provenance),
+    }
+    return _serialize_wiki_frontmatter(frontmatter)
 
 
 def _build_wiki_section_operation(
@@ -811,10 +876,188 @@ def build_compounding_wiki_proposal(
         patches_json=serialize_patch_json_bytes(document),
     )
 
+def build_study_learning_proposal(
+    *,
+    source: SourceSnapshot,
+    wiki_mutations: tuple[PreparedWikiMutation, ...],
+    flashcard_mutations: tuple[PreparedFlashcardCreateMutation, ...],
+    generator: ProvenanceGenerator,
+    proposal_id: str,
+    created_at: str,
+) -> StudyLearningProposalDocuments:
+    """Build one bounded study draft spanning durable knowledge and retrieval practice."""
+    total = len(wiki_mutations) + len(flashcard_mutations)
+    if not 1 <= total <= MAX_COMPOUNDING_WIKI_OPERATIONS:
+        raise InvalidWikiTargetError(
+            f"Study learning evolution requires 1..{MAX_COMPOUNDING_WIKI_OPERATIONS} mutations"
+        )
+
+    operations: list[CreateGeneratedFileV2 | PatchHumanFile | ReplaceGeneratedFileV2] = []
+    target_paths: list[str] = []
+    create_target_paths: list[str] = []
+    review_lines: list[str] = []
+    review_items: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for mutation in wiki_mutations:
+        norm_target = validate_wiki_target_path(mutation.target_path)
+        if not norm_target.endswith(".md"):
+            raise InvalidWikiTargetError("Study wiki targets must be Markdown files")
+        if norm_target in seen:
+            raise InvalidWikiTargetError(
+                f"Study evolution cannot touch one target twice: {norm_target}"
+            )
+        rationale = mutation.rationale
+        if (
+            not isinstance(rationale, str)
+            or not rationale.strip()
+            or rationale != rationale.strip()
+            or len(rationale) > 500
+        ):
+            raise InvalidWikiTargetError(
+                "Every study mutation needs a trimmed rationale of at most 500 characters"
+            )
+        seen.add(norm_target)
+        target_paths.append(norm_target)
+        op_id = f"op-study-{len(operations)+1:02d}"
+        if isinstance(mutation, PreparedWikiCreateMutation):
+            candidate = _build_generated_wiki_candidate(
+                content=mutation.content,
+                source=source,
+                target_path=norm_target,
+                created_at=created_at,
+            )
+            operations.append(CreateGeneratedFileV2(
+                id=op_id, target_path=norm_target, expected_target_state="absent",
+                generator_id=generator.id,
+                generator_version=generator.version,
+                new_content=candidate,
+            ))
+            create_target_paths.append(norm_target)
+            review_lines.append(f"Create wiki `{norm_target}`: {rationale}")
+            review_items.append(
+                {"kind": "wiki_create", "target_path": norm_target, "rationale": rationale}
+            )
+        else:
+            operation = _build_wiki_section_operation(
+                target_path=norm_target, target_content=mutation.target_content,
+                target_content_hash=mutation.target_content_hash, heading=mutation.heading,
+                section_body=mutation.section_body, generator=generator,
+                expected_generator_id=mutation.expected_generator_id,
+                proposed_tags=mutation.proposed_tags,
+            )
+            if isinstance(operation, ReplaceGeneratedFileV2):
+                operation = ReplaceGeneratedFileV2(
+                    id=op_id, target_path=operation.target_path, base_hash=operation.base_hash,
+                    expected_generator_id=operation.expected_generator_id,
+                    generator_version=operation.generator_version,
+                    new_content=operation.new_content,
+                )
+            else:
+                operation = PatchHumanFile(
+                    id=op_id, target_path=operation.target_path, base_hash=operation.base_hash,
+                    unified_diff=operation.unified_diff,
+                )
+            operations.append(operation)
+            review_lines.append(
+                f"Update wiki `{norm_target}` section `{mutation.heading}`: {rationale}"
+            )
+            review_items.append({
+                "kind": "wiki_update_section", "target_path": norm_target,
+                "heading": mutation.heading, "rationale": rationale,
+            })
+
+    for mutation in flashcard_mutations:
+        norm_target = validate_flashcard_target_path(mutation.target_path)
+        if norm_target in seen:
+            raise InvalidWikiTargetError(
+                f"Study evolution cannot touch one target twice: {norm_target}"
+            )
+        for field_name in (
+            "card_id", "topic", "question", "answer", "rationale", "learning_context"
+        ):
+            value = getattr(mutation, field_name)
+            if not isinstance(value, str) or not value.strip() or value != value.strip():
+                raise InvalidWikiTargetError(
+                    f"Flashcard {field_name} must be a trimmed non-empty string"
+                )
+        if len(mutation.rationale) > 500 or len(mutation.learning_context) > 300:
+            raise InvalidWikiTargetError("Flashcard rationale/context exceeds the bounded size")
+        if (
+            type(mutation.estimated_seconds) is not int
+            or not 1 <= mutation.estimated_seconds <= 3600
+        ):
+            raise InvalidWikiTargetError("Flashcard estimated_seconds must be 1..3600")
+        for ref in mutation.knowledge_refs:
+            validate_wiki_target_path(ref)
+        seen.add(norm_target)
+        target_paths.append(norm_target)
+        create_target_paths.append(norm_target)
+        op_id = f"op-study-{len(operations)+1:02d}"
+        candidate = _build_generated_flashcard_candidate(
+            mutation=mutation, source=source, generator=generator, created_at=created_at
+        )
+        operations.append(CreateGeneratedFileV2(
+            id=op_id, target_path=norm_target, expected_target_state="absent",
+            generator_id=generator.id, generator_version=generator.version, new_content=candidate,
+        ))
+        review_lines.append(
+            f"Create flashcard `{norm_target}` ({mutation.learning_context}): {mutation.rationale}"
+        )
+        review_items.append({
+            "kind": "flashcard_create", "target_path": norm_target,
+            "learning_context": mutation.learning_context, "rationale": mutation.rationale,
+        })
+
+    document = PatchDocumentV2(
+        schema_version=2, proposal_id=proposal_id, operations=tuple(operations)
+    )
+    risk = ProposalRisk.MEDIUM if total <= 3 else ProposalRisk.HIGH
+    metadata = ProposalMetadata(
+        id=proposal_id, schema_version=1, patch_schema_version=2, lifecycle_schema_version=1,
+        title=f"Evolve study learning from {source.path} ({total} changes)",
+        description=f"Generated by {generator.id} {generator.version}",
+        status=ProposalStatus.DRAFT, risk=risk, created_at=created_at, created_by="agent",
+        submitted_at=None, submitted_by=None, review_digest=None,
+        approved_at=None, approved_by=None,
+        rejected_at=None, rejected_by=None, rejection_reason=None, applied_at=None, applied_by=None,
+        related_goals=(), related_sources=(source.path,),
+        extensions={"ingestion": {
+            "action": "evolve_study_learning", "source_hash": source.content_hash,
+            "operation_count": total, "mutations": review_items,
+        }},
+    )
+    body = [
+        f"Proposes {total} learning change(s) from the registered study source `{source.path}`.",
+        "",
+        "The external agent selected durable wiki changes and retrieval-practice cards "
+        "using vault context:",
+        "",
+    ]
+    body.extend(f"{index}. {line}" for index, line in enumerate(review_lines, start=1))
+    body.extend([
+        "",
+        "LifeOS validates bounded mutations and provenance; the agent, not deterministic code, "
+        "decides what is pedagogically important for the inferred learning context.",
+    ])
+    proposal_markdown = serialize_proposal_markdown(metadata, "\n".join(body))
+    proposal_markdown = proposal_markdown.replace(b"\nreview_digest: null\n", b"\n")
+    return StudyLearningProposalDocuments(
+        proposal_id=proposal_id, target_paths=tuple(target_paths),
+        create_target_paths=tuple(create_target_paths), proposal_markdown=proposal_markdown,
+        patches_json=serialize_patch_json_bytes(document),
+    )
+
+
 def _persist_proposal_documents(
     *,
     proposals_root: Path,
-    documents: WikiProposalDocuments | CompoundWikiProposalDocuments | CompoundingWikiProposalDocuments,
+    documents: (
+        WikiProposalDocuments
+        | CompoundWikiProposalDocuments
+        | CompoundingWikiProposalDocuments
+        | StudyLearningProposalDocuments
+    ),
 ) -> Path:
     proposal_dir = proposals_root / documents.proposal_id
     proposal_created = False
@@ -883,6 +1126,16 @@ def persist_compound_wiki_proposal(
 
 def persist_compounding_wiki_proposal(
     *, proposals_root: Path, documents: CompoundingWikiProposalDocuments
+) -> Path:
+    vault_root = proposals_root.parent
+    for target_path in documents.create_target_paths:
+        if (vault_root / target_path).exists():
+            raise WikiTargetExistsError(f"Target path already exists: {target_path}")
+    return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)
+
+
+def persist_study_learning_proposal(
+    *, proposals_root: Path, documents: StudyLearningProposalDocuments
 ) -> Path:
     vault_root = proposals_root.parent
     for target_path in documents.create_target_paths:

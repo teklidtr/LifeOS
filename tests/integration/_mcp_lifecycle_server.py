@@ -58,7 +58,10 @@ def main() -> None:
             deny_actions=deny_actions
         )
         
-        mcp = create_mcp_server(vault_root=config.vault_root, registry=registry, authorizer=authorizer)
+        mcp = create_mcp_server(
+            vault_root=config.vault_root, registry=registry, authorizer=authorizer,
+            runtime_dir=config.runtime_dir,
+        )
         mcp.run(transport="stdio")
     except Exception as e:
         import traceback

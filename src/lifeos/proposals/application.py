@@ -32,7 +32,7 @@ from .._transaction_files import (
     rollback_replacement,
 )
 from ..markdown.parser import parse_markdown_note
-from ..wiki.layout import is_emergent_wiki_parent
+from ..wiki.layout import is_emergent_generated_parent
 from ..ownership.manifest import (
     DEFAULT_OWNERSHIP_MANIFEST_PATH,
     GeneratedOwnership,
@@ -438,23 +438,24 @@ def _open_or_create_target_parent(
     except SecureIOError as open_error:
         if not (
             operation.op == "create_generated_file"
-            and is_emergent_wiki_parent(parent_relative)
+            and is_emergent_generated_parent(parent_relative)
         ):
             raise open_error
 
         parent_path = Path(parent_relative)
         parts = parent_path.parts
-        if not parts or parts[0] != "wiki":
+        if not parts or parts[0] not in {"wiki", "flashcards"}:
             raise open_error
+        canonical_root = parts[0]
 
         try:
-            current_fd = open_directory_secure(vault_root / "wiki", dir_fd=root_fd)
+            current_fd = open_directory_secure(vault_root / canonical_root, dir_fd=root_fd)
         except SecureIOError:
-            # The canonical wiki root is never created implicitly.
+            # Canonical generated roots are never created implicitly.
             raise open_error
 
         try:
-            current_parts = ["wiki"]
+            current_parts = [canonical_root]
             for segment in parts[1:]:
                 try:
                     child_fd = open_directory_secure(Path(segment), dir_fd=current_fd)
@@ -467,7 +468,7 @@ def _open_or_create_target_parent(
                         raise SecureIOError(
                             code="dir_create_failed",
                             message=(
-                                "Failed to lazily create generated wiki directory: "
+                                "Failed to lazily create generated directory: "
                                 f"{error.strerror}"
                             ),
                         ) from error
@@ -481,7 +482,7 @@ def _open_or_create_target_parent(
                         raise SecureIOError(
                             code="dir_sync_failed",
                             message=(
-                                "Failed to sync generated wiki directory creation: "
+                                "Failed to sync generated directory creation: "
                                 f"{sync_result.errno_name}"
                             ),
                         )

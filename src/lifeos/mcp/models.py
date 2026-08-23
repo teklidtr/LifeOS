@@ -79,3 +79,62 @@ class EvolveWikiProposalMCPResult(TypedDict):
     target_paths: list[str]
     operation_count: int
     status: Literal["draft"]
+
+
+class VaultContextInstructionMCPResult(TypedDict):
+    id: str
+    text: str
+    authority: str
+    scope: str
+    priority: int
+    applicable_sources: list[str]
+    applicability: list[str]
+
+
+class VaultContextSourceMCPResult(TypedDict):
+    path: str
+    title: str
+    description: str
+    excerpt: str
+    score: int
+
+
+class VaultContextDiagnosticMCPResult(TypedDict):
+    code: str
+    severity: str
+    source_path: str
+    line: int
+    message: str
+
+
+class VaultContextMCPResult(TypedDict):
+    question: str
+    instructions: list[VaultContextInstructionMCPResult]
+    sources: list[VaultContextSourceMCPResult]
+    evidence_gaps: list[str]
+    omissions: list[str]
+    diagnostics: list[VaultContextDiagnosticMCPResult]
+
+
+class StudyLearningProposalMCPResult(TypedDict):
+    proposal_id: str
+    proposal_path: str
+    target_paths: list[str]
+    operation_count: int
+    status: Literal["draft"]
+
+
+class RuntimeActivityRecordMCPResult(TypedDict):
+    timestamp: str
+    tool: str
+    focus_paths: list[str]
+    instruction_ids: list[str]
+    source_paths: list[str]
+    proposal_id: str | None
+    target_paths: list[str]
+    changed_paths: list[str]
+    operation_count: int | None
+
+
+class RuntimeActivityMCPResult(TypedDict):
+    records: list[RuntimeActivityRecordMCPResult]

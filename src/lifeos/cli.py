@@ -82,6 +82,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     context_build_parser.add_argument("question", help="Question or retrieval query")
     context_build_parser.add_argument("--limit", type=int, default=8, help="Maximum source count")
+    context_build_parser.add_argument(
+        "--focus-path",
+        action="append",
+        default=[],
+        help="Vault-relative Markdown path that must be included as reasoning context (repeatable)",
+    )
     context_build_parser.add_argument("--json", action="store_true", help="Output JSON")
 
     study_parser = subparsers.add_parser("study", help="Plan study and flashcard workloads")
@@ -505,6 +511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 vault_root=config.vault_root,
                 question=args.question,
                 limit=args.limit,
+                focus_paths=tuple(args.focus_path),
             )
         except ConfigError as e:
             print(f"Configuration error: {e}", file=sys.stderr)

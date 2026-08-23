@@ -54,6 +54,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         vault_root=config.vault_root,
         registry=registry,
         authorizer=authorizer,
+        runtime_dir=config.runtime_dir,
     )
 
     mcp.run(transport="stdio")

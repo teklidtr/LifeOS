@@ -10,6 +10,7 @@ from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS,
     EvolveWikiCreateMCPInput,
     EvolveWikiUpdateMCPInput,
+    StudyFlashcardCreateMCPInput,
     create_mcp_server,
     _invoke_mcp_tool,
 )
@@ -22,13 +23,15 @@ from lifeos.facade.errors import (
     ToolUnavailableError,
     ToolValidationError,
 )
-from lifeos.facade.read_only import ReadMarkdownRequest, WikiSearchRequest
+from lifeos.facade.read_only import ReadMarkdownRequest, WikiSearchRequest, VaultContextRequest
 from lifeos.facade.proposal_tools import (
     CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
     EvolveWikiCreateRequest,
     EvolveWikiProposalRequest,
     EvolveWikiUpdateRequest,
+    EvolveStudyLearningProposalRequest,
+    StudyFlashcardCreateRequest,
     UpdateWikiSectionProposalRequest,
 )
 from lifeos.facade.registry_tools import RegistryRefreshResult
@@ -42,14 +45,17 @@ def test_server_registers_only_approved_tools() -> None:
     expected_tools = {
         "registry_refresh",
         "vault_read_markdown",
+        "vault_context",
         "wiki_search",
         "ingestion_evolve_wiki_proposal",
+        "study_evolve_learning_proposal",
         "ingestion_create_wiki_proposal",
         "ingestion_create_wiki_and_update_section_proposal",
         "ingestion_update_wiki_section_proposal",
         "proposal_submit",
         "proposal_approve",
         "proposal_apply",
+        "runtime_activity",
     }
 
     registered = {t.name for t in server._tool_manager.list_tools()}
@@ -71,17 +77,17 @@ def test_server_advertises_safe_ingestion_workflow() -> None:
     )
 
     assert server.instructions == LIFEOS_MCP_INSTRUCTIONS
-    assert "first call registry_refresh" in server.instructions
-    assert "then call vault_read_markdown" in server.instructions
+    assert "Application AGENTS.md governs LifeOS development" in server.instructions
+    assert "Use vault_context" in server.instructions
+    assert "Folder location supplies context, not permission" in server.instructions
+    assert "any registered canonical Markdown source" in server.instructions
     assert "wiki_search" in server.instructions
-    assert "prefer ingestion_evolve_wiki_proposal" in server.instructions
+    assert "ingestion_evolve_wiki_proposal" in server.instructions
+    assert "study_evolve_learning_proposal" in server.instructions
+    assert "Do not generate flashcards from non-study sources by default" in server.instructions
     assert "create no proposal" in server.instructions
-    assert "human patches or generated replacements" in server.instructions
-    assert "restore-or-release remediation" in server.instructions
-    assert "does not prescribe a universal wiki taxonomy" in server.instructions
-    assert "page_kind routing" in server.instructions
-    assert "Stop after the draft proposal" in server.instructions
-    assert "Never call proposal_submit, proposal_approve, or proposal_apply" in server.instructions
+    assert "Stop after draft unless the user explicitly requests" in server.instructions
+    assert "runtime_activity is read-only disposable diagnostics" in server.instructions
 
 
 def test_tools_advertise_workflow_specific_descriptions() -> None:
@@ -94,6 +100,9 @@ def test_tools_advertise_workflow_specific_descriptions() -> None:
     assert "rebuildable registry data" in tools["registry_refresh"].description
     assert "before ingestion" in tools["vault_read_markdown"].description
     assert "restricted to wiki/" in tools["wiki_search"].description
+    assert "explicit focus_paths" in tools["vault_context"].description
+    assert "registered study/ source" in tools["study_evolve_learning_proposal"].description
+    assert "routing/activity metadata" in tools["runtime_activity"].description
     assert "1..12 distinct" in tools["ingestion_evolve_wiki_proposal"].description
     assert "compatibility single-create tool" in tools["ingestion_create_wiki_proposal"].description
     assert "both the registered source and existing target" in tools[
@@ -131,6 +140,9 @@ def test_tools_advertise_accurate_safety_annotations() -> None:
         "openWorldHint": False,
     }
     assert tools["wiki_search"].annotations.readOnlyHint is True
+    assert tools["vault_context"].annotations.readOnlyHint is True
+    assert tools["study_evolve_learning_proposal"].annotations.destructiveHint is False
+    assert tools["runtime_activity"].annotations.readOnlyHint is True
     assert tools["ingestion_evolve_wiki_proposal"].annotations.destructiveHint is False
     assert tools["ingestion_create_wiki_proposal"].annotations.destructiveHint is False
     assert tools["ingestion_create_wiki_proposal"].annotations.idempotentHint is False
@@ -298,6 +310,47 @@ def test_wiki_search_delegates_to_scoped_facade(mock_facade: MagicMock) -> None:
     assert result["hits"][0]["path"] == "wiki/learning.md"
 
 
+@patch("lifeos.mcp.server.get_vault_context")
+def test_vault_context_delegates_and_records_routing_metadata(
+    mock_facade: MagicMock, tmp_path: Path
+) -> None:
+    instruction = MagicMock(
+        id="driving-exam", text="Prioritize exam distinctions.", authority="system",
+        scope="path", priority=100, applicable_sources=("study/driving.md",),
+        applicability=("path:study/driving.md",),
+    )
+    source = MagicMock(
+        path="study/driving.md", title="Driving", description="Exam notes",
+        excerpt="right of way", score=0,
+    )
+    mock_facade.return_value = MagicMock(
+        question="What matters?", instructions=(instruction,), sources=(source,),
+        evidence_gaps=(), omissions=(), diagnostics=(),
+    )
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock(),
+        runtime_dir=tmp_path / ".lifeos",
+    )
+
+    result = server._tool_manager.get_tool("vault_context").fn(
+        question="What matters?", focus_paths=["study/driving.md"], limit=6
+    )
+
+    mock_facade.assert_called_once_with(
+        vault_root=tmp_path / "vault",
+        request=VaultContextRequest(
+            question="What matters?", focus_paths=("study/driving.md",), limit=6
+        ),
+    )
+    assert result["instructions"][0]["id"] == "driving-exam"
+    assert result["sources"][0]["path"] == "study/driving.md"
+    activity = server._tool_manager.get_tool("runtime_activity").fn(limit=5)
+    assert activity["records"][-1]["tool"] == "vault_context"
+    assert activity["records"][-1]["focus_paths"] == ["study/driving.md"]
+    assert activity["records"][-1]["instruction_ids"] == ["driving-exam"]
+
+
+
 @patch("lifeos.mcp.server.evolve_wiki_proposal")
 def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock) -> None:
     mock_facade.return_value = MagicMock(
@@ -361,6 +414,68 @@ def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock) -> Non
         "operation_count": 2,
         "status": "draft",
     }
+
+
+@patch("lifeos.mcp.server.evolve_study_learning_proposal")
+def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock) -> None:
+    mock_facade.return_value = MagicMock(
+        proposal_id="prop-study", proposal_path="proposals/prop-study",
+        target_paths=("wiki/traffic.md", "flashcards/driving/right-of-way.md"),
+        operation_count=2,
+    )
+    registry = MagicMock()
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+    )
+    result = server._tool_manager.get_tool("study_evolve_learning_proposal").fn(
+        source_path="study/driving.md",
+        wiki_creates=[
+            EvolveWikiCreateMCPInput(
+                target_path="wiki/traffic.md", title="Traffic", body="Body",
+                rationale="Reusable durable knowledge.",
+            )
+        ],
+        flashcards=[
+            StudyFlashcardCreateMCPInput(
+                target_path="flashcards/driving/right-of-way.md",
+                card_id="right-of-way", topic="Driving", question="Who has priority?",
+                answer="Apply the relevant right-of-way rule.",
+                rationale="Exam-relevant and easy to confuse.",
+                learning_context="Turkish driving licence exam",
+                knowledge_refs=["wiki/traffic.md"], estimated_seconds=30,
+            )
+        ],
+    )
+
+    mock_facade.assert_called_once_with(
+        vault_root=Path("/fake"),
+        registry=registry,
+        request=EvolveStudyLearningProposalRequest(
+            source_path="study/driving.md",
+            wiki_creates=(
+                EvolveWikiCreateRequest(
+                    target_path="wiki/traffic.md", title="Traffic", body="Body",
+                    rationale="Reusable durable knowledge.",
+                ),
+            ),
+            flashcards=(
+                StudyFlashcardCreateRequest(
+                    target_path="flashcards/driving/right-of-way.md",
+                    card_id="right-of-way", topic="Driving", question="Who has priority?",
+                    answer="Apply the relevant right-of-way rule.",
+                    rationale="Exam-relevant and easy to confuse.",
+                    learning_context="Turkish driving licence exam",
+                    knowledge_refs=("wiki/traffic.md",), estimated_seconds=30,
+                ),
+            ),
+        ),
+    )
+    assert result == {
+        "proposal_id": "prop-study", "proposal_path": "proposals/prop-study",
+        "target_paths": ["wiki/traffic.md", "flashcards/driving/right-of-way.md"],
+        "operation_count": 2, "status": "draft",
+    }
+
 
 
 @patch("lifeos.mcp.server.create_wiki_proposal")
@@ -783,3 +898,35 @@ def test_wiki_search_schema_is_read_only_and_bounded() -> None:
     tool = server._tool_manager.get_tool("wiki_search")
     assert set(tool.parameters["properties"]) == {"query", "limit"}
     assert tool.annotations.readOnlyHint is True
+
+
+def test_vault_context_schema_is_read_only_and_bounded() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tool = server._tool_manager.get_tool("vault_context")
+    assert set(tool.parameters["properties"]) == {"question", "focus_paths", "limit"}
+    assert tool.annotations.readOnlyHint is True
+    assert tool.parameters["additionalProperties"] is False
+
+
+def test_study_learning_schema_exposes_only_bounded_mutation_lists() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tool = server._tool_manager.get_tool("study_evolve_learning_proposal")
+    assert set(tool.parameters["properties"]) == {
+        "source_path", "wiki_creates", "wiki_updates", "flashcards"
+    }
+    assert tool.annotations.destructiveHint is False
+    assert tool.parameters["additionalProperties"] is False
+
+
+def test_runtime_activity_schema_is_read_only() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tool = server._tool_manager.get_tool("runtime_activity")
+    assert set(tool.parameters["properties"]) == {"limit"}
+    assert tool.annotations.readOnlyHint is True
+    assert tool.parameters["additionalProperties"] is False

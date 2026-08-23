@@ -3,6 +3,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo"
 python3 scripts/validate_manual_links.py
+./scripts/validate-setup-integration.sh
 PYTHONPATH=src python3 - <<'PY'
 import json, pathlib, tomllib
 from lifeos.bridge.protocol import PROTOCOL_VERSION
