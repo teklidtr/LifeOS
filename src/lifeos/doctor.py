@@ -14,7 +14,7 @@ from lifeos import __version__
 from lifeos.bootstrap import is_recognized_vault
 from lifeos.config import LifeOSConfig
 from lifeos.registry import Registry
-from lifeos.status import StatusResult, collect_status
+from lifeos.status import StatusResult, collect_status, serialize_status_json
 
 FindingState = Literal["healthy", "warning", "blocked"]
 
@@ -205,7 +205,7 @@ def serialize_doctor_json(result: DoctorResult) -> str:
             "vault_root": result.vault_root,
         },
         "findings": [asdict(finding) for finding in result.findings],
-        "vault": json.loads(__import__("lifeos.status", fromlist=["serialize_status_json"]).serialize_status_json(result.vault_status)),
+        "vault": json.loads(serialize_status_json(result.vault_status)),
         "mcp_command": list(result.mcp_command) if result.mcp_command else None,
     }
     return json.dumps(data, indent=2)
