@@ -7,23 +7,25 @@ state.
 
 ## Location and initialization
 
-Callers choose the database path explicitly. The conventional location is:
+Callers choose the database path explicitly. The shipped CLI and MCP runtime use:
 
 ```python
-registry = Registry(config.runtime_dir / "state.sqlite")
+registry = Registry(config.runtime_dir / "registry.db")
 ```
+
+With the first-party `lifeos init` defaults, this resolves to
+`.lifeos/registry.db` inside the vault.
 
 Importing `lifeos.registry`, constructing `Registry`, reading migration metadata,
 and loading configuration do not create files. `Registry.initialize()` is the
-only initialization operation: it may create the database's direct parent and
-the SQLite file, then applies missing migrations. It creates no other runtime
-subdirectories and is not invoked automatically by the CLI or configuration
-loader.
+explicit schema-initialization operation used by registry workflows: it may create
+the database's direct parent and the SQLite file, then applies missing migrations.
+Configuration loading itself remains read-only.
 
 After initialization, `Registry.connect()` yields a context-managed writable
 connection with foreign keys enabled. It refuses missing, older, inconsistent,
-or unsupported schemas; callers must run `initialize()` explicitly before using
-an older supported database.
+or unsupported schemas; callers must run the supported initialization/refresh
+workflow before using an older supported database.
 
 ## Migrations
 
