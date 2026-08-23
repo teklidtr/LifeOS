@@ -80,7 +80,7 @@ newly added or edited source should therefore be ingestible without a separate u
 
 # Documentation impact
 
-Status: resolved
+Status: required
 
 - Updated `docs/user-manual/03-feature-breakdown.md`,
   `docs/user-manual/04-setup-and-installation.md`, and
