@@ -111,7 +111,7 @@ jobs:
       - name: Run test suite
         env:
           PYTHONPATH: ${{ github.workspace }}/src
-        run: uv run pytest --import-mode=importlib -q
+        run: uv run pytest -q
 
   docker-setup-e2e:
     name: docker-setup-e2e
