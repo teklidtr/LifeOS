@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1634
 title: Add first-party `lifeos init` vault bootstrap
-status: ready
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1633
@@ -108,3 +108,37 @@ uv run python scripts/validate_manual_links.py
 - LIFEOS-1633 defines the vault/runtime/bootstrap semantics that `lifeos init` must render.
 - LIFEOS-1633A provides the blocking GitHub Actions and Docker clean-room gates that must
   stay green while the bootstrap path changes.
+- A recognized initialized vault must include the local `.git` directory as well as the
+  canonical roots and bootstrap files; a failed `git init` therefore cannot be mistaken for
+  a completed initialization.
+- Bootstrap failure never recursively deletes the target directory. If a late step fails,
+  the partial scaffold remains visible and a later rerun fails closed, avoiding deletion of
+  content that may have appeared concurrently.
+
+# Completion notes
+
+Implemented the first-party bootstrap without Cookiecutter, Jinja, or another template
+runtime dependency. The `lifeos` console entry point now supports `lifeos init [PATH]` while
+existing commands continue through the established CLI implementation.
+
+The bootstrap creates the application-owned canonical roots and files, initializes Git,
+and is deliberately non-destructive: recognized vault reruns are no-ops that preserve user
+customizations; non-empty unrecognized or partial targets fail closed; symlink targets are
+rejected; and failed initialization never performs recursive rollback deletion.
+
+The LIFEOS-1633 fresh-vault integration test now invokes the real installed bootstrap path,
+and Setup & Installation documents `lifeos init` as the primary vault creation workflow
+while leaving MCP client registration explicit and client-specific.
+
+Validated on PR #2 with GitHub-hosted CI:
+
+- changed-file Ruff passed;
+- changed-source mypy passed;
+- Python compile checks passed;
+- manual links validated across 14 chapters;
+- full pytest suite: 1510 passed;
+- Docker clean-room fresh-vault/setup workflow: 3 passed;
+- Docker real MCP suite: 51 passed.
+
+Repository-wide historical Ruff and mypy debt remains separately tracked by LIFEOS-1616
+and stays visible as the existing non-blocking CI audit.

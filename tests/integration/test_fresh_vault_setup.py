@@ -12,57 +12,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src"
 MANUAL = REPO_ROOT / "docs/user-manual/04-setup-and-installation.md"
 
-VAULT_ROOTS = (
-    "journal",
-    "raw",
-    "study",
-    "wiki",
-    "flashcards",
-    "patterns",
-    "profile",
-    "goals",
-    "plans",
-    "experiments",
-    "metrics",
-    "reviews",
-    "proposals",
-    "system",
-)
-
-
-def _bootstrap_vault(root: Path) -> None:
-    root.mkdir()
-    for name in VAULT_ROOTS:
-        (root / name).mkdir()
-    (root / ".gitignore").write_text(
-        ".lifeos/\n.obsidian/workspace*.json\n.DS_Store\n", encoding="utf-8"
-    )
-    (root / "AGENTS.md").write_text(
-        "# LifeOS Vault Agent Bootstrap\n\n"
-        "This directory is a LifeOS vault, not the LifeOS application source repository.\n\n"
-        "Use the configured LifeOS MCP server for canonical search, context, proposals, and "
-        "consequential mutations. Obtain universal runtime policy from the MCP server and "
-        "vault-specific instructions through LifeOS. Folder names provide semantic context; "
-        "do not infer permission or a universal ontology from them.\n",
-        encoding="utf-8",
-    )
-    (root / "lifeos.yml").write_text(
-        "vault_root: .\n"
-        "runtime_dir: .lifeos\n"
-        "features:\n"
-        "  graphify: true\n"
-        "  exports: true\n",
-        encoding="utf-8",
-    )
-    (root / "system/generated-ownership.json").write_text(
-        json.dumps({"owned_files": {}, "schema_version": 1}, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    (root / "system/instructions.yml").write_text(
-        "schema_version: 1\ninstructions: []\n", encoding="utf-8"
-    )
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
-
 
 def _isolated_env(tmp_path: Path) -> dict[str, str]:
     env = os.environ.copy()
@@ -85,7 +34,7 @@ def _run_lifeos(
     command = (
         ["lifeos", *args]
         if env.get("LIFEOS_INTEGRATION_CONSOLE_SCRIPT") == "1"
-        else [sys.executable, "-m", "lifeos.cli", *args]
+        else [sys.executable, "-m", "lifeos.entrypoint", *args]
     )
     return subprocess.run(
         command,
@@ -99,8 +48,12 @@ def _run_lifeos(
 
 def test_documented_fresh_vault_setup_runs_from_isolated_home(tmp_path: Path) -> None:
     vault = tmp_path / "LifeOS-vault"
-    _bootstrap_vault(vault)
     env = _isolated_env(tmp_path)
+
+    init = _run_lifeos("init", str(vault), cwd=REPO_ROOT, env=env)
+    assert init.returncode == 0
+    assert "Initialized LifeOS vault" in init.stdout
+    assert (vault / ".git").is_dir()
 
     version = _run_lifeos("--version", cwd=REPO_ROOT, env=env)
     assert version.returncode == 0
@@ -201,12 +154,13 @@ def test_documented_fresh_vault_setup_runs_from_isolated_home(tmp_path: Path) ->
 
 def test_setup_guide_contains_the_tested_vault_and_codex_contract() -> None:
     text = MANUAL.read_text(encoding="utf-8")
-    assert "Create `~/LifeOS-vault/lifeos.yml` **inside the vault root**" in text
+    assert "lifeos init ~/LifeOS-vault" in text
     assert "vault_root: ." in text
     assert "runtime_dir: .lifeos" in text
     assert "system/instructions.yml" in text
-    assert "Create a minimal vault-root `AGENTS.md`" in text
     assert "codex mcp add lifeos --" in text
     assert "/absolute/path/to/lifeos-application/.venv/bin/lifeos-mcp" in text
     assert "--config /absolute/path/to/LifeOS-vault/lifeos.yml" in text
     assert "application repository's `AGENTS.md`" not in text
+    assert "Until LIFEOS-1634" not in text
+    assert "mkdir -p" not in text
