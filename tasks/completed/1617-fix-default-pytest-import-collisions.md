@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1617
 title: Make the canonical pytest configuration use importlib mode
-status: backlog
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1633A
@@ -64,3 +64,11 @@ uv run pytest --collect-only -q
   that proven behavior from repeated command-line flags into repository configuration.
 - One canonical pytest configuration is preferable to subtly different local, CI, and
   Docker invocations.
+
+# Completion notes
+
+- Centralized pytest import mode in `pyproject.toml` with `--import-mode=importlib`.
+- GitHub Actions and setup integration validation now rely on the canonical pytest configuration instead of repeating the flag.
+- Added an explicit CI collection gate using `uv run pytest --collect-only -q`.
+- GitHub Actions validation passed, including the full 1510-test suite and Docker clean-room setup/MCP gates.
+- Existing repository-wide Ruff and mypy baseline debt is intentionally unchanged and remains tracked by LIFEOS-1616.

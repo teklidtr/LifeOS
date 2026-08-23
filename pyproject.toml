@@ -22,6 +22,7 @@ lifeos-desktop-bridge = "lifeos.bridge.__main__:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 testpaths = ["tests"]
 
 [tool.ruff]

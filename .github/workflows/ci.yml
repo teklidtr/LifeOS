@@ -108,10 +108,15 @@ jobs:
       - name: Validate manual links
         run: uv run python scripts/validate_manual_links.py
 
+      - name: Collect test suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: uv run pytest --collect-only -q
+
       - name: Run test suite
         env:
           PYTHONPATH: ${{ github.workspace }}/src
-        run: uv run pytest --import-mode=importlib -q
+        run: uv run pytest -q
 
   docker-setup-e2e:
     name: docker-setup-e2e
