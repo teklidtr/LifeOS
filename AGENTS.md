@@ -37,9 +37,10 @@ tests or modifies that runtime contract. Filename alone does not grant authority
 2. Move it to `tasks/in-progress/`.
 3. Inspect existing code and tests.
 4. Implement only the stated scope.
-5. Run all listed validation.
-6. Record discovered work as separate backlog tasks.
-7. Move the task to `tasks/completed/` only when all criteria pass.
+5. Review documentation impact. Update every affected user manual, architecture, design-decision, setup, operations, or other authoritative document in the same PR. If no documentation is affected, record a concrete reason in the task's `# Documentation impact` section.
+6. Run all listed validation.
+7. Record discovered work as separate backlog tasks.
+8. Move the task to `tasks/completed/` only when all criteria pass, including documentation impact.
 
 Do not opportunistically implement neighboring subsystems.
 
@@ -63,6 +64,20 @@ Do not opportunistically implement neighboring subsystems.
 - Never treat inferred relationships as established facts.
 - Open original notes before using graph-discovered relationships as evidence.
 
+## Documentation impact
+
+Every implementation task must contain a `# Documentation impact` section using the format documented in `tasks/README.md`.
+
+Treat documentation as part of the implementation, not follow-up polish:
+
+- User-visible behavior changes require a review of `docs/user-manual/`.
+- Architecture or data-contract changes require a review of architecture/data-model documentation.
+- New or changed durable design choices require a review of `docs/design-decisions.md`.
+- Installation, configuration, CLI, MCP, or operational changes require setup/operations documentation review.
+- Internal-only changes may declare `Status: none`, but must explain why no documented behavior or contract changed.
+
+A completed task file is historical evidence; it does not replace updating the documents that describe LifeOS's current behavior.
+
 ## Completion standard
 
-A task is complete only when acceptance criteria pass, tests pass, unrelated files remain untouched, and newly discovered work is captured separately.
+A task is complete only when acceptance criteria pass, tests pass, unrelated files remain untouched, newly discovered work is captured separately, and documentation impact has been resolved in the same PR. A task that changes documented behavior or contracts without updating the affected documentation is not complete.
