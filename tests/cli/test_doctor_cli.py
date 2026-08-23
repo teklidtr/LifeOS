@@ -53,6 +53,50 @@ def test_doctor_fails_closed_for_invalid_bootstrap_shape(
     )
 
 
+def test_doctor_reports_missing_git_as_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+
+    real_which = __import__("shutil").which
+    monkeypatch.setattr(
+        "lifeos.doctor.shutil.which",
+        lambda name: None if name == "git" else real_which(name),
+    )
+
+    exit_code = main(["doctor", "--config", str(vault / "lifeos.yml"), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload["ready"] is False
+    assert any(finding["code"] == "git-missing" for finding in payload["findings"])
+
+
+def test_doctor_reports_unsupported_python_as_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr("lifeos.doctor.sys.version_info", (3, 10, 14))
+
+    exit_code = main(["doctor", "--config", str(vault / "lifeos.yml"), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload["ready"] is False
+    assert any(
+        finding["code"] == "python-unsupported" for finding in payload["findings"]
+    )
+
+
 def test_doctor_reports_missing_mcp_as_non_blocking(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -105,6 +149,8 @@ def test_doctor_reports_resolved_mcp_command_when_available(
         mcp_executable,
         "--config",
         str((vault / "lifeos.yml").resolve()),
+        "--actor-id",
+        "<actor-id>",
     ]
 
 
