@@ -34,6 +34,10 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --extra dev --extra mcp
 
+      - name: Documentation impact gate
+        if: github.event_name == 'pull_request'
+        run: uv run python scripts/check_documentation_impact.py --base-ref "origin/${{ github.base_ref }}"
+
       - name: Ruff repository gate
         run: uv run ruff check .
 
