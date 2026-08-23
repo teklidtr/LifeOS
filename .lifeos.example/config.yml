@@ -1,3 +1,4 @@
+# Loader example only; real vault configuration belongs at <vault>/lifeos.yml.
 # Relative vault paths are resolved from this configuration file's directory.
 vault_root: ..
 

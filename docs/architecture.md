@@ -13,10 +13,6 @@ journal/
 raw/
 study/
 wiki/
-  sources/
-  entities/
-  concepts/
-  syntheses/
 flashcards/
 patterns/
 profile/
@@ -56,43 +52,41 @@ Agents interpret meaning:
 
 Agents do not silently promote interpretations into truth.
 
-LifeOS does not embed an ingestion model client or accept provider API keys.
-External agents connect through the local STDIO MCP adapter, read an explicitly
-registered source, and synthesize a grounded draft. For an absent wiki target,
-the bounded read facade exposes the Markdown body plus normalized source `tags`
-and `topics`; unrelated frontmatter remains hidden. The agent submits a title,
-body, and optional reviewed canonical wiki tags with a concise rationale. Before proposing durable changes, the external agent can search `wiki/` and read
-relevant existing notes. It then decides whether the source warrants no durable
-change or a bounded set of 1..12 distinct creates and exact-section updates.
-Folder organization beneath `wiki/` is agent-selected from the current vault and
-may evolve over time; LifeOS does not prescribe entity/concept/source/synthesis
-folders. `raw/` remains the evidence/provenance layer and `wiki/` the accumulated
-knowledge layer, so source mirrors are not required. Approved generated creates
-may safely materialize bounded missing nested directories beneath an existing
-`wiki/` root. Source taxonomy is evidence, not an instruction: the agent may
-retain, remove, combine, or supplement it. LifeOS reads durable ownership before
-draft publication: a human-owned target becomes a base-hash-bound
-`patch_human_file`, while an unchanged target owned by the same ingestion generator
-becomes a base-hash-bound `replace_generated_file` containing the deterministic
-section replacement. Only that generated-file replacement may revise wiki tags in
-the same operation; ingestion refuses tag changes on human-owned targets. Every
-compounding mutation carries an inspectable rationale and all operations share one
-atomic reviewed proposal. Orphaned ownership, generator mismatch,
-external modification, and a missing or malformed ownership manifest stop before an
-ingestion draft is written. The Obsidian proposal workspace exposes orphan
-diagnostics and lets the user follow hash-bound restore instructions or create a
-separate ownership-release proposal. A release operation is bound to the complete
-reviewed manifest entry, requires the target to remain absent, and updates only the
-ownership manifest inside the ordinary atomic proposal transaction. LifeOS
-independently owns source verification, hashes, proposal identity, provenance,
-lifecycle state, and persistence.
+LifeOS does not embed an ingestion model client or accept provider API keys. External
+agents connect through the local STDIO MCP adapter. Universal runtime behavior is advertised
+by the MCP server; vault-specific scoped behavior is loaded only from the allowlisted
+`system/instructions.yml`. Application `AGENTS.md` governs development and is not inherited by
+an MCP client.
 
-The structural layout does not yet turn one source into a Karpathy-style fan-out
-across many entity and concept pages. The bounded create tool still creates one
-generated page, and the compound tool creates one page plus one exact existing
-section update. Bounded multi-page compounding is tracked separately so it can
-gain operation budgets, per-page review evidence, and atomic recovery without
-weakening the current proposal boundary.
+A registered canonical Markdown source may come from `raw/`, `study/`, `journal/`,
+`experiments/`, `goals/`, or another ordinary vault area. Folder location supplies semantic
+context rather than permission to reason. When situational context matters, `vault_context`
+combines explicit focus paths, applicable vault instructions, and bounded relevant canonical
+Markdown before the agent chooses mutations. The external agent can then search `wiki/`, read
+relevant existing notes, and decide whether a source warrants zero durable changes or a bounded
+set of 1..12 distinct creates and exact-section updates. Folder organization beneath `wiki/` is
+agent-selected and may evolve over time; LifeOS does not prescribe an entity/concept/source/
+synthesis taxonomy.
+
+For a registered `study/` source, the same reasoning pass may additionally propose selective
+flashcards. The agent decides what merits retrieval practice from the inferred learning context
+(exam relevance, future prerequisites, conceptual leverage, mechanisms, confusable distinctions,
+or comparable evidence). Deterministic LifeOS validates paths, source hashes, ownership,
+provenance, operation budgets, immutable review snapshots, and atomic application; it does not
+encode pedagogical importance. Generated creates may safely materialize bounded nested parents
+beneath existing canonical `wiki/` and `flashcards/` roots. The roots themselves are never
+created implicitly.
+
+Source taxonomy is evidence, not instruction. Human-owned wiki updates remain base-hash-bound
+`patch_human_file` operations; unchanged generated-owned wiki updates remain ownership/hash-bound
+`replace_generated_file` operations. Orphaned ownership, generator mismatch, external
+modification, unsafe paths, and malformed ownership state fail closed before publication or
+application. Every proposal-producing ingestion route stops at draft unless a separate explicit
+lifecycle transition is requested.
+
+Disposable `.lifeos/activity/` records bounded MCP routing metadata for debugging, such as tool
+names, paths, applicable instruction IDs, proposal IDs, operation counts, and changed paths. It
+is not canonical history and does not copy note bodies or flashcard answers.
 
 ### Human layer
 
@@ -177,7 +171,10 @@ Graphify supplies paths, communities, bridge nodes, and visualization. LifeOS co
 
 ## Context packs
 
-A context pack assembles applicable policies, the question, source excerpts, graph-discovered candidate paths, recent context, evidence gaps, and omissions.
+A context pack assembles applicable vault instructions, the question, explicit focus paths,
+bounded relevant canonical excerpts, evidence gaps, diagnostics, and omissions. Explicit focus
+paths are included even when lexical retrieval would not select them, so path/domain instruction
+applicability remains inspectable. A context pack grants no mutation authority.
 
 ## Optional exports
 

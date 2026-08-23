@@ -17,14 +17,13 @@ The real `.lifeos/` directory is runtime state and should normally be ignored by
   cache/
 ```
 
-Copy only configuration files you intentionally want to version.
+Do not place canonical vault configuration inside this runtime directory. The supported
+user-facing location is `<vault>/lifeos.yml`; `.lifeos/` is disposable.
 
-## Configuration
+## Configuration resolution
 
-Phase 1 does not search for configuration automatically. Call
-`load_config(config_path)` with the exact YAML file to read. The included
-`config.yml` is an example that can be adapted as `.lifeos/config.yml` inside a
-vault.
+LifeOS reads the explicit config path supplied by the caller. A vault-root `lifeos.yml` should
+normally use `vault_root: .` and `runtime_dir: .lifeos`.
 
 Supported fields are:
 

@@ -23,10 +23,6 @@ journal/
 raw/
 study/
 wiki/
-  sources/
-  entities/
-  concepts/
-  syntheses/
 flashcards/
 patterns/
 profile/
@@ -39,12 +35,10 @@ proposals/
 system/
 ```
 
-You do not need every top-level directory on day one. Inside `wiki/`, the four
-shown folders have a narrower meaning: they are stable filing roles for generated
-knowledge pages, not a growing ontology. `sources/` holds source-centered pages,
-`entities/` named things or actors worth a durable page, `concepts/` reusable
-ideas, and `syntheses/` cross-source conclusions or comparisons. LifeOS does not
-create a page merely because a noun or tag appeared in a source.
+You do not need every top-level directory on day one. `wiki/` deliberately has
+no required semantic subfolders. The connected agent may keep it flat or create
+useful nested folders as knowledge accumulates. Folder structure is allowed to
+emerge from the vault instead of being imposed as a universal ontology.
 
 ### How it connects
 
@@ -192,20 +186,26 @@ before consequential work continues.
 ### What it is
 
 A context pack retrieves relevant canonical notes for a question and explains
-why they matched.
+why they matched. An explicit focus path can also force the current source or note
+into the pack even when its words do not match the question strongly enough for
+lexical retrieval.
 
 ```bash
-uv run lifeos context build \
+lifeos context build \
   "Why do I avoid long study sessions?"
 
-uv run lifeos context build \
-  "What have I learned about thyroid physiology?" \
+lifeos context build \
+  "What matters while I study this for the driving-licence exam?" \
+  --focus-path study/driving-licence/intersections.md \
   --limit 12 \
   --json
 ```
 
-The result may contain applicable instructions, matching notes, score evidence,
-excerpts, parser diagnostics, evidence gaps, and omissions.
+The result may contain applicable instructions, explicitly focused sources,
+other matching canonical notes, score evidence, excerpts, parser diagnostics,
+evidence gaps, and omissions. `vault_context` exposes the same bounded
+pre-reasoning context to an MCP-connected agent; it does not ingest or mutate
+anything by itself.
 
 ### How it connects
 
@@ -381,67 +381,75 @@ before writing or proposing a durable pattern note.
 
 ### What it is
 
-Ingestion turns a registered source note into a draft wiki proposal through an
-external agent connected to the local LifeOS MCP server. LifeOS does not run an
+Ingestion lets an external agent connected to the local LifeOS MCP server turn
+new evidence into **zero or more reviewable changes**. LifeOS does not run an
 embedded model client and does not accept model names or provider API keys.
 
-```text
-Ingest study/cell-biology/chapter-03.md as the concept
-cell-membrane using LifeOS.
-```
+A source may come from any relevant registered canonical Markdown area, for
+example `raw/`, `study/`, `journal/`, `experiments/`, or `goals/`. Its folder
+provides semantic context; it is not a permission list for what may contribute to
+knowledge.
 
-The connected agent must use the advertised tools in this order:
+For a context-sensitive source, the preferred agent flow is:
 
 ```text
 registry_refresh
-  → vault_read_markdown
-  → if the wiki target is absent:
-      agent evaluates source_tags and source_topics
-      agent chooses source/entity/concept/synthesis plus a canonical slug
-      agent synthesizes a source-grounded title, body, and optional canonical tags
-      → ingestion_create_wiki_proposal
-  → if one section of an existing wiki target must change:
-      vault_read_markdown on the target
-      → agent synthesizes that exact section's replacement body
-      → ingestion_update_wiki_section_proposal
-  → if a detailed page must be created and an existing section must point to it:
-      vault_read_markdown on the existing target
-      → agent synthesizes both bounded bodies
-      → ingestion_create_wiki_and_update_section_proposal
+  → vault_read_markdown on the source
+  → vault_context when goals, instructions, or nearby vault state may change
+    how the source should be interpreted
+  → wiki_search
+  → vault_read_markdown on relevant wiki hits
+  → agent decides whether durable knowledge should change
+  → if no durable change is worthwhile: stop with no proposal
+  → otherwise ingestion_evolve_wiki_proposal
+      with 1..12 coordinated wiki creates and/or exact-section updates
   → stop at draft
 ```
 
+`vault_context` is a read-only pre-reasoning tool, not an ingestion command. It
+combines explicit focus paths with applicable `system/instructions.yml` rules and
+relevant canonical context.
+
+For a `study/` source, the agent may instead use
+`study_evolve_learning_proposal`. The same atomic draft can contain wiki
+mutations plus selective generated flashcards when retrieval practice materially
+serves the inferred learning goal. The agent may infer, for example, exam-focused,
+university-course, or self-study priorities from the source, goals, applicable
+instructions, and surrounding vault context. LifeOS does not hard-code those
+learning modes as a taxonomy. Automatic flashcard generation is not the default
+for `raw/`, `journal/`, `experiments/`, or `goals/`; an explicit user request can
+still ask for cards from any suitable material.
+
 ### How it connects
 
-The MCP adapter reads the canonical source through the bounded facade. The
-external agent interprets the source, while LifeOS verifies its registered
-identity and current hash, validates the supplied fields, creates a draft
-proposal, and records provenance. Source taxonomy is evidence: the agent can keep,
-remove, combine, or add tags, including when the source has no useful taxonomy.
-For current ingestion, the preferred workflow is emergent and compounding rather
-than typed filing. After reading the registered source, the agent searches the
-existing `wiki/`, reads relevant hits, and decides whether durable knowledge
-should change. `ingestion_evolve_wiki_proposal` accepts 1..12 distinct generated
-page creates and/or ownership-aware exact-section updates in one atomic draft.
-Each mutation includes a concise rationale. Generated creates may choose useful
-nested paths such as `wiki/learning/retrieval-practice.md`; approved application
-can create the missing nested folders beneath the existing `wiki/` root. The old
-`page_kind + slug` route remains a compatibility API but is no longer preferred.
-`raw/` is the source-evidence layer, so a parallel `wiki/sources/` note is not
-required. If the source adds no durable knowledge, the correct result is no
-proposal.
+The MCP adapter reads canonical sources through the bounded facade. Registered
+source identity and current hashes are verified before proposal generation. The
+external agent interprets the evidence and chooses what would make the vault more
+useful, while LifeOS validates paths, ownership, operation budgets, hashes, and
+proposal state.
 
-The proposal displays the source taxonomy, proposed canonical tags, rationale,
-and exact tag diff. Existing-note updates require one unique ATX
-heading (the heading text is supplied without `#` markers). LifeOS checks the
-canonical ownership manifest before publishing the draft. Human-owned targets
-produce a base-hash-bound human-file patch; unchanged targets owned by the same
-ingestion generator produce a generated-file replacement derived from the same
-exact-section edit. A generated-owned replacement may revise tags in the same
-operation; a human-owned target rejects requested tag changes. Both preserve every
-surrounding body section. It does not directly
-overwrite the target wiki page, and ingestion alone never implies permission to
-submit, approve, or apply the proposal.
+`ingestion_evolve_wiki_proposal` accepts 1..12 distinct generated-page creates
+and/or ownership-aware exact-section updates in one atomic draft. Generated
+creates may choose useful nested paths such as
+`wiki/learning/retrieval-practice.md`; approved application can create missing
+nested folders beneath the existing canonical `wiki/` root. The old
+`page_kind + slug` route remains a compatibility API but is not the preferred
+workflow. No parallel `wiki/sources/` mirror is required merely because evidence
+exists elsewhere in the vault.
+
+`study_evolve_learning_proposal` applies the same bounded proposal discipline to
+a registered `study/` source and may additionally create generated cards beneath
+the existing canonical `flashcards/` root. New nested folders can emerge on
+approved application, but LifeOS does not silently invent missing canonical
+roots. Generated cards keep source references to the study material and may also
+reference the durable wiki knowledge they test.
+
+Existing-note updates require one unique ATX heading (the heading text is
+supplied without `#` markers). Human-owned targets produce a base-hash-bound
+human-file patch. Generated-owned targets require matching generator ownership
+and content hashes. Every mutation includes a concise rationale. Neither
+ingestion tool directly overwrites canonical notes, and creating a draft never
+implies permission to submit, approve, or apply it.
 
 ## 3.11 Proposal lifecycle, ownership, and recovery
 
@@ -501,41 +509,39 @@ not direct CLI subcommands.
 
 ### What it is
 
-The facade exposes bounded models for external agents. The local MCP server
-makes those tools available over STDIO.
-
-Start the server:
-
-```bash
-uv run lifeos-mcp \
-  --config lifeos.yml \
-  --actor-id "your-trusted-identity"
-```
+The facade exposes bounded models for external agents. The local MCP server makes
+those tools available over STDIO. Normally the MCP client launches the server
+using the application executable and the vault-root configuration file; see the
+[Setup & Installation Guide](04-setup-and-installation.md) for the concrete Codex
+registration command.
 
 ### How it connects
 
 The MCP adapter calls the same deterministic facade used by internal code.
-Consequential actions invoke a trusted interactive authorizer. The agent
-supplies only allowed fields and cannot claim the approving identity or bypass
+Consequential actions invoke a trusted interactive authorizer. The agent supplies
+only allowed fields and cannot claim the approving identity or bypass
 confirmation.
 
-The server uses STDIO protocol output and should normally be launched by an
-MCP-compatible client rather than used as an interactive shell command.
+Three instruction layers stay separate:
 
-When an MCP client receives an ingestion request, the LifeOS server advertises
-the bounded workflow explicitly: refresh the disposable registry with
-`registry_refresh`, read the registered source with `vault_read_markdown`,
-synthesize a source-grounded title, body, and optional reviewed wiki tags, call
-`ingestion_create_wiki_proposal` for an absent target, or read the existing
-target and call `ingestion_update_wiki_section_proposal` for one exact section.
-When one ingestion should do both, call
-`ingestion_create_wiki_and_update_section_proposal`; its single draft contains
-one generated-page creation followed by the ownership-appropriate hash-bound
-update. An orphaned ownership entry, a generator mismatch, an ownership hash
-mismatch, or a missing ownership manifest prevents draft publication and returns
-bounded remediation. All paths stop at the resulting draft. Submission,
-approval, and application each require a separate explicit user request and
-retain trusted interactive authorization.
+- the application repository's `AGENTS.md` guides development of LifeOS;
+- MCP server instructions advertise client-independent LifeOS runtime rules;
+- the vault's `system/instructions.yml` supplies vault-specific instructions that
+  `vault_context` can route to the current question and focus paths.
+
+The preferred runtime surfaces include `registry_refresh`,
+`vault_read_markdown`, `vault_context`, `wiki_search`,
+`ingestion_evolve_wiki_proposal`, `study_evolve_learning_proposal`, and the
+explicit proposal lifecycle tools. `runtime_activity` is a read-only diagnostic
+surface that reports recent MCP routing metadata such as tool names, paths,
+instruction IDs, proposal IDs, and changed paths without copying canonical note
+bodies or flashcard answers into the activity log. This makes “what did the MCP
+server do?” inspectable without coupling a client to `.lifeos/`'s internal file
+format.
+
+All ingestion paths stop at the resulting draft unless the user separately asks
+for submission, approval, or application. Orphaned ownership, generator mismatch,
+hash mismatch, missing canonical roots, or stale source state fail closed.
 
 ## 3.13 Graph views
 

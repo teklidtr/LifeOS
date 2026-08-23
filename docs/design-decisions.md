@@ -46,7 +46,7 @@ Shared files use explicit managed-block markers. Agents may modify only inside v
 
 ## DD-010: Explicit instruction allowlist
 
-A future `system/instructions.yml` is authoritative. Frontmatter alone does not grant instruction authority.
+`system/instructions.yml` is the allowlisted source of vault-specific runtime instructions. Frontmatter alone does not grant instruction authority.
 
 ## DD-011: Read before write
 
@@ -504,7 +504,7 @@ bounded work rather than an implicit consequence of the layout.
 
 LifeOS does not prescribe the durable knowledge taxonomy. The external ingestion
 agent searches existing `wiki/` knowledge, reads relevant notes, and decides
-whether a registered raw source warrants zero durable changes or a bounded set
+whether a registered canonical Markdown source warrants zero durable changes or a bounded set
 of coordinated changes. The preferred compounding contract permits 1..12
 distinct generated creates and ownership-aware exact-section updates in one
 reviewed atomic proposal, with an explicit rationale per mutation. `raw/` is the
@@ -520,3 +520,29 @@ remain ownership/hash-bound, proposal review snapshots stay immutable, and no
 lifecycle transition is inferred from ingestion. LIFEOS-1631 typed page roles
 remain compatibility helpers only; agents are no longer instructed to use them
 as the preferred filing model.
+
+
+## DD-087: Runtime policy is MCP-owned; vault context is explicit and study cards are selective
+
+The LifeOS application repository and a user's vault are separate concerns. Application
+`AGENTS.md` governs development. Universal cross-client runtime behavior is advertised by the
+local STDIO MCP server. Vault-specific behavioral instructions are allowlisted from
+`system/instructions.yml`, and the canonical vault-root configuration is `lifeos.yml` with
+`vault_root: .` and vault-relative `.lifeos` runtime state. An MCP client does not inherit the
+application repository's `AGENTS.md` merely because it launches the application executable.
+
+`vault_context` is a read-only pre-reasoning surface, not ingestion itself. Explicit focus paths
+are always eligible context and make path/domain instruction applicability deterministic even
+when lexical search would miss them. Relevant canonical Markdown may come from any ordinary
+vault area; folder location is semantic context, not a permission boundary.
+
+For registered `study/` sources, one bounded proposal may combine durable wiki evolution with
+selective generated flashcards. The external agent decides card value from the inferred learning
+context; LifeOS does not hard-code exam, university, or self-study ontologies. Generated
+flashcards preserve the study source, optional wiki knowledge references, learning context, and
+selection rationale. Automatic flashcard proposal generation is study-specific by default.
+
+Fast integration tests use isolated HOME/XDG directories, fresh vaults, real subprocesses, and
+real MCP protocol clients when the optional SDK is present. A Linux Docker clean-room smoke is a
+secondary CI/release gate that catches host-environment leakage; it does not replace the fast
+integration suite or put an LLM in deterministic pass/fail infrastructure tests.

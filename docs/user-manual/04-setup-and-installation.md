@@ -94,17 +94,13 @@ lifeos --help
 
 ## 4.5 Create a vault
 
-Choose a location outside the application repository or create a dedicated vault
-folder inside a private workspace:
+Choose a vault location **outside the LifeOS application repository**. The application
+contains code; the vault contains your canonical configuration and personal Markdown.
+Until LIFEOS-1634 adds guided Cookiecutter bootstrap, create the minimal skeleton manually:
 
 ```bash
 mkdir -p ~/LifeOS-vault
 cd ~/LifeOS-vault
-```
-
-Create the main domains:
-
-```bash
 mkdir -p \
   journal \
   raw \
@@ -136,10 +132,11 @@ Create `.gitignore`:
 .DS_Store
 ```
 
-The `.lifeos/` directory contains disposable registry, recovery, graph, export,
-and cache state. Do not treat it as canonical knowledge.
+`.lifeos/` belongs to this vault but is disposable runtime state: registry, recovery,
+activity diagnostics, graph/export generations, indexes, locks, and caches. Do not treat
+it as canonical knowledge and do not commit it.
 
-## 4.6 Create the ownership manifest
+## 4.6 Create canonical vault bootstrap files
 
 Create `system/generated-ownership.json`:
 
@@ -150,28 +147,50 @@ Create `system/generated-ownership.json`:
 }
 ```
 
-Commit this file with the vault. It is durable authorization state, not runtime
-cache.
-
-## 4.7 Create `lifeos.yml`
-
-LifeOS CLI commands currently load `lifeos.yml` from the current working
-directory. A convenient arrangement is to keep the configuration in the
-application repository while pointing it to your separate vault.
-
-From the LifeOS repository root, create:
+Create `system/instructions.yml` even when you do not have custom instructions yet:
 
 ```yaml
-vault_root: /Users/you/LifeOS-vault
+schema_version: 1
+instructions: []
+```
+
+This file is the allowlisted source for **vault-specific** runtime instructions. Universal
+LifeOS behavior comes from the MCP server itself. Later you can add scoped instructions,
+for example exam-oriented study guidance, without turning folder names into permissions.
+
+Create a minimal vault-root `AGENTS.md` for clients such as Codex that understand it:
+
+```markdown
+# LifeOS Vault Agent Bootstrap
+
+This directory is a LifeOS vault, not the LifeOS application source repository.
+
+Use the configured LifeOS MCP server for canonical search, context, proposals, and
+consequential mutations. Obtain universal runtime policy from the MCP server and
+vault-specific instructions through LifeOS. Folder names provide semantic context; do not
+infer permission or a universal ontology from them. Do not directly rewrite canonical
+LifeOS artifacts when an MCP/proposal workflow exists.
+```
+
+The vault `AGENTS.md` is a client convenience, not the cross-client source of truth. MCP
+instructions remain the client-independent runtime contract.
+
+## 4.7 Create vault-root `lifeos.yml`
+
+Create `~/LifeOS-vault/lifeos.yml` **inside the vault root**:
+
+```yaml
+vault_root: .
 runtime_dir: .lifeos
 features:
   graphify: true
   exports: true
 ```
 
-You may use a relative vault path. Relative `vault_root` values are resolved
-from the configuration file's directory. Relative `runtime_dir` values are
-resolved from the vault root.
+Relative `vault_root` values are resolved from the configuration file's directory, so
+`vault_root: .` makes the vault portable. Relative `runtime_dir` values are resolved from
+the vault root. The LifeOS executable may live anywhere; `--config` tells it which vault it
+is serving.
 
 Configuration rules:
 
@@ -183,37 +202,41 @@ Configuration rules:
 
 ## 4.8 Initialize and populate the registry
 
-The registry is explicit and disposable. With the LifeOS repository virtual
-environment activated, run:
+From the vault root, with the **application repository's virtual environment activated**:
 
 ```bash
-uv run lifeos scan --config /absolute/path/to/LifeOS-vault/lifeos.yml
+lifeos scan --config ./lifeos.yml
 ```
 
-Run the same command after manual imports, edits, moves, or deletions, or when
-you intentionally rebuild the disposable registry. Use `--json` for structured
-automation output.
+Or invoke the executable by absolute path without activating the environment:
+
+```bash
+/absolute/path/to/lifeos-application/.venv/bin/lifeos \
+  scan --config /absolute/path/to/LifeOS-vault/lifeos.yml
+```
+
+Run the same scan after manual imports, edits, moves, or deletions, or when intentionally
+rebuilding the disposable registry. Use `--json` for structured automation output.
 
 ## 4.9 Open the vault in Obsidian
 
 1. Open Obsidian.
 2. **Click “Open folder as vault.”**
 3. Select `~/LifeOS-vault`.
-4. Optionally enable **Daily Notes**, **Templates**, **Backlinks**, and
-   **Properties view**.
+4. Optionally enable **Daily Notes**, **Templates**, **Backlinks**, and **Properties view**.
 
-No proprietary LifeOS Obsidian plugin is required for the core workflow. The first-class review workspace and other desktop cockpit views require the bundled LifeOS plugin, while the canonical Markdown artifacts remain usable without it.
+No proprietary LifeOS Obsidian plugin is required for the core workflow. The first-class
+review workspace and other desktop cockpit views require the bundled LifeOS plugin, while
+the canonical Markdown artifacts remain usable without it.
 
 To build and install the optional bundled plugin, follow
-[Obsidian Desktop Cockpit → First run](06-obsidian-desktop.md#first-run). Build it
-from the LifeOS application repository; install only the resulting `main.js`,
-`manifest.json`, and `styles.css` in the vault's `.obsidian/plugins/lifeos/`
-directory.
+[Obsidian Desktop Cockpit → First run](06-obsidian-desktop.md#first-run). Build it from the
+LifeOS application repository; install only the resulting `main.js`, `manifest.json`, and
+`styles.css` in the vault's `.obsidian/plugins/lifeos/` directory.
 
 ## 4.10 Verify the installation
 
-From the directory containing `lifeos.yml`, with the LifeOS repository virtual
-environment activated:
+From the vault root:
 
 ```bash
 lifeos status
@@ -225,76 +248,102 @@ For machine-readable output:
 lifeos status --json
 ```
 
-A fresh installation may report missing graph or export generations. That is
-normal until you build them. A blocked recovery transaction or corrupt canonical
-state should be investigated before consequential operations.
+A fresh installation may report missing graph or export generations. That is normal until
+you build them. A blocked recovery transaction or corrupt canonical state should be
+investigated before consequential operations.
+
+You can also verify context routing without changing canonical files:
+
+```bash
+lifeos context build "What context is relevant?" --json
+```
+
+When you already know the source being worked on, use repeatable `--focus-path` so path- or
+domain-scoped instructions apply even if lexical retrieval would not select the source:
+
+```bash
+lifeos context build "What should I prioritize while studying this?" \
+  --focus-path study/example/topic.md \
+  --json
+```
 
 ## 4.11 Optional MCP setup
 
-Install MCP support:
+Install MCP support in the **application repository**:
 
 ```bash
+cd /absolute/path/to/lifeos-application
 uv sync --extra mcp
 ```
 
-Configure your MCP client to launch:
+The server executable lives with the application; the configuration lives with the vault:
 
-```bash
-lifeos-mcp \
-  --config /absolute/path/to/lifeos.yml \
-  --actor-id "your-trusted-identity"
+```text
+lifeos application/.venv/bin/lifeos-mcp
+                     │
+                     └── --config → LifeOS-vault/lifeos.yml
+                                         │
+                                         └── vault_root: .
 ```
 
-Keep the server local and use STDIO transport. Do not expose it as an
-unauthenticated network service.
+For Codex, register the local STDIO server explicitly. Using the absolute executable path
+avoids depending on shell activation or `PATH`:
 
-Do not pre-create a universal wiki taxonomy. Keep the canonical `wiki/` root and
-let useful subfolders emerge from actual knowledge. Approved generated creates
-can lazily materialize bounded nested folders beneath `wiki/`; draft creation
-alone does not change the vault.
+```bash
+codex mcp add lifeos -- \
+  /absolute/path/to/lifeos-application/.venv/bin/lifeos-mcp \
+  --config /absolute/path/to/LifeOS-vault/lifeos.yml \
+  --actor-id your-codex-identity
+```
 
-After the MCP client connects, ingestion follows `registry_refresh` ->
-`vault_read_markdown` -> `wiki_search` -> read relevant wiki hits -> decide. If
-the source adds no durable knowledge, the agent creates no proposal. Otherwise
-it should normally call `ingestion_evolve_wiki_proposal` with 1..12 distinct
-agent-selected creates and/or exact-section updates, each with a rationale. The
-default result is still only a draft; the server does not infer permission to
-submit, approve, or apply it.
+Verify the Codex registration:
 
-Legacy `page_kind + slug` and single-page tools remain compatible, but they are
-not the preferred knowledge architecture. `raw/` stores source evidence; do not
-create a `wiki/sources/` mirror merely to duplicate it.
+```bash
+codex mcp list
+```
 
-`vault_read_markdown` returns the Markdown body plus bounded `source_tags` and
-`source_topics`. The connected agent may improve or replace that taxonomy and
-send optional canonical wiki tags with a rationale. Source metadata is never
-copied automatically; the proposal diff is the review boundary.
+For another MCP-compatible client, configure the same executable and arguments directly:
 
-If the explicit wiki target already exists, read it with `vault_read_markdown`
-and use `ingestion_update_wiki_section_proposal` with one unique ATX heading and
-its replacement body. Supply heading text without `#` markers. This produces a
-base-hash-bound draft and preserves the rest of the note. LifeOS selects
-`patch_human_file` for a human-owned note or `replace_generated_file` for an
-unchanged note owned by the same ingestion generator; it does not perform a
-whole-note semantic merge.
+```bash
+/absolute/path/to/lifeos-application/.venv/bin/lifeos-mcp \
+  --config /absolute/path/to/LifeOS-vault/lifeos.yml \
+  --actor-id your-trusted-identity
+```
 
-If the source deserves a new detailed wiki page and an existing wiki section
-must be updated in the same review, read the existing target and use
-`ingestion_create_wiki_and_update_section_proposal`. Supply the absent create
-target with its title and body plus the existing target's exact heading and
-replacement body. The result is one draft with two ordered operations; neither
-target changes before the ordinary submit, approve, and apply lifecycle.
+Keep the server local and use STDIO transport. Do not expose it as an unauthenticated
+network service.
 
-The canonical ownership manifest must exist. If an absent create target retains
-an ownership entry, the tool reports an orphan and writes no draft. Restore the
-file or use the explicit ownership-release remediation when available; registry
-refresh intentionally does not remove durable ownership.
+The MCP server supplies universal LifeOS runtime instructions. `system/instructions.yml`
+supplies this vault's scoped behavioral instructions. The application repository's
+`AGENTS.md` is for developing LifeOS and is not inherited merely because an MCP server is
+being used.
 
-This is the only supported agent-assisted ingestion route. The connected agent
-supplies semantic interpretation; LifeOS does not accept a model name, provider
-API key, or environment-based model configuration. The MCP workflow refreshes
-the disposable registry so the source is registered with its current path and
-hash before ingestion.
+For reasoning where personal context can change the answer, the agent should call
+`vault_context` with explicit focus paths. The result may include applicable instructions
+plus relevant canonical study, goals, journal, experiments, plans, wiki, or other Markdown.
+Folder location is context, not an allowlist: any registered canonical Markdown source may
+ground durable wiki evolution when relevant.
+
+For durable knowledge, the preferred loop is `registry_refresh` as needed -> read the source
+-> `vault_context` when situational context matters -> `wiki_search` -> read relevant wiki
+hits -> decide. If no durable knowledge changes, create no proposal. Otherwise use
+`ingestion_evolve_wiki_proposal` with 1..12 distinct reviewed wiki creates/section updates.
+
+For a registered source under `study/`, `study_evolve_learning_proposal` may combine those
+wiki changes with selective flashcard creates in the **same atomic draft**. The external
+agent chooses what merits retrieval practice according to the inferred learning context.
+Examples include exam relevance, future prerequisites, conceptual leverage, mechanisms, and
+confusable distinctions. LifeOS validates the reviewed paths, hashes, ownership, provenance,
+and operation bounds; deterministic code does not decide which facts are educationally
+important. Non-study sources do not get automatic flashcards by default.
+
+Every proposal-producing ingestion tool still stops at draft. `proposal_submit`,
+`proposal_approve`, and `proposal_apply` require separate explicit lifecycle intent.
+
+For debugging, `runtime_activity` exposes recent disposable routing metadata such as tool
+names, focus/source paths, applied instruction IDs, proposal IDs, targets, and changed paths.
+It does **not** copy canonical Markdown bodies or flashcard answers into `.lifeos` activity
+logs.
 
 ## 4.12 Build the semantic retrieval index
 
@@ -315,7 +364,7 @@ conversation fields.
 From the vault:
 
 ```bash
-git add .gitignore system/generated-ownership.json
+git add .gitignore AGENTS.md lifeos.yml system/generated-ownership.json system/instructions.yml
 git commit -m "chore(vault): initialize LifeOS vault"
 ```
 

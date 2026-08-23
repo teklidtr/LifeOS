@@ -114,24 +114,30 @@ tasks:
 Avoid planning an entire year at task-level resolution. Keep distant goals broad
 and near-term work concrete.
 
-### Capture a factual source
+### Process a factual source
 
-1. Save the material under `study/` or `raw/`.
-2. Record its author, URL, edition, date, or citation.
-3. Add your questions and disagreements.
-4. Run `uv run lifeos scan`, or let the MCP-connected agent call
-   `registry_refresh`, after adding the source.
-5. Ask the MCP-connected agent to ingest the registered source. The agent first
-   searches `wiki/`, reads relevant existing notes, and decides what durable
-   knowledge should change. It may propose no change, or use
-   `ingestion_evolve_wiki_proposal` for 1..12 distinct creates and exact-section
-   updates. Folder names beneath `wiki/` are chosen from the current knowledge
-   context rather than a fixed ontology. Prefer reusing existing notes over
-   creating duplicates, and create new folders only when they improve future
-   retrieval or understanding. Every mutation includes a rationale in the review
-   artifact. Source `tags` and `topics` remain evidence rather than instructions.
-
-6. Review the resulting draft proposal. Ingestion does not submit, approve, or
+1. Keep the material in the canonical area that matches its role. A source may
+   already live under `study/`, `raw/`, `journal/`, `experiments/`, `goals/`, or
+   another supported Markdown area; moving it merely to make it “ingestible” is
+   unnecessary.
+2. Record provenance such as author, URL, edition, date, citation, or your own
+   observation context where useful.
+3. Run `lifeos scan`, or let the MCP-connected agent call `registry_refresh`,
+   after adding or changing the source.
+4. The agent reads the source. When personal goals, study purpose, path-scoped
+   instructions, or nearby vault state may affect interpretation, it calls
+   `vault_context` with the source as a focus path. It then searches and reads
+   relevant existing wiki knowledge.
+5. The agent may propose no durable change, or call
+   `ingestion_evolve_wiki_proposal` for 1..12 coordinated wiki creates and
+   exact-section updates. Folder names beneath `wiki/` emerge from the current
+   knowledge context rather than a fixed ontology. Prefer reuse over duplicates.
+6. For a `study/` source, the agent may instead use
+   `study_evolve_learning_proposal` to combine wiki evolution with selective
+   flashcards when active recall serves the inferred learning goal. The study
+   context can change what deserves a card; exam preparation, university study,
+   and self-study need not optimize for the same facts.
+7. Review the resulting draft proposal. Ingestion does not submit, approve, or
    apply it.
 
 If an absent target still has a generated-ownership entry, ingestion stops
@@ -268,11 +274,21 @@ This is more useful than marking the day as a failure.
 Before asking an AI a vault-related question, build a context pack:
 
 ```bash
-uv run lifeos context build \
+lifeos context build \
   "What evidence do I have about why writing tasks are delayed?"
 ```
 
-Review evidence gaps and omissions before trusting the answer.
+When one particular note is the reason for the question, include it explicitly:
+
+```bash
+lifeos context build \
+  "What should matter for my driving-licence exam?" \
+  --focus-path study/driving-licence/intersections.md
+```
+
+The MCP `vault_context` tool provides the same kind of bounded pre-reasoning
+context to a connected agent. Review evidence gaps and omissions before trusting
+the answer.
 
 ## Evening
 
@@ -300,16 +316,12 @@ Review both lightweight notes under `raw/` and canonical rich captures under
 `captures/`. Rich captures may also need attachment audits, failed extraction
 review, suggestion decisions, linking, merge or split, or archive.
 
-A raw capture may become:
-
-- a wiki note;
-- a study question;
-- a flashcard;
-- a task inside an existing plan;
-- a new plan;
-- a journal observation;
-- an experiment;
-- nothing worth keeping.
+A raw capture may contribute to durable wiki knowledge, become study material,
+inform a task, plan, journal observation or experiment, or turn out to need no
+promotion at all. Automatic flashcard generation is normally reserved for
+`study/` material where retrieval practice serves an inferred learning goal. If
+you explicitly ask to memorize something from a raw capture, the agent may still
+propose a suitable card.
 
 Not every thought needs promotion.
 

@@ -20,15 +20,16 @@ Do not rely on chat history when the repository contains the decision.
 
 ## Sources of authority
 
-1. Explicit user instruction for the current task
-2. A future vault's `system/instructions.yml`
-3. `AGENTS.md`
-4. accepted decisions in `docs/design-decisions.md`
-5. architecture and policy documents
-6. task acceptance criteria
-7. reversible implementation details inferred by the agent
+1. Explicit user instruction for the current implementation task
+2. `AGENTS.md`
+3. accepted decisions in `docs/design-decisions.md`
+4. architecture and policy documents
+5. task acceptance criteria
+6. reversible implementation details inferred by the agent
 
-Filename alone does not grant authority.
+A vault's `system/instructions.yml` is runtime input for agents using that vault; it is not
+an instruction source for changing the LifeOS application unless the selected task explicitly
+tests or modifies that runtime contract. Filename alone does not grant authority.
 
 ## Implementation workflow
 
