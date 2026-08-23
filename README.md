@@ -29,10 +29,12 @@ uv sync
 source .venv/bin/activate
 ```
 
-Create a separate vault with the first-party bootstrap:
+Create a separate vault with the first-party bootstrap, then run the read-only readiness
+check before populating disposable runtime state:
 
 ```bash
 lifeos init ~/LifeOS-vault
+lifeos doctor --config ~/LifeOS-vault/lifeos.yml
 cd ~/LifeOS-vault
 lifeos scan --config ./lifeos.yml
 lifeos status
@@ -41,6 +43,12 @@ lifeos status
 `lifeos init` is non-destructive. It creates the supported canonical bootstrap roots and
 files, initializes Git, and refuses to overwrite a conflicting or partial vault. Re-running
 it on a recognized LifeOS vault does not restore template text over your edits.
+
+`lifeos doctor` is diagnostic only. It checks the installed LifeOS/Python/Git environment,
+first-party vault bootstrap shape, existing vault health, and optional MCP availability. It
+does not repair the vault, build disposable indexes, install dependencies, or mutate Codex,
+Claude, Obsidian, or another external client's configuration. Use `--json` for a stable
+machine-readable result.
 
 For MCP-assisted workflows, install the optional MCP dependency in the application
 repository and register `lifeos-mcp` with your client explicitly:
@@ -51,7 +59,7 @@ uv sync --extra mcp
 ```
 
 See the Setup & Installation Guide for the tested Codex registration command, vault/runtime
-boundaries, and Obsidian plugin installation.
+boundaries, doctor exit semantics, and Obsidian plugin installation.
 
 ## User documentation
 
