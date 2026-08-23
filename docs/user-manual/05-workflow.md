@@ -122,27 +122,39 @@ and near-term work concrete.
    unnecessary.
 2. Record provenance such as author, URL, edition, date, citation, or your own
    observation context where useful.
-3. Run `lifeos scan`, or let the MCP-connected agent call `registry_refresh`,
-   after adding or changing the source.
-4. The agent reads the source. When personal goals, study purpose, path-scoped
-   instructions, or nearby vault state may affect interpretation, it calls
-   `vault_context` with the source as a focus path. It then searches and reads
-   relevant existing wiki knowledge.
+3. The agent reads the canonical source directly. You do not need to run
+   `lifeos scan` or call `registry_refresh` merely because the source is new or
+   has been edited.
+4. When personal goals, study purpose, path-scoped instructions, or nearby vault
+   state may affect interpretation, the agent calls `vault_context` with the
+   source as a focus path. It then searches and reads relevant existing wiki
+   knowledge.
 5. The agent may propose no durable change, or call
    `ingestion_evolve_wiki_proposal` for 1..12 coordinated wiki creates and
-   exact-section updates. Folder names beneath `wiki/` emerge from the current
-   knowledge context rather than a fixed ontology. Prefer reuse over duplicates.
+   exact-section updates. Immediately before source and target verification,
+   proposal-building ingestion tools run the authoritative full registry refresh.
+   That refresh updates only rebuildable derived registry state; if it fails,
+   ingestion stops before creating a draft. Folder names beneath `wiki/` emerge
+   from the current knowledge context rather than a fixed ontology. Prefer reuse
+   over duplicates.
 6. For a `study/` source, the agent may instead use
    `study_evolve_learning_proposal` to combine wiki evolution with selective
-   flashcards when active recall serves the inferred learning goal. The study
+   flashcards when active recall serves the inferred learning goal. The same
+   automatic registry preflight runs before source verification. The study
    context can change what deserves a card; exam preparation, university study,
    and self-study need not optimize for the same facts.
 7. Review the resulting draft proposal. Ingestion does not submit, approve, or
    apply it.
 
+`lifeos scan` and MCP `registry_refresh` remain supported explicit maintenance
+operations when you want derived indexes refreshed outside proposal-building
+ingestion, for example during diagnostics or a manual maintenance pass. They are
+not a prerequisite for normal MCP ingestion.
+
 If an absent target still has a generated-ownership entry, ingestion stops
 without creating a draft. Restore the generated file or explicitly release its
-ownership; `registry_refresh` cannot make that durable decision.
+ownership; neither automatic ingestion preflight nor an explicit
+`registry_refresh` can make that durable decision.
 
 ### Capture a flashcard
 
