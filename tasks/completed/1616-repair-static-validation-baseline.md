@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1616
 title: Restore repository-wide Ruff and mypy gates
-status: in-progress
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1633A
@@ -67,3 +67,14 @@ uv run pytest -q
   is blocked while historical debt remains visible.
 - This task closes that bridge by restoring a clean repository-wide baseline; it must not
   make the temporary policy permanent.
+
+# Completion notes
+
+- Cleared the repository-wide Ruff baseline from 148 findings to zero.
+- Cleared the strict mypy baseline from 81 errors across 19 files to zero errors across
+  182 source files.
+- Promoted repository-wide Ruff and mypy checks to blocking CI gates and removed the
+  redundant changed-file-only static-analysis bridge.
+- Preserved the canonical runtime behavior while tightening type narrowing and resolving
+  lint findings without broad ignores or disabled rule families.
+- GitHub Actions validated 1510 passing tests plus the Docker clean-room setup/MCP gate.
