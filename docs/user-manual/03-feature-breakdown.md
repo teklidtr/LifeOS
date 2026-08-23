@@ -151,16 +151,20 @@ Those rows are rebuilt separately by the deterministic provenance-index refresh;
 The registry does **not** replace Markdown and should not contain the only copy of
 canonical knowledge. It may be deleted and rebuilt from canonical state.
 
-Use either supported file/proposal refresh adapter:
+Use either supported explicit file/proposal refresh adapter:
 
 ```bash
 uv run lifeos scan
 uv run lifeos scan --json
 ```
 
-An MCP-connected agent uses `registry_refresh`. Neither surface rebuilds the
-separate provenance, semantic retrieval, graph, or export indexes. See
-[Registry](../registry.md) for the exact SQLite and refresh contracts.
+An MCP-connected agent can use `registry_refresh` for the same explicit
+maintenance operation. Proposal-building ingestion tools also call the
+authoritative full refresh automatically immediately before source verification,
+so a separate refresh call is not required merely because an ingestion source is
+new or edited. Neither surface rebuilds the separate provenance, semantic
+retrieval, graph, or export indexes. See [Registry](../registry.md) for the exact
+SQLite and refresh contracts.
 
 ## 3.5 Status and diagnostics
 
@@ -396,16 +400,16 @@ Ingestion lets an external agent connected to the local LifeOS MCP server turn
 new evidence into **zero or more reviewable changes**. LifeOS does not run an
 embedded model client and does not accept model names or provider API keys.
 
-A source may come from any relevant registered canonical Markdown area, for
-example `raw/`, `study/`, `journal/`, `experiments/`, or `goals/`. Its folder
-provides semantic context; it is not a permission list for what may contribute to
-knowledge.
+A source may come from any relevant canonical Markdown area, for example
+`raw/`, `study/`, `journal/`, `experiments/`, or `goals/`. Its folder provides
+semantic context; it is not a permission list for what may contribute to
+knowledge. Proposal-building ingestion automatically refreshes the disposable
+registry before verifying that source.
 
 For a context-sensitive source, the preferred agent flow is:
 
 ```text
-registry_refresh
-  → vault_read_markdown on the source
+vault_read_markdown on the source
   → vault_context when goals, instructions, or nearby vault state may change
     how the source should be interpreted
   → wiki_search
@@ -413,18 +417,22 @@ registry_refresh
   → agent decides whether durable knowledge should change
   → if no durable change is worthwhile: stop with no proposal
   → otherwise ingestion_evolve_wiki_proposal
-      with 1..12 coordinated wiki creates and/or exact-section updates
+      → automatic full registry refresh
+      → registered-source/hash/target verification
+      → 1..12 coordinated wiki creates and/or exact-section updates in a draft
   → stop at draft
 ```
 
 `vault_context` is a read-only pre-reasoning tool, not an ingestion command. It
 combines explicit focus paths with applicable `system/instructions.yml` rules and
-relevant canonical context.
+relevant canonical context. `registry_refresh` remains available as an explicit
+maintenance operation outside this normal ingestion loop.
 
 For a `study/` source, the agent may instead use
-`study_evolve_learning_proposal`. The same atomic draft can contain wiki
-mutations plus selective generated flashcards when retrieval practice materially
-serves the inferred learning goal. The agent may infer, for example, exam-focused,
+`study_evolve_learning_proposal`. The same automatic registry preflight runs
+before source verification, and the atomic draft can contain wiki mutations plus
+selective generated flashcards when retrieval practice materially serves the
+inferred learning goal. The agent may infer, for example, exam-focused,
 university-course, or self-study priorities from the source, goals, applicable
 instructions, and surrounding vault context. LifeOS does not hard-code those
 learning modes as a taxonomy. Automatic flashcard generation is not the default
@@ -433,11 +441,13 @@ still ask for cards from any suitable material.
 
 ### How it connects
 
-The MCP adapter reads canonical sources through the bounded facade. Registered
-source identity and current hashes are verified before proposal generation. The
-external agent interprets the evidence and chooses what would make the vault more
-useful, while LifeOS validates paths, ownership, operation budgets, hashes, and
-proposal state.
+The MCP adapter reads canonical sources through the bounded facade. Immediately
+before a proposal-building ingestion facade is invoked, it runs the existing
+authoritative full registry refresh. Registered source identity and current hashes
+are then verified against that fresh derived state. Refresh failures stop before a
+draft is created. The external agent interprets the evidence and chooses what
+would make the vault more useful, while LifeOS validates paths, ownership,
+operation budgets, hashes, and proposal state.
 
 `ingestion_evolve_wiki_proposal` accepts 1..12 distinct generated-page creates
 and/or ownership-aware exact-section updates in one atomic draft. Generated
@@ -543,16 +553,18 @@ Three instruction layers stay separate:
 The preferred runtime surfaces include `registry_refresh`,
 `vault_read_markdown`, `vault_context`, `wiki_search`,
 `ingestion_evolve_wiki_proposal`, `study_evolve_learning_proposal`, and the
-explicit proposal lifecycle tools. `runtime_activity` is a read-only diagnostic
-surface that reports recent MCP routing metadata such as tool names, paths,
-instruction IDs, proposal IDs, and changed paths without copying canonical note
-bodies or flashcard answers into the activity log. This makes “what did the MCP
-server do?” inspectable without coupling a client to `.lifeos/`'s internal file
-format.
+explicit proposal lifecycle tools. `registry_refresh` is available for explicit
+maintenance, while proposal-building ingestion performs its own automatic
+preflight refresh. `runtime_activity` is a read-only diagnostic surface that
+reports recent MCP routing metadata such as tool names, paths, instruction IDs,
+proposal IDs, and changed paths without copying canonical note bodies or
+flashcard answers into the activity log. This makes “what did the MCP server do?”
+inspectable without coupling a client to `.lifeos/`'s internal file format.
 
 All ingestion paths stop at the resulting draft unless the user separately asks
 for submission, approval, or application. Orphaned ownership, generator mismatch,
-hash mismatch, missing canonical roots, or stale source state fail closed.
+hash mismatch, missing canonical roots, refresh failure, or source verification
+failure after refresh fail closed.
 
 ## 3.13 Graph views
 
