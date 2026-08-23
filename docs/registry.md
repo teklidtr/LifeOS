@@ -65,19 +65,26 @@ previously completed migrations remain intact.
 - `provenance_sources`: one ordered row per source snapshot in that document's
   provenance block, storing `source_index`, path, and content hash.
 
-## Provenance indexing
+## Refresh surfaces
 
-Canonical generated Wiki provenance lives in Markdown frontmatter. Registry
-refresh parses that frontmatter and derives one `provenance_documents` row plus
-one `provenance_sources` row for each item in the ordered `sources` list.
+The supported `lifeos scan` CLI command and MCP `registry_refresh` facade refresh
+the disposable **file and proposal indexes**. They initialize the registry schema
+when necessary, reconcile file observations, and rebuild proposal index rows. They
+do not change canonical Markdown or generated ownership.
 
-A page with three accepted source snapshots therefore produces three source rows.
-The same source path may legitimately appear more than once when its content hash
-changed between accepted contributions. The row's `source_index` preserves the
-canonical source order.
+Provenance indexing is a separate deterministic registry operation exposed in
+Python as `refresh_provenance_index()`. It scans Git-tracked canonical Markdown,
+parses `lifeos_provenance`, and derives one `provenance_documents` row plus one
+`provenance_sources` row for each item in the ordered `sources` list. Do not assume
+that `lifeos scan` refreshes this separate provenance index.
 
-Registry refresh never decides ownership and never grants write authority from a
-provenance record. It also does not become the source of truth for lineage: the
+A page with three accepted source snapshots therefore produces three source rows
+when the provenance index is refreshed. The same source path may legitimately
+appear more than once when its content hash changed between accepted contributions.
+The row's `source_index` preserves the canonical source order.
+
+Provenance indexing never decides ownership and never grants write authority from
+a provenance record. It also does not become the source of truth for lineage: the
 provenance index can be deleted and rebuilt from canonical Markdown.
 
 See [Generated Wiki Provenance](generated-wiki-provenance.md) for the schema-v1
