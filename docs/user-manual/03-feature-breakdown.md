@@ -16,7 +16,7 @@ The vault is the durable, human-readable center of LifeOS. It is an ordinary
 directory of Markdown files that can be opened directly in Obsidian or any text
 editor.
 
-Typical top-level areas are:
+Canonical areas used by current features include:
 
 ```text
 journal/
@@ -31,14 +31,20 @@ plans/
 experiments/
 metrics/
 reviews/
+conversations/
+captures/
+attachments/
 proposals/
 system/
 ```
 
-You do not need every top-level directory on day one. `wiki/` deliberately has
-no required semantic subfolders. The connected agent may keep it flat or create
-useful nested folders as knowledge accumulates. Folder structure is allowed to
-emerge from the vault instead of being imposed as a universal ontology.
+You do not need every top-level directory on day one, and the first-party
+`lifeos init` bootstrap intentionally creates only its documented core roots.
+Feature-owned canonical areas can appear as those features are used. `wiki/`
+deliberately has no required semantic subfolders. The connected agent may keep it
+flat or create useful nested folders as knowledge accumulates. Folder structure
+is allowed to emerge from the vault instead of being imposed as a universal
+ontology.
 
 ### How it connects
 
@@ -122,34 +128,39 @@ The scanner computes deterministic file facts such as:
 - content hash;
 - file size;
 - deletion state;
-- stable IDs;
-- proposal index entries;
-- source and provenance records.
+- stable IDs.
 
-These facts are stored in a disposable SQLite registry.
+The SQLite registry can also store derived proposal and provenance index rows,
+but those indexes have their own rebuild operations. It remains disposable query
+state rather than canonical knowledge.
 
 ### How it connects
 
-The registry supports:
+The supported `lifeos scan` command and MCP `registry_refresh` operation refresh
+the **file and proposal indexes**. They support:
 
 - proposal listings and counts;
 - file-change comparison;
-- provenance lookup;
 - status reporting;
-- ingestion source validation.
+- registered-source validation for ingestion.
 
-It does **not** replace Markdown and should not contain the only copy of
-canonical knowledge. The registry may be deleted and rebuilt.
+The registry schema also contains provenance tables used for provenance lookup.
+Those rows are rebuilt separately by the deterministic provenance-index refresh;
+`lifeos scan` does not implicitly refresh them.
 
-Use either supported adapter; both call the same deterministic Python facade:
+The registry does **not** replace Markdown and should not contain the only copy of
+canonical knowledge. It may be deleted and rebuilt from canonical state.
+
+Use either supported file/proposal refresh adapter:
 
 ```bash
 uv run lifeos scan
 uv run lifeos scan --json
 ```
 
-An MCP-connected agent uses `registry_refresh`. Refreshing the registry does not
-rebuild the separate semantic retrieval, graph, or export indexes.
+An MCP-connected agent uses `registry_refresh`. Neither surface rebuilds the
+separate provenance, semantic retrieval, graph, or export indexes. See
+[Registry](../registry.md) for the exact SQLite and refresh contracts.
 
 ## 3.5 Status and diagnostics
 

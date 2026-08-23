@@ -470,10 +470,13 @@ Use evidence gaps to decide what to read or test next.
 
 ### 8. Review AI proposals
 
-Open **Open Proposals** in Obsidian. For each proposal, submit, approve, apply, or
-reject it through the explicit workspace controls; leave it unchanged or
-regenerate it when its source has changed.
-Never approve a proposal merely because its prose sounds confident.
+Open **Open Proposals** in Obsidian. Inspect each proposal's immutable review diff,
+source paths, targets, digest, and validation findings. For an unchanged proposal
+you want to proceed with, choose **Accept changes** and confirm once; Python performs
+only the remaining durable lifecycle transitions and revalidates the proposal
+before canonical writes. Reject a pending or approved proposal when it should not
+proceed, or leave/regenerate a draft when its evidence or target has changed.
+Never accept a proposal merely because its prose sounds confident.
 
 ### 9. Rebuild useful graph views
 

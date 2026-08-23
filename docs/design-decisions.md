@@ -546,3 +546,24 @@ Fast integration tests use isolated HOME/XDG directories, fresh vaults, real sub
 real MCP protocol clients when the optional SDK is present. A Linux Docker clean-room smoke is a
 secondary CI/release gate that catches host-environment leakage; it does not replace the fast
 integration suite or put an LLM in deterministic pass/fail infrastructure tests.
+
+## DD-088: Vault bootstrap is first-party, deterministic, and non-destructive
+
+LifeOS owns the canonical fresh-vault bootstrap in application code through
+`lifeos init [PATH]`; it is not delegated to Cookiecutter, Jinja, documentation
+snippets, or another generic template engine. The generated surface stays minimal
+and portable: current core semantic roots, `lifeos.yml`, vault `AGENTS.md`,
+`system/instructions.yml`, `system/generated-ownership.json`, `.gitignore`, and a
+local Git repository.
+
+Initialization may create a missing or empty target. Re-running against a
+recognized LifeOS vault is an idempotent no-op that does not restore template text
+over user changes. A non-empty unrecognized or partially initialized target fails
+closed rather than being repaired or overwritten, and there is no destructive
+`--force` path. If a late bootstrap step fails, LifeOS leaves the partial scaffold
+visible instead of recursively deleting a directory that may have gained
+concurrent user content.
+
+Bootstrap does not configure Codex, Claude, Obsidian, shell state, or another
+external client. MCP and desktop client registration remains explicit and
+client-specific after the vault exists.
