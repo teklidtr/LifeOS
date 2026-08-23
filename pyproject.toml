@@ -14,7 +14,7 @@ dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.10", "types-PyYAML>=6.0"]
 mcp = ["mcp>=1.28,<2"]
 
 [project.scripts]
-lifeos = "lifeos.cli:main"
+lifeos = "lifeos.entrypoint:main"
 lifeos-mcp = "lifeos.mcp.__main__:main"
 lifeos-desktop-bridge = "lifeos.bridge.__main__:main"
 
