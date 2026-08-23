@@ -6,7 +6,7 @@
 
 The vault is canonical human-readable state.
 
-Typical domains:
+Canonical areas used by the current system include:
 
 ```text
 journal/
@@ -21,8 +21,17 @@ plans/
 experiments/
 metrics/
 reviews/
+conversations/
+captures/
+attachments/
+proposals/
 system/
 ```
+
+Not every canonical area is part of the minimal fresh-vault bootstrap. `lifeos init`
+creates the core roots required by the bootstrap contract; feature-owned artifacts such as
+knowledge conversations, rich captures, and attachment evidence use their own canonical
+storage contracts as those features are used.
 
 ### Deterministic layer
 
@@ -92,6 +101,21 @@ is not canonical history and does not copy note bodies or flashcard answers.
 
 The user controls goals, proposal approval, personal interpretations, policy changes, pattern promotion, and archival decisions.
 
+## Vault bootstrap boundary
+
+The LifeOS application and a user's vault are separate. The first-party `lifeos init [PATH]`
+command owns the minimal fresh-vault bootstrap contract in application code rather than in a
+Cookiecutter/Jinja template or documentation copy. It creates the current core semantic roots,
+portable `lifeos.yml`, vault-root `AGENTS.md`, allowlisted `system/instructions.yml`, canonical
+`system/generated-ownership.json`, `.gitignore`, and a local Git repository.
+
+Initialization is deliberately non-destructive. An empty or missing target may be initialized;
+a recognized LifeOS vault is an idempotent no-op; a non-empty unrecognized or partial target
+fails closed rather than being repaired or overwritten. A failed late bootstrap does not
+recursively delete the target because concurrent user content may have appeared. External MCP,
+Obsidian, Codex, Claude, shell, or other client configuration remains explicit and is never
+mutated by `lifeos init`.
+
 ## Proposal engine
 
 Consequential changes are stored under:
@@ -114,14 +138,18 @@ target hashes still match.
 
 ## Registry
 
-The registry stores file hashes, source versions, derived outputs, indexed proposal
-and ownership facts, task records, graph state, and migrations. Canonical generated
-ownership remains exclusively in `system/generated-ownership.json`.
+The current SQLite registry stores deterministic file observations and source versions,
+generated-output facts, indexed proposal metadata, schema migrations, and an optional derived
+provenance index. It does not currently own canonical generated ownership, task bodies, graph
+publications, semantic retrieval state, or full Markdown content. Canonical generated ownership
+remains exclusively in `system/generated-ownership.json`.
 
-It does not replace Markdown content. The shared deterministic refresh facade is
-available as `lifeos scan` for local recovery and as `registry_refresh` for MCP
-agents. Both entry points rebuild file and proposal indexes without changing
-canonical Markdown or adding, repairing, or releasing durable ownership.
+The shared deterministic refresh facade is available as `lifeos scan` for local recovery and as
+`registry_refresh` for MCP agents. Those two surfaces initialize the registry when needed and
+refresh the file and proposal indexes without changing canonical Markdown or adding, repairing,
+or releasing durable ownership. The provenance tables use a separate deterministic
+`refresh_provenance_index()` path; `lifeos scan` does not implicitly refresh them. See
+[Registry](registry.md).
 
 ## Managed content
 
