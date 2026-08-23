@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+import runpy
+from typing import Any, Callable
+
 import pytest
 
-from scripts.check_documentation_impact import (
-    evaluate_documentation_impact,
-    parse_documentation_impact,
-)
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_documentation_impact.py"
+_NAMESPACE = runpy.run_path(str(_SCRIPT))
+parse_documentation_impact: Callable[[str], Any] = _NAMESPACE["parse_documentation_impact"]
+evaluate_documentation_impact: Callable[..., tuple[str, ...]] = _NAMESPACE[
+    "evaluate_documentation_impact"
+]
 
 
 def _task(status: str, reason: str | None = None) -> str:
