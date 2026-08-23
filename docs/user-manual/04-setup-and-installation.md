@@ -209,17 +209,48 @@ To build and install the optional bundled plugin, follow
 LifeOS application repository; install only the resulting `main.js`, `manifest.json`, and
 `styles.css` in the vault's `.obsidian/plugins/lifeos/` directory.
 
-## 4.10 Verify the installation
+## 4.10 Verify the installation with `lifeos doctor`
 
-From the vault root:
+The first readiness check should be the read-only doctor command. It accepts an explicit
+configuration path, so it can be run from the application repository, the vault, or another
+working directory:
 
 ```bash
-lifeos status
+lifeos doctor --config /absolute/path/to/LifeOS-vault/lifeos.yml
 ```
 
 For machine-readable output:
 
 ```bash
+lifeos doctor \
+  --config /absolute/path/to/LifeOS-vault/lifeos.yml \
+  --json
+```
+
+Doctor checks the installed LifeOS version, Python support, Git availability, configuration,
+the current first-party vault bootstrap shape, and the existing read-only vault health
+reported by `lifeos status`. It also reports whether the optional MCP SDK and `lifeos-mcp`
+console script are available.
+
+Doctor is diagnostic, not repair. It does **not** initialize or refresh the registry, create
+runtime indexes, rebuild graph/export output, install packages, edit canonical Markdown, or
+change Codex, Claude, Obsidian, shell, or another external client's configuration. This makes
+it safe to run before `.lifeos/` exists.
+
+Exit behavior is deliberately about blocking readiness rather than cosmetic completeness:
+
+- exit `0` means no blocking environment, bootstrap, or vault-health condition was found;
+- warnings such as optional MCP absence remain non-blocking;
+- a fresh vault can be ready while disposable registry, graph, or export state is still
+  missing or degraded;
+- a blocking environment/bootstrap failure or an existing `status` condition classified as
+  blocked produces a non-zero exit.
+
+`lifeos status` remains the detailed vault subsystem view. After the first scan, run it from
+the vault root:
+
+```bash
+lifeos status
 lifeos status --json
 ```
 
@@ -250,6 +281,16 @@ Install MCP support in the **application repository**:
 cd /absolute/path/to/lifeos-application
 uv sync --extra mcp
 ```
+
+Run doctor again after installing the extra:
+
+```bash
+lifeos doctor --config /absolute/path/to/LifeOS-vault/lifeos.yml
+```
+
+When `lifeos-mcp` is available, doctor prints a vault-scoped server command template ending
+in `--actor-id <actor-id>`. The placeholder is intentional because trusted actor identity is
+client-specific. Doctor never registers that command for you.
 
 The server executable lives with the application; the configuration lives with the vault:
 

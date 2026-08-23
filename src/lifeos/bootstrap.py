@@ -64,7 +64,7 @@ class BootstrapResult:
     created: bool
 
 
-def _is_recognized_vault(root: Path) -> bool:
+def is_recognized_vault(root: Path) -> bool:
     """Return whether an existing directory satisfies the current bootstrap shape."""
     git_dir = root / ".git"
     if not git_dir.is_dir() or git_dir.is_symlink():
@@ -107,7 +107,7 @@ def initialize_vault(target: Path) -> BootstrapResult:
         raise BootstrapError(f"Initialization target is not a directory: {root}")
 
     if root.exists():
-        if _is_recognized_vault(root):
+        if is_recognized_vault(root):
             return BootstrapResult(vault_root=root, created=False)
         try:
             is_empty = next(root.iterdir(), None) is None

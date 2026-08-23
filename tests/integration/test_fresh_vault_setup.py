@@ -59,10 +59,26 @@ def test_documented_fresh_vault_setup_runs_from_isolated_home(tmp_path: Path) ->
     assert version.returncode == 0
     help_result = _run_lifeos("--help", cwd=REPO_ROOT, env=env)
     assert "LifeOS" in help_result.stdout
+    assert "doctor [OPTIONS]" in help_result.stdout
 
     config = load_config(vault / "lifeos.yml")
     assert config.vault_root == vault.resolve()
     assert config.runtime_dir == (vault / ".lifeos").resolve()
+    assert not config.runtime_dir.exists()
+
+    # Doctor is read-only and must work before disposable runtime state exists.
+    doctor = _run_lifeos(
+        "doctor",
+        "--config",
+        str(vault / "lifeos.yml"),
+        "--json",
+        cwd=REPO_ROOT,
+        env=env,
+    )
+    doctor_payload = json.loads(doctor.stdout)
+    assert doctor.returncode == 0
+    assert doctor_payload["ready"] is True
+    assert doctor_payload["application"]["vault_root"] == str(vault.resolve())
     assert not config.runtime_dir.exists()
 
     # The explicit --config path must work even when the application cwd is elsewhere.
@@ -155,6 +171,7 @@ def test_documented_fresh_vault_setup_runs_from_isolated_home(tmp_path: Path) ->
 def test_setup_guide_contains_the_tested_vault_and_codex_contract() -> None:
     text = MANUAL.read_text(encoding="utf-8")
     assert "lifeos init ~/LifeOS-vault" in text
+    assert "lifeos doctor --config" in text
     assert "vault_root: ." in text
     assert "runtime_dir: .lifeos" in text
     assert "system/instructions.yml" in text
