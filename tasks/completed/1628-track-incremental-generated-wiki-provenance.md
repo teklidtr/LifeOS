@@ -75,6 +75,17 @@ single-source restriction.
 - Provenance serialization is deterministic and round-trips through Markdown parsing and
   registry/index flows.
 
+# Documentation impact
+
+Status: required
+
+- `docs/user-manual/14-generated-wiki-source-history.md`: explain cumulative provenance as the generated Wiki page's inspectable References/source history.
+- `docs/user-manual/README.md`: make that user-facing documentation discoverable.
+- `docs/generated-wiki-provenance.md`: define the canonical schema-v1 merge, ownership-separation, and failure contract.
+- `docs/data-model.md`: record the generated Wiki provenance frontmatter model and cumulative snapshot semantics.
+- `docs/registry.md`: document schema-v3 provenance tables and multi-source ordered indexing; this also corrects stale registry schema documentation discovered while documenting LIFEOS-1628.
+- `docs/design-decisions.md` was reviewed. No new DD is required because LIFEOS-1628 formalizes the existing provenance-versus-ownership boundary and existing schema-v1 `sources` object-list contract rather than introducing a new independent system principle.
+
 # Validation
 
 ```bash
@@ -94,6 +105,7 @@ uv run pytest --import-mode=importlib -q
 # Evidence
 
 - PR: #5 (`LIFEOS-1628: Track cumulative generated-wiki provenance`).
-- GitHub Actions CI passed Ruff, mypy, Python compilation, and manual-link validation.
-- Full test suite passed: 1516 tests.
+- GitHub Actions CI passed Ruff, mypy, Python compilation, and manual-link validation before the documentation gate was introduced.
+- Full test suite passed: 1516 tests before rebasing onto the documentation-gate master.
 - Docker clean-room setup and MCP gate passed.
+- After LIFEOS-1635 merged, the rebased PR correctly failed the new documentation-impact gate until this section and the affected docs were added.
