@@ -71,6 +71,40 @@ class CompoundWikiProposalDocuments:
     proposal_markdown: bytes
     patches_json: bytes
 
+
+MAX_COMPOUNDING_WIKI_OPERATIONS = 12
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedWikiCreateMutation:
+    target_path: str
+    content: WikiProposalContent
+    rationale: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedWikiSectionUpdateMutation:
+    target_path: str
+    target_content: str
+    target_content_hash: str
+    heading: str
+    section_body: str
+    rationale: str
+    expected_generator_id: str | None = None
+    proposed_tags: tuple[str, ...] | None = None
+
+
+PreparedWikiMutation = PreparedWikiCreateMutation | PreparedWikiSectionUpdateMutation
+
+
+@dataclass(frozen=True, slots=True)
+class CompoundingWikiProposalDocuments:
+    proposal_id: str
+    target_paths: tuple[str, ...]
+    create_target_paths: tuple[str, ...]
+    proposal_markdown: bytes
+    patches_json: bytes
+
 class _WikiFrontmatterDumper(yaml.SafeDumper):
     pass
 
@@ -601,10 +635,186 @@ def build_compound_wiki_proposal(
     )
 
 
+
+def build_compounding_wiki_proposal(
+    *,
+    source: SourceSnapshot,
+    mutations: tuple[PreparedWikiMutation, ...],
+    generator: ProvenanceGenerator,
+    proposal_id: str,
+    created_at: str,
+) -> CompoundingWikiProposalDocuments:
+    """Build one bounded, inspectable proposal that may touch several wiki notes."""
+    if not 1 <= len(mutations) <= MAX_COMPOUNDING_WIKI_OPERATIONS:
+        raise InvalidWikiTargetError(
+            f"Compounding ingestion requires 1..{MAX_COMPOUNDING_WIKI_OPERATIONS} mutations"
+        )
+
+    operations: list[CreateGeneratedFileV2 | PatchHumanFile | ReplaceGeneratedFileV2] = []
+    target_paths: list[str] = []
+    create_target_paths: list[str] = []
+    review_items: list[dict[str, str]] = []
+    seen_targets: set[str] = set()
+
+    for index, mutation in enumerate(mutations, start=1):
+        norm_target = validate_wiki_target_path(mutation.target_path)
+        if not norm_target.endswith(".md"):
+            raise InvalidWikiTargetError("Compounding wiki targets must be Markdown files")
+        if norm_target in seen_targets:
+            raise InvalidWikiTargetError(
+                f"Compounding ingestion cannot touch one target twice: {norm_target}"
+            )
+        if not isinstance(mutation.rationale, str) or not mutation.rationale.strip():
+            raise InvalidWikiTargetError("Every compounding mutation requires a rationale")
+        if mutation.rationale != mutation.rationale.strip() or len(mutation.rationale) > 500:
+            raise InvalidWikiTargetError(
+                "Mutation rationale must be trimmed and at most 500 characters"
+            )
+        seen_targets.add(norm_target)
+        target_paths.append(norm_target)
+        op_id = f"op-wiki-{index:02d}"
+
+        if isinstance(mutation, PreparedWikiCreateMutation):
+            candidate = _build_generated_wiki_candidate(
+                content=mutation.content,
+                source=source,
+                target_path=norm_target,
+                created_at=created_at,
+            )
+            operations.append(
+                CreateGeneratedFileV2(
+                    id=op_id,
+                    target_path=norm_target,
+                    expected_target_state="absent",
+                    generator_id=generator.id,
+                    generator_version=generator.version,
+                    new_content=candidate,
+                )
+            )
+            create_target_paths.append(norm_target)
+            review_items.append(
+                {
+                    "kind": "create",
+                    "target_path": norm_target,
+                    "rationale": mutation.rationale,
+                }
+            )
+            continue
+
+        operation = _build_wiki_section_operation(
+            target_path=norm_target,
+            target_content=mutation.target_content,
+            target_content_hash=mutation.target_content_hash,
+            heading=mutation.heading,
+            section_body=mutation.section_body,
+            generator=generator,
+            expected_generator_id=mutation.expected_generator_id,
+            proposed_tags=mutation.proposed_tags,
+        )
+        # Give every operation a proposal-unique stable id rather than the helper's
+        # single-operation compatibility id.
+        if isinstance(operation, ReplaceGeneratedFileV2):
+            operation = ReplaceGeneratedFileV2(
+                id=op_id,
+                target_path=operation.target_path,
+                base_hash=operation.base_hash,
+                expected_generator_id=operation.expected_generator_id,
+                generator_version=operation.generator_version,
+                new_content=operation.new_content,
+            )
+        else:
+            operation = PatchHumanFile(
+                id=op_id,
+                target_path=operation.target_path,
+                base_hash=operation.base_hash,
+                unified_diff=operation.unified_diff,
+            )
+        operations.append(operation)
+        review_items.append(
+            {
+                "kind": "update_section",
+                "target_path": norm_target,
+                "heading": mutation.heading,
+                "rationale": mutation.rationale,
+            }
+        )
+
+    document = PatchDocumentV2(
+        schema_version=2,
+        proposal_id=proposal_id,
+        operations=tuple(operations),
+    )
+    risk = ProposalRisk.MEDIUM if len(operations) <= 3 else ProposalRisk.HIGH
+    metadata = ProposalMetadata(
+        id=proposal_id,
+        schema_version=1,
+        patch_schema_version=2,
+        lifecycle_schema_version=1,
+        title=f"Evolve wiki from {source.path} ({len(operations)} changes)",
+        description=f"Generated by {generator.id} {generator.version}",
+        status=ProposalStatus.DRAFT,
+        risk=risk,
+        created_at=created_at,
+        created_by="agent",
+        submitted_at=None,
+        submitted_by=None,
+        review_digest=None,
+        approved_at=None,
+        approved_by=None,
+        rejected_at=None,
+        rejected_by=None,
+        rejection_reason=None,
+        applied_at=None,
+        applied_by=None,
+        related_goals=(),
+        related_sources=(source.path,),
+        extensions={
+            "ingestion": {
+                "action": "evolve_wiki",
+                "source_hash": source.content_hash,
+                "operation_count": len(operations),
+                "mutations": review_items,
+            }
+        },
+    )
+    lines = [
+        f"Proposes {len(operations)} durable wiki change(s) from the registered source "
+        f"`{source.path}`.",
+        "",
+        "The external agent selected these targets after inspecting existing knowledge:",
+        "",
+    ]
+    for index, item in enumerate(review_items, start=1):
+        if item["kind"] == "create":
+            lines.append(
+                f"{index}. Create `{item['target_path']}`: {item['rationale']}"
+            )
+        else:
+            lines.append(
+                f"{index}. Update `{item['target_path']}` section `{item['heading']}`: "
+                f"{item['rationale']}"
+            )
+    lines.extend(
+        [
+            "",
+            "Folder names are agent-selected organization, not a LifeOS ontology. "
+            "All changes remain one reviewed atomic proposal.",
+        ]
+    )
+    proposal_markdown = serialize_proposal_markdown(metadata, "\n".join(lines))
+    proposal_markdown = proposal_markdown.replace(b"\nreview_digest: null\n", b"\n")
+    return CompoundingWikiProposalDocuments(
+        proposal_id=proposal_id,
+        target_paths=tuple(target_paths),
+        create_target_paths=tuple(create_target_paths),
+        proposal_markdown=proposal_markdown,
+        patches_json=serialize_patch_json_bytes(document),
+    )
+
 def _persist_proposal_documents(
     *,
     proposals_root: Path,
-    documents: WikiProposalDocuments | CompoundWikiProposalDocuments,
+    documents: WikiProposalDocuments | CompoundWikiProposalDocuments | CompoundingWikiProposalDocuments,
 ) -> Path:
     proposal_dir = proposals_root / documents.proposal_id
     proposal_created = False
@@ -668,4 +878,14 @@ def persist_compound_wiki_proposal(
         raise WikiTargetExistsError(
             f"Target path already exists: {documents.create_target_path}"
         )
+    return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)
+
+
+def persist_compounding_wiki_proposal(
+    *, proposals_root: Path, documents: CompoundingWikiProposalDocuments
+) -> Path:
+    vault_root = proposals_root.parent
+    for target_path in documents.create_target_paths:
+        if (vault_root / target_path).exists():
+            raise WikiTargetExistsError(f"Target path already exists: {target_path}")
     return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)

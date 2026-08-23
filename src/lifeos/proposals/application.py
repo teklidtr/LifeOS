@@ -32,7 +32,7 @@ from .._transaction_files import (
     rollback_replacement,
 )
 from ..markdown.parser import parse_markdown_note
-from ..wiki.layout import is_lazy_wiki_role_parent
+from ..wiki.layout import is_emergent_wiki_parent
 from ..ownership.manifest import (
     DEFAULT_OWNERSHIP_MANIFEST_PATH,
     GeneratedOwnership,
@@ -431,51 +431,70 @@ def _open_or_create_target_parent(
     root_fd: int,
     parent_relative: str,
     operation: PatchOperation,
+    created_parent_paths: list[str] | None = None,
 ) -> ParentDescriptor:
     try:
         parent_fd = open_directory_secure(vault_root / parent_relative)
     except SecureIOError as open_error:
         if not (
             operation.op == "create_generated_file"
-            and is_lazy_wiki_role_parent(parent_relative)
+            and is_emergent_wiki_parent(parent_relative)
         ):
             raise open_error
 
         parent_path = Path(parent_relative)
-        if parent_path.parent.as_posix() != "wiki":
+        parts = parent_path.parts
+        if not parts or parts[0] != "wiki":
             raise open_error
+
         try:
-            wiki_fd = open_directory_secure(vault_root / "wiki", dir_fd=root_fd)
+            current_fd = open_directory_secure(vault_root / "wiki", dir_fd=root_fd)
         except SecureIOError:
+            # The canonical wiki root is never created implicitly.
             raise open_error
+
         try:
-            try:
-                os.mkdir(parent_path.name, 0o755, dir_fd=wiki_fd)
-            except FileExistsError:
-                pass
-            except OSError as error:
-                raise SecureIOError(
-                    code="dir_create_failed",
-                    message=(
-                        "Failed to lazily create wiki role directory: "
-                        f"{error.strerror}"
-                    ),
-                ) from error
-            sync_result = fsync_directory(wiki_fd)
-            if sync_result.state == DirectorySyncState.FAILED:
-                raise SecureIOError(
-                    code="dir_sync_failed",
-                    message=(
-                        "Failed to sync lazily created wiki role directory: "
-                        f"{sync_result.errno_name}"
-                    ),
-                )
-            parent_fd = open_directory_secure(
-                Path(parent_path.name),
-                dir_fd=wiki_fd,
-            )
-        finally:
-            os.close(wiki_fd)
+            current_parts = ["wiki"]
+            for segment in parts[1:]:
+                try:
+                    child_fd = open_directory_secure(Path(segment), dir_fd=current_fd)
+                except SecureIOError:
+                    try:
+                        os.mkdir(segment, 0o755, dir_fd=current_fd)
+                    except FileExistsError:
+                        pass
+                    except OSError as error:
+                        raise SecureIOError(
+                            code="dir_create_failed",
+                            message=(
+                                "Failed to lazily create generated wiki directory: "
+                                f"{error.strerror}"
+                            ),
+                        ) from error
+                    else:
+                        if created_parent_paths is not None:
+                            created_parent_paths.append(
+                                "/".join((*current_parts, segment))
+                            )
+                    sync_result = fsync_directory(current_fd)
+                    if sync_result.state == DirectorySyncState.FAILED:
+                        raise SecureIOError(
+                            code="dir_sync_failed",
+                            message=(
+                                "Failed to sync generated wiki directory creation: "
+                                f"{sync_result.errno_name}"
+                            ),
+                        )
+                    # O_NOFOLLOW in open_directory_secure keeps an existing or
+                    # raced symlink from becoming a traversal path.
+                    child_fd = open_directory_secure(Path(segment), dir_fd=current_fd)
+                os.close(current_fd)
+                current_fd = child_fd
+                current_parts.append(segment)
+            parent_fd = current_fd
+        except Exception:
+            os.close(current_fd)
+            raise
 
     parent_stat = os.fstat(parent_fd)
     return ParentDescriptor(
@@ -1111,6 +1130,7 @@ def _execute_application_transaction(
     prop_fd: Optional[int] = None
 
     parent_descriptors: Dict[str, ParentDescriptor] = {}
+    created_parent_paths: list[str] = []
     prepared_ops: List[_PreparedOp] = []
     manifest_operation_indexes: list[int] = []
     manifest_staging: Optional[StagingFile] = None
@@ -1240,6 +1260,7 @@ def _execute_application_transaction(
                         root_fd=root_fd,
                         parent_relative=parent_relative,
                         operation=op,
+                        created_parent_paths=created_parent_paths,
                     )
                 except SecureIOError as error:
                     raise ApplicationError(
@@ -1722,6 +1743,16 @@ def _execute_application_transaction(
         cleanup_succeeded = cleanup_result.cleanup_succeeded
         vault_lock_released = cleanup_result.vault_lock_released
         proposal_lock_released = cleanup_result.proposal_lock_released
+
+        if application_error is not None or unexpected_error is not None:
+            # Parent folders are implicit support for reviewed generated creates,
+            # not independent durable output. Remove newly created empty folders
+            # after a failed application; non-empty or raced paths are left alone.
+            for relative_path in reversed(created_parent_paths):
+                try:
+                    (vault_root / relative_path).rmdir()
+                except OSError:
+                    pass
 
         if transaction_initialized and (
             recovery_journal is None or recovery_journal.phase is not RecoveryPhase.COMPLETE

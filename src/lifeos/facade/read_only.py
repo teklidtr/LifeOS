@@ -8,6 +8,7 @@ from lifeos.facade.errors import (
 )
 from lifeos.facade.models import ToolDescriptor, ToolEffect
 from lifeos.markdown.parser import parse_markdown_note
+from lifeos.context import ContextSearchError, lexical_search_report
 from lifeos.ingestion.taxonomy import extract_source_taxonomy
 from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
@@ -15,6 +16,12 @@ from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
 READ_MARKDOWN_DESCRIPTOR = ToolDescriptor(
     name="vault.read_markdown",
     description="Read the Markdown body of a vault-relative file.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+WIKI_SEARCH_DESCRIPTOR = ToolDescriptor(
+    name="wiki.search",
+    description="Search durable wiki Markdown before choosing ingestion targets.",
     effect=ToolEffect.READ_ONLY,
 )
 
@@ -67,4 +74,62 @@ def read_markdown(
         markdown_body=parsed.body,
         source_tags=taxonomy.tags,
         source_topics=taxonomy.topics,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class WikiSearchRequest:
+    query: str
+    limit: int = 8
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.query, str) or not self.query.strip():
+            raise ValueError("query must be a non-empty string")
+        if type(self.limit) is not int or not 1 <= self.limit <= 20:
+            raise ValueError("limit must be an integer between 1 and 20")
+
+
+@dataclass(frozen=True, slots=True)
+class WikiSearchHit:
+    path: str
+    title: str
+    description: str
+    excerpt: str
+    score: int
+
+
+@dataclass(frozen=True, slots=True)
+class WikiSearchResult:
+    query: str
+    hits: tuple[WikiSearchHit, ...]
+
+
+def search_wiki(
+    *,
+    vault_root: Path,
+    request: WikiSearchRequest,
+) -> WikiSearchResult:
+    """Search only canonical wiki Markdown with deterministic lexical ranking."""
+    try:
+        report = lexical_search_report(
+            vault_root=vault_root,
+            query=request.query,
+            limit=request.limit,
+            path_prefix="wiki",
+        )
+    except ContextSearchError as exc:
+        raise ToolValidationError(str(exc)) from exc
+
+    return WikiSearchResult(
+        query=request.query,
+        hits=tuple(
+            WikiSearchHit(
+                path=item.path,
+                title=item.title,
+                description=item.description,
+                excerpt=item.excerpt,
+                score=item.score,
+            )
+            for item in report.results
+        ),
     )

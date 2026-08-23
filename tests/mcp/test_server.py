@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, patch
 
 from mcp.server.fastmcp.exceptions import ToolError
 
-from lifeos.mcp.server import LIFEOS_MCP_INSTRUCTIONS, create_mcp_server, _invoke_mcp_tool
+from lifeos.mcp.server import (
+    LIFEOS_MCP_INSTRUCTIONS,
+    EvolveWikiCreateMCPInput,
+    EvolveWikiUpdateMCPInput,
+    create_mcp_server,
+    _invoke_mcp_tool,
+)
 from lifeos.facade.errors import (
     ToolAuthorizationError,
     ToolConflictError,
@@ -16,10 +22,13 @@ from lifeos.facade.errors import (
     ToolUnavailableError,
     ToolValidationError,
 )
-from lifeos.facade.read_only import ReadMarkdownRequest
+from lifeos.facade.read_only import ReadMarkdownRequest, WikiSearchRequest
 from lifeos.facade.proposal_tools import (
     CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
+    EvolveWikiCreateRequest,
+    EvolveWikiProposalRequest,
+    EvolveWikiUpdateRequest,
     UpdateWikiSectionProposalRequest,
 )
 from lifeos.facade.registry_tools import RegistryRefreshResult
@@ -33,6 +42,8 @@ def test_server_registers_only_approved_tools() -> None:
     expected_tools = {
         "registry_refresh",
         "vault_read_markdown",
+        "wiki_search",
+        "ingestion_evolve_wiki_proposal",
         "ingestion_create_wiki_proposal",
         "ingestion_create_wiki_and_update_section_proposal",
         "ingestion_update_wiki_section_proposal",
@@ -62,13 +73,13 @@ def test_server_advertises_safe_ingestion_workflow() -> None:
     assert server.instructions == LIFEOS_MCP_INSTRUCTIONS
     assert "first call registry_refresh" in server.instructions
     assert "then call vault_read_markdown" in server.instructions
-    assert "call ingestion_create_wiki_proposal" in server.instructions
-    assert "call ingestion_create_wiki_and_update_section_proposal" in server.instructions
-    assert "call ingestion_update_wiki_section_proposal" in server.instructions
-    assert "selects a human patch or generated replacement" in server.instructions
+    assert "wiki_search" in server.instructions
+    assert "prefer ingestion_evolve_wiki_proposal" in server.instructions
+    assert "create no proposal" in server.instructions
+    assert "human patches or generated replacements" in server.instructions
     assert "restore-or-release remediation" in server.instructions
-    assert "page_kind + slug" in server.instructions
-    assert "not a domain ontology" in server.instructions
+    assert "does not prescribe a universal wiki taxonomy" in server.instructions
+    assert "page_kind routing" in server.instructions
     assert "Stop after the draft proposal" in server.instructions
     assert "Never call proposal_submit, proposal_approve, or proposal_apply" in server.instructions
 
@@ -82,8 +93,9 @@ def test_tools_advertise_workflow_specific_descriptions() -> None:
     assert all(tool.description for tool in tools.values())
     assert "rebuildable registry data" in tools["registry_refresh"].description
     assert "before ingestion" in tools["vault_read_markdown"].description
-    assert "after vault_read_markdown" in tools["ingestion_create_wiki_proposal"].description
-    assert "creates a draft" in tools["ingestion_create_wiki_proposal"].description
+    assert "restricted to wiki/" in tools["wiki_search"].description
+    assert "1..12 distinct" in tools["ingestion_evolve_wiki_proposal"].description
+    assert "compatibility single-create tool" in tools["ingestion_create_wiki_proposal"].description
     assert "both the registered source and existing target" in tools[
         "ingestion_update_wiki_section_proposal"
     ].description
@@ -118,6 +130,8 @@ def test_tools_advertise_accurate_safety_annotations() -> None:
         "idempotentHint": True,
         "openWorldHint": False,
     }
+    assert tools["wiki_search"].annotations.readOnlyHint is True
+    assert tools["ingestion_evolve_wiki_proposal"].annotations.destructiveHint is False
     assert tools["ingestion_create_wiki_proposal"].annotations.destructiveHint is False
     assert tools["ingestion_create_wiki_proposal"].annotations.idempotentHint is False
     assert tools["ingestion_update_wiki_section_proposal"].annotations.destructiveHint is False
@@ -253,6 +267,99 @@ def test_read_markdown_delegates_to_facade(mock_facade) -> None:
         "markdown_body": "# test",
         "source_tags": ["tag"],
         "source_topics": ["topic"],
+    }
+
+
+@patch("lifeos.mcp.server.search_wiki")
+def test_wiki_search_delegates_to_scoped_facade(mock_facade: MagicMock) -> None:
+    mock_facade.return_value = MagicMock(
+        query="retrieval",
+        hits=(
+            MagicMock(
+                path="wiki/learning.md",
+                title="Learning",
+                description="Durable learning notes",
+                excerpt="retrieval practice",
+                score=12,
+            ),
+        ),
+    )
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+
+    result = server._tool_manager.get_tool("wiki_search").fn(
+        query="retrieval", limit=5
+    )
+
+    mock_facade.assert_called_once_with(
+        vault_root=Path("/fake"), request=WikiSearchRequest(query="retrieval", limit=5)
+    )
+    assert result["hits"][0]["path"] == "wiki/learning.md"
+
+
+@patch("lifeos.mcp.server.evolve_wiki_proposal")
+def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock) -> None:
+    mock_facade.return_value = MagicMock(
+        proposal_id="prop1",
+        proposal_path="proposals/prop1",
+        target_paths=("wiki/learning/retrieval.md", "wiki/learning.md"),
+        operation_count=2,
+    )
+    registry = MagicMock()
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+    )
+
+    result = server._tool_manager.get_tool("ingestion_evolve_wiki_proposal").fn(
+        source_path="raw/source.md",
+        creates=[
+            EvolveWikiCreateMCPInput(
+                target_path="wiki/learning/retrieval.md",
+                title="Retrieval",
+                body="Body",
+                rationale="Durable reusable concept.",
+            )
+        ],
+        updates=[
+            EvolveWikiUpdateMCPInput(
+                target_path="wiki/learning.md",
+                heading="Retrieval",
+                body="See [[learning/retrieval]].",
+                rationale="Reuse the existing hub.",
+            )
+        ],
+    )
+
+    mock_facade.assert_called_once_with(
+        vault_root=Path("/fake"),
+        registry=registry,
+        request=EvolveWikiProposalRequest(
+            source_path="raw/source.md",
+            creates=(
+                EvolveWikiCreateRequest(
+                    target_path="wiki/learning/retrieval.md",
+                    title="Retrieval",
+                    body="Body",
+                    rationale="Durable reusable concept.",
+                ),
+            ),
+            updates=(
+                EvolveWikiUpdateRequest(
+                    target_path="wiki/learning.md",
+                    heading="Retrieval",
+                    body="See [[learning/retrieval]].",
+                    rationale="Reuse the existing hub.",
+                ),
+            ),
+        ),
+    )
+    assert result == {
+        "proposal_id": "prop1",
+        "proposal_path": "proposals/prop1",
+        "target_paths": ["wiki/learning/retrieval.md", "wiki/learning.md"],
+        "operation_count": 2,
+        "status": "draft",
     }
 
 
@@ -658,3 +765,21 @@ async def test_consequential_tools_reject_extra_agent_fields(
                 extra_field: "agent-controlled",
             },
         )
+
+
+def test_evolve_ingestion_schema_exposes_bounded_mutation_lists() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tool = server._tool_manager.get_tool("ingestion_evolve_wiki_proposal")
+    assert set(tool.parameters["properties"]) == {"source_path", "creates", "updates"}
+    assert tool.parameters["additionalProperties"] is False
+
+
+def test_wiki_search_schema_is_read_only_and_bounded() -> None:
+    server = create_mcp_server(
+        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+    )
+    tool = server._tool_manager.get_tool("wiki_search")
+    assert set(tool.parameters["properties"]) == {"query", "limit"}
+    assert tool.annotations.readOnlyHint is True

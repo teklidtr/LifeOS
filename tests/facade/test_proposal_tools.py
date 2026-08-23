@@ -18,13 +18,18 @@ from lifeos.facade.errors import (
 from lifeos.facade.proposal_tools import (
     COMPOUND_WIKI_PROPOSAL_DESCRIPTOR,
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
+    EVOLVE_WIKI_PROPOSAL_DESCRIPTOR,
     UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
     CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
+    EvolveWikiCreateRequest,
+    EvolveWikiProposalRequest,
+    EvolveWikiUpdateRequest,
     CreateWikiProposalResult,
     UpdateWikiSectionProposalRequest,
     create_wiki_and_update_section_proposal,
     create_wiki_proposal,
+    evolve_wiki_proposal,
     update_wiki_section_proposal,
 )
 from lifeos.ingestion.orchestration import (
@@ -542,7 +547,7 @@ def test_real_happy_path_facade(tmp_path: Path) -> None:
     prov = parsed.frontmatter["lifeos_provenance"]
     assert prov["generator"]["id"] == "lifeos.facade.external_agent"
     assert prov["generator"]["version"] == "1"
-    assert prov["generator"]["prompt_schema_version"] == "3"
+    assert prov["generator"]["prompt_schema_version"] == "4"
     assert "model_id" not in prov["generator"]
     assert prov["sources"][0]["path"] == "src.md"
     assert prov["sources"][0]["content_hash"] == f"sha256:{content_hash}"
@@ -1014,3 +1019,106 @@ def test_verify_identity_and_time_generation(tmp_path: Path) -> None:
         kwargs = mock_build.call_args.kwargs
         assert kwargs["proposal_id"] == "prop-20250101T120000Z-abcdef12"
         assert kwargs["created_at"] == "2025-01-01T12:00:00Z"
+
+
+def test_evolve_wiki_request_rejects_empty_overflow_and_duplicate_targets() -> None:
+    with pytest.raises(ValueError, match="1..12"):
+        EvolveWikiProposalRequest(source_path="study/source.md")
+
+    creates = tuple(
+        EvolveWikiCreateRequest(
+            target_path=f"wiki/topic-{index}.md",
+            title=f"Topic {index}",
+            body="Body",
+            rationale="Durable knowledge worth retaining.",
+        )
+        for index in range(13)
+    )
+    with pytest.raises(ValueError, match="1..12"):
+        EvolveWikiProposalRequest(source_path="study/source.md", creates=creates)
+
+    with pytest.raises(ValueError, match="distinct target paths"):
+        EvolveWikiProposalRequest(
+            source_path="study/source.md",
+            creates=(
+                EvolveWikiCreateRequest(
+                    "wiki/shared.md", "Shared", "Body", "Create durable note."
+                ),
+            ),
+            updates=(
+                EvolveWikiUpdateRequest(
+                    "wiki/shared.md", "Section", "Body", "Update existing knowledge."
+                ),
+            ),
+        )
+
+
+def test_evolve_wiki_builds_multi_target_agent_selected_draft(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    (vault_root / "proposals").mkdir(parents=True)
+    (vault_root / "wiki").mkdir()
+    _write_ownership(vault_root)
+    registry = _registered_source(vault_root, tmp_path)
+    existing = vault_root / "wiki" / "learning.md"
+    existing.write_text("# Learning\n\n## Retrieval\n\nOld note.\n")
+
+    request = EvolveWikiProposalRequest(
+        source_path="study/source.md",
+        creates=(
+            EvolveWikiCreateRequest(
+                target_path="wiki/learning/retrieval-practice.md",
+                title="Retrieval Practice",
+                body="Durable explanation.",
+                rationale="The source adds a reusable learning principle.",
+            ),
+            EvolveWikiCreateRequest(
+                target_path="wiki/people/andrej-karpathy.md",
+                title="Andrej Karpathy",
+                body="Relevant source-grounded context.",
+                rationale="The person is likely to accumulate future source context.",
+            ),
+        ),
+        updates=(
+            EvolveWikiUpdateRequest(
+                target_path="wiki/learning.md",
+                heading="Retrieval",
+                body="See [[learning/retrieval-practice]] for the durable explanation.",
+                rationale="Reuse the existing learning hub instead of duplicating it.",
+            ),
+        ),
+    )
+
+    result = evolve_wiki_proposal(
+        vault_root=vault_root,
+        registry=registry,
+        request=request,
+        clock_fn=lambda: datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+        random_suffix_fn=lambda: "abcdef12",
+    )
+
+    assert EVOLVE_WIKI_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
+    assert result.operation_count == 3
+    assert result.target_paths == (
+        "wiki/learning/retrieval-practice.md",
+        "wiki/people/andrej-karpathy.md",
+        "wiki/learning.md",
+    )
+    assert not (vault_root / "wiki" / "learning" / "retrieval-practice.md").exists()
+
+    from lifeos.proposals.loader import load_proposal_directory
+
+    loaded = load_proposal_directory(
+        vault_root / result.proposal_path, proposals_root=vault_root / "proposals"
+    ).proposal
+    assert loaded is not None
+    assert [op.op for op in loaded.patch_document.operations] == [
+        "create_generated_file",
+        "create_generated_file",
+        "patch_human_file",
+    ]
+    ingestion = loaded.metadata.extensions["ingestion"]
+    assert ingestion["action"] == "evolve_wiki"
+    assert ingestion["operation_count"] == 3
+    proposal_text = (vault_root / result.proposal_path / "proposal.md").read_text()
+    assert "Folder names are agent-selected organization" in proposal_text
+    assert "Reuse the existing learning hub" in proposal_text

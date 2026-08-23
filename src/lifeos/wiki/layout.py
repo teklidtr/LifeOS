@@ -64,3 +64,21 @@ def is_lazy_wiki_role_parent(parent_path: str) -> bool:
     """Return whether application may lazily create this exact structural folder."""
 
     return parent_path in _FOLDER_TO_KIND
+
+MAX_EMERGENT_WIKI_PARENT_DEPTH = 6
+
+
+def is_emergent_wiki_parent(parent_path: str) -> bool:
+    """Return whether generated ingestion may materialize this wiki parent.
+
+    Folder names are deliberately not enumerated. The mutation boundary is the
+    canonical ``wiki/`` root plus a bounded nesting depth; semantic organization
+    is left to the reviewing agent and user.
+    """
+
+    normalized = PurePosixPath(parent_path)
+    parts = normalized.parts
+    if len(parts) < 2 or parts[0] != "wiki":
+        return False
+    nested_depth = len(parts) - 1
+    return nested_depth <= MAX_EMERGENT_WIKI_PARENT_DEPTH

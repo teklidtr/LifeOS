@@ -155,11 +155,11 @@ def test_missing_parent_rejection(tmp_path):
     assert not (vault_root / "missing").exists()
 
 
-def test_generated_wiki_role_parent_is_created_lazily(tmp_path):
+def test_agent_selected_nested_wiki_parent_is_created_lazily(tmp_path):
     meta = _make_meta()
     op = CreateGeneratedFileV2(
         "op-1",
-        "wiki/concepts/active-recall.md",
+        "wiki/learning/memory/active-recall.md",
         "absent",
         "gen-1",
         "v1",
@@ -171,7 +171,7 @@ def test_generated_wiki_role_parent_is_created_lazily(tmp_path):
     (vault_root / "wiki").mkdir()
     loaded = load_proposal_directory(prop_dir, proposals_root=proposals_root)
     assert loaded.proposal is not None
-    assert not (vault_root / "wiki" / "concepts").exists()
+    assert not (vault_root / "wiki" / "learning").exists()
 
     result = apply_proposal(
         loaded.proposal,
@@ -181,7 +181,7 @@ def test_generated_wiki_role_parent_is_created_lazily(tmp_path):
     )
 
     assert result.new_status == ProposalStatus.APPLIED
-    assert (vault_root / "wiki" / "concepts" / "active-recall.md").read_text() == "hello"
+    assert (vault_root / "wiki" / "learning" / "memory" / "active-recall.md").read_text() == "hello"
 
 
 # 3. Same-directory hardlink backups, backup identity and hash
@@ -1223,3 +1223,41 @@ def test_retained_complete_transaction_does_not_block_new_apply(tmp_path):
     assert discovery.findings == ()
     assert len(discovery.journals) == 1
     assert discovery.journals[0].phase is RecoveryPhase.COMPLETE
+
+
+def test_failed_generated_create_removes_new_empty_wiki_parents(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    meta = _make_meta()
+    operation = CreateGeneratedFileV2(
+        "op-1",
+        "wiki/learning/memory/retrieval.md",
+        "absent",
+        "gen-1",
+        "v1",
+        "hello",
+    )
+    document = PatchDocumentV2(2, meta.id, (operation,))
+    vault_root, proposals_root, proposal_dir = _setup_proposal(
+        tmp_path, meta, document
+    )
+    (vault_root / "wiki").mkdir()
+    loaded = load_proposal_directory(proposal_dir, proposals_root=proposals_root)
+    assert loaded.proposal is not None
+
+    def fail_preparation(**kwargs: object) -> object:
+        raise ValueError("forced preparation failure")
+
+    monkeypatch.setattr(
+        "lifeos.proposals.application._candidate_for_operation", fail_preparation
+    )
+
+    with pytest.raises(ApplicationError):
+        apply_proposal(
+            loaded.proposal,
+            vault_root=vault_root,
+            applied_by="admin",
+            applied_at="2026-07-13T03:00:00Z",
+        )
+
+    assert not (vault_root / "wiki" / "learning").exists()

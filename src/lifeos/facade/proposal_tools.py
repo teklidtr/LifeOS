@@ -26,9 +26,14 @@ from lifeos.ingestion.orchestration import (
     VerifiedRegisteredSource,
 )
 from lifeos.ingestion.proposals import (
+    MAX_COMPOUNDING_WIKI_OPERATIONS,
+    PreparedWikiCreateMutation,
+    PreparedWikiSectionUpdateMutation,
+    build_compounding_wiki_proposal,
     build_compound_wiki_proposal,
     build_wiki_section_update_proposal,
     build_wiki_proposal,
+    persist_compounding_wiki_proposal,
     persist_compound_wiki_proposal,
     persist_wiki_section_update_proposal,
     persist_wiki_proposal,
@@ -86,10 +91,19 @@ COMPOUND_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     effect=ToolEffect.PROPOSAL_PRODUCING,
 )
 
+EVOLVE_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
+    name="ingestion.evolve_wiki_proposal",
+    description=(
+        "Create one bounded atomic draft containing several agent-selected wiki "
+        "creations and exact-section updates."
+    ),
+    effect=ToolEffect.PROPOSAL_PRODUCING,
+)
+
 GENERATOR_ID = "lifeos.facade.external_agent"
 GENERATOR_VERSION = "1"
 # REQUEST_SCHEMA_VERSION versions the external-agent supplied content request contract.
-REQUEST_SCHEMA_VERSION = "3"
+REQUEST_SCHEMA_VERSION = "4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +260,90 @@ class CompoundWikiProposalResult:
     create_target_path: str
     update_target_path: str
     heading: str
+    status: Literal["draft"]
+
+
+def _validate_mutation_rationale(value: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError("rationale must be a string")
+    if not value or value.isspace():
+        raise ValueError("rationale cannot be empty or whitespace-only")
+    if value != value.strip():
+        raise ValueError("rationale cannot have surrounding whitespace")
+    if len(value) > 500:
+        raise ValueError("rationale cannot exceed 500 characters")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class EvolveWikiCreateRequest:
+    target_path: str
+    title: str
+    body: str
+    rationale: str
+    tags: tuple[str, ...] = ()
+    tag_rationale: str | None = None
+
+    def __post_init__(self) -> None:
+        validated = CreateWikiProposalRequest(
+            source_path="compat-validation",
+            target_path=self.target_path,
+            title=self.title,
+            body=self.body,
+            tags=self.tags,
+            tag_rationale=self.tag_rationale,
+        )
+        object.__setattr__(self, "tags", validated.tags)
+        object.__setattr__(self, "tag_rationale", validated.tag_rationale)
+        object.__setattr__(self, "rationale", _validate_mutation_rationale(self.rationale))
+
+
+@dataclass(frozen=True, slots=True)
+class EvolveWikiUpdateRequest:
+    target_path: str
+    heading: str
+    body: str
+    rationale: str
+    tags: tuple[str, ...] | None = None
+    tag_rationale: str | None = None
+
+    def __post_init__(self) -> None:
+        validated = UpdateWikiSectionProposalRequest(
+            source_path="compat-validation",
+            target_path=self.target_path,
+            heading=self.heading,
+            body=self.body,
+            tags=self.tags,
+            tag_rationale=self.tag_rationale,
+        )
+        object.__setattr__(self, "tags", validated.tags)
+        object.__setattr__(self, "tag_rationale", validated.tag_rationale)
+        object.__setattr__(self, "rationale", _validate_mutation_rationale(self.rationale))
+
+
+@dataclass(frozen=True, slots=True)
+class EvolveWikiProposalRequest:
+    source_path: str
+    creates: tuple[EvolveWikiCreateRequest, ...] = ()
+    updates: tuple[EvolveWikiUpdateRequest, ...] = ()
+
+    def __post_init__(self) -> None:
+        operation_count = len(self.creates) + len(self.updates)
+        if not 1 <= operation_count <= MAX_COMPOUNDING_WIKI_OPERATIONS:
+            raise ValueError(
+                f"evolve_wiki requires 1..{MAX_COMPOUNDING_WIKI_OPERATIONS} mutations"
+            )
+        targets = [item.target_path for item in (*self.creates, *self.updates)]
+        if len(set(targets)) != len(targets):
+            raise ValueError("evolve_wiki mutations must use distinct target paths")
+
+
+@dataclass(frozen=True, slots=True)
+class EvolveWikiProposalResult:
+    proposal_id: str
+    proposal_path: str
+    target_paths: tuple[str, ...]
+    operation_count: int
     status: Literal["draft"]
 
 
@@ -678,5 +776,147 @@ def create_wiki_and_update_section_proposal(
         create_target_path=documents.create_target_path,
         update_target_path=documents.update_target_path,
         heading=request.update_heading,
+        status="draft",
+    )
+
+
+
+def evolve_wiki_proposal(
+    *,
+    vault_root: Path,
+    registry: Registry,
+    request: EvolveWikiProposalRequest,
+    clock_fn: Callable[[], datetime] = _utc_now,
+    random_suffix_fn: Callable[[], str] = _random_suffix,
+) -> EvolveWikiProposalResult:
+    """Create one reviewed draft for a bounded set of agent-selected wiki changes."""
+    verified = _load_verified_source(
+        vault_root=vault_root,
+        registry=registry,
+        source_path=request.source_path,
+    )
+    ownership = _load_generated_ownership(vault_root=vault_root)
+    generator = ProvenanceGenerator(
+        id=GENERATOR_ID,
+        version=GENERATOR_VERSION,
+        prompt_schema_version=REQUEST_SCHEMA_VERSION,
+        model_id=None,
+    )
+
+    prepared: list[PreparedWikiCreateMutation | PreparedWikiSectionUpdateMutation] = []
+    for item in request.creates:
+        target_path = _resolve_create_wiki_target(
+            target_path=item.target_path,
+            page_kind=None,
+            slug=None,
+        )
+        if not target_path.endswith(".md"):
+            raise ToolValidationError("Wiki create target must be a Markdown file")
+        _check_create_target_ownership(
+            vault_root=vault_root,
+            target_path=target_path,
+            ownership=ownership,
+        )
+        prepared.append(
+            PreparedWikiCreateMutation(
+                target_path=target_path,
+                content=WikiProposalContent(
+                    title=item.title,
+                    body=item.body,
+                    generator=generator,
+                    tags=item.tags,
+                    tag_rationale=item.tag_rationale,
+                ),
+                rationale=item.rationale,
+            )
+        )
+
+    for item in request.updates:
+        try:
+            target_path = validate_wiki_target_path(item.target_path)
+        except (FileTrackingError, InvalidWikiTargetError) as error:
+            raise ToolValidationError("Invalid wiki update target path") from error
+        if not target_path.endswith(".md"):
+            raise ToolValidationError("Wiki update target must be a Markdown file")
+        ownership_entry = ownership.entries.get(target_path)
+        try:
+            target = read_vault_markdown(vault_root, target_path)
+        except VaultAccessError as error:
+            if error.code == "not-found":
+                if ownership_entry is not None:
+                    raise ToolOwnershipConflictError(
+                        "Wiki update target is missing but retains generated ownership; "
+                        "restore the file or release ownership before updating it"
+                    ) from error
+                raise ToolNotFoundError("Wiki update target is missing") from error
+            if error.code in {"invalid-path", "invalid-extension"}:
+                raise ToolValidationError("Invalid wiki update target path") from error
+            raise ToolExecutionError("Could not read wiki update target") from error
+        ownership_entry = _classify_update_target_ownership(
+            target_path=target_path,
+            target_content=target.content_bytes,
+            ownership=ownership,
+        )
+        if item.tags is not None and ownership_entry is None:
+            raise ToolValidationError(
+                "Ingestion cannot change tags on a human-owned wiki target"
+            )
+        if ownership_entry is None and parse_markdown_note(
+            Path(target_path), content=target.content
+        ).managed_blocks:
+            raise ToolValidationError(
+                "Wiki update target contains managed blocks and cannot use a human patch"
+            )
+        prepared.append(
+            PreparedWikiSectionUpdateMutation(
+                target_path=target_path,
+                target_content=target.content,
+                target_content_hash=f"sha256:{hash_file_content(target.content_bytes)}",
+                heading=item.heading,
+                section_body=item.body,
+                rationale=item.rationale,
+                expected_generator_id=(
+                    ownership_entry.generator_id if ownership_entry is not None else None
+                ),
+                proposed_tags=item.tags,
+            )
+        )
+
+    now = clock_fn()
+    proposal_id = generate_proposal_id(
+        clock_fn=lambda: now,
+        random_suffix_fn=random_suffix_fn,
+    )
+    created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        documents = build_compounding_wiki_proposal(
+            source=verified.source,
+            mutations=tuple(prepared),
+            generator=generator,
+            proposal_id=proposal_id,
+            created_at=created_at,
+        )
+    except (InvalidWikiSectionError, InvalidWikiTargetError) as error:
+        raise ToolValidationError(str(error)) from error
+    except WikiSectionUnchangedError as error:
+        raise ToolConflictError("Wiki section already has the proposed content") from error
+
+    try:
+        persisted_path = persist_compounding_wiki_proposal(
+            proposals_root=vault_root / "proposals",
+            documents=documents,
+        )
+    except WikiTargetExistsError as error:
+        raise ToolConflictError("A proposed wiki create target already exists") from error
+    except ProposalAlreadyExistsError as error:
+        raise ToolConflictError("Draft proposal already exists") from error
+    except ProposalPublicationError as error:
+        raise ToolExecutionError("Could not publish draft proposal") from error
+
+    return EvolveWikiProposalResult(
+        proposal_id=proposal_id,
+        proposal_path=persisted_path.relative_to(vault_root).as_posix(),
+        target_paths=documents.target_paths,
+        operation_count=len(documents.target_paths),
         status="draft",
     )

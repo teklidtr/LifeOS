@@ -118,6 +118,7 @@ def lexical_search_report(
     vault_root: Path,
     query: str,
     limit: int = 8,
+    path_prefix: str | None = None,
 ) -> SearchReport:
     """Search Markdown by exact tokens and report parser omissions deterministically."""
     if not isinstance(vault_root, Path):
@@ -126,6 +127,14 @@ def lexical_search_report(
         raise ContextSearchError("query must be a non-empty string")
     if type(limit) is not int or limit <= 0:
         raise ContextSearchError("limit must be a positive integer")
+    if path_prefix is not None:
+        if not isinstance(path_prefix, str) or not path_prefix:
+            raise ContextSearchError("path_prefix must be a non-empty string or None")
+        if path_prefix.startswith("/") or ".." in Path(path_prefix).parts:
+            raise ContextSearchError("path_prefix must be vault-relative")
+        normalized_prefix = path_prefix.rstrip("/") + "/"
+    else:
+        normalized_prefix = None
 
     terms = lexical_terms(query)
     if not terms:
@@ -140,6 +149,10 @@ def lexical_search_report(
         raise ContextSearchError(str(exc)) from exc
 
     for source in files:
+        relative = source.relative_path
+        if normalized_prefix is not None and not relative.startswith(normalized_prefix):
+            continue
+
         path = source.path
         parsed = parse_markdown_note(path, content=source.content)
         source_diagnostics = diagnostics_from_findings(parsed.findings, vault_root=vault_root)
@@ -147,7 +160,6 @@ def lexical_search_report(
             diagnostics.extend(source_diagnostics)
             continue
 
-        relative = source.relative_path
         title = parsed.durable_fields.title or path.stem.replace("-", " ")
         description = parsed.durable_fields.description or ""
         body = parsed.body

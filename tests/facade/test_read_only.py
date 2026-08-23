@@ -11,9 +11,12 @@ from lifeos.facade.errors import (
 from lifeos.facade.models import ToolEffect
 from lifeos.facade.read_only import (
     READ_MARKDOWN_DESCRIPTOR,
+    WIKI_SEARCH_DESCRIPTOR,
     ReadMarkdownRequest,
     ReadMarkdownResult,
+    WikiSearchRequest,
     read_markdown,
+    search_wiki,
 )
 
 
@@ -226,3 +229,31 @@ def test_no_forbidden_imports() -> None:
     assert "sqlite" not in content.lower()
     assert "pydantic" not in content.lower()
     assert "openai" not in content.lower()
+
+
+def test_wiki_search_is_read_only_and_scoped_to_wiki(tmp_path: Path) -> None:
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "wiki" / "learning.md").write_text(
+        "---\ntitle: Retrieval Practice\n---\n\nActive recall improves retrieval.\n"
+    )
+    (tmp_path / "raw" / "source.md").write_text(
+        "---\ntitle: Retrieval Source\n---\n\nActive recall raw evidence.\n"
+    )
+
+    result = search_wiki(
+        vault_root=tmp_path,
+        request=WikiSearchRequest(query="active recall", limit=8),
+    )
+
+    assert WIKI_SEARCH_DESCRIPTOR.effect == ToolEffect.READ_ONLY
+    assert [hit.path for hit in result.hits] == ["wiki/learning.md"]
+    assert result.hits[0].title == "Retrieval Practice"
+    assert "Active recall" in result.hits[0].excerpt
+
+
+def test_wiki_search_request_is_bounded() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        WikiSearchRequest(query="   ")
+    with pytest.raises(ValueError, match="between 1 and 20"):
+        WikiSearchRequest(query="learning", limit=21)

@@ -446,7 +446,7 @@ def test_standard_generated_wiki_role_parent_may_be_missing(tmp_path: Path) -> N
     assert not (tmp_path / "wiki" / "concepts").exists()
 
 
-def test_arbitrary_generated_wiki_parent_remains_invalid(tmp_path: Path) -> None:
+def test_agent_selected_generated_wiki_parent_may_be_missing(tmp_path: Path) -> None:
     manifest_path = tmp_path / DEFAULT_OWNERSHIP_MANIFEST_PATH
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text('{"schema_version": 1, "owned_files": {}}')
@@ -454,7 +454,7 @@ def test_arbitrary_generated_wiki_parent_remains_invalid(tmp_path: Path) -> None
 
     operation = CreateGeneratedFile(
         id="op-1",
-        target_path="wiki/topics/active-recall.md",
+        target_path="wiki/topics/learning/active-recall.md",
         expected_target_state="absent",
         generator_id="gen1",
         new_content="content",
@@ -464,8 +464,8 @@ def test_arbitrary_generated_wiki_parent_remains_invalid(tmp_path: Path) -> None
         vault_root=tmp_path,
     )
 
-    assert result.operations[0].state == "invalid"
-    assert result.operations[0].findings[0].code == "missing_parent"
+    assert result.operations[0].state == "valid"
+    assert not (tmp_path / "wiki" / "topics").exists()
 
 
 def test_invalid_max_bytes(tmp_path: Path) -> None:

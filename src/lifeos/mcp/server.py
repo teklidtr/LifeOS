@@ -35,15 +35,27 @@ from lifeos.facade.errors import (
 from lifeos.facade.proposal_tools import (
     COMPOUND_WIKI_PROPOSAL_DESCRIPTOR,
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
+    EVOLVE_WIKI_PROPOSAL_DESCRIPTOR,
     UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
     CompoundWikiProposalRequest,
     CreateWikiProposalRequest,
+    EvolveWikiCreateRequest,
+    EvolveWikiProposalRequest,
+    EvolveWikiUpdateRequest,
     UpdateWikiSectionProposalRequest,
     create_wiki_and_update_section_proposal,
     create_wiki_proposal,
+    evolve_wiki_proposal,
     update_wiki_section_proposal,
 )
-from lifeos.facade.read_only import READ_MARKDOWN_DESCRIPTOR, ReadMarkdownRequest, read_markdown
+from lifeos.facade.read_only import (
+    READ_MARKDOWN_DESCRIPTOR,
+    WIKI_SEARCH_DESCRIPTOR,
+    ReadMarkdownRequest,
+    WikiSearchRequest,
+    read_markdown,
+    search_wiki,
+)
 from lifeos.facade.registry_tools import (
     REGISTRY_REFRESH_DESCRIPTOR,
     refresh_registry,
@@ -54,10 +66,12 @@ from lifeos.mcp.models import (
     ApproveProposalMCPResult,
     CompoundWikiProposalMCPResult,
     CreateWikiProposalMCPResult,
+    EvolveWikiProposalMCPResult,
     ReadMarkdownMCPResult,
     RegistryRefreshMCPResult,
     SubmitProposalMCPResult,
     UpdateWikiSectionProposalMCPResult,
+    WikiSearchMCPResult,
 )
 from lifeos.registry import Registry
 from lifeos.wiki.layout import WikiPageKind
@@ -66,30 +80,50 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+
+class EvolveWikiCreateMCPInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_path: str
+    title: str
+    body: str
+    rationale: str
+    tags: list[str] | None = None
+    tag_rationale: str | None = None
+
+
+class EvolveWikiUpdateMCPInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_path: str
+    heading: str
+    body: str
+    rationale: str
+    tags: list[str] | None = None
+    tag_rationale: str | None = None
+
 LIFEOS_MCP_INSTRUCTIONS = (
-    "LifeOS keeps Markdown canonical. For ingestion requests, first call registry_refresh "
-    "to register the source's current path and hash, then call vault_read_markdown for "
-    "the source. Evaluate the returned source_tags and source_topics as input evidence; "
-    "they may be retained, removed, combined, or supplemented. For a newly generated wiki "
-    "page, prefer typed routing with page_kind + slug: source -> wiki/sources/, entity -> "
-    "wiki/entities/, concept -> wiki/concepts/, synthesis -> wiki/syntheses/. These are small "
-    "filing roles, not a domain ontology; do not create a page for every noun or tag. "
-    "Use explicit target_path only for legacy or deliberately custom wiki paths. Synthesize a "
-    "grounded title, body, optional canonical tags, and a concise tag rationale and call "
-    "ingestion_create_wiki_proposal. When one ingestion should both create a "
-    "detailed wiki page and update one exact section in an existing wiki note, also read "
-    "that existing target and call ingestion_create_wiki_and_update_section_proposal. "
-    "To update only an existing wiki note, also read "
-    "that target, synthesize the replacement body for one exact heading, and call "
-    "ingestion_update_wiki_section_proposal. LifeOS selects a human patch or generated "
-    "replacement from canonical ownership; never guess ownership from the filename. "
-    "If ownership is orphaned, stop and report the restore-or-release remediation. "
-    "Stop after the draft "
-    "proposal unless the user explicitly requests another exact lifecycle transition. "
-    "Never call proposal_submit, proposal_approve, or proposal_apply merely because an "
-    "ingestion was requested. Use vault-relative paths and never directly rewrite "
-    "canonical notes."
+    "LifeOS keeps Markdown canonical and does not prescribe a universal wiki taxonomy. "
+    "For ingestion, first call registry_refresh, then vault_read_markdown for the registered "
+    "raw source. Search existing durable knowledge with wiki_search using the source's main "
+    "ideas, then read the relevant wiki hits before choosing mutations. Decide what would "
+    "make the wiki more useful: reuse existing notes when possible, create new notes or "
+    "folders only when they are durable and useful, and allow structure under wiki/ to "
+    "emerge from the vault rather than forcing entity/concept/source/synthesis folders. "
+    "raw/ is evidence; wiki/ is accumulated knowledge, so do not create wiki/source mirrors "
+    "merely to duplicate raw material. If the source adds no durable knowledge, create no "
+    "proposal. Otherwise prefer ingestion_evolve_wiki_proposal with 1..12 distinct, "
+    "source-grounded creates and/or exact-section updates, each with a concise rationale. "
+    "LifeOS selects human patches or generated replacements from canonical ownership and "
+    "keeps every consequential mutation reviewable. The older single-create, single-update, "
+    "typed page_kind routing, and fixed two-operation tools remain compatibility APIs, not "
+    "the preferred filing model. If ownership is orphaned, stop and report the "
+    "restore-or-release remediation. Stop after the draft proposal unless the user explicitly "
+    "requests another exact lifecycle transition. Never call proposal_submit, "
+    "proposal_approve, or proposal_apply merely because ingestion was requested. Use "
+    "vault-relative paths and never directly rewrite canonical notes."
 )
+
 
 REGISTRY_REFRESH_MCP_DESCRIPTION = (
     f"{REGISTRY_REFRESH_DESCRIPTOR.description} Use after files are added, changed, moved, "
@@ -98,13 +132,23 @@ REGISTRY_REFRESH_MCP_DESCRIPTION = (
 
 READ_MARKDOWN_MCP_DESCRIPTION = (
     f"{READ_MARKDOWN_DESCRIPTOR.description} Use this before ingestion to inspect the "
-    "registered source; paths are vault-relative."
+    "registered source and any relevant wiki notes; paths are vault-relative."
+)
+WIKI_SEARCH_MCP_DESCRIPTION = (
+    f"{WIKI_SEARCH_DESCRIPTOR.description} Search after reading a source and before choosing "
+    "wiki targets. Results are restricted to wiki/ and are read-only."
+)
+EVOLVE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
+    f"{EVOLVE_WIKI_PROPOSAL_DESCRIPTOR.description} Prefer this after wiki_search and "
+    "vault_read_markdown have inspected relevant existing knowledge. Supply 1..12 distinct "
+    "agent-selected wiki targets with a rationale for each create/update. Folder structure "
+    "may emerge under wiki/; this creates only a draft and never applies it."
 )
 CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{CREATE_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown and "
-    "supply a source-grounded title and body. Prefer page_kind+slug for a new generated "
-    "source, entity, concept, or synthesis page; target_path remains a compatibility escape "
-    "hatch. This creates a draft and does not modify the target wiki note."
+    "supply a source-grounded title and body. This is a compatibility single-create tool; "
+    "explicit target_path is preferred here and page_kind+slug remains legacy-compatible. "
+    "For new ingestion workflows prefer ingestion_evolve_wiki_proposal."
 )
 UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
     f"{UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
@@ -115,8 +159,7 @@ UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
 COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
     "has inspected both the registered source and existing update target. Supply the "
-    "absent create target with its grounded title and body, preferably routed by "
-    "create_page_kind+create_slug, plus one exact heading and "
+    "absent create target with its grounded title and body, plus one exact heading and "
     "replacement body for the existing target. LifeOS selects the update operation from "
     "canonical ownership. This creates one atomic two-operation draft and does not modify "
     "either target."
@@ -225,6 +268,72 @@ def create_mcp_server(
                 "markdown_body": res.markdown_body,
                 "source_tags": list(res.source_tags),
                 "source_topics": list(res.source_topics),
+            }
+
+        return _invoke_mcp_tool(op)
+
+    def wiki_search_tool(query: str, limit: int = 8) -> WikiSearchMCPResult:
+        def op() -> WikiSearchMCPResult:
+            result = search_wiki(
+                vault_root=vault_root, request=WikiSearchRequest(query=query, limit=limit)
+            )
+            return {
+                "query": result.query,
+                "hits": [
+                    {
+                        "path": hit.path,
+                        "title": hit.title,
+                        "description": hit.description,
+                        "excerpt": hit.excerpt,
+                        "score": hit.score,
+                    }
+                    for hit in result.hits
+                ],
+            }
+
+        return _invoke_mcp_tool(op)
+
+    def ingestion_evolve_wiki_proposal_tool(
+        source_path: str,
+        creates: list[EvolveWikiCreateMCPInput] | None = None,
+        updates: list[EvolveWikiUpdateMCPInput] | None = None,
+    ) -> EvolveWikiProposalMCPResult:
+        def op() -> EvolveWikiProposalMCPResult:
+            result = evolve_wiki_proposal(
+                vault_root=vault_root,
+                registry=registry,
+                request=EvolveWikiProposalRequest(
+                    source_path=source_path,
+                    creates=tuple(
+                        EvolveWikiCreateRequest(
+                            target_path=item.target_path,
+                            title=item.title,
+                            body=item.body,
+                            rationale=item.rationale,
+                            tags=tuple(item.tags or ()),
+                            tag_rationale=item.tag_rationale,
+                        )
+                        for item in creates or []
+                    ),
+                    updates=tuple(
+                        EvolveWikiUpdateRequest(
+                            target_path=item.target_path,
+                            heading=item.heading,
+                            body=item.body,
+                            rationale=item.rationale,
+                            tags=None if item.tags is None else tuple(item.tags),
+                            tag_rationale=item.tag_rationale,
+                        )
+                        for item in updates or []
+                    ),
+                ),
+            )
+            return {
+                "proposal_id": result.proposal_id,
+                "proposal_path": result.proposal_path,
+                "target_paths": list(result.target_paths),
+                "operation_count": result.operation_count,
+                "status": "draft",
             }
 
         return _invoke_mcp_tool(op)
@@ -406,6 +515,30 @@ def create_mcp_server(
                     readOnlyHint=True,
                     destructiveHint=False,
                     idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            _strict_tool(
+                wiki_search_tool,
+                name="wiki_search",
+                description=WIKI_SEARCH_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Search wiki knowledge",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            _strict_tool(
+                ingestion_evolve_wiki_proposal_tool,
+                name="ingestion_evolve_wiki_proposal",
+                description=EVOLVE_WIKI_PROPOSAL_MCP_DESCRIPTION,
+                annotations=ToolAnnotations(
+                    title="Evolve wiki knowledge",
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=False,
                     openWorldHint=False,
                 ),
             ),

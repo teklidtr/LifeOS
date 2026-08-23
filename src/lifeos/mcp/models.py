@@ -58,3 +58,24 @@ class ApplyProposalMCPResult(TypedDict):
     proposal_id: str
     status: Literal["applied"]
     changed_paths: list[str]
+
+
+class WikiSearchHitMCPResult(TypedDict):
+    path: str
+    title: str
+    description: str
+    excerpt: str
+    score: int
+
+
+class WikiSearchMCPResult(TypedDict):
+    query: str
+    hits: list[WikiSearchHitMCPResult]
+
+
+class EvolveWikiProposalMCPResult(TypedDict):
+    proposal_id: str
+    proposal_path: str
+    target_paths: list[str]
+    operation_count: int
+    status: Literal["draft"]
