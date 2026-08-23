@@ -92,15 +92,6 @@ def _is_recognized_vault(root: Path) -> bool:
     return config.vault_root == resolved_root
 
 
-def _clear_directory(root: Path) -> None:
-    """Remove only children created during a failed initialization attempt."""
-    for child in root.iterdir():
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
-
-
 def initialize_vault(target: Path) -> BootstrapResult:
     """Create the canonical LifeOS vault skeleton without overwriting existing content."""
     expanded_target = target.expanduser()
@@ -127,9 +118,8 @@ def initialize_vault(target: Path) -> BootstrapResult:
     if git_executable is None:
         raise BootstrapError("Git is required to initialize a LifeOS vault")
 
-    target_existed = root.exists()
     try:
-        root.mkdir(parents=True, exist_ok=target_existed)
+        root.mkdir(parents=True, exist_ok=True)
         for name in VAULT_ROOTS:
             (root / name).mkdir()
         for relative_path, content in BOOTSTRAP_FILES.items():
@@ -142,14 +132,10 @@ def initialize_vault(target: Path) -> BootstrapResult:
             text=True,
         )
     except (OSError, subprocess.CalledProcessError) as error:
-        try:
-            if root.exists():
-                if target_existed:
-                    _clear_directory(root)
-                else:
-                    shutil.rmtree(root)
-        except OSError:
-            pass
+        # Do not recursively roll back the target. A concurrent process may have created
+        # user content after our initial emptiness check; deleting the directory would make
+        # a failed bootstrap destructive. Leave the partial scaffold visible and fail closed
+        # on a later rerun so the user can inspect/remove it explicitly.
         raise BootstrapError(f"Failed to initialize LifeOS vault at {root}: {error}") from error
 
     return BootstrapResult(vault_root=root, created=True)
