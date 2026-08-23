@@ -92,105 +92,80 @@ lifeos --version
 lifeos --help
 ```
 
-## 4.5 Create a vault
+## 4.5 Create a vault with `lifeos init`
 
 Choose a vault location **outside the LifeOS application repository**. The application
 contains code; the vault contains your canonical configuration and personal Markdown.
-Until LIFEOS-1634 adds guided Cookiecutter bootstrap, create the minimal skeleton manually:
+Create the vault with the first-party bootstrap command:
 
 ```bash
-mkdir -p ~/LifeOS-vault
+lifeos init ~/LifeOS-vault
 cd ~/LifeOS-vault
-mkdir -p \
-  journal \
-  raw \
-  study \
-  wiki \
-  flashcards \
-  patterns \
-  profile \
-  goals \
-  plans \
-  experiments \
-  metrics \
-  reviews \
-  proposals \
-  system
 ```
 
-Initialize Git:
+You can also initialize the current directory when it is empty:
 
 ```bash
-git init
+lifeos init
 ```
 
-Create `.gitignore`:
+`lifeos init` owns the canonical bootstrap contract. It creates the supported top-level
+LifeOS roots, the vault configuration and bootstrap files, and initializes a local Git
+repository. It does not configure Codex, Claude, Obsidian, or another external client.
 
-```gitignore
-.lifeos/
-.obsidian/workspace*.json
-.DS_Store
-```
+Initialization is deliberately non-destructive:
 
-`.lifeos/` belongs to this vault but is disposable runtime state: registry, recovery,
-activity diagnostics, graph/export generations, indexes, locks, and caches. Do not treat
-it as canonical knowledge and do not commit it.
+- a missing or empty target is initialized;
+- an existing recognized LifeOS vault returns successfully without rewriting user files;
+- a non-empty unrecognized or partially initialized target fails without repairing or
+  overwriting it;
+- there is no destructive `--force` mode.
 
-## 4.6 Create canonical vault bootstrap files
+This means you may customize `system/instructions.yml`, `AGENTS.md`, and other canonical
+content after initialization. Re-running `lifeos init` on that valid vault will not restore
+template text over your changes.
 
-Create `system/generated-ownership.json`:
+## 4.6 What the bootstrap creates
 
-```json
-{
-  "owned_files": {},
-  "schema_version": 1
-}
-```
+The application owns the generated scaffold, so the manual does not duplicate its file
+contents. The current bootstrap creates these top-level semantic roots:
 
-Create `system/instructions.yml` even when you do not have custom instructions yet:
+`journal/`, `raw/`, `study/`, `wiki/`, `flashcards/`, `patterns/`, `profile/`, `goals/`,
+`plans/`, `experiments/`, `metrics/`, `reviews/`, `proposals/`, and `system/`.
 
-```yaml
-schema_version: 1
-instructions: []
-```
+These roots provide LifeOS domain context. They do **not** define a universal ontology or
+fixed subfolder structure. In particular, LifeOS does not prescribe an entity/concept/source
+hierarchy under `wiki/`; an agent may evolve useful nested knowledge structure when needed.
 
-This file is the allowlisted source for **vault-specific** runtime instructions. Universal
-LifeOS behavior comes from the MCP server itself. Later you can add scoped instructions,
-for example exam-oriented study guidance, without turning folder names into permissions.
+The bootstrap also creates:
 
-Create a minimal vault-root `AGENTS.md` for clients such as Codex that understand it:
+- `lifeos.yml`, whose portable defaults include `vault_root: .` and
+  `runtime_dir: .lifeos`;
+- a minimal vault-root `AGENTS.md` for clients that understand it;
+- `system/instructions.yml` as the allowlisted source of vault-specific runtime
+  instructions;
+- `system/generated-ownership.json` for generated-file ownership metadata;
+- `.gitignore` covering `.lifeos/` and disposable editor/OS state.
 
-```markdown
-# LifeOS Vault Agent Bootstrap
-
-This directory is a LifeOS vault, not the LifeOS application source repository.
-
-Use the configured LifeOS MCP server for canonical search, context, proposals, and
-consequential mutations. Obtain universal runtime policy from the MCP server and
-vault-specific instructions through LifeOS. Folder names provide semantic context; do not
-infer permission or a universal ontology from them. Do not directly rewrite canonical
-LifeOS artifacts when an MCP/proposal workflow exists.
-```
+`.lifeos/` belongs to the vault but is disposable runtime state: registry, recovery,
+activity diagnostics, graph/export generations, indexes, locks, and caches. `lifeos init`
+does not need to populate it. Runtime commands create the state they need later. Do not
+treat `.lifeos/` as canonical knowledge and do not commit it.
 
 The vault `AGENTS.md` is a client convenience, not the cross-client source of truth. MCP
-instructions remain the client-independent runtime contract.
+instructions remain the client-independent universal runtime contract, while
+`system/instructions.yml` contains vault-specific or path-scoped guidance.
 
-## 4.7 Create vault-root `lifeos.yml`
+## 4.7 Vault configuration behavior
 
-Create `~/LifeOS-vault/lifeos.yml` **inside the vault root**:
-
-```yaml
-vault_root: .
-runtime_dir: .lifeos
-features:
-  graphify: true
-  exports: true
-```
-
+The generated vault-root `lifeos.yml` uses relative paths so the vault remains portable.
 Relative `vault_root` values are resolved from the configuration file's directory, so
-`vault_root: .` makes the vault portable. Relative `runtime_dir` values are resolved from
-the vault root. The LifeOS executable may live anywhere; `--config` tells it which vault it
-is serving.
+`vault_root: .` identifies the directory containing the file. Relative `runtime_dir` values
+are resolved from the vault root, so `runtime_dir: .lifeos` keeps disposable state beside
+the canonical vault without making it canonical.
+
+The LifeOS executable may live anywhere; `--config` tells it which vault it is serving.
+Configuration loading itself remains read-only.
 
 Configuration rules:
 
@@ -198,7 +173,7 @@ Configuration rules:
 - `runtime_dir` may be absent, but if present it must be a directory;
 - unknown keys are rejected;
 - `~` and environment variables are not expanded inside YAML;
-- configuration loading is read-only and does not create directories.
+- configuration loading does not create directories.
 
 ## 4.8 Initialize and populate the registry
 
@@ -358,10 +333,11 @@ The workspace discloses the exact selected passages before external generation.
 Provider configuration remains runtime-specific and is not written into canonical
 conversation fields.
 
-
 ## 4.13 Create the first vault commit
 
-From the vault:
+`lifeos init` already initializes the vault's Git repository. After reviewing the generated
+bootstrap and making any desired vault-specific instruction changes, create the first
+canonical commit:
 
 ```bash
 git add .gitignore AGENTS.md lifeos.yml system/generated-ownership.json system/instructions.yml
