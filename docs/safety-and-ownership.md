@@ -13,11 +13,11 @@ Agents may replace only content inside valid managed markers.
 ### Fully generated files
 
 A generator may replace the whole file only when ownership is recorded in the canonical Git-tracked manifest at `system/generated-ownership.json`.
-For a newly approved generated wiki create, application may lazily create the
-immediate parent only when it is exactly `wiki/sources`, `wiki/entities`,
-`wiki/concepts`, or `wiki/syntheses` and the canonical `wiki/` directory already
-exists. This is a narrow structural exception to missing-parent rejection; it
-does not authorize arbitrary nested directories or human-owned writes.
+For a newly approved `create_generated_file` beneath `wiki/`, application may
+lazily create a bounded missing nested parent chain beneath an already-existing
+canonical `wiki/` root. Folder names are not allowlisted semantic categories.
+Path traversal, symlink parents, non-directory parents, excessive nesting, and
+missing parents for other operation types still fail closed.
 For bounded ingestion updates, LifeOS may derive that replacement by changing one
 exact heading while preserving the rest of the generated file. The manifest
 generator and raw content hash must both match before a draft is published.

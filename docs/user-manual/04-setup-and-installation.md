@@ -110,10 +110,6 @@ mkdir -p \
   raw \
   study \
   wiki \
-  wiki/sources \
-  wiki/entities \
-  wiki/concepts \
-  wiki/syntheses \
   flashcards \
   patterns \
   profile \
@@ -252,21 +248,22 @@ lifeos-mcp \
 Keep the server local and use STDIO transport. Do not expose it as an
 unauthenticated network service.
 
-The four `wiki/` subdirectories above are structural filing roles, not a domain
-ontology. Creating them during setup makes the layout immediately visible, but
-it is optional: when `wiki/` exists, LifeOS can lazily create one of those exact
-role folders while applying an approved generated-page proposal.
+Do not pre-create a universal wiki taxonomy. Keep the canonical `wiki/` root and
+let useful subfolders emerge from actual knowledge. Approved generated creates
+can lazily materialize bounded nested folders beneath `wiki/`; draft creation
+alone does not change the vault.
 
-After the MCP client connects, an ingestion request such as “Ingest
-`study/example.md` as a concept named `example` using LifeOS” is routed through
-`registry_refresh`, `vault_read_markdown`, and
-`ingestion_create_wiki_proposal`. The default result is a draft proposal. The
-server does not infer permission to submit, approve, or apply it.
+After the MCP client connects, ingestion follows `registry_refresh` ->
+`vault_read_markdown` -> `wiki_search` -> read relevant wiki hits -> decide. If
+the source adds no durable knowledge, the agent creates no proposal. Otherwise
+it should normally call `ingestion_evolve_wiki_proposal` with 1..12 distinct
+agent-selected creates and/or exact-section updates, each with a rationale. The
+default result is still only a draft; the server does not infer permission to
+submit, approve, or apply it.
 
-For new generated pages, the agent should prefer `page_kind` (`source`, `entity`,
-`concept`, or `synthesis`) plus a lowercase kebab-case `slug`; LifeOS derives the
-role-folder target. Explicit `target_path` remains supported for legacy or custom
-wiki layouts.
+Legacy `page_kind + slug` and single-page tools remain compatible, but they are
+not the preferred knowledge architecture. `raw/` stores source evidence; do not
+create a `wiki/sources/` mirror merely to duplicate it.
 
 `vault_read_markdown` returns the Markdown body plus bounded `source_tags` and
 `source_topics`. The connected agent may improve or replace that taxonomy and

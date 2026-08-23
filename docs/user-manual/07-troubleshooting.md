@@ -51,29 +51,22 @@ LifeOS does not need a model name or provider API key for this workflow. If the
 MCP tools are missing, verify the MCP extra is installed and the client launches
 `lifeos-mcp` with the intended `lifeos.yml` configuration.
 
-## `wiki/entities/` or `wiki/concepts/` is missing
+## Expected `wiki/entities/` or `wiki/concepts/`, but they are missing
 
-Older ingestion flows asked the external agent for an explicit `wiki/...` path
-and did not define entity/concept/source/synthesis routing. Proposal application
-also rejected every missing parent directory. As a result, flat targets such as
-`wiki/cell-membrane.md` worked, but nothing caused structural wiki role folders
-to appear.
+Those folders are no longer required. LifeOS intentionally does not prescribe a
+fixed wiki taxonomy. Current ingestion searches existing knowledge and lets the
+agent choose useful targets beneath `wiki/`, such as `wiki/learning/`,
+`wiki/people/`, a flat `wiki/`, or another structure that fits the vault.
 
-Current generated-page ingestion prefers `page_kind + slug` and derives one of
-`wiki/sources/<slug>.md`, `wiki/entities/<slug>.md`,
-`wiki/concepts/<slug>.md`, or `wiki/syntheses/<slug>.md`. The folder is created
-lazily only when the approved generated create is applied. A draft proposal by
-itself therefore does not create the folder. You may also create the four folders
-during initial vault setup. LifeOS intentionally does not auto-create arbitrary
-subfolders such as `wiki/topics/`; the four roles are a small filing contract,
-not a universal ontology.
+The old `page_kind + slug` API can still derive `wiki/entities/`,
+`wiki/concepts/`, `wiki/sources/`, or `wiki/syntheses/` for compatibility, but
+MCP guidance no longer prefers it. Approved generated creates can safely create
+missing nested folders beneath an existing `wiki/` root. Draft proposals do not
+materialize those folders.
 
-This fixes structural routing and folder creation, but it does not make one
-source automatically create a source summary and update many entity/concept
-pages in the same ingestion. Current ingestion remains deliberately bounded to
-one generated create, or one generated create plus one exact existing-section
-update. Multi-page compounding is tracked separately so that fan-out limits and
-atomic review can be designed explicitly.
+Remember that `raw/` already holds source evidence. A `wiki/sources/` mirror is
+usually unnecessary unless you deliberately choose to maintain one as durable
+knowledge.
 
 ## Registry paths are stale after a file move
 

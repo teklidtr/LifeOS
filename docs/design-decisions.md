@@ -479,7 +479,7 @@ tags in the same full-file replacement; ingestion never changes tags on a
 human-owned wiki target. Missing taxonomy and omitted proposed tags remain valid
 and do not cause metadata invention.
 
-## DD-085: Wiki page roles are a small structural filing contract
+## DD-085: Wiki page roles are a small structural filing contract (superseded by DD-086)
 
 New agent-generated wiki pages prefer one of four stable page roles: `source`,
 `entity`, `concept`, or `synthesis`. LifeOS deterministically maps those roles to
@@ -498,3 +498,25 @@ create that single role directory safely before publishing the reviewed page.
 This exception does not authorize arbitrary nested folders, human-owned creates,
 or autonomous semantic merging. Multi-page compounding ingestion is separate
 bounded work rather than an implicit consequence of the layout.
+
+
+## DD-086: Wiki structure emerges; mutation boundaries stay strict
+
+LifeOS does not prescribe the durable knowledge taxonomy. The external ingestion
+agent searches existing `wiki/` knowledge, reads relevant notes, and decides
+whether a registered raw source warrants zero durable changes or a bounded set
+of coordinated changes. The preferred compounding contract permits 1..12
+distinct generated creates and ownership-aware exact-section updates in one
+reviewed atomic proposal, with an explicit rationale per mutation. `raw/` is the
+evidence/provenance layer and `wiki/` is accumulated durable knowledge; a source
+need not be mirrored into `wiki/sources/`.
+
+Folder names beneath `wiki/` may therefore emerge and evolve from actual use. An
+approved generated create may materialize a bounded missing nested parent chain
+beneath an already-existing `wiki/` root. This freedom does not weaken the
+mutation boundary: traversal and symlinks fail closed, targets are unique and
+operation-count bounded, human updates remain base-hash-bound, generated updates
+remain ownership/hash-bound, proposal review snapshots stay immutable, and no
+lifecycle transition is inferred from ingestion. LIFEOS-1631 typed page roles
+remain compatibility helpers only; agents are no longer instructed to use them
+as the preferred filing model.

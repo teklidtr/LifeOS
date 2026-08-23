@@ -418,18 +418,19 @@ external agent interprets the source, while LifeOS verifies its registered
 identity and current hash, validates the supplied fields, creates a draft
 proposal, and records provenance. Source taxonomy is evidence: the agent can keep,
 remove, combine, or add tags, including when the source has no useful taxonomy.
-For a newly generated page, the preferred inputs are `page_kind` plus `slug`.
-LifeOS derives `wiki/sources/<slug>.md`, `wiki/entities/<slug>.md`,
-`wiki/concepts/<slug>.md`, or `wiki/syntheses/<slug>.md` and records the selected
-role as the generated page's `type`. Explicit `target_path` remains available for
-legacy or deliberately custom wiki notes. The role folder is created only when
-an approved generated create is applied, so merely creating a draft does not
-materialize `wiki/entities/` or `wiki/concepts/` on disk.
-This layout support is intentionally smaller than a full Karpathy-style
-compounding ingest: one current create request still produces one generated wiki
-page, while the compound request produces one create plus one exact section
-update. Automatic bounded fan-out across several entity/concept/synthesis pages
-is separate roadmap work rather than hidden side effect.
+For current ingestion, the preferred workflow is emergent and compounding rather
+than typed filing. After reading the registered source, the agent searches the
+existing `wiki/`, reads relevant hits, and decides whether durable knowledge
+should change. `ingestion_evolve_wiki_proposal` accepts 1..12 distinct generated
+page creates and/or ownership-aware exact-section updates in one atomic draft.
+Each mutation includes a concise rationale. Generated creates may choose useful
+nested paths such as `wiki/learning/retrieval-practice.md`; approved application
+can create the missing nested folders beneath the existing `wiki/` root. The old
+`page_kind + slug` route remains a compatibility API but is no longer preferred.
+`raw/` is the source-evidence layer, so a parallel `wiki/sources/` note is not
+required. If the source adds no durable knowledge, the correct result is no
+proposal.
+
 The proposal displays the source taxonomy, proposed canonical tags, rationale,
 and exact tag diff. Existing-note updates require one unique ATX
 heading (the heading text is supplied without `#` markers). LifeOS checks the

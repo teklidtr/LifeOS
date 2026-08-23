@@ -121,27 +121,16 @@ and near-term work concrete.
 3. Add your questions and disagreements.
 4. Run `uv run lifeos scan`, or let the MCP-connected agent call
    `registry_refresh`, after adding the source.
-5. Ask the MCP-connected agent to ingest the registered source. For a new
-   generated page, prefer a role and slug such as `concept + cell-membrane`,
-   `entity + andrej-karpathy`, `source + paper-2026`, or
-   `synthesis + spaced-repetition-evidence`. LifeOS derives the target beneath
-   `wiki/concepts/`, `wiki/entities/`, `wiki/sources/`, or `wiki/syntheses/`.
-   These are filing roles rather than a domain ontology, so the agent should
-   create only durable pages that improve retrieval or synthesis, not one page
-   per noun or source tag. Explicit `wiki/...` targets remain available when a
-   legacy or intentionally custom note is the right destination. For an absent
-   target, the agent synthesizes a grounded draft and calls
-   `ingestion_create_wiki_proposal`. The read response includes bounded
-   source `tags` and `topics`; review the agent's proposed canonical wiki tags in
-   the proposal diff because they may deliberately differ from the source. For an
-   existing note, identify the
-   one heading to update; the agent reads that target and calls
-   `ingestion_update_wiki_section_proposal` with the heading text and replacement
-   body. LifeOS reads canonical ownership and emits either a human-file patch or
-   a generated-file replacement; the agent does not choose that operation. If
-   both a detailed page and an existing-section update belong to the same
-   ingestion, use `ingestion_create_wiki_and_update_section_proposal` so both
-   operations remain in one atomic draft.
+5. Ask the MCP-connected agent to ingest the registered source. The agent first
+   searches `wiki/`, reads relevant existing notes, and decides what durable
+   knowledge should change. It may propose no change, or use
+   `ingestion_evolve_wiki_proposal` for 1..12 distinct creates and exact-section
+   updates. Folder names beneath `wiki/` are chosen from the current knowledge
+   context rather than a fixed ontology. Prefer reusing existing notes over
+   creating duplicates, and create new folders only when they improve future
+   retrieval or understanding. Every mutation includes a rationale in the review
+   artifact. Source `tags` and `topics` remain evidence rather than instructions.
+
 6. Review the resulting draft proposal. Ingestion does not submit, approve, or
    apply it.
 

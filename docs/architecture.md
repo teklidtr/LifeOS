@@ -61,25 +61,23 @@ External agents connect through the local STDIO MCP adapter, read an explicitly
 registered source, and synthesize a grounded draft. For an absent wiki target,
 the bounded read facade exposes the Markdown body plus normalized source `tags`
 and `topics`; unrelated frontmatter remains hidden. The agent submits a title,
-body, and optional reviewed canonical wiki tags with a concise rationale. For a
-new generated page, the preferred create route is a small structural
-`page_kind + slug` contract: `source`, `entity`, `concept`, or `synthesis` maps
-to `wiki/sources/`, `wiki/entities/`, `wiki/concepts/`, or `wiki/syntheses/`.
-These are filing roles, not a domain ontology, and existing explicit `wiki/...`
-targets remain compatible. The approved generated create may lazily create only
-one of those four exact role directories when it is first applied; arbitrary
-missing parent directories still fail closed. Source
-taxonomy is evidence, not an instruction: the agent may retain, remove, combine,
-or supplement it. For an existing wiki note, it may submit one exact ATX heading
-and its replacement body. LifeOS reads durable
-ownership before draft publication: a human-owned target becomes a base-hash-bound
+body, and optional reviewed canonical wiki tags with a concise rationale. Before proposing durable changes, the external agent can search `wiki/` and read
+relevant existing notes. It then decides whether the source warrants no durable
+change or a bounded set of 1..12 distinct creates and exact-section updates.
+Folder organization beneath `wiki/` is agent-selected from the current vault and
+may evolve over time; LifeOS does not prescribe entity/concept/source/synthesis
+folders. `raw/` remains the evidence/provenance layer and `wiki/` the accumulated
+knowledge layer, so source mirrors are not required. Approved generated creates
+may safely materialize bounded missing nested directories beneath an existing
+`wiki/` root. Source taxonomy is evidence, not an instruction: the agent may
+retain, remove, combine, or supplement it. LifeOS reads durable ownership before
+draft publication: a human-owned target becomes a base-hash-bound
 `patch_human_file`, while an unchanged target owned by the same ingestion generator
 becomes a base-hash-bound `replace_generated_file` containing the deterministic
 section replacement. Only that generated-file replacement may revise wiki tags in
-the same operation; ingestion refuses tag changes on human-owned targets. Proposed
-tags appear in canonical frontmatter and in the immutable reviewed diff. A compound
-draft uses `create_generated_file` followed by the
-ownership-appropriate update operation. Orphaned ownership, generator mismatch,
+the same operation; ingestion refuses tag changes on human-owned targets. Every
+compounding mutation carries an inspectable rationale and all operations share one
+atomic reviewed proposal. Orphaned ownership, generator mismatch,
 external modification, and a missing or malformed ownership manifest stop before an
 ingestion draft is written. The Obsidian proposal workspace exposes orphan
 diagnostics and lets the user follow hash-bound restore instructions or create a
