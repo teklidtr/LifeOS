@@ -5,14 +5,12 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
-from pathlib import Path
 from typing import Literal
 
 from lifeos.daily import content_hash
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate
-from lifeos.reviews.contracts import ReviewArtifact, ReviewItemSnapshot, ReviewSectionSnapshot, ReviewSnapshot
-from lifeos.reviews.decisions import artifact_item_fingerprints
+from lifeos.reviews.contracts import ReviewArtifact, ReviewSectionSnapshot, ReviewSnapshot
 from lifeos.vault import VaultAccessError, iter_vault_markdown
 
 ContinuityState = Literal["carried", "unresolved", "suppressed", "evidence_changed", "no_longer_present"]

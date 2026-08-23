@@ -17,7 +17,7 @@ from lifeos.feedback import (
     build_adaptive_menu,
     rebuild_evidence_dataset,
 )
-from lifeos.planning import PlanningError, build_daily_menu, load_plan_actions
+from lifeos.planning import PlanningError, load_plan_actions
 from lifeos.study import StudyError, build_review_plan, load_flashcards
 from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
 

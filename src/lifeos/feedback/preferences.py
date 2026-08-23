@@ -24,7 +24,18 @@ from lifeos.feedback.models import FeedbackObservation
 from lifeos.vault import VaultAccessError, read_vault_text
 
 PREFERENCES_SCHEMA_VERSION = 1
-_ALLOWED_DIMENSIONS = frozenset({"duration", "energy", "motivation", "mode", "duration_band", "time_window", "blocker", "avoidance"})
+_ALLOWED_DIMENSIONS = frozenset(
+    {
+        "duration",
+        "energy",
+        "motivation",
+        "mode",
+        "duration_band",
+        "time_window",
+        "blocker",
+        "avoidance",
+    }
+)
 _ALLOWED_MODES = frozenset({"off", "shadow", "active"})
 _ALLOWED_OUTCOMES = frozenset(
     {"started", "done", "partial", "skipped", "deferred", "cancelled", "unaccounted"}
@@ -39,9 +50,7 @@ _CURRENT_KEYS = frozenset(
         "reset",
     }
 )
-_LEGACY_KEYS = frozenset(
-    {"schema_version", "enabled", "disabled_signals", "excluded_events"}
-)
+_LEGACY_KEYS = frozenset({"schema_version", "enabled", "disabled_signals", "excluded_events"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,8 +109,7 @@ def apply_preferences(
     result = []
     for item in observations:
         reset_excluded = (
-            preferences.reset_before is not None
-            and item.day < preferences.reset_before
+            preferences.reset_before is not None and item.day < preferences.reset_before
         )
         result.append(
             replace(
@@ -137,9 +145,7 @@ class FeedbackControlService:
 
     def _read_preferences_content(self) -> str | None:
         try:
-            return read_vault_text(
-                self.vault_root, "system/adaptive-planning.yml"
-            ).content
+            return read_vault_text(self.vault_root, "system/adaptive-planning.yml").content
         except VaultAccessError as exc:
             if exc.code == "not-found":
                 return None
@@ -167,9 +173,7 @@ class FeedbackControlService:
                 "Adaptive preferences are invalid YAML.",
                 "Repair system/adaptive-planning.yml.",
             ) from exc
-        if not isinstance(loaded, dict) or not all(
-            isinstance(key, str) for key in loaded
-        ):
+        if not isinstance(loaded, dict) or not all(isinstance(key, str) for key in loaded):
             raise DailyInteractionError(
                 "invalid_feedback_preferences",
                 "Adaptive preferences must be a mapping with string keys.",
@@ -209,8 +213,7 @@ class FeedbackControlService:
                 "Choose off, shadow, or active.",
             )
         if not isinstance(disabled, list) or not all(
-            isinstance(item, str) and item in _ALLOWED_DIMENSIONS
-            for item in disabled
+            isinstance(item, str) and item in _ALLOWED_DIMENSIONS for item in disabled
         ):
             raise DailyInteractionError(
                 "invalid_feedback_preferences",
@@ -226,10 +229,7 @@ class FeedbackControlService:
                 "Repair the preferences file.",
             )
         if not isinstance(dismissed, dict) or not all(
-            isinstance(key, str)
-            and key
-            and isinstance(value, str)
-            and value
+            isinstance(key, str) and key and isinstance(value, str) and value
             for key, value in dismissed.items()
         ):
             raise DailyInteractionError(
@@ -343,7 +343,7 @@ class FeedbackControlService:
             return PreferencesMigrationResult(
                 "migratable", 0, PREFERENCES_SCHEMA_VERSION, True, True, mode
             )
-        document = {
+        document: dict[str, Any] = {
             "schema_version": PREFERENCES_SCHEMA_VERSION,
             "mode": mode,
             "disabled_dimensions": sorted(set(disabled)),
@@ -363,7 +363,9 @@ class FeedbackControlService:
             "migrated", 0, PREFERENCES_SCHEMA_VERSION, True, False, mode
         )
 
-    def _cache(self, key: str, fingerprint: str, result: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    def _cache(
+        self, key: str, fingerprint: str, result: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
         cache = self.runtime_dir / "feedback" / "idempotency" / f"{key}.json"
         if result is None:
             try:
@@ -371,10 +373,19 @@ class FeedbackControlService:
             except (OSError, json.JSONDecodeError):
                 return None
             if raw.get("fingerprint") != fingerprint:
-                raise DailyInteractionError("idempotency_conflict", "The idempotency key was reused with different data.", "Retry with a new key.")
-            return raw.get("result")
+                raise DailyInteractionError(
+                    "idempotency_conflict",
+                    "The idempotency key was reused with different data.",
+                    "Retry with a new key.",
+                )
+            cached_result = raw.get("result")
+            if cached_result is not None and not isinstance(cached_result, dict):
+                return None
+            return cached_result
         cache.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps({"fingerprint": fingerprint, "result": result}, sort_keys=True, default=str).encode("utf-8")
+        payload = json.dumps(
+            {"fingerprint": fingerprint, "result": result}, sort_keys=True, default=str
+        ).encode("utf-8")
         dir_fd = os.open(cache.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             atomic_write_file_secure(dir_fd, cache.name, payload)
@@ -383,19 +394,35 @@ class FeedbackControlService:
         return result
 
     def update(self, request: PreferencesUpdate) -> AdaptivePreferences:
-        fingerprint = hashlib.sha256(json.dumps(asdict(request), sort_keys=True, default=str).encode()).hexdigest()
+        fingerprint = hashlib.sha256(
+            json.dumps(asdict(request), sort_keys=True, default=str).encode()
+        ).hexdigest()
         cached = self._cache(request.idempotency_key, fingerprint)
         if cached is not None:
             return self.load()
         current = self.load()
         if request.expected_hash != current.content_hash:
-            raise DailyInteractionError("stale_write", "Adaptive preferences changed after they were read.", "Reload feedback settings and retry.")
+            raise DailyInteractionError(
+                "stale_write",
+                "Adaptive preferences changed after they were read.",
+                "Reload feedback settings and retry.",
+            )
         mode = request.mode or current.mode
         if mode not in _ALLOWED_MODES:
-            raise DailyInteractionError("invalid_mode", "Adaptive mode is invalid.", "Choose off, shadow, or active.")
-        disabled = set(current.disabled_dimensions if request.disabled_dimensions is None else request.disabled_dimensions)
+            raise DailyInteractionError(
+                "invalid_mode", "Adaptive mode is invalid.", "Choose off, shadow, or active."
+            )
+        disabled = set(
+            current.disabled_dimensions
+            if request.disabled_dimensions is None
+            else request.disabled_dimensions
+        )
         if not disabled <= _ALLOWED_DIMENSIONS:
-            raise DailyInteractionError("invalid_dimension", "An adaptive feedback dimension is invalid.", "Choose a supported dimension.")
+            raise DailyInteractionError(
+                "invalid_dimension",
+                "An adaptive feedback dimension is invalid.",
+                "Choose a supported dimension.",
+            )
         excluded = set(current.excluded_event_ids)
         if request.exclude_event_id:
             excluded.add(request.exclude_event_id)
@@ -404,13 +431,21 @@ class FeedbackControlService:
         dismissed = dict(current.dismissed_diagnoses)
         if request.dismiss_diagnosis_id or request.dismiss_fingerprint:
             if not request.dismiss_diagnosis_id or not request.dismiss_fingerprint:
-                raise DailyInteractionError("invalid_dismissal", "Diagnosis ID and evidence fingerprint are both required.", "Reload the diagnosis and retry.")
+                raise DailyInteractionError(
+                    "invalid_dismissal",
+                    "Diagnosis ID and evidence fingerprint are both required.",
+                    "Reload the diagnosis and retry.",
+                )
             dismissed[request.dismiss_diagnosis_id] = request.dismiss_fingerprint
         if request.restore_diagnosis_id:
             dismissed.pop(request.restore_diagnosis_id, None)
-        reset_before = request.reset_before if request.reset_before is not None else current.reset_before
-        reset_reason = request.reset_reason if request.reset_before is not None else current.reset_reason
-        document = {
+        reset_before = (
+            request.reset_before if request.reset_before is not None else current.reset_before
+        )
+        reset_reason = (
+            request.reset_reason if request.reset_before is not None else current.reset_reason
+        )
+        document: dict[str, Any] = {
             "schema_version": PREFERENCES_SCHEMA_VERSION,
             "mode": mode,
             "disabled_dimensions": sorted(disabled),
@@ -432,28 +467,66 @@ class FeedbackControlService:
 
     def correct_outcome(self, request: OutcomeCorrection) -> dict[str, Any]:
         if request.outcome not in _ALLOWED_OUTCOMES:
-            raise DailyInteractionError("invalid_outcome", "Corrected outcome is invalid.", "Choose a supported outcome.")
-        if request.actual_minutes is not None and (type(request.actual_minutes) is not int or not 0 <= request.actual_minutes <= 1440):
-            raise DailyInteractionError("invalid_duration", "Actual minutes must be from 0 to 1440.", "Correct the duration.")
-        if request.completion_fraction is not None and (isinstance(request.completion_fraction, bool) or not 0 <= request.completion_fraction <= 1):
-            raise DailyInteractionError("invalid_completion_fraction", "Completion fraction must be from 0 to 1.", "Correct the fraction.")
-        fingerprint = hashlib.sha256(json.dumps(asdict(request), sort_keys=True, default=str).encode()).hexdigest()
+            raise DailyInteractionError(
+                "invalid_outcome", "Corrected outcome is invalid.", "Choose a supported outcome."
+            )
+        if request.actual_minutes is not None and (
+            type(request.actual_minutes) is not int or not 0 <= request.actual_minutes <= 1440
+        ):
+            raise DailyInteractionError(
+                "invalid_duration",
+                "Actual minutes must be from 0 to 1440.",
+                "Correct the duration.",
+            )
+        if request.completion_fraction is not None and (
+            isinstance(request.completion_fraction, bool)
+            or not 0 <= request.completion_fraction <= 1
+        ):
+            raise DailyInteractionError(
+                "invalid_completion_fraction",
+                "Completion fraction must be from 0 to 1.",
+                "Correct the fraction.",
+            )
+        fingerprint = hashlib.sha256(
+            json.dumps(asdict(request), sort_keys=True, default=str).encode()
+        ).hexdigest()
         cached = self._cache(request.idempotency_key, fingerprint)
         if cached is not None:
             return cached
         old, frontmatter, body = _read_existing(self.vault_root, request.plan_path)
         actual_hash = content_hash(old)
         if actual_hash != request.expected_hash:
-            raise DailyInteractionError("stale_write", "The plan changed after it was read.", "Reload the plan and retry.")
+            raise DailyInteractionError(
+                "stale_write", "The plan changed after it was read.", "Reload the plan and retry."
+            )
         history = frontmatter.get("execution_history")
         if not isinstance(history, list):
-            raise DailyInteractionError("invalid_execution_history", "Execution history must be a list.", "Repair the plan note.")
-        source = next((item for item in history if isinstance(item, dict) and item.get("event_id") == request.corrects_event_id), None)
+            raise DailyInteractionError(
+                "invalid_execution_history",
+                "Execution history must be a list.",
+                "Repair the plan note.",
+            )
+        source = next(
+            (
+                item
+                for item in history
+                if isinstance(item, dict) and item.get("event_id") == request.corrects_event_id
+            ),
+            None,
+        )
         if source is None:
-            raise DailyInteractionError("event_not_found", "The execution event no longer exists.", "Reload execution history.")
+            raise DailyInteractionError(
+                "event_not_found",
+                "The execution event no longer exists.",
+                "Reload execution history.",
+            )
         task_id = source.get("task_id")
         if not isinstance(task_id, str):
-            raise DailyInteractionError("invalid_execution_history", "The source event has no valid task ID.", "Repair the source event.")
+            raise DailyInteractionError(
+                "invalid_execution_history",
+                "The source event has no valid task ID.",
+                "Repair the source event.",
+            )
         event: dict[str, Any] = {
             "schema_version": 1,
             "event_id": request.idempotency_key,
@@ -471,8 +544,15 @@ class FeedbackControlService:
             event["reason"] = request.reason.strip()
         history.append(event)
         document = _frontmatter_document(frontmatter, body)
-        _atomic_write(self.vault_root, request.plan_path, document, expected_hash=actual_hash, create=False)
-        result = {"plan_path": request.plan_path, "content_hash": content_hash(document), "event_id": request.idempotency_key, "corrects_event_id": request.corrects_event_id}
+        _atomic_write(
+            self.vault_root, request.plan_path, document, expected_hash=actual_hash, create=False
+        )
+        result = {
+            "plan_path": request.plan_path,
+            "content_hash": content_hash(document),
+            "event_id": request.idempotency_key,
+            "corrects_event_id": request.corrects_event_id,
+        }
         self._cache(request.idempotency_key, fingerprint, result)
         return result
 

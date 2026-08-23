@@ -7,11 +7,18 @@ import json
 from datetime import datetime
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, Literal, cast
 
 from lifeos.attention import evaluate_attention, save_preference
 from lifeos.copilot import (
     CopilotContractError,
+    CopilotIndex,
+    DecompositionResult,
+    GoalRecord,
+    PlanOption,
+    PlanOptionSet,
+    PlanningContextPack,
+    PortfolioCapacityReport,
     PlanningContextError,
     PlanningSessionError,
     PlanningSessionService,
@@ -128,6 +135,7 @@ from lifeos.experiments import (
     preview_experiment_context,
     preview_experiment_migration,
 )
+from lifeos.experiments.contracts import ConclusionKind, ExperimentState, ObservationState
 from lifeos.experiments.design import evaluate_design
 from lifeos.captures import CaptureArtifactService, CaptureError
 from lifeos.captures.contracts import ArtifactLink, CaptureState, CaptureType, PrivacyScope
@@ -141,7 +149,11 @@ from lifeos.captures.migration import apply_capture_migration, preview_capture_m
 from lifeos.captures.recovery import audit_capture_recovery
 from lifeos.captures.visualization import build_capture_visualization
 from lifeos.feedback import (
+    AdaptivePreferences,
+    EvidenceDataset,
+    EvidenceDatasetStatus,
     FeedbackControlService,
+    FeedbackObservation,
     FeedbackProposalRequest,
     OutcomeCorrection,
     PreferencesUpdate,
@@ -238,7 +250,14 @@ class BridgeApplication:
         self._cancelled: set[str] = set()
         self.shutdown_requested = False
 
-    def _feedback_context(self, as_of: date):
+    def _feedback_context(
+        self, as_of: date
+    ) -> tuple[
+        AdaptivePreferences,
+        EvidenceDataset,
+        EvidenceDatasetStatus,
+        tuple[FeedbackObservation, ...],
+    ]:
         preferences = self.feedback_controls.load()
         dataset, status = rebuild_evidence_dataset(
             self.daily.vault_root,
@@ -250,8 +269,21 @@ class BridgeApplication:
         return preferences, dataset, status, observations
 
     def _copilot_bundle(
-        self, *, session_id: str, option_id: str, as_of: date, available_minutes: int | None = None
-    ):
+        self,
+        *,
+        session_id: str,
+        option_id: str,
+        as_of: date,
+        available_minutes: int | None = None,
+    ) -> tuple[
+        GoalRecord,
+        CopilotIndex,
+        PlanningContextPack,
+        PlanOptionSet,
+        PlanOption,
+        DecompositionResult,
+        PortfolioCapacityReport,
+    ]:
         snapshot = self.planning_sessions.get(session_id)
         session = snapshot.envelope.session
         source = read_vault_markdown(self.daily.vault_root, session.goal_ref)
@@ -1040,9 +1072,23 @@ class BridgeApplication:
                     required={"path", "target", "expected_hash"},
                 )
                 moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                target = data["target"]
+                if target not in {
+                    "idea",
+                    "drafting",
+                    "baseline",
+                    "scheduled",
+                    "active",
+                    "paused",
+                    "completed",
+                    "abandoned",
+                    "analyzed",
+                    "archived",
+                }:
+                    raise ProtocolError("invalid_params", "target is not a valid experiment state.")
                 return self.experiments.transition(
                     str(data["path"]),
-                    str(data["target"]),
+                    cast(ExperimentState, target),
                     expected_hash=str(data["expected_hash"]),
                     reason=str(data.get("reason", "")),
                     now=moment,
@@ -1114,12 +1160,21 @@ class BridgeApplication:
                     raise ProtocolError("invalid_params", "context and source_refs must be lists.")
                 from lifeos.experiments.contracts import source_from_dict
 
+                observation_state = data["state"]
+                if observation_state not in {
+                    "measured",
+                    "not-measured",
+                    "not-applicable",
+                    "skipped",
+                    "unavailable",
+                }:
+                    raise ProtocolError("invalid_params", "state is not a valid observation state.")
                 observation = create_observation(
                     artifact.metadata,
                     measure_id=str(data["measure_id"]),
                     phase_id=str(data["phase_id"]),
                     observed_at=_iso_datetime(data["observed_at"], "observed_at"),
-                    state=str(data["state"]),
+                    state=cast(ObservationState, observation_state),
                     value=data.get("value"),
                     note=str(data.get("note", "")),
                     context=tuple(str(item) for item in context),
@@ -1175,10 +1230,27 @@ class BridgeApplication:
                     raise ProtocolError("invalid_params", "follow_up_decisions must be a list.")
                 artifact = self.experiments.load(str(data["path"]))
                 moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                conclusion = data["conclusion"]
+                if conclusion not in {
+                    "supports-hypothesis",
+                    "does-not-support-hypothesis",
+                    "mixed",
+                    "inconclusive",
+                    "protocol-failure",
+                    "insufficient-adherence",
+                    "insufficient-duration",
+                    "too-much-missing-data",
+                    "confounded",
+                    "stopped-for-safety",
+                    "abandoned-without-analysis",
+                }:
+                    raise ProtocolError(
+                        "invalid_params", "conclusion is not a valid conclusion kind."
+                    )
                 return record_conclusion(
                     self.experiments,
                     artifact,
-                    conclusion=str(data["conclusion"]),
+                    conclusion=cast(ConclusionKind, conclusion),
                     notes=str(data.get("notes", "")),
                     follow_up_decisions=tuple(str(item) for item in decisions),
                     expected_hash=str(data["expected_hash"]),
@@ -1739,14 +1811,16 @@ class BridgeApplication:
                     index=index,
                     as_of=as_of,
                 )
-                option = next(
+                selected_capacity_option = next(
                     (item for item in options.options if item.option_id == data["option_id"]), None
                 )
-                if option is None:
+                if selected_capacity_option is None:
                     raise CapacityError("selected option was not found")
-                decomposition = decompose_plan_option(option=option, horizon=goal.horizon)
+                decomposition = decompose_plan_option(
+                    option=selected_capacity_option, horizon=goal.horizon
+                )
                 return check_portfolio_capacity(
-                    option=option,
+                    option=selected_capacity_option,
                     decomposition=decomposition,
                     index=index,
                     as_of=as_of,
@@ -1799,13 +1873,15 @@ class BridgeApplication:
                     index=index,
                     as_of=as_of,
                 )
-                option = next(
+                selected_decomposition_option = next(
                     (item for item in options.options if item.option_id == data["option_id"]), None
                 )
-                if option is None:
+                if selected_decomposition_option is None:
                     raise DecompositionError("selected option was not found")
                 return decompose_plan_option(
-                    option=option, horizon=goal.horizon, existing_task_ids=tuple(existing)
+                    option=selected_decomposition_option,
+                    horizon=goal.horizon,
+                    existing_task_ids=tuple(existing),
                 ).to_dict()
             except (
                 DecompositionError,
@@ -2101,7 +2177,7 @@ class BridgeApplication:
                 raise ProtocolError("invalid_params", "contexts must be a list.")
             contexts = []
             for raw in raw_contexts:
-                context = strict_object(
+                replay_context_data = strict_object(
                     raw,
                     allowed={
                         "day",
@@ -2113,8 +2189,8 @@ class BridgeApplication:
                     },
                     required={"day"},
                 )
-                context["day"] = _iso_date(context["day"], "day")
-                contexts.append(ReplayContext(**context))
+                replay_context_data["day"] = _iso_date(replay_context_data["day"], "day")
+                contexts.append(ReplayContext(**replay_context_data))
             disabled = data.pop("disabled_dimensions", None)
             if disabled is not None and (
                 not isinstance(disabled, list)
@@ -2167,7 +2243,7 @@ class BridgeApplication:
             if not disabled:
                 disabled = preferences.disabled_dimensions
             data.setdefault("adaptive_mode", preferences.mode)
-            result = build_adaptive_menu(
+            adaptive_result = build_adaptive_menu(
                 actions=actions,
                 observations=observations,
                 as_of=as_of,
@@ -2177,7 +2253,7 @@ class BridgeApplication:
             )
             try:
                 return explain_adaptive_result(
-                    result=result, actions=actions, task_id=task_id
+                    result=adaptive_result, actions=actions, task_id=task_id
                 ).to_dict()
             except KeyError as exc:
                 raise ProtocolError("not_found", str(exc)) from exc
@@ -2390,9 +2466,7 @@ class BridgeApplication:
                     allowed={"target_path"},
                     required={"target_path"},
                 )
-                return self.proposals.create_ownership_release_proposal(
-                    data["target_path"]
-                )
+                return self.proposals.create_ownership_release_proposal(data["target_path"])
             except ProtocolError:
                 raise
             except ValueError as exc:
@@ -2427,18 +2501,24 @@ class BridgeApplication:
                     )
                     kind = data["kind"]
                     if kind == "daily":
-                        state = open_daily_review(
+                        phase = data.get("phase", "morning")
+                        if phase not in {"morning", "evening"}:
+                            raise ProtocolError(
+                                "invalid_params", "phase must be morning or evening."
+                            )
+                        daily_review_state = open_daily_review(
                             service=artifacts,
                             runtime_dir=self.daily.runtime_dir,
                             day=_iso_date(data["day"], "day"),
                             timezone=str(data["timezone"]),
                             now=_iso_datetime(data["now"], "now"),
                             idempotency_key=str(data["idempotency_key"]),
-                            phase=str(data.get("phase", "morning")),
+                            phase=cast(Literal["morning", "evening"], phase),
                             refresh=bool(data.get("refresh", True)),
                         )
-                    elif kind == "weekly":
-                        state = open_weekly_review(
+                        return _jsonable(daily_review_state.to_dict())
+                    if kind == "weekly":
+                        weekly_review_state = open_weekly_review(
                             service=artifacts,
                             runtime_dir=self.daily.runtime_dir,
                             day=_iso_date(data["day"], "day"),
@@ -2447,9 +2527,8 @@ class BridgeApplication:
                             idempotency_key=str(data["idempotency_key"]),
                             refresh=bool(data.get("refresh", True)),
                         )
-                    else:
-                        raise ProtocolError("invalid_params", "kind must be daily or weekly.")
-                    return _jsonable(state.to_dict())
+                        return _jsonable(weekly_review_state.to_dict())
+                    raise ProtocolError("invalid_params", "kind must be daily or weekly.")
                 if method == "review.artifact.load":
                     data = strict_object(
                         params, allowed={"review_id", "path", "now"}, required={"now"}
@@ -2463,7 +2542,7 @@ class BridgeApplication:
                         if data.get("review_id")
                         else artifacts.load_path(str(data["path"]))
                     )
-                    snapshot = build_review_snapshot(
+                    review_snapshot = build_review_snapshot(
                         vault_root=self.daily.vault_root,
                         runtime_dir=self.daily.runtime_dir,
                         kind=artifact.metadata.review_kind,
@@ -2471,7 +2550,7 @@ class BridgeApplication:
                         generated_at=_iso_datetime(data["now"], "now"),
                     )
                     return _jsonable(
-                        {"artifact": artifact.to_dict(), "snapshot": snapshot.to_dict()}
+                        {"artifact": artifact.to_dict(), "snapshot": review_snapshot.to_dict()}
                     )
                 if method == "review.artifact.refresh":
                     data = strict_object(
@@ -2486,7 +2565,7 @@ class BridgeApplication:
                             "The review changed after it was opened.",
                             {"actual_hash": artifact.content_hash, "path": artifact.path},
                         )
-                    updated, snapshot = refresh_review_snapshot(
+                    updated, refreshed_review_snapshot = refresh_review_snapshot(
                         service=artifacts,
                         artifact=artifact,
                         runtime_dir=self.daily.runtime_dir,
@@ -2494,7 +2573,10 @@ class BridgeApplication:
                         idempotency_key=str(data["idempotency_key"]),
                     )
                     return _jsonable(
-                        {"artifact": updated.to_dict(), "snapshot": snapshot.to_dict()}
+                        {
+                            "artifact": updated.to_dict(),
+                            "snapshot": refreshed_review_snapshot.to_dict(),
+                        }
                     )
                 if method == "review.artifact.migration.preview":
                     strict_object(params, allowed=set())
@@ -2736,10 +2818,10 @@ class BridgeApplication:
                         if data.get("now") is not None
                         else None
                     )
-                    request = ReviewProposalRequest(**data)
+                    review_proposal_request = ReviewProposalRequest(**data)
                     return create_review_proposal(
                         vault_root=self.daily.vault_root,
-                        request=request,
+                        request=review_proposal_request,
                         actor_id=self.actor_id,
                         now=moment,
                     ).to_dict()
@@ -2747,8 +2829,8 @@ class BridgeApplication:
                 raise
             except (DailyInteractionError, ValueError, TypeError) as exc:
                 code = getattr(exc, "code", "review_artifact_invalid")
-                data = getattr(exc, "data", None)
-                raise ProtocolError(code, str(exc), data) from exc
+                error_data = getattr(exc, "data", None)
+                raise ProtocolError(code, str(exc), error_data) from exc
         if method == "review.build":
             data = strict_object(params, allowed={"kind", "day"}, required={"kind", "day"})
             data["day"] = _iso_date(data["day"], "day")
@@ -2845,7 +2927,7 @@ class BridgeApplication:
                     "inbox_days",
                 },
             )
-            return asdict(save_preference(self.daily.runtime_dir, **data))  # type: ignore[arg-type]
+            return asdict(save_preference(self.daily.runtime_dir, **data))
         if method == "today.get":
             data = strict_object(
                 params,
@@ -2865,7 +2947,7 @@ class BridgeApplication:
                 vault_root=self.daily.vault_root,
                 runtime_dir=self.daily.runtime_dir,
                 inputs=TodayInputs(**data),
-            )  # type: ignore[arg-type]
+            )
             return dashboard.to_dict()
         if method == "system.health":
             strict_object(params, allowed=set())
@@ -2887,7 +2969,7 @@ class BridgeApplication:
             self._cancelled.add(request_id)
             return {"cancelled": request_id}
         try:
-            result = self._dispatch_daily(method, params)
+            daily_result = self._dispatch_daily(method, params)
         except DailyInteractionError as exc:
             raise ProtocolError(
                 exc.code, exc.message, {"remediation": exc.remediation, **(exc.data or {})}
@@ -2897,11 +2979,11 @@ class BridgeApplication:
                 {
                     "jsonrpc": "2.0",
                     "method": "vault.changed",
-                    "params": {"path": result["reference"]["path"]},
+                    "params": {"path": daily_result["reference"]["path"]},
                     "meta": {"protocol": PROTOCOL_VERSION},
                 }
             )
-        return result
+        return daily_result
 
     def _dispatch_daily(self, method: str, params: object) -> dict[str, Any]:
         if method == "daily.capture":
@@ -2920,8 +3002,8 @@ class BridgeApplication:
                 },
                 required={"idempotency_key", "kind", "title"},
             )
-            request = QuickCaptureRequest(**data)  # type: ignore[arg-type]
-            return self.daily.quick_capture(request).to_dict()
+            capture_request = QuickCaptureRequest(**data)
+            return self.daily.quick_capture(capture_request).to_dict()
         if method == "daily.checkin":
             data = strict_object(
                 params,
@@ -2944,8 +3026,8 @@ class BridgeApplication:
                 ):
                     raise ProtocolError("invalid_params", "activities must be a list of strings.")
                 data["activities"] = tuple(activities)
-            request = CheckInRequest(**data)  # type: ignore[arg-type]
-            return self.daily.update_checkin(request).to_dict()
+            checkin_request = CheckInRequest(**data)
+            return self.daily.update_checkin(checkin_request).to_dict()
         if method == "daily.task_outcome":
             data = strict_object(
                 params,
@@ -2982,8 +3064,8 @@ class BridgeApplication:
             data["day"] = _iso_date(data["day"], "day")
             if data.get("deferred_until") is not None:
                 data["deferred_until"] = _iso_date(data["deferred_until"], "deferred_until")
-            request = TaskOutcomeRequest(**data)  # type: ignore[arg-type]
-            return self.daily.record_task_outcome(request).to_dict()
+            outcome_request = TaskOutcomeRequest(**data)
+            return self.daily.record_task_outcome(outcome_request).to_dict()
         if method == "daily.review":
             data = strict_object(
                 params,
@@ -2991,8 +3073,8 @@ class BridgeApplication:
                 required={"idempotency_key", "kind", "day", "facts_markdown"},
             )
             data["day"] = _iso_date(data["day"], "day")
-            request = ReviewNoteRequest(**data)  # type: ignore[arg-type]
-            return self.daily.create_review_note(request).to_dict()
+            review_note_request = ReviewNoteRequest(**data)
+            return self.daily.create_review_note(review_note_request).to_dict()
         raise ProtocolError(
             "method_not_found",
             "The requested bridge method is not allowlisted.",

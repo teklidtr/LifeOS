@@ -9,7 +9,8 @@ from lifeos.study import StudySessionService
 
 
 def write_card(vault: Path, name: str, due: str = "2026-07-15") -> Path:
-    path=vault/"flashcards"/f"{name}.md";path.parent.mkdir(parents=True,exist_ok=True)
+    path = vault / "flashcards" / f"{name}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"""---
 id: {name}
 type: flashcard
@@ -26,34 +27,60 @@ source_refs: []
 
 
 def test_session_lifecycle_and_canonical_result(tmp_path: Path) -> None:
-    vault=tmp_path/"vault";vault.mkdir();runtime=tmp_path/"runtime";write_card(vault,"c1")
-    service=StudySessionService(vault_root=vault,runtime_dir=runtime)
-    now=datetime(2026,7,16,10,tzinfo=timezone.utc)
-    session=service.start(day=date(2026,7,16),minutes=5,session_id="s1",now=now)
-    assert service.start(day=date(2026,7,16),minutes=5,session_id="s1",now=now)==session
-    assert service.transition(session_id="s1",action="pause",now=now+timedelta(minutes=1)).state=="paused"
-    assert service.transition(session_id="s1",action="resume",now=now+timedelta(minutes=2)).state=="active"
-    finished=service.transition(session_id="s1",action="finish",now=now+timedelta(minutes=4))
-    assert finished.actual_minutes==4
-    assert "session_id: s1" in (vault/"journal"/"2026-07-16.md").read_text()
-    assert service.list_open()==()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime = tmp_path / "runtime"
+    write_card(vault, "c1")
+    service = StudySessionService(vault_root=vault, runtime_dir=runtime)
+    now = datetime(2026, 7, 16, 10, tzinfo=timezone.utc)
+    session = service.start(day=date(2026, 7, 16), minutes=5, session_id="s1", now=now)
+    assert service.start(day=date(2026, 7, 16), minutes=5, session_id="s1", now=now) == session
+    assert (
+        service.transition(session_id="s1", action="pause", now=now + timedelta(minutes=1)).state
+        == "paused"
+    )
+    assert (
+        service.transition(session_id="s1", action="resume", now=now + timedelta(minutes=2)).state
+        == "active"
+    )
+    finished = service.transition(session_id="s1", action="finish", now=now + timedelta(minutes=4))
+    assert finished.actual_minutes == 4
+    assert "session_id: s1" in (vault / "journal" / "2026-07-16.md").read_text()
+    assert service.list_open() == ()
 
 
-def test_interrupted_session_appears_in_attention_and_source_changes_are_reported(tmp_path: Path) -> None:
-    vault=tmp_path/"vault";vault.mkdir();runtime=tmp_path/"runtime";card=write_card(vault,"c1")
-    service=StudySessionService(vault_root=vault,runtime_dir=runtime)
-    service.start(day=date(2026,7,16),minutes=5,session_id="s1",now=datetime(2026,7,16,10,tzinfo=timezone.utc))
-    result=evaluate_attention(vault_root=vault,runtime_dir=runtime,as_of=datetime(2026,7,16,12,tzinfo=timezone.utc))
-    assert any(item.kind=="unfinished_study_session" for item in result.items)
+def test_interrupted_session_appears_in_attention_and_source_changes_are_reported(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime = tmp_path / "runtime"
+    card = write_card(vault, "c1")
+    service = StudySessionService(vault_root=vault, runtime_dir=runtime)
+    service.start(
+        day=date(2026, 7, 16),
+        minutes=5,
+        session_id="s1",
+        now=datetime(2026, 7, 16, 10, tzinfo=timezone.utc),
+    )
+    result = evaluate_attention(
+        vault_root=vault, runtime_dir=runtime, as_of=datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+    )
+    assert any(item.kind == "unfinished_study_session" for item in result.items)
     card.unlink()
-    finished=service.transition(session_id="s1",action="abandon",now=datetime(2026,7,16,12,tzinfo=timezone.utc))
-    assert finished.source_changes==("flashcards/c1.md",)
+    finished = service.transition(
+        session_id="s1", action="abandon", now=datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+    )
+    assert finished.source_changes == ("flashcards/c1.md",)
 
 
 def test_invalid_transition_is_rejected(tmp_path: Path) -> None:
-    vault=tmp_path/"vault";vault.mkdir();runtime=tmp_path/"runtime";write_card(vault,"c1")
-    service=StudySessionService(vault_root=vault,runtime_dir=runtime)
-    service.start(day=date(2026,7,16),minutes=5,session_id="s1")
-    service.transition(session_id="s1",action="abandon")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime = tmp_path / "runtime"
+    write_card(vault, "c1")
+    service = StudySessionService(vault_root=vault, runtime_dir=runtime)
+    service.start(day=date(2026, 7, 16), minutes=5, session_id="s1")
+    service.transition(session_id="s1", action="abandon")
     with pytest.raises(DailyInteractionError):
-        service.transition(session_id="s1",action="resume")
+        service.transition(session_id="s1", action="resume")

@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from statistics import median
-from typing import Iterable
+from typing import Iterable, Literal
 
-from lifeos.feedback.models import DurationForecast, FeedbackObservation
+from lifeos.feedback.models import Confidence, DurationForecast, FeedbackObservation
 
 DURATION_POLICY_VERSION = 1
 
@@ -30,7 +30,9 @@ class _Sample:
     ratio: float
 
 
-def _usable_samples(observations: Iterable[FeedbackObservation], *, as_of: date, stale_after_days: int) -> tuple[list[_Sample], list[str]]:
+def _usable_samples(
+    observations: Iterable[FeedbackObservation], *, as_of: date, stale_after_days: int
+) -> tuple[list[_Sample], list[str]]:
     samples: list[_Sample] = []
     ignored: list[str] = []
     for item in observations:
@@ -65,6 +67,10 @@ def _usable_samples(observations: Iterable[FeedbackObservation], *, as_of: date,
     return samples, ignored
 
 
+EvidenceLevel = Literal["task", "task_shape", "plan", "mode", "global"]
+DurationDirection = Literal["underestimated", "overestimated", "aligned"]
+
+
 def _matching_levels(
     samples: list[_Sample],
     *,
@@ -73,12 +79,38 @@ def _matching_levels(
     plan_id: str,
     mode: str,
     config: DurationCalibrationConfig,
-) -> tuple[tuple[str, str, int, list[_Sample]], ...]:
+) -> tuple[tuple[EvidenceLevel, str, int, list[_Sample]], ...]:
     return (
-        ("task", task_id, config.task_min_samples, [s for s in samples if s.observation.task_id == task_id]),
-        ("task_shape", task_shape, config.task_shape_min_samples, [s for s in samples if task_shape and task_shape != "unspecified" and s.observation.task_shape == task_shape]),
-        ("plan", plan_id, config.plan_min_samples, [s for s in samples if plan_id and s.observation.plan_id == plan_id]),
-        ("mode", mode, config.mode_min_samples, [s for s in samples if mode and mode != "unspecified" and s.observation.mode == mode]),
+        (
+            "task",
+            task_id,
+            config.task_min_samples,
+            [s for s in samples if s.observation.task_id == task_id],
+        ),
+        (
+            "task_shape",
+            task_shape,
+            config.task_shape_min_samples,
+            [
+                s
+                for s in samples
+                if task_shape
+                and task_shape != "unspecified"
+                and s.observation.task_shape == task_shape
+            ],
+        ),
+        (
+            "plan",
+            plan_id,
+            config.plan_min_samples,
+            [s for s in samples if plan_id and s.observation.plan_id == plan_id],
+        ),
+        (
+            "mode",
+            mode,
+            config.mode_min_samples,
+            [s for s in samples if mode and mode != "unspecified" and s.observation.mode == mode],
+        ),
         ("global", "all", config.global_min_samples, list(samples)),
     )
 
@@ -95,7 +127,7 @@ def _trim_outliers(samples: list[_Sample]) -> tuple[list[_Sample], int, float, f
     return kept, len(samples) - len(kept), float(median([s.ratio for s in kept])), mad
 
 
-def _confidence(sample_count: int, threshold: int, spread: float, freshest_age: int) -> str:
+def _confidence(sample_count: int, threshold: int, spread: float, freshest_age: int) -> Confidence:
     if sample_count < threshold:
         return "insufficient"
     if sample_count >= threshold * 2 and spread <= 0.25 and freshest_age <= 30:
@@ -121,19 +153,74 @@ def calibrate_duration(
         raise ValueError("declared_minutes must be from 1 to 1440")
     cfg = config or DurationCalibrationConfig()
     if not enabled:
-        return DurationForecast(DURATION_POLICY_VERSION, task_id, declared_minutes, declared_minutes, "none", "", 0, 0, None, None, None, "insufficient", "unknown", (), ("calibration-disabled",), False)
-    usable, ignored = _usable_samples(observations, as_of=as_of, stale_after_days=cfg.stale_after_days)
-    chosen: tuple[str, str, int, list[_Sample]] | None = None
-    for level in _matching_levels(usable, task_id=task_id, task_shape=task_shape, plan_id=plan_id, mode=mode, config=cfg):
-        if len(level[3]) >= level[2]:
-            chosen = level
+        return DurationForecast(
+            DURATION_POLICY_VERSION,
+            task_id,
+            declared_minutes,
+            declared_minutes,
+            "none",
+            "",
+            0,
+            0,
+            None,
+            None,
+            None,
+            "insufficient",
+            "unknown",
+            (),
+            ("calibration-disabled",),
+            False,
+        )
+    usable, ignored = _usable_samples(
+        observations, as_of=as_of, stale_after_days=cfg.stale_after_days
+    )
+    chosen: tuple[EvidenceLevel, str, int, list[_Sample]] | None = None
+    for candidate_level in _matching_levels(
+        usable, task_id=task_id, task_shape=task_shape, plan_id=plan_id, mode=mode, config=cfg
+    ):
+        if len(candidate_level[3]) >= candidate_level[2]:
+            chosen = candidate_level
             break
     if chosen is None:
-        return DurationForecast(DURATION_POLICY_VERSION, task_id, declared_minutes, declared_minutes, "none", "", 0, 0, None, None, max((s.observation.day for s in usable), default=None), "insufficient", "unknown", (), tuple(sorted(ignored)), True)
-    level, key, threshold, level_samples = chosen
+        return DurationForecast(
+            DURATION_POLICY_VERSION,
+            task_id,
+            declared_minutes,
+            declared_minutes,
+            "none",
+            "",
+            0,
+            0,
+            None,
+            None,
+            max((s.observation.day for s in usable), default=None),
+            "insufficient",
+            "unknown",
+            (),
+            tuple(sorted(ignored)),
+            True,
+        )
+    level_name, key, threshold, level_samples = chosen
     kept, excluded_outliers, center, spread = _trim_outliers(level_samples)
     if len(kept) < threshold:
-        return DurationForecast(DURATION_POLICY_VERSION, task_id, declared_minutes, declared_minutes, "none", "", len(kept), excluded_outliers, center, spread, max((s.observation.day for s in kept), default=None), "insufficient", "unknown", tuple(sorted(s.observation.event_id for s in kept)), tuple(sorted(ignored + ["outliers-below-threshold"])), True)
+        return DurationForecast(
+            DURATION_POLICY_VERSION,
+            task_id,
+            declared_minutes,
+            declared_minutes,
+            "none",
+            "",
+            len(kept),
+            excluded_outliers,
+            center,
+            spread,
+            max((s.observation.day for s in kept), default=None),
+            "insufficient",
+            "unknown",
+            tuple(sorted(s.observation.event_id for s in kept)),
+            tuple(sorted(ignored + ["outliers-below-threshold"])),
+            True,
+        )
     shrink = min(1.0, len(kept) / (threshold * 2.0))
     multiplier = 1.0 + (center - 1.0) * shrink
     multiplier = min(cfg.maximum_multiplier, max(cfg.minimum_multiplier, multiplier))
@@ -141,20 +228,26 @@ def calibrate_duration(
     freshest = max(s.observation.day for s in kept)
     confidence = _confidence(len(kept), threshold, spread, (as_of - freshest).days)
     delta_ratio = calibrated / declared_minutes
-    direction = "underestimated" if delta_ratio >= 1.1 else "overestimated" if delta_ratio <= 0.9 else "aligned"
+    direction: DurationDirection = (
+        "underestimated"
+        if delta_ratio >= 1.1
+        else "overestimated"
+        if delta_ratio <= 0.9
+        else "aligned"
+    )
     return DurationForecast(
         DURATION_POLICY_VERSION,
         task_id,
         declared_minutes,
         calibrated,
-        level,  # type: ignore[arg-type]
+        level_name,
         key,
         len(kept),
         excluded_outliers,
         round(center, 4),
         round(spread, 4),
         freshest,
-        confidence,  # type: ignore[arg-type]
+        confidence,
         direction,
         tuple(sorted(s.observation.event_id for s in kept)),
         tuple(sorted(ignored)),

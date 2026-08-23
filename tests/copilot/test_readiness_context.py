@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from lifeos.bridge import BridgeApplication
-from lifeos.copilot import build_copilot_index, parse_goal_note
+from lifeos.copilot import build_copilot_index
 from lifeos.copilot.context import (
     PlanningContextError,
     PlanningContextPolicy,

@@ -11,7 +11,7 @@ from typing import Iterable, Literal, Mapping
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
 
-from .contracts import CopilotIndex, GoalRecord, PlanRecord, content_hash
+from .contracts import CopilotIndex, GoalRecord, content_hash
 from .readiness import GoalReadinessReport, evaluate_goal_readiness
 
 _DEFAULT_SENSITIVE_ROOTS = frozenset(

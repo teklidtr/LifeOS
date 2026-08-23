@@ -25,17 +25,26 @@ from lifeos.proposals.patches import (
 )
 from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.registry.file_tracking import validate_vault_path
-from lifeos.ingestion.provenance import provenance_to_frontmatter_value, LifeOSProvenance, ProvenanceSource, ProvenanceGenerator
+from lifeos.ingestion.provenance import (
+    provenance_to_frontmatter_value,
+    LifeOSProvenance,
+    ProvenanceSource,
+    ProvenanceGenerator,
+)
 from lifeos._atomic_write import atomic_write_file_secure
+
 
 class WikiTargetExistsError(Exception):
     pass
 
+
 class ProposalPublicationError(Exception):
     pass
 
+
 class ProposalAlreadyExistsError(ProposalPublicationError):
     pass
+
 
 class InvalidWikiTargetError(ValueError):
     pass
@@ -48,10 +57,13 @@ class InvalidWikiSectionError(ValueError):
 class WikiSectionUnchangedError(Exception):
     pass
 
+
 def validate_wiki_target_path(target_path: str) -> str:
     norm_target = str(PurePosixPath(target_path))
     if not norm_target.startswith("wiki/"):
-        raise InvalidWikiTargetError(f"Target path must be within the canonical wiki area: {target_path}")
+        raise InvalidWikiTargetError(
+            f"Target path must be within the canonical wiki area: {target_path}"
+        )
     validate_vault_path(target_path)
     return norm_target
 
@@ -66,6 +78,7 @@ def validate_flashcard_target_path(target_path: str) -> str:
     if not norm_target.endswith(".md"):
         raise InvalidWikiTargetError("Flashcard targets must be Markdown files")
     return norm_target
+
 
 @dataclass(frozen=True, slots=True)
 class WikiProposalDocuments:
@@ -139,19 +152,16 @@ class StudyLearningProposalDocuments:
     proposal_markdown: bytes
     patches_json: bytes
 
+
 class _WikiFrontmatterDumper(yaml.SafeDumper):
     pass
 
 
-_ATX_HEADING_RE = re.compile(
-    r"^[ \t]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:\r?\n)?$"
-)
+_ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:\r?\n)?$")
 _FENCE_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 
 
-def _scan_atx_headings(
-    lines: list[str], *, skip_frontmatter: bool
-) -> list[tuple[int, int, str]]:
+def _scan_atx_headings(lines: list[str], *, skip_frontmatter: bool) -> list[tuple[int, int, str]]:
     headings: list[tuple[int, int, str]] = []
     in_frontmatter = False
     in_fence = False
@@ -221,9 +231,7 @@ def replace_wiki_section(*, target_content: str, heading: str, section_body: str
         normalized_body.splitlines(keepends=True), skip_frontmatter=False
     )
     if any(level <= heading_level for _index, level, _title in body_headings):
-        raise InvalidWikiSectionError(
-            "Section body cannot introduce a peer or parent heading"
-        )
+        raise InvalidWikiSectionError("Section body cannot introduce a peer or parent heading")
 
     heading_line = lines[heading_index]
     if heading_line.endswith("\r\n"):
@@ -242,14 +250,17 @@ def replace_wiki_section(*, target_content: str, heading: str, section_body: str
         prefix += newline
     return prefix + separator + "".join(lines[section_end:])
 
+
 def _represent_string(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
     if len(data) == 20 and data.endswith("Z") and data[10] == "T":
         return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
     if "\n" in data:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='|')
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
     return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
+
 _WikiFrontmatterDumper.add_representer(str, _represent_string)
+
 
 def _serialize_wiki_frontmatter(metadata: dict[str, Any]) -> str:
     rendered = yaml.dump(
@@ -309,9 +320,7 @@ def _build_generated_wiki_candidate(
 ) -> str:
     provenance = LifeOSProvenance(
         schema_version=1,
-        sources=(
-            ProvenanceSource(path=source.path, content_hash=source.content_hash),
-        ),
+        sources=(ProvenanceSource(path=source.path, content_hash=source.content_hash),),
         generator=ProvenanceGenerator(
             id=content.generator.id,
             version=content.generator.version,
@@ -380,14 +389,10 @@ def _build_wiki_section_operation(
     )
     if proposed_tags is not None:
         if expected_generator_id is None:
-            raise InvalidWikiSectionError(
-                "Tags cannot be changed on a human-owned wiki target"
-            )
+            raise InvalidWikiSectionError("Tags cannot be changed on a human-owned wiki target")
         candidate = _replace_generated_wiki_tags(candidate, proposed_tags)
     if candidate == target_content:
-        raise WikiSectionUnchangedError(
-            f"Section already has the proposed content: {heading}"
-        )
+        raise WikiSectionUnchangedError(f"Section already has the proposed content: {heading}")
     if expected_generator_id is not None:
         return ReplaceGeneratedFileV2(
             id="op-update-wiki-section",
@@ -411,6 +416,7 @@ def _build_wiki_section_operation(
         base_hash=target_content_hash,
         unified_diff="".join(diff_lines[2:]),
     )
+
 
 def build_wiki_proposal(
     *,
@@ -459,15 +465,12 @@ def build_wiki_proposal(
         related_sources=(source.path,),
         extensions={},
     )
-    
+
     # 5. Serialize proposal markdown
-    proposal_body = (
-        f"Generates new wiki page at `{norm_target}`."
-        + _taxonomy_review(
-            source=source,
-            proposed_tags=content.tags,
-            rationale=content.tag_rationale,
-        )
+    proposal_body = f"Generates new wiki page at `{norm_target}`." + _taxonomy_review(
+        source=source,
+        proposed_tags=content.tags,
+        rationale=content.tag_rationale,
     )
     proposal_markdown_bytes = serialize_proposal_markdown(meta, proposal_body)
     proposal_markdown_bytes = proposal_markdown_bytes.replace(b"\nreview_digest: null\n", b"\n")
@@ -481,11 +484,7 @@ def build_wiki_proposal(
         generator_version=content.generator.version,
         new_content=candidate_markdown,
     )
-    doc = PatchDocumentV2(
-        schema_version=2,
-        proposal_id=proposal_id,
-        operations=(patch,)
-    )
+    doc = PatchDocumentV2(schema_version=2, proposal_id=proposal_id, operations=(patch,))
     patches_json_bytes = serialize_patch_json_bytes(doc)
 
     return WikiProposalDocuments(
@@ -556,11 +555,7 @@ def build_wiki_section_update_proposal(
                 "source_hash": source.content_hash,
                 "target_path": norm_target,
                 "heading": heading,
-                **(
-                    {"target_ownership": "generated"}
-                    if expected_generator_id is not None
-                    else {}
-                ),
+                **({"target_ownership": "generated"} if expected_generator_id is not None else {}),
             }
         },
     )
@@ -644,8 +639,7 @@ def build_compound_wiki_proposal(
         patch_schema_version=2,
         lifecycle_schema_version=1,
         title=(
-            f"Create {norm_create_target}: {content.title}; update "
-            f"{norm_update_target}: {heading}"
+            f"Create {norm_create_target}: {content.title}; update {norm_update_target}: {heading}"
         ),
         description=f"Generated by {content.generator.id} {content.generator.version}",
         status=ProposalStatus.DRAFT,
@@ -698,7 +692,6 @@ def build_compound_wiki_proposal(
         proposal_markdown=proposal_markdown,
         patches_json=serialize_patch_json_bytes(document),
     )
-
 
 
 def build_compounding_wiki_proposal(
@@ -851,9 +844,7 @@ def build_compounding_wiki_proposal(
     ]
     for index, item in enumerate(review_items, start=1):
         if item["kind"] == "create":
-            lines.append(
-                f"{index}. Create `{item['target_path']}`: {item['rationale']}"
-            )
+            lines.append(f"{index}. Create `{item['target_path']}`: {item['rationale']}")
         else:
             lines.append(
                 f"{index}. Update `{item['target_path']}` section `{item['heading']}`: "
@@ -875,6 +866,7 @@ def build_compounding_wiki_proposal(
         proposal_markdown=proposal_markdown,
         patches_json=serialize_patch_json_bytes(document),
     )
+
 
 def build_study_learning_proposal(
     *,
@@ -919,7 +911,7 @@ def build_study_learning_proposal(
             )
         seen.add(norm_target)
         target_paths.append(norm_target)
-        op_id = f"op-study-{len(operations)+1:02d}"
+        op_id = f"op-study-{len(operations) + 1:02d}"
         if isinstance(mutation, PreparedWikiCreateMutation):
             candidate = _build_generated_wiki_candidate(
                 content=mutation.content,
@@ -927,12 +919,16 @@ def build_study_learning_proposal(
                 target_path=norm_target,
                 created_at=created_at,
             )
-            operations.append(CreateGeneratedFileV2(
-                id=op_id, target_path=norm_target, expected_target_state="absent",
-                generator_id=generator.id,
-                generator_version=generator.version,
-                new_content=candidate,
-            ))
+            operations.append(
+                CreateGeneratedFileV2(
+                    id=op_id,
+                    target_path=norm_target,
+                    expected_target_state="absent",
+                    generator_id=generator.id,
+                    generator_version=generator.version,
+                    new_content=candidate,
+                )
+            )
             create_target_paths.append(norm_target)
             review_lines.append(f"Create wiki `{norm_target}`: {rationale}")
             review_items.append(
@@ -940,92 +936,139 @@ def build_study_learning_proposal(
             )
         else:
             operation = _build_wiki_section_operation(
-                target_path=norm_target, target_content=mutation.target_content,
-                target_content_hash=mutation.target_content_hash, heading=mutation.heading,
-                section_body=mutation.section_body, generator=generator,
+                target_path=norm_target,
+                target_content=mutation.target_content,
+                target_content_hash=mutation.target_content_hash,
+                heading=mutation.heading,
+                section_body=mutation.section_body,
+                generator=generator,
                 expected_generator_id=mutation.expected_generator_id,
                 proposed_tags=mutation.proposed_tags,
             )
             if isinstance(operation, ReplaceGeneratedFileV2):
                 operation = ReplaceGeneratedFileV2(
-                    id=op_id, target_path=operation.target_path, base_hash=operation.base_hash,
+                    id=op_id,
+                    target_path=operation.target_path,
+                    base_hash=operation.base_hash,
                     expected_generator_id=operation.expected_generator_id,
                     generator_version=operation.generator_version,
                     new_content=operation.new_content,
                 )
             else:
                 operation = PatchHumanFile(
-                    id=op_id, target_path=operation.target_path, base_hash=operation.base_hash,
+                    id=op_id,
+                    target_path=operation.target_path,
+                    base_hash=operation.base_hash,
                     unified_diff=operation.unified_diff,
                 )
             operations.append(operation)
             review_lines.append(
                 f"Update wiki `{norm_target}` section `{mutation.heading}`: {rationale}"
             )
-            review_items.append({
-                "kind": "wiki_update_section", "target_path": norm_target,
-                "heading": mutation.heading, "rationale": rationale,
-            })
+            review_items.append(
+                {
+                    "kind": "wiki_update_section",
+                    "target_path": norm_target,
+                    "heading": mutation.heading,
+                    "rationale": rationale,
+                }
+            )
 
-    for mutation in flashcard_mutations:
-        norm_target = validate_flashcard_target_path(mutation.target_path)
+    for flashcard_mutation in flashcard_mutations:
+        norm_target = validate_flashcard_target_path(flashcard_mutation.target_path)
         if norm_target in seen:
             raise InvalidWikiTargetError(
                 f"Study evolution cannot touch one target twice: {norm_target}"
             )
         for field_name in (
-            "card_id", "topic", "question", "answer", "rationale", "learning_context"
+            "card_id",
+            "topic",
+            "question",
+            "answer",
+            "rationale",
+            "learning_context",
         ):
-            value = getattr(mutation, field_name)
+            value = getattr(flashcard_mutation, field_name)
             if not isinstance(value, str) or not value.strip() or value != value.strip():
                 raise InvalidWikiTargetError(
                     f"Flashcard {field_name} must be a trimmed non-empty string"
                 )
-        if len(mutation.rationale) > 500 or len(mutation.learning_context) > 300:
+        if (
+            len(flashcard_mutation.rationale) > 500
+            or len(flashcard_mutation.learning_context) > 300
+        ):
             raise InvalidWikiTargetError("Flashcard rationale/context exceeds the bounded size")
         if (
-            type(mutation.estimated_seconds) is not int
-            or not 1 <= mutation.estimated_seconds <= 3600
+            type(flashcard_mutation.estimated_seconds) is not int
+            or not 1 <= flashcard_mutation.estimated_seconds <= 3600
         ):
             raise InvalidWikiTargetError("Flashcard estimated_seconds must be 1..3600")
-        for ref in mutation.knowledge_refs:
+        for ref in flashcard_mutation.knowledge_refs:
             validate_wiki_target_path(ref)
         seen.add(norm_target)
         target_paths.append(norm_target)
         create_target_paths.append(norm_target)
-        op_id = f"op-study-{len(operations)+1:02d}"
+        op_id = f"op-study-{len(operations) + 1:02d}"
         candidate = _build_generated_flashcard_candidate(
-            mutation=mutation, source=source, generator=generator, created_at=created_at
+            mutation=flashcard_mutation, source=source, generator=generator, created_at=created_at
         )
-        operations.append(CreateGeneratedFileV2(
-            id=op_id, target_path=norm_target, expected_target_state="absent",
-            generator_id=generator.id, generator_version=generator.version, new_content=candidate,
-        ))
+        operations.append(
+            CreateGeneratedFileV2(
+                id=op_id,
+                target_path=norm_target,
+                expected_target_state="absent",
+                generator_id=generator.id,
+                generator_version=generator.version,
+                new_content=candidate,
+            )
+        )
         review_lines.append(
-            f"Create flashcard `{norm_target}` ({mutation.learning_context}): {mutation.rationale}"
+            f"Create flashcard `{norm_target}` ({flashcard_mutation.learning_context}): {flashcard_mutation.rationale}"
         )
-        review_items.append({
-            "kind": "flashcard_create", "target_path": norm_target,
-            "learning_context": mutation.learning_context, "rationale": mutation.rationale,
-        })
+        review_items.append(
+            {
+                "kind": "flashcard_create",
+                "target_path": norm_target,
+                "learning_context": flashcard_mutation.learning_context,
+                "rationale": flashcard_mutation.rationale,
+            }
+        )
 
     document = PatchDocumentV2(
         schema_version=2, proposal_id=proposal_id, operations=tuple(operations)
     )
     risk = ProposalRisk.MEDIUM if total <= 3 else ProposalRisk.HIGH
     metadata = ProposalMetadata(
-        id=proposal_id, schema_version=1, patch_schema_version=2, lifecycle_schema_version=1,
+        id=proposal_id,
+        schema_version=1,
+        patch_schema_version=2,
+        lifecycle_schema_version=1,
         title=f"Evolve study learning from {source.path} ({total} changes)",
         description=f"Generated by {generator.id} {generator.version}",
-        status=ProposalStatus.DRAFT, risk=risk, created_at=created_at, created_by="agent",
-        submitted_at=None, submitted_by=None, review_digest=None,
-        approved_at=None, approved_by=None,
-        rejected_at=None, rejected_by=None, rejection_reason=None, applied_at=None, applied_by=None,
-        related_goals=(), related_sources=(source.path,),
-        extensions={"ingestion": {
-            "action": "evolve_study_learning", "source_hash": source.content_hash,
-            "operation_count": total, "mutations": review_items,
-        }},
+        status=ProposalStatus.DRAFT,
+        risk=risk,
+        created_at=created_at,
+        created_by="agent",
+        submitted_at=None,
+        submitted_by=None,
+        review_digest=None,
+        approved_at=None,
+        approved_by=None,
+        rejected_at=None,
+        rejected_by=None,
+        rejection_reason=None,
+        applied_at=None,
+        applied_by=None,
+        related_goals=(),
+        related_sources=(source.path,),
+        extensions={
+            "ingestion": {
+                "action": "evolve_study_learning",
+                "source_hash": source.content_hash,
+                "operation_count": total,
+                "mutations": review_items,
+            }
+        },
     )
     body = [
         f"Proposes {total} learning change(s) from the registered study source `{source.path}`.",
@@ -1035,16 +1078,20 @@ def build_study_learning_proposal(
         "",
     ]
     body.extend(f"{index}. {line}" for index, line in enumerate(review_lines, start=1))
-    body.extend([
-        "",
-        "LifeOS validates bounded mutations and provenance; the agent, not deterministic code, "
-        "decides what is pedagogically important for the inferred learning context.",
-    ])
+    body.extend(
+        [
+            "",
+            "LifeOS validates bounded mutations and provenance; the agent, not deterministic code, "
+            "decides what is pedagogically important for the inferred learning context.",
+        ]
+    )
     proposal_markdown = serialize_proposal_markdown(metadata, "\n".join(body))
     proposal_markdown = proposal_markdown.replace(b"\nreview_digest: null\n", b"\n")
     return StudyLearningProposalDocuments(
-        proposal_id=proposal_id, target_paths=tuple(target_paths),
-        create_target_paths=tuple(create_target_paths), proposal_markdown=proposal_markdown,
+        proposal_id=proposal_id,
+        target_paths=tuple(target_paths),
+        create_target_paths=tuple(create_target_paths),
+        proposal_markdown=proposal_markdown,
         patches_json=serialize_patch_json_bytes(document),
     )
 
@@ -1118,9 +1165,7 @@ def persist_compound_wiki_proposal(
 ) -> Path:
     vault_root = proposals_root.parent
     if (vault_root / documents.create_target_path).exists():
-        raise WikiTargetExistsError(
-            f"Target path already exists: {documents.create_target_path}"
-        )
+        raise WikiTargetExistsError(f"Target path already exists: {documents.create_target_path}")
     return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)
 
 

@@ -7,8 +7,8 @@ import os
 import re
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime
-from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from pathlib import Path
+from typing import Any, Callable, Mapping
 
 import yaml
 
@@ -198,7 +198,9 @@ def _review_path_from_id(review_id: str) -> str:
     match = _REVIEW_ID.fullmatch(review_id)
     if match is None:
         raise DailyInteractionError(
-            "invalid_review_id", "Review ID is invalid.", "Reload the review and choose a valid artifact."
+            "invalid_review_id",
+            "Review ID is invalid.",
+            "Reload the review and choose a valid artifact.",
         )
     if review_id.startswith("daily-"):
         return f"reviews/daily/{review_id.removeprefix('daily-')}.md"
@@ -208,7 +210,9 @@ def _review_path_from_id(review_id: str) -> str:
 class ReviewArtifactService:
     """Create and update review notes while preserving human-owned Markdown."""
 
-    def __init__(self, *, vault_root: Path, runtime_dir: Path, actor_id: str = "local-user") -> None:
+    def __init__(
+        self, *, vault_root: Path, runtime_dir: Path, actor_id: str = "local-user"
+    ) -> None:
         self.vault_root = vault_root
         self.runtime_dir = runtime_dir
         self.actor_id = actor_id
@@ -232,7 +236,13 @@ class ReviewArtifactService:
                 "storage_unavailable", str(exc), "Check vault access and retry."
             ) from exc
 
-    def _idempotent(self, key: str, operation: str, payload: Mapping[str, Any], run: Any) -> ReviewArtifact:
+    def _idempotent(
+        self,
+        key: str,
+        operation: str,
+        payload: Mapping[str, Any],
+        run: Callable[[], ReviewArtifact],
+    ) -> ReviewArtifact:
         if not isinstance(key, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", key):
             raise DailyInteractionError(
                 "invalid_idempotency_key",
@@ -293,7 +303,9 @@ class ReviewArtifactService:
         error = next((finding for finding in parsed.findings if finding.severity == "error"), None)
         if error is not None:
             raise DailyInteractionError(
-                "invalid_review_artifact", error.message, "Repair the Markdown note before continuing."
+                "invalid_review_artifact",
+                error.message,
+                "Repair the Markdown note before continuing.",
             )
         try:
             metadata = validate_review_metadata(dict(parsed.frontmatter), path=source.relative_path)
@@ -305,7 +317,9 @@ class ReviewArtifactService:
                 "Repair or migrate the review artifact before continuing.",
             ) from exc
         validate_managed_blocks(parsed.body)
-        return ReviewArtifact(source.relative_path, content_hash(source.content), metadata, parsed.body)
+        return ReviewArtifact(
+            source.relative_path, content_hash(source.content), metadata, parsed.body
+        )
 
     def open_or_create(
         self,
@@ -318,7 +332,9 @@ class ReviewArtifactService:
     ) -> ReviewArtifact:
         if now.tzinfo is None:
             raise DailyInteractionError(
-                "invalid_datetime", "Review timestamps must include a timezone.", "Use an aware datetime."
+                "invalid_datetime",
+                "Review timestamps must include a timezone.",
+                "Use an aware datetime.",
             )
         if kind not in {"daily", "weekly"}:
             raise DailyInteractionError(
@@ -352,7 +368,9 @@ class ReviewArtifactService:
                 phases=default_phases(kind),  # type: ignore[arg-type]
                 current_phase="morning" if kind == "daily" else "weekly",
             )
-            document = _frontmatter_document(_metadata_frontmatter(metadata), _initial_body(metadata))
+            document = _frontmatter_document(
+                _metadata_frontmatter(metadata), _initial_body(metadata)
+            )
             _atomic_write(self.vault_root, path, document, expected_hash=None, create=True)
             return self.load_path(path)
 
@@ -369,7 +387,9 @@ class ReviewArtifactService:
     ) -> ReviewArtifact:
         if now.tzinfo is None:
             raise DailyInteractionError(
-                "invalid_datetime", "Review timestamps must include a timezone.", "Use an aware datetime."
+                "invalid_datetime",
+                "Review timestamps must include a timezone.",
+                "Use an aware datetime.",
             )
         payload = {
             "review_id": review_id,
@@ -420,7 +440,9 @@ class ReviewArtifactService:
             if update.human_body is not None:
                 validate_managed_blocks(update.human_body)
                 for name in _MANAGED_NAMES:
-                    if extract_managed_block(update.human_body, name) != extract_managed_block(current.body, name):
+                    if extract_managed_block(update.human_body, name) != extract_managed_block(
+                        current.body, name
+                    ):
                         raise DailyInteractionError(
                             "managed_content_changed",
                             f"Human Markdown replacement changed managed block '{name}'.",

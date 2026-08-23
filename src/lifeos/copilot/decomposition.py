@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass
 from datetime import date
-from typing import Any, Literal, Mapping, Protocol, cast
+from typing import Literal, Mapping, Protocol
 
 from .contracts import GoalHorizon, Milestone, NearTermAction, PlanOption
 
@@ -123,6 +123,7 @@ def decompose_plan_option(
     if not current:
         raise DecompositionError("at least one current-wave milestone is required")
     adapter_used = adapter is not None
+    adapter_finding: DecompositionFinding | None = None
     if adapter is None:
         suggestions = tuple(_fallback_action(option, milestone) for milestone in current)
     else:
@@ -146,8 +147,8 @@ def decompose_plan_option(
     used_ids = set(existing_task_ids)
     generated: list[GeneratedAction] = []
     findings: list[DecompositionFinding] = []
-    if adapter is not None and not adapter_used:
-        findings.append(adapter_finding)  # type: ignore[arg-type]
+    if adapter is not None and not adapter_used and adapter_finding is not None:
+        findings.append(adapter_finding)
     for index, suggestion in enumerate(suggestions, start=1):
         if suggestion.milestone_id not in milestone_ids:
             raise DecompositionError(
@@ -222,7 +223,9 @@ def decompose_plan_option(
             source_refs=suggestion.source_refs or option.source_refs,
         )
         generated.append(
-            GeneratedAction(action=action, verification=suggestion.verification, kind=suggestion.kind)
+            GeneratedAction(
+                action=action, verification=suggestion.verification, kind=suggestion.kind
+            )
         )
     findings.extend(_duplicate_findings(generated))
     findings.extend(_blocker_findings(generated, existing_task_ids=set(existing_task_ids)))

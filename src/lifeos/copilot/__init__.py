@@ -22,6 +22,91 @@ from .contracts import (
     parse_goal_note,
     parse_plan_note,
 )
+from .context import (
+    ContextOmission,
+    ContextRedaction,
+    PlanningContextError,
+    PlanningContextItem,
+    PlanningContextPack,
+    PlanningContextPolicy,
+    build_planning_context,
+)
+from .readiness import (
+    GoalReadinessReport,
+    ReadinessFinding,
+    evaluate_goal_readiness,
+)
+from .sessions import (
+    ClarificationQuestion,
+    ClarificationQuestionAdapter,
+    PlanningSessionError,
+    PlanningSessionService,
+    QuestionSuggestion,
+    SessionConflictError,
+    SessionEnvelope,
+    SessionSnapshot,
+)
+from .options import (
+    DuplicatePlanFinding,
+    PlanOptionAdapter,
+    PlanOptionError,
+    PlanOptionRequest,
+    PlanOptionSet,
+    generate_plan_options,
+)
+from .decomposition import (
+    ActionSuggestion,
+    DecompositionError,
+    DecompositionFinding,
+    DecompositionPolicy,
+    DecompositionResult,
+    GeneratedAction,
+    RollingWaveAdapter,
+    decompose_plan_option,
+)
+from .capacity import (
+    CapacityError,
+    CapacityFinding,
+    CapacityView,
+    PortfolioCapacityReport,
+    RecurringWorkload,
+    check_portfolio_capacity,
+)
+from .explanations import (
+    ComparisonDimension,
+    ContradictionSummary,
+    CounterfactualResult,
+    ExplanationError,
+    ItemExplanation,
+    OmissionSummary,
+    PlanExplanation,
+    PlanOptionComparison,
+    ProvenanceEntry,
+    compare_plan_options,
+    explain_plan_option,
+    recompute_capacity_counterfactual,
+)
+from .proposals import (
+    ConflictPlanEdit,
+    CopilotProposalError,
+    CopilotProposalRequest,
+    CopilotProposalResult,
+    create_copilot_plan_proposal,
+)
+from .replanning import (
+    ReplanningComparison,
+    ReplanningError,
+    ReplanningProposalRequest,
+    ReplanningProposalResult,
+    ReplanningReview,
+    ReplanningTrigger,
+    ReviewEvidence,
+    build_replanning_review,
+    create_replanning_proposal,
+    scan_replanning_triggers,
+    suppress_replanning_suggestion,
+)
+
 
 __all__ = [
     "CURRENT_COPILOT_SCHEMA_VERSION",
@@ -46,20 +131,6 @@ __all__ = [
     "parse_plan_note",
 ]
 
-from .context import (
-    ContextOmission,
-    ContextRedaction,
-    PlanningContextError,
-    PlanningContextItem,
-    PlanningContextPack,
-    PlanningContextPolicy,
-    build_planning_context,
-)
-from .readiness import (
-    GoalReadinessReport,
-    ReadinessFinding,
-    evaluate_goal_readiness,
-)
 
 __all__ += [
     "ContextOmission",
@@ -74,16 +145,6 @@ __all__ += [
     "evaluate_goal_readiness",
 ]
 
-from .sessions import (
-    ClarificationQuestion,
-    ClarificationQuestionAdapter,
-    PlanningSessionError,
-    PlanningSessionService,
-    QuestionSuggestion,
-    SessionConflictError,
-    SessionEnvelope,
-    SessionSnapshot,
-)
 
 __all__ += [
     "ClarificationQuestion",
@@ -96,14 +157,6 @@ __all__ += [
     "SessionSnapshot",
 ]
 
-from .options import (
-    DuplicatePlanFinding,
-    PlanOptionAdapter,
-    PlanOptionError,
-    PlanOptionRequest,
-    PlanOptionSet,
-    generate_plan_options,
-)
 
 __all__ += [
     "DuplicatePlanFinding",
@@ -114,16 +167,6 @@ __all__ += [
     "generate_plan_options",
 ]
 
-from .decomposition import (
-    ActionSuggestion,
-    DecompositionError,
-    DecompositionFinding,
-    DecompositionPolicy,
-    DecompositionResult,
-    GeneratedAction,
-    RollingWaveAdapter,
-    decompose_plan_option,
-)
 
 __all__ += [
     "ActionSuggestion",
@@ -136,14 +179,6 @@ __all__ += [
     "decompose_plan_option",
 ]
 
-from .capacity import (
-    CapacityError,
-    CapacityFinding,
-    CapacityView,
-    PortfolioCapacityReport,
-    RecurringWorkload,
-    check_portfolio_capacity,
-)
 
 __all__ += [
     "CapacityError",
@@ -154,20 +189,6 @@ __all__ += [
     "check_portfolio_capacity",
 ]
 
-from .explanations import (
-    ComparisonDimension,
-    ContradictionSummary,
-    CounterfactualResult,
-    ExplanationError,
-    ItemExplanation,
-    OmissionSummary,
-    PlanExplanation,
-    PlanOptionComparison,
-    ProvenanceEntry,
-    compare_plan_options,
-    explain_plan_option,
-    recompute_capacity_counterfactual,
-)
 
 __all__ += [
     "ComparisonDimension",
@@ -184,13 +205,6 @@ __all__ += [
     "recompute_capacity_counterfactual",
 ]
 
-from .proposals import (
-    ConflictPlanEdit,
-    CopilotProposalError,
-    CopilotProposalRequest,
-    CopilotProposalResult,
-    create_copilot_plan_proposal,
-)
 
 __all__ += [
     "ConflictPlanEdit",
@@ -200,19 +214,6 @@ __all__ += [
     "create_copilot_plan_proposal",
 ]
 
-from .replanning import (
-    ReplanningComparison,
-    ReplanningError,
-    ReplanningProposalRequest,
-    ReplanningProposalResult,
-    ReplanningReview,
-    ReplanningTrigger,
-    ReviewEvidence,
-    build_replanning_review,
-    create_replanning_proposal,
-    scan_replanning_triggers,
-    suppress_replanning_suggestion,
-)
 
 __all__ += [
     "ReplanningComparison",

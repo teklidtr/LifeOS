@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from lifeos.attention import evaluate_attention
 from lifeos.copilot.replanning import ReplanningError, scan_replanning_triggers
-from lifeos.daily import DailyInteractionService, ReviewNoteRequest, content_hash, load_execution_records
+from lifeos.daily import DailyInteractionService, ReviewNoteRequest, load_execution_records
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.feedback import build_feedback_review_summary
 from lifeos.markdown.parser import parse_markdown_note

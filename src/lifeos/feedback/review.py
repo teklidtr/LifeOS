@@ -104,8 +104,8 @@ def build_feedback_review_summary(
     for diagnosis in diagnoses:
         if diagnosis.dismissed:
             continue
-        action = action_by_task.get(diagnosis.task_id)
-        target_path = action.source_path if action is not None else ""
+        matched_action = action_by_task.get(diagnosis.task_id)
+        target_path = matched_action.source_path if matched_action is not None else ""
         suggestions.append(
             FeedbackReviewSuggestion(
                 _stable_id("avoidance", diagnosis.diagnosis_id),
@@ -146,4 +146,6 @@ def build_feedback_review_summary(
                 )
             )
 
-    return tuple(sorted(suggestions, key=lambda item: (item.kind, item.target_path, item.task_id or "")))
+    return tuple(
+        sorted(suggestions, key=lambda item: (item.kind, item.target_path, item.task_id or ""))
+    )
