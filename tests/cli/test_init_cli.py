@@ -128,3 +128,12 @@ def test_init_without_path_uses_current_directory(
     assert captured.err == ""
     assert (vault / "lifeos.yml").is_file()
     assert load_config(vault / "lifeos.yml").vault_root == vault.resolve()
+
+
+def test_global_help_mentions_init(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--help"])
+
+    captured = capsys.readouterr()
+    assert exit_info.value.code == 0
+    assert "init [PATH]" in captured.out
