@@ -117,21 +117,21 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
                     "limit": 6,
                 },
             )
-            assert context_result.is_error is False
-            assert context_result.structured_content is not None
-            assert context_result.structured_content["sources"][0]["path"] == (
+            assert context_result.isError is False
+            assert context_result.structuredContent is not None
+            assert context_result.structuredContent["sources"][0]["path"] == (
                 "study/driving-licence/intersections.md"
             )
             assert [
-                item["id"] for item in context_result.structured_content["instructions"]
+                item["id"] for item in context_result.structuredContent["instructions"]
             ] == ["driving-exam"]
 
             activity_result = await session.call_tool(
                 "runtime_activity", arguments={"limit": 5}
             )
-            assert activity_result.is_error is False
-            assert activity_result.structured_content is not None
-            records = activity_result.structured_content["records"]
+            assert activity_result.isError is False
+            assert activity_result.structuredContent is not None
+            records = activity_result.structuredContent["records"]
             assert records[-1]["tool"] == "vault_context"
             assert records[-1]["focus_paths"] == [
                 "study/driving-licence/intersections.md"

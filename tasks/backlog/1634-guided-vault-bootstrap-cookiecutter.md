@@ -1,10 +1,11 @@
 ---
 id: LIFEOS-1634
 title: Add guided vault bootstrap with Cookiecutter
-status: ready
+status: backlog
 phase: 16
 depends_on:
   - LIFEOS-1633
+  - LIFEOS-1633A
 risk: medium
 ---
 
@@ -37,3 +38,22 @@ files.
   LIFEOS-1633 vaults.
 - Re-running bootstrap fails safely or provides an explicit non-destructive mode.
 - Documentation no longer duplicates template contents by hand.
+
+# Validation
+
+```bash
+pytest --import-mode=importlib -q tests/integration/test_fresh_vault_setup.py \
+  tests/integration/test_study_learning_workflow.py
+./scripts/run-setup-integration-docker.sh
+python scripts/validate_manual_links.py
+git diff --check
+```
+
+# Relevant decisions
+
+- LIFEOS-1633 defines the vault-root runtime/config and fresh-vault integration contract
+  that generated vaults must preserve.
+- LIFEOS-1633A must be completed first so bootstrap changes are protected by automatic
+  GitHub Actions and Docker clean-room gates.
+- Keep this task in `backlog/` while LIFEOS-1633A is in progress; move it back to
+  `ready/` only after the CI gate is green and completed.

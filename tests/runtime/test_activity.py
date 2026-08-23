@@ -26,3 +26,15 @@ def test_activity_store_is_bounded_and_tolerates_missing_state(tmp_path: Path) -
     for index in range(3):
         store.append(tool=f"tool-{index}")
     assert [item.tool for item in store.read(limit=2)] == ["tool-1", "tool-2"]
+
+
+def test_activity_store_write_failure_does_not_break_primary_operation(tmp_path: Path) -> None:
+    blocked_runtime = tmp_path / "runtime-file"
+    blocked_runtime.write_text("not a directory", encoding="utf-8")
+    store = ActivityStore(blocked_runtime)
+
+    record = store.append(tool="vault_read_markdown", source_paths=["wiki/example.md"])
+
+    assert record.tool == "vault_read_markdown"
+    assert record.source_paths == ("wiki/example.md",)
+    assert not store.path.exists()
