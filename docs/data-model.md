@@ -85,6 +85,41 @@ target_hashes: {}
 items: []
 ```
 
+## Generated Wiki provenance (canonical)
+
+LifeOS-generated Wiki pages may carry canonical page-level evidence lineage in
+frontmatter:
+
+```yaml
+lifeos_provenance:
+  schema_version: 1
+  sources:
+    - path: notes/example.md
+      content_hash: sha256:<64 lowercase hex characters>
+    - path: journal/2026-08-23.md
+      content_hash: sha256:<64 lowercase hex characters>
+  generator:
+    id:
+    version:
+    prompt_schema_version:
+    model_id:
+  created_at: YYYY-MM-DDTHH:MM:SSZ
+```
+
+`sources` is a non-empty ordered list of source objects. Exact
+`(path, content_hash)` repeats are deduplicated. The same path with a changed hash
+is retained as another historical snapshot, so accepted evidence history is not
+silently rewritten to the source's current bytes.
+
+When a generated-owned Wiki page receives another accepted source contribution,
+LifeOS preserves the existing source order, generator metadata, and provenance
+`created_at`, then appends the new source snapshot when it is not an exact repeat.
+Human-owned Wiki patches do not acquire generated provenance automatically.
+Provenance does not grant generated-file ownership or write authority.
+
+See [Generated Wiki Provenance](generated-wiki-provenance.md) for the full
+validation and merge contract.
+
 ## Graph view state
 
 ```yaml
