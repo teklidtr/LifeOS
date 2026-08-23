@@ -4,8 +4,10 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any, Mapping
 
+
 class ProvenanceValidationError(ValueError):
     """Raised when lifeos_provenance is present but malformed."""
+
     pass
 
 
@@ -64,7 +66,9 @@ def _validate_hash(hash_val: Any) -> str:
     if not isinstance(hash_val, str):
         raise ProvenanceValidationError("Content hash must be a string")
     if not HASH_REGEX.match(hash_val):
-        raise ProvenanceValidationError("Content hash must be in canonical form: sha256:<64 lowercase hexadecimal characters>")
+        raise ProvenanceValidationError(
+            "Content hash must be in canonical form: sha256:<64 lowercase hexadecimal characters>"
+        )
     return hash_val
 
 
@@ -99,19 +103,17 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
     if not isinstance(raw, dict):
         raise ProvenanceValidationError("lifeos_provenance must be a mapping")
 
-    # Schema version
     schema_version = raw.get("schema_version")
     if type(schema_version) is not int or isinstance(schema_version, bool):
         raise ProvenanceValidationError("schema_version must be an integer")
     if schema_version != 1:
         raise ProvenanceValidationError("schema_version must be 1")
 
-    # Sources
     raw_sources = raw.get("sources")
     if not isinstance(raw_sources, list):
         raise ProvenanceValidationError("sources must be a list")
-    if len(raw_sources) != 1:
-        raise ProvenanceValidationError("sources must contain exactly one source for schema_version 1")
+    if not raw_sources:
+        raise ProvenanceValidationError("sources must contain at least one source for schema_version 1")
 
     source_objs = []
     for raw_source in raw_sources:
@@ -121,7 +123,6 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
         path = raw_source.get("path")
         content_hash = raw_source.get("content_hash")
 
-        # reject unknown fields in source
         for k in raw_source:
             if k not in ("path", "content_hash"):
                 raise ProvenanceValidationError(f"Unknown field in source: {k}")
@@ -129,12 +130,10 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
         if path is None or content_hash is None:
             raise ProvenanceValidationError("source entry must contain path and content_hash")
 
-        source_objs.append(ProvenanceSource(
-            path=_validate_path(path),
-            content_hash=_validate_hash(content_hash)
-        ))
+        source_objs.append(
+            ProvenanceSource(path=_validate_path(path), content_hash=_validate_hash(content_hash))
+        )
 
-    # Generator
     raw_generator = raw.get("generator")
     if not isinstance(raw_generator, dict):
         raise ProvenanceValidationError("generator must be a mapping")
@@ -143,25 +142,29 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
         if k not in ("id", "version", "prompt_schema_version", "model_id"):
             raise ProvenanceValidationError(f"Unknown field in generator: {k}")
 
-    if "id" not in raw_generator or "version" not in raw_generator or "prompt_schema_version" not in raw_generator:
-         raise ProvenanceValidationError("generator must contain id, version, and prompt_schema_version")
+    if (
+        "id" not in raw_generator
+        or "version" not in raw_generator
+        or "prompt_schema_version" not in raw_generator
+    ):
+        raise ProvenanceValidationError("generator must contain id, version, and prompt_schema_version")
 
     gen_id = _validate_string_nonempty(raw_generator["id"], "generator id")
     gen_version = _validate_string_nonempty(raw_generator["version"], "generator version")
-    gen_prompt = _validate_string_nonempty(raw_generator["prompt_schema_version"], "generator prompt_schema_version")
+    gen_prompt = _validate_string_nonempty(
+        raw_generator["prompt_schema_version"], "generator prompt_schema_version"
+    )
 
     model_id = raw_generator.get("model_id")
     if model_id is not None:
         model_id = _validate_string_nonempty(model_id, "generator model_id")
 
-    # Created at
     raw_created = raw.get("created_at")
     if raw_created is None:
         raise ProvenanceValidationError("created_at is required")
 
     created_at = _validate_timestamp(raw_created)
 
-    # Ensure no other top-level fields
     for k in raw:
         if k not in ("schema_version", "sources", "generator", "created_at"):
             raise ProvenanceValidationError(f"Unknown field in lifeos_provenance: {k}")
@@ -179,17 +182,32 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
     )
 
 
+def merge_provenance_sources(
+    existing: tuple[ProvenanceSource, ...],
+    source: ProvenanceSource,
+) -> tuple[ProvenanceSource, ...]:
+    """Append one accepted source snapshot without erasing provenance history.
+
+    Exact ``(path, content_hash)`` repeats are deduplicated. The same path with a
+    changed hash remains a distinct historical snapshot. Accepted-order is preserved,
+    which makes serialization deterministic and the page's reference history inspectable.
+    """
+    merged: list[ProvenanceSource] = []
+    seen: set[tuple[str, str]] = set()
+    for item in (*existing, source):
+        key = (item.path, item.content_hash)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return tuple(merged)
+
+
 def provenance_to_frontmatter_value(provenance: LifeOSProvenance) -> dict[str, object]:
-    """
-    Convert a typed provenance model back to a deterministically ordered mapping.
-    This mapping can be safely embedded under 'lifeos_provenance' in a Markdown document.
-    """
+    """Convert a typed provenance model back to a deterministically ordered mapping."""
     sources_list = []
     for s in provenance.sources:
-        sources_list.append({
-            "path": s.path,
-            "content_hash": s.content_hash,
-        })
+        sources_list.append({"path": s.path, "content_hash": s.content_hash})
 
     gen_dict: dict[str, object] = {
         "id": provenance.generator.id,
