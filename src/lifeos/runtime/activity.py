@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,9 +66,12 @@ class ActivityStore:
             changed_paths=self._clean_paths(changed_paths),
             operation_count=operation_count,
         )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(record), sort_keys=True, ensure_ascii=False) + "\n")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(asdict(record), sort_keys=True, ensure_ascii=False) + "\n")
+        except OSError as error:
+            logger.warning("Unable to persist LifeOS activity record to %s: %s", self.path, error)
         return record
 
     def read(self, *, limit: int = 20) -> tuple[ActivityRecord, ...]:
