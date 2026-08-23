@@ -99,7 +99,7 @@ def _validate_provenance_frontmatter(
             model_id=typed.generator.model_id,
             created_at=typed.created_at,
         )
-        source_rows = tuple(
+        canonical_source_rows = tuple(
             ProvenanceSourceRow(
                 derived_path=derived_path,
                 source_index=index,
@@ -108,7 +108,7 @@ def _validate_provenance_frontmatter(
             )
             for index, source in enumerate(typed.sources)
         )
-        return doc_row, source_rows
+        return doc_row, canonical_source_rows
 
     try:
         schema_version = prov.get("schema_version")
@@ -145,7 +145,7 @@ def _validate_provenance_frontmatter(
             created_at=created_at,
         )
 
-        source_rows = []
+        source_rows: list[ProvenanceSourceRow] = []
         for i, src in enumerate(sources_list):
             if not isinstance(src, dict):
                 raise ValueError(f"sources[{i}] must be a dictionary")
