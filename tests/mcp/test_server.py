@@ -37,10 +37,10 @@ from lifeos.facade.proposal_tools import (
 from lifeos.facade.registry_tools import RegistryRefreshResult
 
 
-def test_server_registers_only_approved_tools() -> None:
+def test_server_registers_only_approved_tools(tmp_path: Path) -> None:
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
+    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     expected_tools = {
         "registry_refresh",
@@ -62,18 +62,18 @@ def test_server_registers_only_approved_tools() -> None:
     assert registered == expected_tools
 
 
-def test_mcp_names_are_unique() -> None:
+def test_mcp_names_are_unique(tmp_path: Path) -> None:
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
+    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
     tools = list(server._tool_manager.list_tools())
     names = [t.name for t in tools]
     assert len(names) == len(set(names))
 
 
-def test_server_advertises_safe_ingestion_workflow() -> None:
+def test_server_advertises_safe_ingestion_workflow(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
 
     assert server.instructions == LIFEOS_MCP_INSTRUCTIONS
@@ -90,9 +90,9 @@ def test_server_advertises_safe_ingestion_workflow() -> None:
     assert "runtime_activity is read-only disposable diagnostics" in server.instructions
 
 
-def test_tools_advertise_workflow_specific_descriptions() -> None:
+def test_tools_advertise_workflow_specific_descriptions(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
 
@@ -119,9 +119,9 @@ def test_tools_advertise_workflow_specific_descriptions() -> None:
     assert "changes canonical vault content" in tools["proposal_apply"].description
 
 
-def test_tools_advertise_accurate_safety_annotations() -> None:
+def test_tools_advertise_accurate_safety_annotations(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
 
@@ -160,18 +160,18 @@ def test_tools_advertise_accurate_safety_annotations() -> None:
     assert all(tool.annotations.openWorldHint is False for tool in tools.values())
 
 
-def test_tools_map_to_expected_facade_descriptors() -> None:
+def test_tools_map_to_expected_facade_descriptors(tmp_path: Path) -> None:
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
+    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     tool = server._tool_manager.get_tool("vault_read_markdown")
     assert "vault_path" in tool.parameters["properties"]
 
 
-def test_update_ingestion_schema_exposes_only_bounded_fields() -> None:
+def test_update_ingestion_schema_exposes_only_bounded_fields(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tool = server._tool_manager.get_tool("ingestion_update_wiki_section_proposal")
 
@@ -186,9 +186,9 @@ def test_update_ingestion_schema_exposes_only_bounded_fields() -> None:
     assert tool.parameters["additionalProperties"] is False
 
 
-def test_create_ingestion_schema_exposes_typed_and_legacy_routing_fields() -> None:
+def test_create_ingestion_schema_exposes_typed_and_legacy_routing_fields(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tool = server._tool_manager.get_tool("ingestion_create_wiki_proposal")
 
@@ -205,9 +205,9 @@ def test_create_ingestion_schema_exposes_typed_and_legacy_routing_fields() -> No
     assert tool.parameters["additionalProperties"] is False
 
 
-def test_compound_ingestion_schema_exposes_only_bounded_fields() -> None:
+def test_compound_ingestion_schema_exposes_only_bounded_fields(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tool = server._tool_manager.get_tool(
         "ingestion_create_wiki_and_update_section_proposal"
@@ -230,7 +230,7 @@ def test_compound_ingestion_schema_exposes_only_bounded_fields() -> None:
 
 
 @patch("lifeos.mcp.server.refresh_registry")
-def test_registry_refresh_delegates_to_facade(mock_facade: MagicMock) -> None:
+def test_registry_refresh_delegates_to_facade(mock_facade: MagicMock, tmp_path: Path) -> None:
     mock_facade.return_value = RegistryRefreshResult(
         new=("study/new.md",),
         modified=(),
@@ -240,12 +240,12 @@ def test_registry_refresh_delegates_to_facade(mock_facade: MagicMock) -> None:
     )
     registry = MagicMock()
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=registry, authorizer=MagicMock()
     )
 
     result = server._tool_manager.get_tool("registry_refresh").fn()
 
-    mock_facade.assert_called_once_with(vault_root=Path("/fake"), registry=registry)
+    mock_facade.assert_called_once_with(vault_root=tmp_path / "vault", registry=registry)
     assert result == {
         "new": ["study/new.md"],
         "modified": [],
@@ -256,7 +256,7 @@ def test_registry_refresh_delegates_to_facade(mock_facade: MagicMock) -> None:
 
 
 @patch("lifeos.mcp.server.read_markdown")
-def test_read_markdown_delegates_to_facade(mock_facade) -> None:
+def test_read_markdown_delegates_to_facade(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
         vault_path="test.md",
         markdown_body="# test",
@@ -266,13 +266,13 @@ def test_read_markdown_delegates_to_facade(mock_facade) -> None:
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
+    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     tool = server._tool_manager.get_tool("vault_read_markdown")
     res = tool.fn(vault_path="test.md")
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"), request=ReadMarkdownRequest(vault_path="test.md")
+        vault_root=tmp_path / "vault", request=ReadMarkdownRequest(vault_path="test.md")
     )
     assert res == {
         "vault_path": "test.md",
@@ -283,7 +283,7 @@ def test_read_markdown_delegates_to_facade(mock_facade) -> None:
 
 
 @patch("lifeos.mcp.server.search_wiki")
-def test_wiki_search_delegates_to_scoped_facade(mock_facade: MagicMock) -> None:
+def test_wiki_search_delegates_to_scoped_facade(mock_facade: MagicMock, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
         query="retrieval",
         hits=(
@@ -297,7 +297,7 @@ def test_wiki_search_delegates_to_scoped_facade(mock_facade: MagicMock) -> None:
         ),
     )
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
 
     result = server._tool_manager.get_tool("wiki_search").fn(
@@ -305,7 +305,7 @@ def test_wiki_search_delegates_to_scoped_facade(mock_facade: MagicMock) -> None:
     )
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"), request=WikiSearchRequest(query="retrieval", limit=5)
+        vault_root=tmp_path / "vault", request=WikiSearchRequest(query="retrieval", limit=5)
     )
     assert result["hits"][0]["path"] == "wiki/learning.md"
 
@@ -352,7 +352,7 @@ def test_vault_context_delegates_and_records_routing_metadata(
 
 
 @patch("lifeos.mcp.server.evolve_wiki_proposal")
-def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock) -> None:
+def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
         proposal_id="prop1",
         proposal_path="proposals/prop1",
@@ -361,7 +361,7 @@ def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock) -> Non
     )
     registry = MagicMock()
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=registry, authorizer=MagicMock()
     )
 
     result = server._tool_manager.get_tool("ingestion_evolve_wiki_proposal").fn(
@@ -385,7 +385,7 @@ def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock) -> Non
     )
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         registry=registry,
         request=EvolveWikiProposalRequest(
             source_path="raw/source.md",
@@ -417,7 +417,7 @@ def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock) -> Non
 
 
 @patch("lifeos.mcp.server.evolve_study_learning_proposal")
-def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock) -> None:
+def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
         proposal_id="prop-study", proposal_path="proposals/prop-study",
         target_paths=("wiki/traffic.md", "flashcards/driving/right-of-way.md"),
@@ -425,7 +425,7 @@ def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock) -> 
     )
     registry = MagicMock()
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=registry, authorizer=MagicMock()
     )
     result = server._tool_manager.get_tool("study_evolve_learning_proposal").fn(
         source_path="study/driving.md",
@@ -448,7 +448,7 @@ def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock) -> 
     )
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         registry=registry,
         request=EvolveStudyLearningProposalRequest(
             source_path="study/driving.md",
@@ -479,20 +479,20 @@ def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock) -> 
 
 
 @patch("lifeos.mcp.server.create_wiki_proposal")
-def test_create_wiki_proposal_delegates_to_facade(mock_facade) -> None:
+def test_create_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
         proposal_id="prop1", proposal_path="prop/path", target_path="target/path"
     )
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
+    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     tool = server._tool_manager.get_tool("ingestion_create_wiki_proposal")
     res = tool.fn(source_path="s", target_path="t", title="title", body="b")
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         registry=registry,
         request=CreateWikiProposalRequest(
             source_path="s",
@@ -510,7 +510,7 @@ def test_create_wiki_proposal_delegates_to_facade(mock_facade) -> None:
 
 
 @patch("lifeos.mcp.server.create_wiki_proposal")
-def test_create_wiki_proposal_accepts_typed_routing(mock_facade) -> None:
+def test_create_wiki_proposal_accepts_typed_routing(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
         proposal_id="prop1",
         proposal_path="prop/path",
@@ -518,7 +518,7 @@ def test_create_wiki_proposal_accepts_typed_routing(mock_facade) -> None:
     )
     registry = MagicMock()
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=registry, authorizer=MagicMock()
     )
 
     result = server._tool_manager.get_tool("ingestion_create_wiki_proposal").fn(
@@ -530,7 +530,7 @@ def test_create_wiki_proposal_accepts_typed_routing(mock_facade) -> None:
     )
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         registry=registry,
         request=CreateWikiProposalRequest(
             source_path="study/source.md",
@@ -545,7 +545,7 @@ def test_create_wiki_proposal_accepts_typed_routing(mock_facade) -> None:
 
 
 @patch("lifeos.mcp.server.update_wiki_section_proposal")
-def test_update_wiki_section_proposal_delegates_to_facade(mock_facade) -> None:
+def test_update_wiki_section_proposal_delegates_to_facade(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
         proposal_id="prop1",
         proposal_path="prop/path",
@@ -554,7 +554,7 @@ def test_update_wiki_section_proposal_delegates_to_facade(mock_facade) -> None:
     )
     registry = MagicMock()
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=registry, authorizer=MagicMock()
     )
 
     result = server._tool_manager.get_tool("ingestion_update_wiki_section_proposal").fn(
@@ -565,7 +565,7 @@ def test_update_wiki_section_proposal_delegates_to_facade(mock_facade) -> None:
     )
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         registry=registry,
         request=UpdateWikiSectionProposalRequest(
             source_path="study/source.md",
@@ -584,7 +584,7 @@ def test_update_wiki_section_proposal_delegates_to_facade(mock_facade) -> None:
 
 
 @patch("lifeos.mcp.server.create_wiki_and_update_section_proposal")
-def test_compound_wiki_proposal_delegates_to_facade(mock_facade) -> None:
+def test_compound_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
         proposal_id="prop1",
         proposal_path="proposals/prop1",
@@ -594,7 +594,7 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade) -> None:
     )
     registry = MagicMock()
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=registry, authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=registry, authorizer=MagicMock()
     )
 
     result = server._tool_manager.get_tool(
@@ -610,7 +610,7 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade) -> None:
     )
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         registry=registry,
         request=CompoundWikiProposalRequest(
             source_path="study/source.md",
@@ -633,12 +633,12 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade) -> None:
 
 
 @patch("lifeos.mcp.server.submit_proposal_tool")
-def test_submit_passes_trusted_authorizer(mock_facade) -> None:
+def test_submit_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(proposal_id="prop1", review_digest="dig")
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
+    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     tool = server._tool_manager.get_tool("proposal_submit")
     res = tool.fn(proposal_id="prop1")
@@ -646,7 +646,7 @@ def test_submit_passes_trusted_authorizer(mock_facade) -> None:
     from lifeos.facade.consequential_tools import SubmitProposalRequest
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         authorizer=authorizer,
         request=SubmitProposalRequest(proposal_id="prop1"),
     )
@@ -654,12 +654,12 @@ def test_submit_passes_trusted_authorizer(mock_facade) -> None:
 
 
 @patch("lifeos.mcp.server.approve_proposal_tool")
-def test_approve_passes_trusted_authorizer(mock_facade) -> None:
+def test_approve_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(proposal_id="prop1", review_digest="dig")
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
+    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     tool = server._tool_manager.get_tool("proposal_approve")
     res = tool.fn(proposal_id="prop1")
@@ -667,7 +667,7 @@ def test_approve_passes_trusted_authorizer(mock_facade) -> None:
     from lifeos.facade.consequential_tools import ApproveProposalRequest
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         authorizer=authorizer,
         request=ApproveProposalRequest(proposal_id="prop1"),
     )
@@ -675,12 +675,12 @@ def test_approve_passes_trusted_authorizer(mock_facade) -> None:
 
 
 @patch("lifeos.mcp.server.apply_proposal_tool")
-def test_apply_passes_trusted_authorizer(mock_facade) -> None:
+def test_apply_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(proposal_id="prop1", changed_paths=["a.md"])
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=Path("/fake"), registry=registry, authorizer=authorizer)
+    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     tool = server._tool_manager.get_tool("proposal_apply")
     res = tool.fn(proposal_id="prop1")
@@ -688,16 +688,16 @@ def test_apply_passes_trusted_authorizer(mock_facade) -> None:
     from lifeos.facade.consequential_tools import ApplyProposalRequest
 
     mock_facade.assert_called_once_with(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         authorizer=authorizer,
         request=ApplyProposalRequest(proposal_id="prop1"),
     )
     assert res == {"proposal_id": "prop1", "status": "applied", "changed_paths": ["a.md"]}
 
 
-def test_agent_cannot_supply_actor_or_digest() -> None:
+def test_agent_cannot_supply_actor_or_digest(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     submit = server._tool_manager.get_tool("proposal_submit")
     assert "actor_id" not in submit.parameters["properties"]
@@ -859,9 +859,10 @@ def test_mcp_apply_returns_sanitized_recovery_required_error(
 async def test_consequential_tools_reject_extra_agent_fields(
     tool_name: str,
     extra_field: str,
+    tmp_path: Path,
 ) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"),
+        vault_root=tmp_path / "vault",
         registry=MagicMock(),
         authorizer=MagicMock(),
     )
@@ -882,27 +883,27 @@ async def test_consequential_tools_reject_extra_agent_fields(
         )
 
 
-def test_evolve_ingestion_schema_exposes_bounded_mutation_lists() -> None:
+def test_evolve_ingestion_schema_exposes_bounded_mutation_lists(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tool = server._tool_manager.get_tool("ingestion_evolve_wiki_proposal")
     assert set(tool.parameters["properties"]) == {"source_path", "creates", "updates"}
     assert tool.parameters["additionalProperties"] is False
 
 
-def test_wiki_search_schema_is_read_only_and_bounded() -> None:
+def test_wiki_search_schema_is_read_only_and_bounded(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tool = server._tool_manager.get_tool("wiki_search")
     assert set(tool.parameters["properties"]) == {"query", "limit"}
     assert tool.annotations.readOnlyHint is True
 
 
-def test_vault_context_schema_is_read_only_and_bounded() -> None:
+def test_vault_context_schema_is_read_only_and_bounded(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tool = server._tool_manager.get_tool("vault_context")
     assert set(tool.parameters["properties"]) == {"question", "focus_paths", "limit"}
@@ -910,9 +911,9 @@ def test_vault_context_schema_is_read_only_and_bounded() -> None:
     assert tool.parameters["additionalProperties"] is False
 
 
-def test_study_learning_schema_exposes_only_bounded_mutation_lists() -> None:
+def test_study_learning_schema_exposes_only_bounded_mutation_lists(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tool = server._tool_manager.get_tool("study_evolve_learning_proposal")
     assert set(tool.parameters["properties"]) == {
@@ -922,9 +923,9 @@ def test_study_learning_schema_exposes_only_bounded_mutation_lists() -> None:
     assert tool.parameters["additionalProperties"] is False
 
 
-def test_runtime_activity_schema_is_read_only() -> None:
+def test_runtime_activity_schema_is_read_only(tmp_path: Path) -> None:
     server = create_mcp_server(
-        vault_root=Path("/fake"), registry=MagicMock(), authorizer=MagicMock()
+        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
     tool = server._tool_manager.get_tool("runtime_activity")
     assert set(tool.parameters["properties"]) == {"limit"}
