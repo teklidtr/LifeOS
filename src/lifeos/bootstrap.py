@@ -103,10 +103,11 @@ def _clear_directory(root: Path) -> None:
 
 def initialize_vault(target: Path) -> BootstrapResult:
     """Create the canonical LifeOS vault skeleton without overwriting existing content."""
-    root = target.expanduser().resolve(strict=False)
+    expanded_target = target.expanduser()
+    if expanded_target.is_symlink():
+        raise BootstrapError(f"Refusing to initialize a symlink target: {expanded_target}")
+    root = expanded_target.resolve(strict=False)
 
-    if root.is_symlink():
-        raise BootstrapError(f"Refusing to initialize a symlink target: {root}")
     if root.exists() and not root.is_dir():
         raise BootstrapError(f"Initialization target is not a directory: {root}")
 
