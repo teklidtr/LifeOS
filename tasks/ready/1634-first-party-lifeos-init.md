@@ -5,6 +5,7 @@ status: ready
 phase: 16
 depends_on:
   - LIFEOS-1633
+  - LIFEOS-1633A
 risk: medium
 ---
 
@@ -15,7 +16,8 @@ LifeOS itself should own the canonical bootstrap contract instead of delegating 
 external template engine such as Cookiecutter.
 
 A new user should be able to create a valid vault with one command while preserving the
-runtime, MCP, and semantic contracts established by LIFEOS-1633.
+runtime, MCP, and semantic contracts established by LIFEOS-1633 and the clean-room CI
+contract established by LIFEOS-1633A.
 
 # Design principles
 
@@ -89,7 +91,7 @@ runtime, MCP, and semantic contracts established by LIFEOS-1633.
 - No Cookiecutter/Jinja/template-engine runtime dependency is added.
 - Setup documentation presents `lifeos init` as the primary fresh-vault path and no longer
   requires users to hand-create the canonical roots or bootstrap files.
-- CI remains green for both the normal test job and `docker-setup-e2e`.
+- CI remains green for both the normal `test` job and `docker-setup-e2e`.
 
 # Validation
 
@@ -100,3 +102,9 @@ uv run python -m compileall -q src tests
 uv run python scripts/validate_manual_links.py
 ./scripts/run-setup-integration-docker.sh
 ```
+
+# Relevant decisions
+
+- LIFEOS-1633 defines the vault/runtime/bootstrap semantics that `lifeos init` must render.
+- LIFEOS-1633A provides the blocking GitHub Actions and Docker clean-room gates that must
+  stay green while the bootstrap path changes.
