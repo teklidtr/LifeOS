@@ -1,0 +1,115 @@
+name: LIFEOS-1628 Apply
+
+on:
+  push:
+    branches: [lifeos-1628-cumulative-wiki-provenance]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, 'LIFEOS-1628: implement cumulative provenance') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lifeos-1628-cumulative-wiki-provenance
+          fetch-depth: 0
+
+      - name: Apply focused implementation patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          provenance_path = Path('src/lifeos/ingestion/provenance.py')
+          provenance = provenance_path.read_text()
+          provenance = provenance.replace(
+              '    if len(raw_sources) != 1:\n        raise ProvenanceValidationError("sources must contain exactly one source for schema_version 1")\n',
+              '    if not raw_sources:\n        raise ProvenanceValidationError("sources must contain at least one source for schema_version 1")\n',
+          )
+          marker = '\n\ndef provenance_to_frontmatter_value(provenance: LifeOSProvenance) -> dict[str, object]:\n'
+          helper = '''\n\ndef merge_provenance_sources(\n    existing: tuple[ProvenanceSource, ...],\n    source: ProvenanceSource,\n) -> tuple[ProvenanceSource, ...]:\n    """Append a source snapshot once while preserving accepted history order.\n\n    An exact ``(path, content_hash)`` repeat is a no-op. The same path with a\n    different hash is a distinct historical snapshot and is therefore retained.\n    """\n    merged: list[ProvenanceSource] = []\n    seen: set[tuple[str, str]] = set()\n    for item in (*existing, source):\n        key = (item.path, item.content_hash)\n        if key in seen:\n            continue\n        seen.add(key)\n        merged.append(item)\n    return tuple(merged)\n'''
+          if 'def merge_provenance_sources(' not in provenance:
+              assert marker in provenance
+              provenance = provenance.replace(marker, helper + marker)
+          provenance_path.write_text(provenance)
+
+          proposals_path = Path('src/lifeos/ingestion/proposals.py')
+          proposals = proposals_path.read_text()
+          proposals = proposals.replace(
+              '    provenance_to_frontmatter_value,\n    LifeOSProvenance,\n',
+              '    provenance_to_frontmatter_value,\n    extract_provenance,\n    ProvenanceValidationError,\n    merge_provenance_sources,\n    LifeOSProvenance,\n',
+          )
+          insert_after = '''def _replace_generated_wiki_tags(target_content: str, tags: tuple[str, ...]) -> str:\n    parsed = parse_markdown_note(Path("generated-wiki.md"), content=target_content)\n    if any(finding.severity == "error" for finding in parsed.findings):\n        raise InvalidWikiSectionError("Generated wiki frontmatter is malformed")\n    metadata = dict(parsed.frontmatter)\n    if tags:\n        metadata["tags"] = list(tags)\n    else:\n        metadata.pop("tags", None)\n    return _serialize_wiki_frontmatter(metadata) + parsed.body\n'''
+          accumulate = '''\n\ndef _accumulate_generated_wiki_provenance(\n    target_content: str, source: SourceSnapshot\n) -> str:\n    parsed = parse_markdown_note(Path("generated-wiki.md"), content=target_content)\n    if any(finding.severity == "error" for finding in parsed.findings):\n        raise InvalidWikiSectionError("Generated wiki frontmatter is malformed")\n    try:\n        provenance = extract_provenance(parsed.frontmatter)\n    except ProvenanceValidationError as exc:\n        raise InvalidWikiSectionError("Generated wiki provenance is malformed") from exc\n    if provenance is None:\n        return target_content\n\n    merged_sources = merge_provenance_sources(\n        provenance.sources,\n        ProvenanceSource(path=source.path, content_hash=source.content_hash),\n    )\n    if merged_sources == provenance.sources:\n        return target_content\n\n    metadata = dict(parsed.frontmatter)\n    metadata["lifeos_provenance"] = provenance_to_frontmatter_value(\n        LifeOSProvenance(\n            schema_version=provenance.schema_version,\n            sources=merged_sources,\n            generator=provenance.generator,\n            created_at=provenance.created_at,\n        )\n    )\n    return _serialize_wiki_frontmatter(metadata) + parsed.body\n'''
+          if 'def _accumulate_generated_wiki_provenance(' not in proposals:
+              assert insert_after in proposals
+              proposals = proposals.replace(insert_after, insert_after + accumulate)
+
+          proposals = proposals.replace(
+              '    proposed_tags: tuple[str, ...] | None = None,\n) -> PatchHumanFile | ReplaceGeneratedFileV2:',
+              '    proposed_tags: tuple[str, ...] | None = None,\n    source: SourceSnapshot | None = None,\n) -> PatchHumanFile | ReplaceGeneratedFileV2:',
+              1,
+          )
+          old = '''    if proposed_tags is not None:\n        if expected_generator_id is None:\n            raise InvalidWikiSectionError("Tags cannot be changed on a human-owned wiki target")\n        candidate = _replace_generated_wiki_tags(candidate, proposed_tags)\n    if candidate == target_content:\n'''
+          new = '''    if proposed_tags is not None:\n        if expected_generator_id is None:\n            raise InvalidWikiSectionError("Tags cannot be changed on a human-owned wiki target")\n        candidate = _replace_generated_wiki_tags(candidate, proposed_tags)\n    if expected_generator_id is not None and source is not None:\n        candidate = _accumulate_generated_wiki_provenance(candidate, source)\n    if candidate == target_content:\n'''
+          if old in proposals:
+              proposals = proposals.replace(old, new, 1)
+
+          proposals = proposals.replace(
+              '        proposed_tags=proposed_tags,\n    )',
+              '        proposed_tags=proposed_tags,\n        source=source,\n    )',
+              1,
+          )
+          proposals = proposals.replace(
+              '        expected_generator_id=update_expected_generator_id,\n    )',
+              '        expected_generator_id=update_expected_generator_id,\n        source=source,\n    )',
+              1,
+          )
+          proposals = proposals.replace(
+              '            proposed_tags=mutation.proposed_tags,\n        )',
+              '            proposed_tags=mutation.proposed_tags,\n            source=source,\n        )',
+          )
+          proposals_path.write_text(proposals)
+
+          registry_path = Path('src/lifeos/registry/provenance.py')
+          registry = registry_path.read_text()
+          if 'from lifeos.ingestion.provenance import (' not in registry:
+              registry = registry.replace(
+                  'from lifeos.markdown.parser import parse_markdown_note\n',
+                  'from lifeos.markdown.parser import parse_markdown_note\nfrom lifeos.ingestion.provenance import (\n    ProvenanceValidationError,\n    extract_provenance,\n)\n',
+              )
+          hook = '''    if not isinstance(prov, dict):\n        raise ValueError("lifeos_provenance must be a dictionary")\n\n'''
+          canonical = '''    if not isinstance(prov, dict):\n        raise ValueError("lifeos_provenance must be a dictionary")\n\n    # Canonical ingestion provenance uses the typed nested generator mapping.\n    # Keep the older flat registry fixture shape readable while converging new\n    # generated Markdown on the canonical parser.\n    if "generator" in prov:\n        try:\n            typed = extract_provenance({"lifeos_provenance": prov})\n        except ProvenanceValidationError as exc:\n            raise ProvenanceIndexError(\n                f"Malformed provenance in {derived_path}: {exc}"\n            ) from exc\n        if typed is None:\n            raise ProvenanceIndexError(f"Malformed provenance in {derived_path}: missing block")\n        doc_row = ProvenanceDocumentRow(\n            derived_path=derived_path,\n            schema_version=typed.schema_version,\n            generator_id=typed.generator.id,\n            generator_version=typed.generator.version,\n            prompt_schema_version=typed.generator.prompt_schema_version,\n            model_id=typed.generator.model_id,\n            created_at=typed.created_at,\n        )\n        source_rows = tuple(\n            ProvenanceSourceRow(\n                derived_path=derived_path,\n                source_index=index,\n                source_path=source.path,\n                source_hash=source.content_hash,\n            )\n            for index, source in enumerate(typed.sources)\n        )\n        return doc_row, source_rows\n\n'''
+          if canonical not in registry:
+              assert hook in registry
+              registry = registry.replace(hook, canonical, 1)
+          registry_path.write_text(registry)
+
+          test_path = Path('tests/ingestion/test_cumulative_provenance.py')
+          test_path.write_text('''import json\nfrom pathlib import Path\n\nfrom lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent\nfrom lifeos.ingestion.provenance import (\n    ProvenanceGenerator,\n    ProvenanceSource,\n    extract_provenance,\n    merge_provenance_sources,\n)\nfrom lifeos.ingestion.proposals import build_wiki_proposal, build_wiki_section_update_proposal\nfrom lifeos.markdown.parser import parse_markdown_note\nfrom lifeos.registry.provenance import _validate_provenance_frontmatter\n\n\ndef _source(path: str, char: str) -> SourceSnapshot:\n    return SourceSnapshot(path=path, content_hash="sha256:" + char * 64)\n\n\ndef _generator() -> ProvenanceGenerator:\n    return ProvenanceGenerator("lifeos.ingestion.wiki", "1.0", "v1", "test-model")\n\n\ndef _created_page(source: SourceSnapshot) -> str:\n    content = WikiProposalContent(\n        title="Creatine",\n        body="# Creatine\\n\\n## Evidence\\n\\nInitial.\\n",\n        generator=_generator(),\n    )\n    documents = build_wiki_proposal(\n        content=content,\n        source=source,\n        target_path="wiki/concepts/creatine.md",\n        proposal_id="prop-20260823T190000Z-abcdef12",\n        created_at="2026-08-23T19:00:00Z",\n    )\n    return json.loads(documents.patches_json)["operations"][0]["new_content"]\n\n\ndef test_schema_v1_accepts_multiple_source_snapshots() -> None:\n    first = ProvenanceSource("notes/creatine.md", "sha256:" + "a" * 64)\n    second = ProvenanceSource("journal/2026-08-23.md", "sha256:" + "b" * 64)\n    merged = merge_provenance_sources((first,), second)\n    assert merged == (first, second)\n\n\ndef test_exact_source_snapshot_is_deduplicated_but_changed_hash_is_history() -> None:\n    first = ProvenanceSource("notes/creatine.md", "sha256:" + "a" * 64)\n    same = ProvenanceSource("notes/creatine.md", "sha256:" + "a" * 64)\n    changed = ProvenanceSource("notes/creatine.md", "sha256:" + "b" * 64)\n    assert merge_provenance_sources((first,), same) == (first,)\n    assert merge_provenance_sources((first,), changed) == (first, changed)\n\n\ndef test_generated_wiki_update_accumulates_new_reference() -> None:\n    source_a = _source("notes/creatine.md", "a")\n    source_b = _source("journal/2026-08-23.md", "b")\n    original = _created_page(source_a)\n    documents = build_wiki_section_update_proposal(\n        source=source_b,\n        target_path="wiki/concepts/creatine.md",\n        target_content=original,\n        target_content_hash="sha256:" + "c" * 64,\n        heading="Evidence",\n        section_body="Updated from the journal.",\n        generator=_generator(),\n        proposal_id="prop-20260823T191000Z-abcdef12",\n        created_at="2026-08-23T19:10:00Z",\n        expected_generator_id="lifeos.ingestion.wiki",\n    )\n    candidate = json.loads(documents.patches_json)["operations"][0]["new_content"]\n    parsed = parse_markdown_note(Path("wiki/concepts/creatine.md"), content=candidate)\n    provenance = extract_provenance(parsed.frontmatter)\n    assert provenance is not None\n    assert [(item.path, item.content_hash) for item in provenance.sources] == [\n        (source_a.path, source_a.content_hash),\n        (source_b.path, source_b.content_hash),\n    ]\n\n\ndef test_generated_wiki_repeated_same_snapshot_does_not_duplicate_reference() -> None:\n    source = _source("notes/creatine.md", "a")\n    original = _created_page(source)\n    documents = build_wiki_section_update_proposal(\n        source=source,\n        target_path="wiki/concepts/creatine.md",\n        target_content=original,\n        target_content_hash="sha256:" + "c" * 64,\n        heading="Evidence",\n        section_body="Updated wording.",\n        generator=_generator(),\n        proposal_id="prop-20260823T191000Z-abcdef12",\n        created_at="2026-08-23T19:10:00Z",\n        expected_generator_id="lifeos.ingestion.wiki",\n    )\n    candidate = json.loads(documents.patches_json)["operations"][0]["new_content"]\n    provenance = extract_provenance(\n        parse_markdown_note(Path("wiki/concepts/creatine.md"), content=candidate).frontmatter\n    )\n    assert provenance is not None\n    assert len(provenance.sources) == 1\n\n\ndef test_human_owned_update_does_not_gain_provenance() -> None:\n    original = "---\\ntitle: Human note\\n---\\n# Human\\n\\n## Evidence\\n\\nOld.\\n"\n    documents = build_wiki_section_update_proposal(\n        source=_source("journal/2026-08-23.md", "b"),\n        target_path="wiki/human.md",\n        target_content=original,\n        target_content_hash="sha256:" + "c" * 64,\n        heading="Evidence",\n        section_body="New.",\n        generator=_generator(),\n        proposal_id="prop-20260823T191000Z-abcdef12",\n        created_at="2026-08-23T19:10:00Z",\n    )\n    operation = json.loads(documents.patches_json)["operations"][0]\n    assert operation["op"] == "patch_human_file"\n    assert "lifeos_provenance" not in operation["unified_diff"]\n\n\ndef test_registry_accepts_canonical_multi_source_shape() -> None:\n    original = _created_page(_source("notes/creatine.md", "a"))\n    documents = build_wiki_section_update_proposal(\n        source=_source("journal/2026-08-23.md", "b"),\n        target_path="wiki/concepts/creatine.md",\n        target_content=original,\n        target_content_hash="sha256:" + "c" * 64,\n        heading="Evidence",\n        section_body="Updated.",\n        generator=_generator(),\n        proposal_id="prop-20260823T191000Z-abcdef12",\n        created_at="2026-08-23T19:10:00Z",\n        expected_generator_id="lifeos.ingestion.wiki",\n    )\n    candidate = json.loads(documents.patches_json)["operations"][0]["new_content"]\n    frontmatter = parse_markdown_note(\n        Path("wiki/concepts/creatine.md"), content=candidate\n    ).frontmatter\n    document, sources = _validate_provenance_frontmatter(\n        "wiki/concepts/creatine.md", frontmatter["lifeos_provenance"]\n    )\n    assert document.schema_version == 1\n    assert document.generator_id == "lifeos.ingestion.wiki"\n    assert [row.source_path for row in sources] == [\n        "notes/creatine.md",\n        "journal/2026-08-23.md",\n    ]\n''')
+
+          # Update the old parser expectations now that schema v1 formally supports 1+ snapshots.
+          test_prov = Path('tests/ingestion/test_provenance.py')
+          text = test_prov.read_text()
+          text = text.replace(
+              'with pytest.raises(ProvenanceValidationError, match="exactly one source for schema_version 1"):',
+              'with pytest.raises(ProvenanceValidationError, match="at least one source for schema_version 1"):',
+              1,
+          )
+          old_multi = '''def test_multiple_sources_rejected_in_version_1() -> None:\n    raw = valid_raw_mapping()\n    raw["sources"].append(raw["sources"][0].copy())\n    with pytest.raises(ProvenanceValidationError, match="exactly one source for schema_version 1"):\n        extract_provenance({"lifeos_provenance": raw})\n'''
+          new_multi = '''def test_multiple_sources_parse_in_version_1() -> None:\n    raw = valid_raw_mapping()\n    second = raw["sources"][0].copy()\n    second["path"] = "journal/example.md"\n    second["content_hash"] = "sha256:" + "a" * 64\n    raw["sources"].append(second)\n    prov = extract_provenance({"lifeos_provenance": raw})\n    assert prov is not None\n    assert [source.path for source in prov.sources] == ["study/example.md", "journal/example.md"]\n'''
+          assert old_multi in text
+          text = text.replace(old_multi, new_multi)
+          test_prov.write_text(text)
+          PY
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lifeos/ingestion/provenance.py src/lifeos/ingestion/proposals.py src/lifeos/registry/provenance.py tests/ingestion/test_provenance.py tests/ingestion/test_cumulative_provenance.py
+          git commit -m "LIFEOS-1628: implement cumulative provenance"
+          git push origin HEAD:lifeos-1628-cumulative-wiki-provenance
