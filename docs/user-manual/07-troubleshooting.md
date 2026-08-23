@@ -13,24 +13,53 @@
 ## Ingestion command is unavailable
 
 This is expected: the standalone `lifeos ingest` command and embedded model
-runtime were removed. Connect an external agent to `lifeos-mcp`, then ask it to
-ingest the registered vault-relative source. For a new generated page, prefer a
-structural role (`source`, `entity`, `concept`, or `synthesis`) plus a lowercase
-kebab-case slug; an explicit `wiki/` target remains valid for legacy or custom
-layouts.
-The agent must call `registry_refresh`, then `vault_read_markdown`. It follows
-with `ingestion_create_wiki_proposal` when the target is absent. For one section
-of an existing target, it also reads the target and calls
-`ingestion_update_wiki_section_proposal`. When the intended review must both
-create a detailed page and update an existing section, use
-`ingestion_create_wiki_and_update_section_proposal`; it produces one draft with
-two ordered operations. All paths stop at the resulting draft. Refreshing first
-ensures moved or changed sources have current registry paths and hashes.
+runtime were removed. Connect an external agent to the local `lifeos-mcp` STDIO
+server and let the agent work through the bounded MCP tools instead. LifeOS does
+not need a model name or provider API key for ingestion.
 
-The section-update tool requires one unique ATX heading, supplied without `#`
+For current durable-Wiki ingestion, the preferred flow is:
+
+```text
+registry_refresh as needed
+  → vault_read_markdown on the registered source
+  → vault_context when goals, study purpose, instructions, or nearby vault state matter
+  → wiki_search
+  → vault_read_markdown on relevant wiki hits
+  → decide whether durable knowledge should change
+  → if no useful durable change exists: create no proposal
+  → otherwise ingestion_evolve_wiki_proposal with 1..12 reviewed mutations
+  → stop at draft
+```
+
+`ingestion_evolve_wiki_proposal` may coordinate generated-page creates and
+ownership-aware exact-section updates in one atomic draft. Each mutation has an
+explicit target and rationale. Folder structure beneath `wiki/` is allowed to
+emerge from the existing knowledge instead of being forced into
+`source/entity/concept/synthesis` folders.
+
+The older `ingestion_create_wiki_proposal`,
+`ingestion_update_wiki_section_proposal`, and
+`ingestion_create_wiki_and_update_section_proposal` tools remain compatibility
+surfaces for bounded single/fixed-shape callers, but they are not the preferred
+new ingestion workflow. Likewise, `page_kind + slug` typed routing remains
+compatible but is no longer recommended as the canonical Wiki organization.
+
+For a registered `study/` source, use `study_evolve_learning_proposal` when the
+same reviewed draft should combine Wiki evolution with selective flashcards.
+Flashcards are chosen according to the inferred learning context rather than
+being generated for every fact. Non-study sources do not receive automatic
+flashcards by default.
+
+All proposal-producing ingestion paths stop at draft. Low-level MCP lifecycle
+tools still require explicit submit, approve, and apply intent. In Obsidian, the
+proposal workspace normally exposes one trusted **Accept changes** confirmation
+that performs only the remaining lifecycle transitions while preserving all
+hash, digest, ownership, and recovery checks.
+
+Exact-section updates require one unique ATX heading, supplied without `#`
 markers. If the heading is missing or duplicated, choose a more precise target
-heading or edit the note structure before retrying. Whole-note merging remains
-outside this bounded ingestion operation.
+heading or edit the note structure before retrying. Deterministic LifeOS code
+does not perform autonomous semantic whole-note merging.
 
 If ingestion reports that a missing target retains generated ownership, do not
 edit `system/generated-ownership.json` casually. The file was deleted while its
@@ -47,9 +76,9 @@ changes**. If the target reappears or any ownership field changes before
 acceptance, LifeOS refuses the stale release proposal. Do not edit the manifest by
 hand to bypass review.
 
-LifeOS does not need a model name or provider API key for this workflow. If the
-MCP tools are missing, verify the MCP extra is installed and the client launches
-`lifeos-mcp` with the intended `lifeos.yml` configuration.
+If the MCP tools are missing, verify the `mcp` extra is installed in the LifeOS
+application environment and that the client launches `lifeos-mcp` with the
+intended vault's `lifeos.yml` configuration.
 
 ## Expected `wiki/entities/` or `wiki/concepts/`, but they are missing
 
@@ -79,9 +108,9 @@ uv run lifeos scan
 
 From another directory, pass `--config /absolute/path/to/lifeos.yml`. The command
 reports new, modified, unchanged, and deleted paths and refreshes the proposal
-index. It changes only disposable `registry.db` state. It does not update source
-links written inside Markdown and does not rebuild semantic retrieval; those
-require a proposal and **Synchronize index**, respectively.
+index. It changes only disposable `.lifeos/registry.db` state. It does not update
+source links written inside Markdown and does not rebuild semantic retrieval;
+those require a proposal and **Synchronize index**, respectively.
 
 ## Plugin fails to load
 
