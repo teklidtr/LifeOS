@@ -66,6 +66,10 @@ class BootstrapResult:
 
 def _is_recognized_vault(root: Path) -> bool:
     """Return whether an existing directory satisfies the current bootstrap shape."""
+    git_dir = root / ".git"
+    if not git_dir.is_dir() or git_dir.is_symlink():
+        return False
+
     config_path = root / "lifeos.yml"
     if not config_path.is_file() or config_path.is_symlink():
         return False
