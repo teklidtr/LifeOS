@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from lifeos.ingestion.provenance import ProvenanceValidationError, extract_provenance
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.registry._registry import Registry
 from lifeos.registry._registry import RegistryError
@@ -78,6 +79,37 @@ def _validate_provenance_frontmatter(
     if not isinstance(prov, dict):
         raise ValueError("lifeos_provenance must be a dictionary")
 
+    # Canonical ingestion provenance stores generator metadata as a nested mapping.
+    # The older flat shape remains readable for registry compatibility, while new
+    # generated Markdown goes through the stricter shared provenance parser.
+    if "generator" in prov:
+        try:
+            typed = extract_provenance({"lifeos_provenance": prov})
+        except ProvenanceValidationError as e:
+            raise ProvenanceIndexError(f"Malformed provenance in {derived_path}: {e}") from e
+        if typed is None:
+            raise ProvenanceIndexError(f"Malformed provenance in {derived_path}: missing block")
+
+        doc_row = ProvenanceDocumentRow(
+            derived_path=derived_path,
+            schema_version=typed.schema_version,
+            generator_id=typed.generator.id,
+            generator_version=typed.generator.version,
+            prompt_schema_version=typed.generator.prompt_schema_version,
+            model_id=typed.generator.model_id,
+            created_at=typed.created_at,
+        )
+        source_rows = tuple(
+            ProvenanceSourceRow(
+                derived_path=derived_path,
+                source_index=index,
+                source_path=source.path,
+                source_hash=source.content_hash,
+            )
+            for index, source in enumerate(typed.sources)
+        )
+        return doc_row, source_rows
+
     try:
         schema_version = prov.get("schema_version")
         if type(schema_version) is not int:
@@ -135,9 +167,7 @@ def _validate_provenance_frontmatter(
 
 
 def refresh_provenance_index(registry: Registry, vault_root: Path) -> int:
-    """
-    Refresh the provenance index from Git-tracked canonical files.
-    """
+    """Refresh the provenance index from Git-tracked canonical files."""
     try:
         candidate_paths = git_tracked_markdown_paths(vault_root)
     except GitScannerError as e:
@@ -152,7 +182,6 @@ def refresh_provenance_index(registry: Registry, vault_root: Path) -> int:
             raise ProvenanceIndexError(f"Tracked file missing from working tree: {rel_path}")
 
         parsed = parse_markdown_note(abs_path)
-
         prov = parsed.frontmatter.get("lifeos_provenance")
         if prov is None:
             continue
@@ -161,11 +190,9 @@ def refresh_provenance_index(registry: Registry, vault_root: Path) -> int:
         doc_rows.append(doc)
         source_rows.extend(sources)
 
-    # Sort deterministically
     doc_rows.sort(key=lambda x: x.derived_path)
     source_rows.sort(key=lambda x: (x.derived_path, x.source_index))
 
-    # Transactional replacement
     with registry.connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -242,8 +269,7 @@ def get_provenance_for_derived(
             (derived_path,),
         )
         sources = tuple(
-            ProvenanceSourceSummary(path=row[0], content_hash=row[1])
-            for row in src_cursor.fetchall()
+            ProvenanceSourceSummary(path=row[0], content_hash=row[1]) for row in src_cursor.fetchall()
         )
 
         return DerivedProvenanceSummary(
@@ -268,7 +294,7 @@ def list_derived_for_source(
     with registry.connect_read_only() as conn:
         cursor = conn.execute(
             """
-            SELECT derived_path
+            SELECT DISTINCT derived_path
             FROM provenance_sources
             WHERE source_path = ?
             ORDER BY derived_path ASC
