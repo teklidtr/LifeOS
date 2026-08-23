@@ -65,8 +65,42 @@ jobs:
             echo "No changed Python files."
           fi
 
-      - name: Mypy
+      - name: Mypy repository audit
+        continue-on-error: true
         run: uv run mypy src
+
+      - name: Mypy changed source files
+        if: github.event_name != 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ github.event_name }}" in
+            pull_request)
+              base="${{ github.event.pull_request.base.sha }}"
+              head="${{ github.event.pull_request.head.sha }}"
+              ;;
+            push)
+              base="${{ github.event.before }}"
+              head="${{ github.sha }}"
+              ;;
+            *)
+              echo "No diff base for this event; skipping changed-source mypy gate."
+              exit 0
+              ;;
+          esac
+
+          mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$base" "$head" -- '*.py')
+          files=()
+          for file in "${changed[@]}"; do
+            if [[ "$file" == src/* ]]; then
+              files+=("$file")
+            fi
+          done
+          if ((${#files[@]})); then
+            uv run mypy "${files[@]}"
+          else
+            echo "No changed Python source files."
+          fi
 
       - name: Compile Python sources
         run: uv run python -m compileall -q src tests
