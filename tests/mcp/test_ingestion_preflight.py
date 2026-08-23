@@ -51,7 +51,7 @@ def _proposal_source_hash(vault_root: Path, proposal_path: str) -> str:
     assert loaded is not None
     operation = loaded.patch_document.operations[0]
     assert operation.op == "create_generated_file"
-    parsed = parse_markdown_note(Path(operation.path), content=operation.new_content)
+    parsed = parse_markdown_note(Path(operation.target_path), content=operation.new_content)
     provenance = parsed.frontmatter["lifeos_provenance"]
     return provenance["sources"][0]["content_hash"]
 
