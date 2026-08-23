@@ -6,7 +6,6 @@ from pathlib import Path
 from lifeos.bridge import BridgeApplication
 from lifeos.copilot import (
     CopilotIndex,
-    GoalRecord,
     Milestone,
     NearTermAction,
     PlanOption,

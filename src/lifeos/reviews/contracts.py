@@ -205,7 +205,9 @@ def review_identity(kind: ReviewKind, day: date) -> tuple[str, date, date]:
         start = day - timedelta(days=day.weekday())
         iso = start.isocalendar()
         return f"weekly-{iso.year}-W{iso.week:02d}", start, start + timedelta(days=6)
-    raise ReviewContractError("invalid_review_kind", f"Unsupported review kind: {kind}", "review_kind")
+    raise ReviewContractError(
+        "invalid_review_kind", f"Unsupported review kind: {kind}", "review_kind"
+    )
 
 
 def review_path(kind: ReviewKind, day: date) -> str:
@@ -219,7 +221,9 @@ def review_kind_from_legacy(kind: str) -> ReviewKind:
         return "daily"
     if kind == "weekly":
         return "weekly"
-    raise ReviewContractError("invalid_review_kind", f"Unsupported review kind: {kind}", "review_kind")
+    raise ReviewContractError(
+        "invalid_review_kind", f"Unsupported review kind: {kind}", "review_kind"
+    )
 
 
 def phase_ids_for_kind(kind: ReviewKind) -> tuple[PhaseId, ...]:
@@ -242,7 +246,9 @@ def _date(value: object, field: str) -> date:
         try:
             return date.fromisoformat(value)
         except ValueError as exc:
-            raise ReviewContractError("invalid_date", f"{field} must be an ISO date.", field) from exc
+            raise ReviewContractError(
+                "invalid_date", f"{field} must be an ISO date.", field
+            ) from exc
     raise ReviewContractError("invalid_date", f"{field} must be an ISO date.", field)
 
 
@@ -252,7 +258,9 @@ def _datetime(value: object, field: str) -> str:
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise ReviewContractError("invalid_datetime", f"{field} must be an ISO datetime.", field) from exc
+        raise ReviewContractError(
+            "invalid_datetime", f"{field} must be an ISO datetime.", field
+        ) from exc
     if parsed.tzinfo is None:
         raise ReviewContractError("invalid_datetime", f"{field} must include a timezone.", field)
     return value
@@ -277,7 +285,9 @@ def _string_tuple(value: object, field: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise ReviewContractError("invalid_collection", f"{field} must be a list of strings.", field)
+        raise ReviewContractError(
+            "invalid_collection", f"{field} must be a list of strings.", field
+        )
     rows = tuple(_string(item, field) for item in value)
     if len(set(rows)) != len(rows):
         raise ReviewContractError("duplicate_value", f"{field} contains duplicates.", field)
@@ -294,10 +304,14 @@ def _hash(value: object, field: str) -> str:
 def _path(value: object, field: str) -> str:
     result = _string(value, field)
     if "\\" in result or "\x00" in result:
-        raise ReviewContractError("invalid_path", f"{field} is not a safe vault-relative path.", field)
+        raise ReviewContractError(
+            "invalid_path", f"{field} is not a safe vault-relative path.", field
+        )
     pure = PurePosixPath(result)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
-        raise ReviewContractError("invalid_path", f"{field} is not a safe vault-relative path.", field)
+        raise ReviewContractError(
+            "invalid_path", f"{field} is not a safe vault-relative path.", field
+        )
     return pure.as_posix()
 
 
@@ -311,10 +325,14 @@ def parse_phase_progress(value: object, *, field: str = "phases") -> ReviewPhase
     raw = _mapping(value, field)
     phase_id = _string(raw.get("phase_id"), f"{field}.phase_id")
     if phase_id not in {"morning", "evening", "weekly"}:
-        raise ReviewContractError("invalid_phase", f"Unsupported phase: {phase_id}", f"{field}.phase_id")
+        raise ReviewContractError(
+            "invalid_phase", f"Unsupported phase: {phase_id}", f"{field}.phase_id"
+        )
     state = str(raw.get("state", "pending"))
     if state not in {"pending", "completed", "skipped"}:
-        raise ReviewContractError("invalid_progress_state", f"Unsupported phase state: {state}", f"{field}.state")
+        raise ReviewContractError(
+            "invalid_progress_state", f"Unsupported phase state: {state}", f"{field}.state"
+        )
     completed_at = _optional_string(raw.get("completed_at"), f"{field}.completed_at")
     if completed_at is not None:
         completed_at = _datetime(completed_at, f"{field}.completed_at")
@@ -322,7 +340,11 @@ def parse_phase_progress(value: object, *, field: str = "phases") -> ReviewPhase
     skipped = _string_tuple(raw.get("skipped_sections", []), f"{field}.skipped_sections")
     overlap = set(completed) & set(skipped)
     if overlap:
-        raise ReviewContractError("conflicting_progress", f"Sections cannot be completed and skipped: {sorted(overlap)}", field)
+        raise ReviewContractError(
+            "conflicting_progress",
+            f"Sections cannot be completed and skipped: {sorted(overlap)}",
+            field,
+        )
     return ReviewPhaseProgress(
         phase_id=phase_id,  # type: ignore[arg-type]
         state=state,  # type: ignore[arg-type]
@@ -346,10 +368,14 @@ def parse_item_decision(value: object, *, field: str = "item_decisions") -> Revi
         "propose_change",
     }
     if decision not in allowed:
-        raise ReviewContractError("invalid_decision", f"Unsupported review decision: {decision}", f"{field}.decision")
+        raise ReviewContractError(
+            "invalid_decision", f"Unsupported review decision: {decision}", f"{field}.decision"
+        )
     return ReviewItemDecision(
         item_id=_string(raw.get("item_id"), f"{field}.item_id", pattern=_ITEM_ID),
-        evidence_fingerprint=_hash(raw.get("evidence_fingerprint"), f"{field}.evidence_fingerprint"),
+        evidence_fingerprint=_hash(
+            raw.get("evidence_fingerprint"), f"{field}.evidence_fingerprint"
+        ),
         decision=decision,  # type: ignore[arg-type]
         decided_at=_datetime(raw.get("decided_at"), f"{field}.decided_at"),
         note=_optional_string(raw.get("note"), f"{field}.note"),
@@ -361,7 +387,9 @@ def parse_answer(value: object, *, field: str = "answers") -> ReviewAnswer:
     raw = _mapping(value, field)
     phase = _optional_string(raw.get("phase_id"), f"{field}.phase_id")
     if phase is not None and phase not in {"morning", "evening", "weekly"}:
-        raise ReviewContractError("invalid_phase", f"Unsupported phase: {phase}", f"{field}.phase_id")
+        raise ReviewContractError(
+            "invalid_phase", f"Unsupported phase: {phase}", f"{field}.phase_id"
+        )
     return ReviewAnswer(
         prompt_id=_string(raw.get("prompt_id"), f"{field}.prompt_id", pattern=_ITEM_ID),
         value=_string(raw.get("value"), f"{field}.value"),
@@ -370,7 +398,9 @@ def parse_answer(value: object, *, field: str = "answers") -> ReviewAnswer:
     )
 
 
-def parse_lifecycle_event(value: object, *, field: str = "lifecycle_events") -> ReviewLifecycleEvent:
+def parse_lifecycle_event(
+    value: object, *, field: str = "lifecycle_events"
+) -> ReviewLifecycleEvent:
     raw = _mapping(value, field)
     return ReviewLifecycleEvent(
         event_id=_string(raw.get("event_id"), f"{field}.event_id", pattern=_ITEM_ID),
@@ -381,7 +411,9 @@ def parse_lifecycle_event(value: object, *, field: str = "lifecycle_events") -> 
     )
 
 
-def parse_snapshot_record(value: object, *, field: str = "snapshot_history") -> ReviewSnapshotRecord:
+def parse_snapshot_record(
+    value: object, *, field: str = "snapshot_history"
+) -> ReviewSnapshotRecord:
     raw = _mapping(value, field)
     return ReviewSnapshotRecord(
         snapshot_id=_string(raw.get("snapshot_id"), f"{field}.snapshot_id"),
@@ -395,7 +427,9 @@ def validate_review_metadata(
 ) -> ReviewArtifactMetadata:
     schema = frontmatter.get("review_schema", frontmatter.get("schema_version"))
     if type(schema) is not int:
-        raise ReviewContractError("missing_schema", "review_schema must be an integer.", "review_schema")
+        raise ReviewContractError(
+            "missing_schema", "review_schema must be an integer.", "review_schema"
+        )
     if schema not in SUPPORTED_REVIEW_SCHEMA_VERSIONS:
         raise ReviewContractError(
             "unsupported_schema",
@@ -405,7 +439,9 @@ def validate_review_metadata(
     review_id = _string(frontmatter.get("review_id"), "review_id", pattern=_REVIEW_ID)
     kind = _string(frontmatter.get("review_kind"), "review_kind")
     if kind not in {"daily", "weekly"}:
-        raise ReviewContractError("invalid_review_kind", f"Unsupported review kind: {kind}", "review_kind")
+        raise ReviewContractError(
+            "invalid_review_kind", f"Unsupported review kind: {kind}", "review_kind"
+        )
     start = _date(frontmatter.get("period_start"), "period_start")
     end = _date(frontmatter.get("period_end"), "period_end")
     expected_id, expected_start, expected_end = review_identity(kind, start)  # type: ignore[arg-type]
@@ -416,50 +452,94 @@ def validate_review_metadata(
             "review_id",
         )
     if path is not None and _path(path, "path") != review_path(kind, start):  # type: ignore[arg-type]
-        raise ReviewContractError("path_mismatch", "Review path does not match its identity.", "path")
+        raise ReviewContractError(
+            "path_mismatch", "Review path does not match its identity.", "path"
+        )
     timezone = _string(frontmatter.get("timezone"), "timezone", pattern=_TIMEZONE)
     status = _string(frontmatter.get("status"), "status")
     if status not in {"open", "completed", "skipped", "superseded"}:
-        raise ReviewContractError("invalid_status", f"Unsupported review status: {status}", "status")
+        raise ReviewContractError(
+            "invalid_status", f"Unsupported review status: {status}", "status"
+        )
     raw_phases = frontmatter.get("phases")
     if not isinstance(raw_phases, Sequence) or isinstance(raw_phases, (str, bytes)):
         raise ReviewContractError("invalid_collection", "phases must be a list.", "phases")
-    phases = tuple(parse_phase_progress(value, field=f"phases[{index}]") for index, value in enumerate(raw_phases))
+    phases = tuple(
+        parse_phase_progress(value, field=f"phases[{index}]")
+        for index, value in enumerate(raw_phases)
+    )
     expected_phases = phase_ids_for_kind(kind)  # type: ignore[arg-type]
     ids = tuple(phase.phase_id for phase in phases)
     if ids != expected_phases:
-        raise ReviewContractError("invalid_phases", f"Expected phases {expected_phases}, got {ids}.", "phases")
+        raise ReviewContractError(
+            "invalid_phases", f"Expected phases {expected_phases}, got {ids}.", "phases"
+        )
     current_phase = _optional_string(frontmatter.get("current_phase"), "current_phase")
     if current_phase is not None and current_phase not in expected_phases:
-        raise ReviewContractError("invalid_phase", "current_phase is not valid for this review.", "current_phase")
+        raise ReviewContractError(
+            "invalid_phase", "current_phase is not valid for this review.", "current_phase"
+        )
     decisions_raw = frontmatter.get("item_decisions", [])
     if not isinstance(decisions_raw, Sequence) or isinstance(decisions_raw, (str, bytes)):
-        raise ReviewContractError("invalid_collection", "item_decisions must be a list.", "item_decisions")
-    decisions = tuple(parse_item_decision(value, field=f"item_decisions[{index}]") for index, value in enumerate(decisions_raw))
+        raise ReviewContractError(
+            "invalid_collection", "item_decisions must be a list.", "item_decisions"
+        )
+    decisions = tuple(
+        parse_item_decision(value, field=f"item_decisions[{index}]")
+        for index, value in enumerate(decisions_raw)
+    )
     decision_keys = [(item.item_id, item.evidence_fingerprint) for item in decisions]
     if len(set(decision_keys)) != len(decision_keys):
-        raise ReviewContractError("duplicate_decision", "item_decisions contains duplicate item fingerprints.", "item_decisions")
+        raise ReviewContractError(
+            "duplicate_decision",
+            "item_decisions contains duplicate item fingerprints.",
+            "item_decisions",
+        )
     answers_raw = frontmatter.get("answers", [])
     if not isinstance(answers_raw, Sequence) or isinstance(answers_raw, (str, bytes)):
         raise ReviewContractError("invalid_collection", "answers must be a list.", "answers")
-    answers = tuple(parse_answer(value, field=f"answers[{index}]") for index, value in enumerate(answers_raw))
+    answers = tuple(
+        parse_answer(value, field=f"answers[{index}]") for index, value in enumerate(answers_raw)
+    )
     answer_keys = [(answer.prompt_id, answer.phase_id) for answer in answers]
     if len(set(answer_keys)) != len(answer_keys):
-        raise ReviewContractError("duplicate_answer", "answers contains duplicate prompt and phase pairs.", "answers")
+        raise ReviewContractError(
+            "duplicate_answer", "answers contains duplicate prompt and phase pairs.", "answers"
+        )
     snapshot_hash = frontmatter.get("snapshot_hash")
-    normalized_snapshot_hash = None if snapshot_hash is None else _hash(snapshot_hash, "snapshot_hash")
+    normalized_snapshot_hash = (
+        None if snapshot_hash is None else _hash(snapshot_hash, "snapshot_hash")
+    )
     history_raw = frontmatter.get("snapshot_history", [])
     if not isinstance(history_raw, Sequence) or isinstance(history_raw, (str, bytes)):
-        raise ReviewContractError("invalid_collection", "snapshot_history must be a list.", "snapshot_history")
-    history = tuple(parse_snapshot_record(value, field=f"snapshot_history[{index}]") for index, value in enumerate(history_raw))
+        raise ReviewContractError(
+            "invalid_collection", "snapshot_history must be a list.", "snapshot_history"
+        )
+    history = tuple(
+        parse_snapshot_record(value, field=f"snapshot_history[{index}]")
+        for index, value in enumerate(history_raw)
+    )
     if len({item.snapshot_id for item in history}) != len(history):
-        raise ReviewContractError("duplicate_snapshot", "snapshot_history contains duplicate snapshot IDs.", "snapshot_history")
+        raise ReviewContractError(
+            "duplicate_snapshot",
+            "snapshot_history contains duplicate snapshot IDs.",
+            "snapshot_history",
+        )
     lifecycle_raw = frontmatter.get("lifecycle_events", [])
     if not isinstance(lifecycle_raw, Sequence) or isinstance(lifecycle_raw, (str, bytes)):
-        raise ReviewContractError("invalid_collection", "lifecycle_events must be a list.", "lifecycle_events")
-    lifecycle = tuple(parse_lifecycle_event(value, field=f"lifecycle_events[{index}]") for index, value in enumerate(lifecycle_raw))
+        raise ReviewContractError(
+            "invalid_collection", "lifecycle_events must be a list.", "lifecycle_events"
+        )
+    lifecycle = tuple(
+        parse_lifecycle_event(value, field=f"lifecycle_events[{index}]")
+        for index, value in enumerate(lifecycle_raw)
+    )
     if len({item.event_id for item in lifecycle}) != len(lifecycle):
-        raise ReviewContractError("duplicate_lifecycle_event", "lifecycle_events contains duplicate IDs.", "lifecycle_events")
+        raise ReviewContractError(
+            "duplicate_lifecycle_event",
+            "lifecycle_events contains duplicate IDs.",
+            "lifecycle_events",
+        )
     return ReviewArtifactMetadata(
         review_id=review_id,
         schema_version=schema,
@@ -471,13 +551,18 @@ def validate_review_metadata(
         created_at=_datetime(frontmatter.get("created_at"), "created_at"),
         updated_at=_datetime(frontmatter.get("updated_at"), "updated_at"),
         phases=phases,
-        current_phase=current_phase,  # type: ignore[arg-type]
+        current_phase=current_phase,
         item_decisions=decisions,
         answers=answers,
         proposal_refs=_string_tuple(frontmatter.get("proposal_refs", []), "proposal_refs"),
-        previous_review_id=_optional_string(frontmatter.get("previous_review_id"), "previous_review_id"),
+        previous_review_id=_optional_string(
+            frontmatter.get("previous_review_id"), "previous_review_id"
+        ),
         next_review_id=_optional_string(frontmatter.get("next_review_id"), "next_review_id"),
-        migrated_from=tuple(_path(item, "migrated_from") for item in _string_tuple(frontmatter.get("migrated_from", []), "migrated_from")),
+        migrated_from=tuple(
+            _path(item, "migrated_from")
+            for item in _string_tuple(frontmatter.get("migrated_from", []), "migrated_from")
+        ),
         snapshot_id=_optional_string(frontmatter.get("snapshot_id"), "snapshot_id"),
         snapshot_hash=normalized_snapshot_hash,
         snapshot_history=history,

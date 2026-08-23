@@ -8,8 +8,7 @@ import pytest
 from lifeos.bridge import BridgeApplication
 from lifeos.copilot import (
     CopilotIndex, GoalReadinessReport, Milestone, PlanAssumption, PlanOption,
-    PlanningContextItem, PlanningContextPack, ReadinessFinding,
-    RecurringWorkload, check_portfolio_capacity, compare_plan_options,
+    PlanningContextItem, PlanningContextPack, RecurringWorkload, check_portfolio_capacity, compare_plan_options,
     decompose_plan_option, explain_plan_option, recompute_capacity_counterfactual,
 )
 from lifeos.copilot.context import ContextOmission

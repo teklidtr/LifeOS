@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Literal, cast
+from typing import Literal
 
 WikiPageKind = Literal["source", "entity", "concept", "synthesis"]
 
@@ -33,7 +33,7 @@ def validate_wiki_page_kind(value: str) -> WikiPageKind:
     if value not in WIKI_PAGE_FOLDERS:
         choices = ", ".join(WIKI_PAGE_FOLDERS)
         raise WikiLayoutError(f"page_kind must be one of: {choices}")
-    return cast(WikiPageKind, value)
+    return value
 
 
 def validate_wiki_slug(slug: str) -> str:
@@ -64,6 +64,7 @@ def is_lazy_wiki_role_parent(parent_path: str) -> bool:
     """Return whether application may lazily create this exact structural folder."""
 
     return parent_path in _FOLDER_TO_KIND
+
 
 MAX_EMERGENT_WIKI_PARENT_DEPTH = 6
 _GENERATED_EMERGENT_ROOTS = frozenset({"wiki", "flashcards"})

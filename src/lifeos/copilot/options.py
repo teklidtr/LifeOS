@@ -158,6 +158,7 @@ def generate_plan_options(
         as_of=as_of,
     )
     diagnostics: list[str] = []
+    options: tuple[PlanOption, ...]
     adapter_used = adapter is not None
     if adapter is None:
         options = (_deterministic_option(request),)
@@ -178,7 +179,9 @@ def generate_plan_options(
     _validate_option_set(options, request=request)
     duplicates = _find_duplicates(options, index=index)
     if duplicates:
-        diagnostics.append("One or more options overlap an existing plan and require explicit review.")
+        diagnostics.append(
+            "One or more options overlap an existing plan and require explicit review."
+        )
     outcome: OptionSetOutcome = "options" if options else "no-viable-option"
     return PlanOptionSet(
         schema_version=1,
@@ -326,9 +329,7 @@ def _option_from_mapping(data: Mapping[str, Any]) -> PlanOption:
     )
 
 
-def _validate_option_set(
-    options: tuple[PlanOption, ...], *, request: PlanOptionRequest
-) -> None:
+def _validate_option_set(options: tuple[PlanOption, ...], *, request: PlanOptionRequest) -> None:
     if len(options) > 3:
         raise PlanOptionError("no more than three options are allowed")
     ids = [item.option_id for item in options]
@@ -353,7 +354,9 @@ def _validate_option_set(
             tuple(sorted(_normalize(item) for item in option.tradeoffs)),
         )
         if signature in signatures:
-            raise PlanOptionError("multiple options are cosmetic rewrites rather than distinct strategies")
+            raise PlanOptionError(
+                "multiple options are cosmetic rewrites rather than distinct strategies"
+            )
         signatures.add(signature)
         for assumption in option.assumptions:
             if assumption.source_ref is not None and assumption.source_ref not in allowed_refs:
@@ -399,7 +402,7 @@ def _answer_value(session: PlanningSession, question_id: str) -> str | None:
 
 def _reference_id(value: str) -> str:
     cleaned = value.strip()
-    if cleaned.startswith("[[") and cleaned.endswith("]]" ):
+    if cleaned.startswith("[[") and cleaned.endswith("]]"):
         cleaned = cleaned[2:-2].split("|", 1)[0]
     return Path(cleaned).stem
 
@@ -425,7 +428,9 @@ def _mapping_list(value: object, name: str) -> list[Mapping[str, Any]]:
 
 
 def _string_tuple(value: object, name: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
         raise PlanOptionError(f"{name} must be a list of non-empty strings")
     return tuple(cast(list[str], value))
 

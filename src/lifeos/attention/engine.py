@@ -105,9 +105,7 @@ def load_preferences(runtime_dir: Path) -> AttentionPreferences:
             snoozed_until=tuple(
                 sorted((str(key), str(value)) for key, value in snoozed_raw.items())
             ),
-            dismissed=tuple(
-                sorted(str(item) for item in dismissed_raw if isinstance(item, str))
-            ),
+            dismissed=tuple(sorted(str(item) for item in dismissed_raw if isinstance(item, str))),
         )
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise DailyInteractionError(
@@ -239,9 +237,7 @@ def evaluate_attention(
                     None,
                 )
                 planned = (
-                    _date_value(raw_task.get("planned_for"))
-                    if isinstance(raw_task, dict)
-                    else None
+                    _date_value(raw_task.get("planned_for")) if isinstance(raw_task, dict) else None
                 )
             except (VaultAccessError, TypeError):
                 planned = None
@@ -300,9 +296,7 @@ def evaluate_attention(
 
     try:
         dataset = build_evidence_dataset(vault_root, as_of=day)
-        for diagnosis in diagnose_repeated_avoidance(
-            observations=dataset.observations, as_of=day
-        ):
+        for diagnosis in diagnose_repeated_avoidance(observations=dataset.observations, as_of=day):
             if diagnosis.dismissed:
                 continue
             items.append(
@@ -320,7 +314,8 @@ def evaluate_attention(
                     tuple(
                         SuggestedAction(action, action.replace("_", " ").title())
                         for action in diagnosis.suggested_actions
-                    ) + (SuggestedAction("dismiss", "Dismiss"),),
+                    )
+                    + (SuggestedAction("dismiss", "Dismiss"),),
                     "when new evidence changes the fingerprint or the task is resolved",
                 )
             )
@@ -380,17 +375,13 @@ def evaluate_attention(
                 raw = parsed.frontmatter.get("required_metrics", [])
                 if isinstance(raw, list):
                     required_metrics.extend(
-                        (source.relative_path, metric)
-                        for metric in raw
-                        if isinstance(metric, str)
+                        (source.relative_path, metric) for metric in raw if isinstance(metric, str)
                     )
         metrics_raw = journal_fm.get("metrics", {})
         metrics = metrics_raw if isinstance(metrics_raw, dict) else {}
         for path, metric in required_metrics:
             if metric not in metrics:
-                item_id = _stable_id(
-                    "experiment-observation", path, metric, day.isoformat()
-                )
+                item_id = _stable_id("experiment-observation", path, metric, day.isoformat())
                 items.append(
                     AttentionItem(
                         item_id,
@@ -401,9 +392,7 @@ def evaluate_attention(
                         day.isoformat(),
                         (
                             AttentionEvidence(path, f"Requires metric {metric}"),
-                            AttentionEvidence(
-                                f"journal/{day.isoformat()}.md", "Metric absent"
-                            ),
+                            AttentionEvidence(f"journal/{day.isoformat()}.md", "Metric absent"),
                         ),
                         (
                             SuggestedAction("metric", "Log observation"),
@@ -416,7 +405,9 @@ def evaluate_attention(
         diagnostics.append(f"journal: {exc}")
 
     try:
-        for session in StudySessionService(vault_root=vault_root, runtime_dir=runtime_dir).list_open():
+        for session in StudySessionService(
+            vault_root=vault_root, runtime_dir=runtime_dir
+        ).list_open():
             item_id = _stable_id("unfinished-study", session.session_id)
             items.append(
                 AttentionItem(
@@ -426,7 +417,10 @@ def evaluate_attention(
                     "Study session is still open",
                     "A started study workload was not finished or abandoned.",
                     session.started_at,
-                    tuple(AttentionEvidence(path, "Selected for this session") for path in session.card_paths),
+                    tuple(
+                        AttentionEvidence(path, "Selected for this session")
+                        for path in session.card_paths
+                    ),
                     (
                         SuggestedAction("resume", "Resume"),
                         SuggestedAction("finish", "Finish"),
@@ -482,10 +476,15 @@ def evaluate_attention(
             if item.kind in {"plan_no_next_action", "repeated_avoidance"}
             for evidence in item.evidence
         }
-        severity_map = {"information": "info", "attention": "attention", "important": "important"}
+        severity_map: dict[str, Severity] = {
+            "information": "info",
+            "attention": "attention",
+            "important": "important",
+        }
         for trigger in replanning:
             if trigger.target_path in existing_paths and trigger.code in {
-                "plan-no-feasible-next-action", "repeated-avoidance"
+                "plan-no-feasible-next-action",
+                "repeated-avoidance",
             }:
                 continue
             items.append(
@@ -499,7 +498,8 @@ def evaluate_attention(
                     tuple(
                         AttentionEvidence(trigger.target_path, reference)
                         for reference in trigger.evidence_refs
-                    ) or (AttentionEvidence(trigger.target_path, trigger.code),),
+                    )
+                    or (AttentionEvidence(trigger.target_path, trigger.code),),
                     (
                         SuggestedAction("replan", "Review with copilot"),
                         SuggestedAction("continue", "Continue unchanged"),
@@ -525,17 +525,28 @@ def evaluate_attention(
                     continue
                 phase_id = phase.get("phase_id")
                 state = phase.get("state", "pending")
+                if not isinstance(phase_id, str):
+                    continue
                 threshold_hour = phase_thresholds.get(phase_id)
                 if threshold_hour is None or state != "pending" or as_of.hour < threshold_hour:
                     continue
                 item_id = _stable_id("daily-review-phase", day.isoformat(), str(phase_id))
-                items.append(AttentionItem(
-                    item_id, "daily_review_phase", "attention", f"Resume {phase_id} review",
-                    f"The canonical daily review exists and its {phase_id} phase is still open.", day.isoformat(),
-                    (AttentionEvidence(review_path, f"{phase_id} phase is pending"),),
-                    (SuggestedAction("review", "Resume review"), SuggestedAction("snooze", "Ask later")),
-                    f"when the {phase_id} phase is completed or intentionally skipped",
-                ))
+                items.append(
+                    AttentionItem(
+                        item_id,
+                        "daily_review_phase",
+                        "attention",
+                        f"Resume {phase_id} review",
+                        f"The canonical daily review exists and its {phase_id} phase is still open.",
+                        day.isoformat(),
+                        (AttentionEvidence(review_path, f"{phase_id} phase is pending"),),
+                        (
+                            SuggestedAction("review", "Resume review"),
+                            SuggestedAction("snooze", "Ask later"),
+                        ),
+                        f"when the {phase_id} phase is completed or intentionally skipped",
+                    )
+                )
     except VaultAccessError as exc:
         if exc.code != "not-found":
             diagnostics.append(f"daily-review: {exc}")
@@ -547,16 +558,34 @@ def evaluate_attention(
         weekly_source = read_vault_markdown(vault_root, weekly_path)
         weekly_parsed = parse_markdown_note(weekly_source.path, content=weekly_source.content)
         phases = weekly_parsed.frontmatter.get("phases", [])
-        pending = any(isinstance(phase, dict) and phase.get("phase_id") == "weekly" and phase.get("state", "pending") == "pending" for phase in phases) if isinstance(phases, list) else False
+        pending = (
+            any(
+                isinstance(phase, dict)
+                and phase.get("phase_id") == "weekly"
+                and phase.get("state", "pending") == "pending"
+                for phase in phases
+            )
+            if isinstance(phases, list)
+            else False
+        )
         if pending and (day.weekday() == 6 and as_of.hour >= 17):
             item_id = _stable_id("weekly-review", f"{iso.year}-W{iso.week:02d}")
-            items.append(AttentionItem(
-                item_id, "weekly_review", "attention", "Resume weekly review",
-                "The canonical weekly review exists and remains open as the ISO week ends.", day.isoformat(),
-                (AttentionEvidence(weekly_path, "Weekly phase is pending"),),
-                (SuggestedAction("review", "Resume review"), SuggestedAction("snooze", "Ask tomorrow")),
-                "when the weekly review is completed or intentionally skipped",
-            ))
+            items.append(
+                AttentionItem(
+                    item_id,
+                    "weekly_review",
+                    "attention",
+                    "Resume weekly review",
+                    "The canonical weekly review exists and remains open as the ISO week ends.",
+                    day.isoformat(),
+                    (AttentionEvidence(weekly_path, "Weekly phase is pending"),),
+                    (
+                        SuggestedAction("review", "Resume review"),
+                        SuggestedAction("snooze", "Ask tomorrow"),
+                    ),
+                    "when the weekly review is completed or intentionally skipped",
+                )
+            )
     except VaultAccessError as exc:
         if exc.code != "not-found":
             diagnostics.append(f"weekly-review: {exc}")

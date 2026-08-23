@@ -89,8 +89,7 @@ UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR = ToolDescriptor(
 COMPOUND_WIKI_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     name="ingestion.create_wiki_and_update_section_proposal",
     description=(
-        "Create one reviewable draft that adds a wiki page and updates one "
-        "existing wiki section."
+        "Create one reviewable draft that adds a wiki page and updates one existing wiki section."
     ),
     effect=ToolEffect.PROPOSAL_PRODUCING,
 )
@@ -137,7 +136,7 @@ class CreateWikiProposalRequest:
             raise ValueError("title cannot be empty or whitespace-only")
         if self.title != self.title.strip():
             raise ValueError("title cannot have surrounding whitespace")
-        
+
         if not isinstance(self.body, str):
             raise TypeError("body must be a string")
         if not self.body or self.body.isspace():
@@ -343,10 +342,9 @@ class EvolveWikiProposalRequest:
     def __post_init__(self) -> None:
         operation_count = len(self.creates) + len(self.updates)
         if not 1 <= operation_count <= MAX_COMPOUNDING_WIKI_OPERATIONS:
-            raise ValueError(
-                f"evolve_wiki requires 1..{MAX_COMPOUNDING_WIKI_OPERATIONS} mutations"
-            )
-        targets = [item.target_path for item in (*self.creates, *self.updates)]
+            raise ValueError(f"evolve_wiki requires 1..{MAX_COMPOUNDING_WIKI_OPERATIONS} mutations")
+        targets = [item.target_path for item in self.creates]
+        targets.extend(item.target_path for item in self.updates)
         if len(set(targets)) != len(targets):
             raise ValueError("evolve_wiki mutations must use distinct target paths")
 
@@ -374,7 +372,12 @@ class StudyFlashcardCreateRequest:
 
     def __post_init__(self) -> None:
         for field_name in (
-            "target_path", "card_id", "topic", "question", "answer", "learning_context"
+            "target_path",
+            "card_id",
+            "topic",
+            "question",
+            "answer",
+            "learning_context",
         ):
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value.strip() or value != value.strip():
@@ -404,10 +407,9 @@ class EvolveStudyLearningProposalRequest:
             raise ValueError(
                 f"study learning evolution requires 1..{MAX_COMPOUNDING_WIKI_OPERATIONS} mutations"
             )
-        targets = [
-            item.target_path
-            for item in (*self.wiki_creates, *self.wiki_updates, *self.flashcards)
-        ]
+        targets = [item.target_path for item in self.wiki_creates]
+        targets.extend(item.target_path for item in self.wiki_updates)
+        targets.extend(item.target_path for item in self.flashcards)
         if len(set(targets)) != len(targets):
             raise ValueError("study learning mutations must use distinct target paths")
 
@@ -518,9 +520,7 @@ def _resolve_create_wiki_target(
             return derived
         explicit = validate_wiki_target_path(target_path)
         if explicit != derived:
-            raise WikiLayoutError(
-                f"target_path must match the typed wiki target {derived}"
-            )
+            raise WikiLayoutError(f"target_path must match the typed wiki target {derived}")
         return derived
     except (FileTrackingError, InvalidWikiTargetError, WikiLayoutError) as error:
         raise ToolValidationError("Invalid wiki target path or typed routing") from error
@@ -610,7 +610,7 @@ def create_wiki_proposal(
 
     # 9. Return vault-relative result
     proposal_path = persisted_path.relative_to(vault_root).as_posix()
-    
+
     return CreateWikiProposalResult(
         proposal_id=proposal_id,
         proposal_path=proposal_path,
@@ -661,12 +661,11 @@ def update_wiki_section_proposal(
         ownership=ownership,
     )
     if request.tags is not None and ownership_entry is None:
-        raise ToolValidationError(
-            "Ingestion cannot change tags on a human-owned wiki target"
-        )
-    if ownership_entry is None and parse_markdown_note(
-        Path(target_path), content=target.content
-    ).managed_blocks:
+        raise ToolValidationError("Ingestion cannot change tags on a human-owned wiki target")
+    if (
+        ownership_entry is None
+        and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
+    ):
         raise ToolValidationError(
             "Wiki update target contains managed blocks and cannot use a human patch"
         )
@@ -778,9 +777,12 @@ def create_wiki_and_update_section_proposal(
         target_content=update_target.content_bytes,
         ownership=ownership,
     )
-    if update_ownership_entry is None and parse_markdown_note(
-        Path(update_target_path), content=update_target.content
-    ).managed_blocks:
+    if (
+        update_ownership_entry is None
+        and parse_markdown_note(
+            Path(update_target_path), content=update_target.content
+        ).managed_blocks
+    ):
         raise ToolValidationError(
             "Wiki update target contains managed blocks and cannot use a human patch"
         )
@@ -819,9 +821,7 @@ def create_wiki_and_update_section_proposal(
             proposal_id=proposal_id,
             created_at=created_at,
             update_expected_generator_id=(
-                update_ownership_entry.generator_id
-                if update_ownership_entry is not None
-                else None
+                update_ownership_entry.generator_id if update_ownership_entry is not None else None
             ),
         )
     except InvalidWikiSectionError as e:
@@ -853,7 +853,6 @@ def create_wiki_and_update_section_proposal(
     )
 
 
-
 def evolve_wiki_proposal(
     *,
     vault_root: Path,
@@ -877,9 +876,9 @@ def evolve_wiki_proposal(
     )
 
     prepared: list[PreparedWikiCreateMutation | PreparedWikiSectionUpdateMutation] = []
-    for item in request.creates:
+    for create_item in request.creates:
         target_path = _resolve_create_wiki_target(
-            target_path=item.target_path,
+            target_path=create_item.target_path,
             page_kind=None,
             slug=None,
         )
@@ -894,19 +893,19 @@ def evolve_wiki_proposal(
             PreparedWikiCreateMutation(
                 target_path=target_path,
                 content=WikiProposalContent(
-                    title=item.title,
-                    body=item.body,
+                    title=create_item.title,
+                    body=create_item.body,
                     generator=generator,
-                    tags=item.tags,
-                    tag_rationale=item.tag_rationale,
+                    tags=create_item.tags,
+                    tag_rationale=create_item.tag_rationale,
                 ),
-                rationale=item.rationale,
+                rationale=create_item.rationale,
             )
         )
 
-    for item in request.updates:
+    for update_item in request.updates:
         try:
-            target_path = validate_wiki_target_path(item.target_path)
+            target_path = validate_wiki_target_path(update_item.target_path)
         except (FileTrackingError, InvalidWikiTargetError) as error:
             raise ToolValidationError("Invalid wiki update target path") from error
         if not target_path.endswith(".md"):
@@ -930,13 +929,12 @@ def evolve_wiki_proposal(
             target_content=target.content_bytes,
             ownership=ownership,
         )
-        if item.tags is not None and ownership_entry is None:
-            raise ToolValidationError(
-                "Ingestion cannot change tags on a human-owned wiki target"
-            )
-        if ownership_entry is None and parse_markdown_note(
-            Path(target_path), content=target.content
-        ).managed_blocks:
+        if update_item.tags is not None and ownership_entry is None:
+            raise ToolValidationError("Ingestion cannot change tags on a human-owned wiki target")
+        if (
+            ownership_entry is None
+            and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
+        ):
             raise ToolValidationError(
                 "Wiki update target contains managed blocks and cannot use a human patch"
             )
@@ -945,13 +943,13 @@ def evolve_wiki_proposal(
                 target_path=target_path,
                 target_content=target.content,
                 target_content_hash=f"sha256:{hash_file_content(target.content_bytes)}",
-                heading=item.heading,
-                section_body=item.body,
-                rationale=item.rationale,
+                heading=update_item.heading,
+                section_body=update_item.body,
+                rationale=update_item.rationale,
                 expected_generator_id=(
                     ownership_entry.generator_id if ownership_entry is not None else None
                 ),
-                proposed_tags=item.tags,
+                proposed_tags=update_item.tags,
             )
         )
 
@@ -1014,30 +1012,37 @@ def evolve_study_learning_proposal(
 
     ownership = _load_generated_ownership(vault_root=vault_root)
     generator = ProvenanceGenerator(
-        id=GENERATOR_ID, version=GENERATOR_VERSION,
-        prompt_schema_version=REQUEST_SCHEMA_VERSION, model_id=None,
+        id=GENERATOR_ID,
+        version=GENERATOR_VERSION,
+        prompt_schema_version=REQUEST_SCHEMA_VERSION,
+        model_id=None,
     )
     prepared_wiki: list[PreparedWikiCreateMutation | PreparedWikiSectionUpdateMutation] = []
 
-    for item in request.wiki_creates:
+    for create_item in request.wiki_creates:
         target_path = _resolve_create_wiki_target(
-            target_path=item.target_path, page_kind=None, slug=None
+            target_path=create_item.target_path, page_kind=None, slug=None
         )
         _check_create_target_ownership(
             vault_root=vault_root, target_path=target_path, ownership=ownership
         )
-        prepared_wiki.append(PreparedWikiCreateMutation(
-            target_path=target_path,
-            content=WikiProposalContent(
-                title=item.title, body=item.body, generator=generator,
-                tags=item.tags, tag_rationale=item.tag_rationale,
-            ),
-            rationale=item.rationale,
-        ))
+        prepared_wiki.append(
+            PreparedWikiCreateMutation(
+                target_path=target_path,
+                content=WikiProposalContent(
+                    title=create_item.title,
+                    body=create_item.body,
+                    generator=generator,
+                    tags=create_item.tags,
+                    tag_rationale=create_item.tag_rationale,
+                ),
+                rationale=create_item.rationale,
+            )
+        )
 
-    for item in request.wiki_updates:
+    for update_item in request.wiki_updates:
         try:
-            target_path = validate_wiki_target_path(item.target_path)
+            target_path = validate_wiki_target_path(update_item.target_path)
         except (FileTrackingError, InvalidWikiTargetError) as error:
             raise ToolValidationError("Invalid wiki update target path") from error
         ownership_entry = ownership.entries.get(target_path)
@@ -1056,52 +1061,68 @@ def evolve_study_learning_proposal(
         ownership_entry = _classify_update_target_ownership(
             target_path=target_path, target_content=target.content_bytes, ownership=ownership
         )
-        if item.tags is not None and ownership_entry is None:
+        if update_item.tags is not None and ownership_entry is None:
             raise ToolValidationError(
                 "Study ingestion cannot change tags on a human-owned wiki target"
             )
-        if ownership_entry is None and parse_markdown_note(
-            Path(target_path), content=target.content
-        ).managed_blocks:
+        if (
+            ownership_entry is None
+            and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
+        ):
             raise ToolValidationError(
                 "Wiki update target contains managed blocks and cannot use a human patch"
             )
-        prepared_wiki.append(PreparedWikiSectionUpdateMutation(
-            target_path=target_path, target_content=target.content,
-            target_content_hash=f"sha256:{hash_file_content(target.content_bytes)}",
-            heading=item.heading, section_body=item.body, rationale=item.rationale,
-            expected_generator_id=(
-                ownership_entry.generator_id if ownership_entry is not None else None
-            ),
-            proposed_tags=item.tags,
-        ))
+        prepared_wiki.append(
+            PreparedWikiSectionUpdateMutation(
+                target_path=target_path,
+                target_content=target.content,
+                target_content_hash=f"sha256:{hash_file_content(target.content_bytes)}",
+                heading=update_item.heading,
+                section_body=update_item.body,
+                rationale=update_item.rationale,
+                expected_generator_id=(
+                    ownership_entry.generator_id if ownership_entry is not None else None
+                ),
+                proposed_tags=update_item.tags,
+            )
+        )
 
     prepared_cards: list[PreparedFlashcardCreateMutation] = []
-    for item in request.flashcards:
+    for card_item in request.flashcards:
         try:
-            target_path = validate_flashcard_target_path(item.target_path)
-            for ref in item.knowledge_refs:
+            target_path = validate_flashcard_target_path(card_item.target_path)
+            for ref in card_item.knowledge_refs:
                 validate_wiki_target_path(ref)
         except (FileTrackingError, InvalidWikiTargetError) as error:
             raise ToolValidationError("Invalid flashcard target or knowledge reference") from error
         _check_create_target_ownership(
             vault_root=vault_root, target_path=target_path, ownership=ownership
         )
-        prepared_cards.append(PreparedFlashcardCreateMutation(
-            target_path=target_path, card_id=item.card_id, topic=item.topic,
-            question=item.question, answer=item.answer, rationale=item.rationale,
-            learning_context=item.learning_context, knowledge_refs=item.knowledge_refs,
-            estimated_seconds=item.estimated_seconds,
-        ))
+        prepared_cards.append(
+            PreparedFlashcardCreateMutation(
+                target_path=target_path,
+                card_id=card_item.card_id,
+                topic=card_item.topic,
+                question=card_item.question,
+                answer=card_item.answer,
+                rationale=card_item.rationale,
+                learning_context=card_item.learning_context,
+                knowledge_refs=card_item.knowledge_refs,
+                estimated_seconds=card_item.estimated_seconds,
+            )
+        )
 
     now = clock_fn()
     proposal_id = generate_proposal_id(clock_fn=lambda: now, random_suffix_fn=random_suffix_fn)
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         documents = build_study_learning_proposal(
-            source=verified.source, wiki_mutations=tuple(prepared_wiki),
-            flashcard_mutations=tuple(prepared_cards), generator=generator,
-            proposal_id=proposal_id, created_at=created_at,
+            source=verified.source,
+            wiki_mutations=tuple(prepared_wiki),
+            flashcard_mutations=tuple(prepared_cards),
+            generator=generator,
+            proposal_id=proposal_id,
+            created_at=created_at,
         )
     except (InvalidWikiSectionError, InvalidWikiTargetError) as error:
         raise ToolValidationError(str(error)) from error
@@ -1122,6 +1143,7 @@ def evolve_study_learning_proposal(
     return EvolveStudyLearningProposalResult(
         proposal_id=proposal_id,
         proposal_path=persisted_path.relative_to(vault_root).as_posix(),
-        target_paths=documents.target_paths, operation_count=len(documents.target_paths),
+        target_paths=documents.target_paths,
+        operation_count=len(documents.target_paths),
         status="draft",
     )

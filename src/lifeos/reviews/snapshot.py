@@ -6,7 +6,7 @@ import json
 from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from lifeos.daily import content_hash, load_execution_records
 from lifeos.experiments.reviews import daily_experiment_section, weekly_experiment_section
@@ -25,7 +25,9 @@ from lifeos.reviews.workflow import ReviewItem, ReviewSection, build_review_work
 from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
 
 
-def _source_reference(vault_root: Path, item: ReviewItem, generated_at: str) -> tuple[ReviewSourceReference, ...]:
+def _source_reference(
+    vault_root: Path, item: ReviewItem, generated_at: str
+) -> tuple[ReviewSourceReference, ...]:
     if not item.source_path:
         return ()
     path = item.source_path
@@ -38,7 +40,13 @@ def _source_reference(vault_root: Path, item: ReviewItem, generated_at: str) -> 
     try:
         source = read_vault_markdown(vault_root, path)
     except VaultAccessError:
-        return (ReviewSourceReference(path=path, detail="Source was unavailable during snapshot.", observed_at=generated_at),)
+        return (
+            ReviewSourceReference(
+                path=path,
+                detail="Source was unavailable during snapshot.",
+                observed_at=generated_at,
+            ),
+        )
     return (
         ReviewSourceReference(
             path=path,
@@ -49,7 +57,9 @@ def _source_reference(vault_root: Path, item: ReviewItem, generated_at: str) -> 
     )
 
 
-def _snapshot_item(vault_root: Path, section: ReviewSection, item: ReviewItem, generated_at: str) -> ReviewItemSnapshot:
+def _snapshot_item(
+    vault_root: Path, section: ReviewSection, item: ReviewItem, generated_at: str
+) -> ReviewItemSnapshot:
     sources = _source_reference(vault_root, item, generated_at)
     fingerprint = stable_fingerprint(
         section.section_id,
@@ -72,18 +82,24 @@ def _snapshot_item(vault_root: Path, section: ReviewSection, item: ReviewItem, g
     )
 
 
-def _snapshot_section(vault_root: Path, section: ReviewSection, generated_at: str) -> ReviewSectionSnapshot:
+def _snapshot_section(
+    vault_root: Path, section: ReviewSection, generated_at: str
+) -> ReviewSectionSnapshot:
     return ReviewSectionSnapshot(
         section_id=section.section_id,
         title=section.title,
         optional=section.optional,
         state=section.state,
-        items=tuple(_snapshot_item(vault_root, section, item, generated_at) for item in section.items),
+        items=tuple(
+            _snapshot_item(vault_root, section, item, generated_at) for item in section.items
+        ),
         diagnostic=section.diagnostic,
     )
 
 
-def _daily_evidence_section(vault_root: Path, day: date, generated_at: str) -> ReviewSectionSnapshot:
+def _daily_evidence_section(
+    vault_root: Path, day: date, generated_at: str
+) -> ReviewSectionSnapshot:
     items: list[ReviewItemSnapshot] = []
     journal_path = f"journal/{day.isoformat()}.md"
     try:
@@ -94,36 +110,85 @@ def _daily_evidence_section(vault_root: Path, day: date, generated_at: str) -> R
         morning = "## morning check-in" in body or bool(parsed.frontmatter.get("metrics"))
         evening = "## evening check-in" in body
         for phase, present in (("morning", morning), ("evening", evening)):
-            detail = f"{phase.title()} check-in is recorded." if present else f"No {phase} check-in is recorded; this remains unknown, not a failure."
-            items.append(ReviewItemSnapshot(
-                item_id=f"daily-evidence:{phase}-checkin", section_id="daily-evidence", title=f"{phase.title()} check-in",
-                detail=detail, evidence_fingerprint=stable_fingerprint(journal_path, journal_hash, phase, present),
-                state="ready", action="open", sources=(ReviewSourceReference(journal_path, journal_hash, detail, generated_at),),
-            ))
+            detail = (
+                f"{phase.title()} check-in is recorded."
+                if present
+                else f"No {phase} check-in is recorded; this remains unknown, not a failure."
+            )
+            items.append(
+                ReviewItemSnapshot(
+                    item_id=f"daily-evidence:{phase}-checkin",
+                    section_id="daily-evidence",
+                    title=f"{phase.title()} check-in",
+                    detail=detail,
+                    evidence_fingerprint=stable_fingerprint(
+                        journal_path, journal_hash, phase, present
+                    ),
+                    state="ready",
+                    action="open",
+                    sources=(
+                        ReviewSourceReference(journal_path, journal_hash, detail, generated_at),
+                    ),
+                )
+            )
     except VaultAccessError:
         for phase in ("morning", "evening"):
-            items.append(ReviewItemSnapshot(
-                item_id=f"daily-evidence:{phase}-checkin", section_id="daily-evidence", title=f"{phase.title()} check-in",
-                detail=f"No journal evidence is available for the {phase} check-in; this remains unknown.",
-                evidence_fingerprint=stable_fingerprint(journal_path, phase, "missing"), state="ready", action="checkin",
-                sources=(ReviewSourceReference(journal_path, None, "Journal note is absent.", generated_at),),
-            ))
+            items.append(
+                ReviewItemSnapshot(
+                    item_id=f"daily-evidence:{phase}-checkin",
+                    section_id="daily-evidence",
+                    title=f"{phase.title()} check-in",
+                    detail=f"No journal evidence is available for the {phase} check-in; this remains unknown.",
+                    evidence_fingerprint=stable_fingerprint(journal_path, phase, "missing"),
+                    state="ready",
+                    action="checkin",
+                    sources=(
+                        ReviewSourceReference(
+                            journal_path, None, "Journal note is absent.", generated_at
+                        ),
+                    ),
+                )
+            )
     try:
-        records = tuple(record for record in load_execution_records(vault_root) if record.day == day)
+        records = tuple(
+            record for record in load_execution_records(vault_root) if record.day == day
+        )
         detail = f"{len(records)} explicit task outcome{'s' if len(records) != 1 else ''} recorded today."
-        refs = tuple(ReviewSourceReference(record.plan_path, None, record.outcome, generated_at) for record in records)
-        items.append(ReviewItemSnapshot(
-            item_id="daily-evidence:task-outcomes", section_id="daily-evidence", title="Task outcomes", detail=detail,
-            evidence_fingerprint=stable_fingerprint(*(f"{record.event_id}:{record.outcome}" for record in records), day),
-            state="ready", action="reconcile", sources=refs,
-        ))
+        refs = tuple(
+            ReviewSourceReference(record.plan_path, None, record.outcome, generated_at)
+            for record in records
+        )
+        items.append(
+            ReviewItemSnapshot(
+                item_id="daily-evidence:task-outcomes",
+                section_id="daily-evidence",
+                title="Task outcomes",
+                detail=detail,
+                evidence_fingerprint=stable_fingerprint(
+                    *(f"{record.event_id}:{record.outcome}" for record in records), day
+                ),
+                state="ready",
+                action="reconcile",
+                sources=refs,
+            )
+        )
     except Exception as exc:
-        items.append(ReviewItemSnapshot(
-            item_id="daily-evidence:task-outcomes", section_id="daily-evidence", title="Task outcomes",
-            detail="Task outcome evidence is temporarily unavailable.", evidence_fingerprint=stable_fingerprint(day, "outcomes-unavailable", type(exc).__name__),
-            state="unavailable", diagnostic=str(exc),
-        ))
-    return ReviewSectionSnapshot("daily-evidence", "Today's explicit evidence", False, "ready", tuple(items))
+        items.append(
+            ReviewItemSnapshot(
+                item_id="daily-evidence:task-outcomes",
+                section_id="daily-evidence",
+                title="Task outcomes",
+                detail="Task outcome evidence is temporarily unavailable.",
+                evidence_fingerprint=stable_fingerprint(
+                    day, "outcomes-unavailable", type(exc).__name__
+                ),
+                state="unavailable",
+                diagnostic=str(exc),
+            )
+        )
+    return ReviewSectionSnapshot(
+        "daily-evidence", "Today's explicit evidence", False, "ready", tuple(items)
+    )
 
 
 def _weekly_evidence_sections(
@@ -131,20 +196,49 @@ def _weekly_evidence_sections(
 ) -> tuple[ReviewSectionSnapshot, ...]:
     sections: list[ReviewSectionSnapshot] = []
     try:
-        records = tuple(record for record in load_execution_records(vault_root) if range_start <= record.day <= range_end)
+        records = tuple(
+            record
+            for record in load_execution_records(vault_root)
+            if range_start <= record.day <= range_end
+        )
         counts: dict[str, int] = {}
         for record in records:
             counts[record.outcome] = counts.get(record.outcome, 0) + 1
-        detail = ", ".join(f"{key}: {value}" for key, value in sorted(counts.items())) or "No explicit task outcomes were recorded; missing evidence remains unknown."
-        refs = tuple(ReviewSourceReference(record.plan_path, None, f"{record.day}: {record.outcome}", generated_at) for record in records)
-        execution = ReviewItemSnapshot(
-            "weekly-evidence:execution", "weekly-evidence", "Execution evidence", detail,
-            stable_fingerprint(range_start, range_end, *(f"{record.event_id}:{record.outcome}" for record in records)),
-            "ready", "review", refs,
+        detail = (
+            ", ".join(f"{key}: {value}" for key, value in sorted(counts.items()))
+            or "No explicit task outcomes were recorded; missing evidence remains unknown."
         )
-        sections.append(ReviewSectionSnapshot("weekly-evidence", "Week in explicit evidence", False, "ready", (execution,)))
+        refs = tuple(
+            ReviewSourceReference(
+                record.plan_path, None, f"{record.day}: {record.outcome}", generated_at
+            )
+            for record in records
+        )
+        execution = ReviewItemSnapshot(
+            "weekly-evidence:execution",
+            "weekly-evidence",
+            "Execution evidence",
+            detail,
+            stable_fingerprint(
+                range_start,
+                range_end,
+                *(f"{record.event_id}:{record.outcome}" for record in records),
+            ),
+            "ready",
+            "review",
+            refs,
+        )
+        sections.append(
+            ReviewSectionSnapshot(
+                "weekly-evidence", "Week in explicit evidence", False, "ready", (execution,)
+            )
+        )
     except Exception as exc:
-        sections.append(ReviewSectionSnapshot("weekly-evidence", "Week in explicit evidence", False, "unavailable", (), str(exc)))
+        sections.append(
+            ReviewSectionSnapshot(
+                "weekly-evidence", "Week in explicit evidence", False, "unavailable", (), str(exc)
+            )
+        )
 
     experiments: list[ReviewItemSnapshot] = []
     try:
@@ -156,32 +250,79 @@ def _weekly_evidence_sections(
                 continue
             title = str(parsed.frontmatter.get("title") or source.path.stem)
             required = parsed.frontmatter.get("required_metrics", [])
-            metric_names = tuple(item for item in required if isinstance(item, str)) if isinstance(required, list) else ()
+            metric_names = (
+                tuple(item for item in required if isinstance(item, str))
+                if isinstance(required, list)
+                else ()
+            )
             source_hash = "sha256:" + content_hash(source.content)
             detail = f"Active experiment; required observations: {', '.join(metric_names) if metric_names else 'none declared'}."
-            experiments.append(ReviewItemSnapshot(
-                f"experiments:{stable_fingerprint(source.relative_path)[-16:]}", "experiments", title, detail,
-                stable_fingerprint(source.relative_path, source_hash, metric_names), "ready", "open",
-                (ReviewSourceReference(source.relative_path, source_hash, detail, generated_at),),
-            ))
-        sections.append(ReviewSectionSnapshot("experiments", "Active experiments", True, "ready" if experiments else "empty", tuple(experiments)))
+            experiments.append(
+                ReviewItemSnapshot(
+                    f"experiments:{stable_fingerprint(source.relative_path)[-16:]}",
+                    "experiments",
+                    title,
+                    detail,
+                    stable_fingerprint(source.relative_path, source_hash, metric_names),
+                    "ready",
+                    "open",
+                    (
+                        ReviewSourceReference(
+                            source.relative_path, source_hash, detail, generated_at
+                        ),
+                    ),
+                )
+            )
+        sections.append(
+            ReviewSectionSnapshot(
+                "experiments",
+                "Active experiments",
+                True,
+                "ready" if experiments else "empty",
+                tuple(experiments),
+            )
+        )
     except VaultAccessError as exc:
-        sections.append(ReviewSectionSnapshot("experiments", "Active experiments", True, "unavailable", (), str(exc)))
+        sections.append(
+            ReviewSectionSnapshot(
+                "experiments", "Active experiments", True, "unavailable", (), str(exc)
+            )
+        )
 
     health_items: list[ReviewItemSnapshot] = []
     registry_path = runtime_dir / "registry.db"
-    health_items.append(ReviewItemSnapshot(
-        "system-health:registry", "system-health", "Disposable registry",
-        "Registry is present and rebuildable." if registry_path.exists() else "Registry is absent; review artifacts remain canonical and the index can be rebuilt.",
-        stable_fingerprint("registry", registry_path.exists()), "ready", "status", (),
-    ))
+    health_items.append(
+        ReviewItemSnapshot(
+            "system-health:registry",
+            "system-health",
+            "Disposable registry",
+            "Registry is present and rebuildable."
+            if registry_path.exists()
+            else "Registry is absent; review artifacts remain canonical and the index can be rebuilt.",
+            stable_fingerprint("registry", registry_path.exists()),
+            "ready",
+            "status",
+            (),
+        )
+    )
     ownership_path = vault_root / "system" / "generated-ownership.json"
-    health_items.append(ReviewItemSnapshot(
-        "system-health:ownership", "system-health", "Generated ownership manifest",
-        "Ownership manifest is present." if ownership_path.exists() else "Ownership manifest is absent; consequential proposal preflight may fail closed.",
-        stable_fingerprint("ownership", ownership_path.exists()), "ready", "status", (),
-    ))
-    sections.append(ReviewSectionSnapshot("system-health", "System health", True, "ready", tuple(health_items)))
+    health_items.append(
+        ReviewItemSnapshot(
+            "system-health:ownership",
+            "system-health",
+            "Generated ownership manifest",
+            "Ownership manifest is present."
+            if ownership_path.exists()
+            else "Ownership manifest is absent; consequential proposal preflight may fail closed.",
+            stable_fingerprint("ownership", ownership_path.exists()),
+            "ready",
+            "status",
+            (),
+        )
+    )
+    sections.append(
+        ReviewSectionSnapshot("system-health", "System health", True, "ready", tuple(health_items))
+    )
     return tuple(sections)
 
 
@@ -198,7 +339,7 @@ def build_review_snapshot(
     if kind not in {"daily", "weekly"}:
         raise ValueError("kind must be daily or weekly")
     # The existing evening workflow contains the complete daily evidence set.
-    workflow_kind = "evening" if kind == "daily" else "weekly"
+    workflow_kind: Literal["evening", "weekly"] = "evening" if kind == "daily" else "weekly"
     workflow = build_review_workflow(
         vault_root=vault_root,
         runtime_dir=runtime_dir,
@@ -206,11 +347,31 @@ def build_review_snapshot(
         day=day,
     )
     generated = generated_at.isoformat()
-    sections = tuple(_snapshot_section(vault_root, section, generated) for section in workflow.sections)
+    sections = tuple(
+        _snapshot_section(vault_root, section, generated) for section in workflow.sections
+    )
     if kind == "daily":
-        sections = (*sections, _daily_evidence_section(vault_root, day, generated), daily_experiment_section(vault_root=vault_root, runtime_dir=runtime_dir, day=day, generated_at=generated_at))
+        sections = (
+            *sections,
+            _daily_evidence_section(vault_root, day, generated),
+            daily_experiment_section(
+                vault_root=vault_root, runtime_dir=runtime_dir, day=day, generated_at=generated_at
+            ),
+        )
     else:
-        sections = (*sections, *_weekly_evidence_sections(vault_root, runtime_dir, workflow.range_start, workflow.range_end, generated), weekly_experiment_section(vault_root=vault_root, runtime_dir=runtime_dir, range_start=workflow.range_start, range_end=workflow.range_end, generated_at=generated_at))
+        sections = (
+            *sections,
+            *_weekly_evidence_sections(
+                vault_root, runtime_dir, workflow.range_start, workflow.range_end, generated
+            ),
+            weekly_experiment_section(
+                vault_root=vault_root,
+                runtime_dir=runtime_dir,
+                range_start=workflow.range_start,
+                range_end=workflow.range_end,
+                generated_at=generated_at,
+            ),
+        )
     diagnostics = tuple(
         f"{section.section_id}: {section.diagnostic}"
         for section in sections
@@ -229,7 +390,12 @@ def build_review_snapshot(
 
 
 def render_snapshot_facts(snapshot: ReviewSnapshot) -> str:
-    lines = ["## Review facts", "", f"Snapshot `{snapshot.snapshot_id}` generated {snapshot.generated_at}.", ""]
+    lines = [
+        "## Review facts",
+        "",
+        f"Snapshot `{snapshot.snapshot_id}` generated {snapshot.generated_at}.",
+        "",
+    ]
     for section in snapshot.sections:
         lines.append(f"### {section.title}")
         if section.state == "unavailable":
@@ -243,7 +409,9 @@ def render_snapshot_facts(snapshot: ReviewSnapshot) -> str:
                 lines.append(f"- **{item.title}**: {item.detail}{suffix}")
         lines.append("")
     if snapshot.diagnostics:
-        lines.extend(["### Snapshot diagnostics", *[f"- {item}" for item in snapshot.diagnostics], ""])
+        lines.extend(
+            ["### Snapshot diagnostics", *[f"- {item}" for item in snapshot.diagnostics], ""]
+        )
     return "\n".join(lines).rstrip()
 
 
@@ -254,7 +422,9 @@ def render_snapshot_items(snapshot: ReviewSnapshot) -> str:
         if not section.items:
             lines.append("- No items.")
         for item in section.items:
-            lines.append(f"- [ ] {item.title} <!-- lifeos:item {item.item_id} {item.evidence_fingerprint} -->")
+            lines.append(
+                f"- [ ] {item.title} <!-- lifeos:item {item.item_id} {item.evidence_fingerprint} -->"
+            )
             if item.action:
                 lines.append(f"  - Suggested action: `{item.action}`")
             for source in item.sources:
@@ -285,11 +455,14 @@ def refresh_review_snapshot(
         build_review_continuity,
         render_review_continuity,
     )
+
     previous, _ = adjacent_reviews(service=service, artifact=artifact)
     continuity = build_review_continuity(current_snapshot=snapshot, previous=previous)
     snapshot = apply_continuity_to_snapshot(snapshot, continuity)
     history = artifact.metadata.snapshot_history
-    record = ReviewSnapshotRecord(snapshot.snapshot_id, snapshot.content_hash, snapshot.generated_at)
+    record = ReviewSnapshotRecord(
+        snapshot.snapshot_id, snapshot.content_hash, snapshot.generated_at
+    )
     if not history or history[-1].snapshot_id != record.snapshot_id:
         history = (*history, record)[-20:]
     updated = service.update(

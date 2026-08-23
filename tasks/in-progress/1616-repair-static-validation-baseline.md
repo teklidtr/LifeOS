@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1616
 title: Restore repository-wide Ruff and mypy gates
-status: backlog
+status: in-progress
 phase: 16
 depends_on:
   - LIFEOS-1633A

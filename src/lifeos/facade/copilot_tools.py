@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass
 from pathlib import Path
-
 from lifeos.copilot import build_copilot_index, parse_goal_note
 from lifeos.copilot.context import (
     PlanningContextPack,
@@ -14,6 +14,34 @@ from lifeos.copilot.context import (
 from lifeos.copilot.readiness import GoalReadinessReport, evaluate_goal_readiness
 from lifeos.facade.models import ToolDescriptor, ToolEffect
 from lifeos.vault import read_vault_markdown
+from datetime import date
+from typing import Mapping
+from lifeos.copilot.capacity import (
+    PortfolioCapacityReport,
+    RecurringWorkload,
+    check_portfolio_capacity,
+)
+from lifeos.copilot.decomposition import DecompositionResult
+from lifeos.copilot.contracts import PlanOption
+from lifeos.copilot.explanations import (
+    CounterfactualResult,
+    PlanExplanation,
+    PlanOptionComparison,
+    compare_plan_options,
+    explain_plan_option,
+    recompute_capacity_counterfactual,
+)
+from lifeos.copilot.replanning import (
+    ReplanningProposalRequest,
+    ReplanningProposalResult,
+    ReplanningReview,
+    ReplanningTrigger,
+    ReviewEvidence,
+    build_replanning_review,
+    create_replanning_proposal,
+    scan_replanning_triggers,
+)
+
 
 COPILOT_READINESS_DESCRIPTOR = ToolDescriptor(
     name="copilot.goal_readiness",
@@ -63,23 +91,11 @@ def preview_goal_context(
         include_paths=request.include_paths,
         exclude_paths=request.exclude_paths,
         redact_terms=request.redact_terms,
-        policy=PlanningContextPolicy(
-            allowed_sensitive_roots=request.allowed_sensitive_roots
-        ),
+        policy=PlanningContextPolicy(allowed_sensitive_roots=request.allowed_sensitive_roots),
         max_total_bytes=request.max_total_bytes,
         max_item_bytes=request.max_item_bytes,
     )
 
-from datetime import date
-from typing import Mapping
-
-from lifeos.copilot.capacity import (
-    PortfolioCapacityReport,
-    RecurringWorkload,
-    check_portfolio_capacity,
-)
-from lifeos.copilot.decomposition import DecompositionResult
-from lifeos.copilot.contracts import PlanOption
 
 COPILOT_CAPACITY_DESCRIPTOR = ToolDescriptor(
     name="copilot.capacity_check",
@@ -111,14 +127,6 @@ def inspect_portfolio_capacity(
         adaptive_durations=request.adaptive_durations,
     )
 
-from lifeos.copilot.explanations import (
-    CounterfactualResult,
-    PlanExplanation,
-    PlanOptionComparison,
-    compare_plan_options,
-    explain_plan_option,
-    recompute_capacity_counterfactual,
-)
 
 COPILOT_EXPLAIN_DESCRIPTOR = ToolDescriptor(
     name="copilot.explain",
@@ -133,8 +141,11 @@ COPILOT_COMPARE_DESCRIPTOR = ToolDescriptor(
 
 
 def explain_copilot_option(
-    *, option: PlanOption, decomposition: DecompositionResult,
-    capacity: PortfolioCapacityReport, context: PlanningContextPack,
+    *,
+    option: PlanOption,
+    decomposition: DecompositionResult,
+    capacity: PortfolioCapacityReport,
+    context: PlanningContextPack,
 ) -> PlanExplanation:
     return explain_plan_option(
         option=option, decomposition=decomposition, capacity=capacity, context=context
@@ -142,7 +153,8 @@ def explain_copilot_option(
 
 
 def compare_copilot_options(
-    *, options: tuple[PlanOption, ...],
+    *,
+    options: tuple[PlanOption, ...],
     decompositions: Mapping[str, DecompositionResult],
     capacity_reports: Mapping[str, PortfolioCapacityReport],
 ) -> PlanOptionComparison:
@@ -152,25 +164,23 @@ def compare_copilot_options(
 
 
 def counterfactual_capacity(
-    *, vault_root: Path, option: PlanOption, decomposition: DecompositionResult,
-    before: PortfolioCapacityReport, as_of: date, available_minutes: int | None,
+    *,
+    vault_root: Path,
+    option: PlanOption,
+    decomposition: DecompositionResult,
+    before: PortfolioCapacityReport,
+    as_of: date,
+    available_minutes: int | None,
 ) -> CounterfactualResult:
     return recompute_capacity_counterfactual(
-        option=option, decomposition=decomposition, index=build_copilot_index(vault_root),
-        before=before, as_of=as_of, available_minutes=available_minutes,
+        option=option,
+        decomposition=decomposition,
+        index=build_copilot_index(vault_root),
+        before=before,
+        as_of=as_of,
+        available_minutes=available_minutes,
     )
 
-
-from lifeos.copilot.replanning import (
-    ReplanningProposalRequest,
-    ReplanningProposalResult,
-    ReplanningReview,
-    ReplanningTrigger,
-    ReviewEvidence,
-    build_replanning_review,
-    create_replanning_proposal,
-    scan_replanning_triggers,
-)
 
 COPILOT_REPLANNING_SCAN_DESCRIPTOR = ToolDescriptor(
     name="copilot.replanning_scan",
@@ -201,9 +211,7 @@ class CopilotReplanningReviewRequest:
 def scan_copilot_replanning(
     *, vault_root: Path, runtime_dir: Path, as_of: date
 ) -> tuple[ReplanningTrigger, ...]:
-    return scan_replanning_triggers(
-        vault_root=vault_root, runtime_dir=runtime_dir, as_of=as_of
-    )
+    return scan_replanning_triggers(vault_root=vault_root, runtime_dir=runtime_dir, as_of=as_of)
 
 
 def inspect_copilot_replanning(
@@ -223,6 +231,4 @@ def inspect_copilot_replanning(
 def propose_copilot_replanning(
     *, vault_root: Path, request: ReplanningProposalRequest, actor_id: str
 ) -> ReplanningProposalResult | None:
-    return create_replanning_proposal(
-        vault_root=vault_root, request=request, actor_id=actor_id
-    )
+    return create_replanning_proposal(vault_root=vault_root, request=request, actor_id=actor_id)

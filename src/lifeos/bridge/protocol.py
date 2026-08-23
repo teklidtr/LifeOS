@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import Any
 
@@ -163,7 +164,7 @@ class ProtocolError(Exception):
 
 
 def strict_object(
-    value: object, *, allowed: set[str], required: set[str] = frozenset()
+    value: object, *, allowed: AbstractSet[str], required: AbstractSet[str] = frozenset()
 ) -> dict[str, Any]:
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise ProtocolError("invalid_request", "Expected a JSON object.")

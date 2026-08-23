@@ -7,7 +7,6 @@ import pytest
 
 from lifeos.copilot import (
     CopilotContractError,
-    Milestone,
     NearTermAction,
     PlanningAnswer,
     PlanningSession,
@@ -21,7 +20,7 @@ from lifeos.bridge import BridgeApplication
 
 
 def _goal(*, extra: str = "") -> str:
-    return f"""---
+    return """---
 copilot_schema_version: 1
 id: goal-learn-cell
  type: invalid
