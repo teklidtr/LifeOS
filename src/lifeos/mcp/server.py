@@ -134,9 +134,9 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "development; it is not the runtime contract. Use vault_context when goals, study "
     "purpose, journal context, experiments, or path-scoped system/instructions.yml rules "
     "could change how a source should be interpreted. Folder location supplies context, "
-    "not permission: any canonical Markdown source supported by the registry scan may ground "
-    "durable wiki evolution when relevant. Read the source, search existing durable knowledge "
-    "with wiki_search, and read relevant hits before choosing mutations. Proposal-building "
+    "not permission: any registered canonical Markdown source may ground durable wiki "
+    "evolution when relevant. Read the source, search existing durable knowledge with "
+    "wiki_search, and read relevant hits before choosing mutations. Proposal-building "
     "ingestion tools automatically refresh the disposable registry immediately before source "
     "verification, so a separate registry_refresh call is not required for normal ingestion. "
     "Prefer reuse over creation and allow useful wiki folders to emerge from the vault. "
@@ -176,9 +176,10 @@ VAULT_CONTEXT_MCP_DESCRIPTION = (
     "not retrieve those files. This is read-only and grants no mutation authority."
 )
 STUDY_EVOLVE_LEARNING_MCP_DESCRIPTION = (
-    f"{STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR.description} Use for a study/ source after "
-    "gathering relevant vault context. LifeOS automatically refreshes the disposable registry "
-    "before source verification. The external agent chooses which facts merit retrieval "
+    f"{STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR.description} Use for a registered study/ "
+    "source after gathering relevant vault context. LifeOS automatically refreshes the "
+    "disposable registry before source verification, so new or edited study sources do not "
+    "need a separate refresh call. The external agent chooses which facts merit retrieval "
     "practice for the inferred learning goal; LifeOS validates the bounded reviewed mutations. "
     "This creates only a draft."
 )
@@ -202,10 +203,10 @@ CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
 )
 UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
     f"{UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
-    "has inspected both the source and existing target. LifeOS automatically refreshes the "
-    "disposable registry before source and target verification. Supply the exact heading text "
-    "without # markers and only its replacement body. This creates a base-hash-bound, "
-    "ownership-aware draft and does not modify the target wiki note."
+    "has inspected both the registered source and existing target. LifeOS automatically "
+    "refreshes the disposable registry before source and target verification. Supply the "
+    "exact heading text without # markers and only its replacement body. This creates a "
+    "base-hash-bound, ownership-aware draft and does not modify the target wiki note."
 )
 COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown has "
