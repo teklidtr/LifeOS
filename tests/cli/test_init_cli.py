@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -80,6 +81,37 @@ def test_init_rejects_partial_lifeos_scaffold_instead_of_repairing_it(
     assert "Refusing to initialize non-empty directory" in captured.err
     assert instructions.read_text(encoding="utf-8") == "schema_version: 1\ninstructions: []\n"
     assert not (target / "lifeos.yml").exists()
+
+
+def test_failed_init_never_deletes_content_created_concurrently(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target = tmp_path / "empty"
+    target.mkdir()
+    concurrent = target / "concurrent.txt"
+
+    def fail_git(*args: object, **kwargs: object) -> None:
+        concurrent.write_text("keep me\n", encoding="utf-8")
+        raise subprocess.CalledProcessError(1, "git init")
+
+    monkeypatch.setattr("lifeos.bootstrap.subprocess.run", fail_git)
+
+    exit_code = main(["init", str(target)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Failed to initialize LifeOS vault" in captured.err
+    assert concurrent.read_text(encoding="utf-8") == "keep me\n"
+    assert (target / "lifeos.yml").is_file()
+
+    # A partial scaffold is now intentionally visible and must fail closed on rerun.
+    rerun_code = main(["init", str(target)])
+    rerun = capsys.readouterr()
+    assert rerun_code == 1
+    assert "Refusing to initialize non-empty directory" in rerun.err
+    assert concurrent.read_text(encoding="utf-8") == "keep me\n"
 
 
 def test_init_without_path_uses_current_directory(
