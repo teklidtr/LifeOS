@@ -46,19 +46,20 @@ class DoctorResult:
 
 def _python_finding() -> DoctorFinding:
     current = sys.version_info[:3]
+    version = f"{current[0]}.{current[1]}.{current[2]}"
     if current < (3, 11, 0):
         return DoctorFinding(
             "python",
             "blocked",
             "python-unsupported",
-            f"Python {current[0]}.{current[1]}.{current[2]} is unsupported; LifeOS requires Python 3.11+.",
+            f"Python {version} is unsupported; LifeOS requires Python 3.11+.",
             "Install Python 3.11 or newer and reinstall LifeOS.",
         )
     return DoctorFinding(
         "python",
         "healthy",
         "python-supported",
-        f"Python {current[0]}.{current[1]}.{current[2]} is supported.",
+        f"Python {version} is supported.",
     )
 
 
@@ -72,7 +73,9 @@ def _git_finding() -> DoctorFinding:
             "Git is not available on PATH.",
             "Install Git and make it available on PATH.",
         )
-    return DoctorFinding("git", "healthy", "git-ready", f"Git is available at {executable}.")
+    return DoctorFinding(
+        "git", "healthy", "git-ready", f"Git is available at {executable}."
+    )
 
 
 def _bootstrap_finding(config: LifeOSConfig) -> DoctorFinding:
@@ -99,7 +102,12 @@ def _mcp_findings(config_path: Path) -> tuple[tuple[DoctorFinding, ...], tuple[s
 
     if sdk_available:
         findings.append(
-            DoctorFinding("mcp-sdk", "healthy", "mcp-sdk-ready", "Optional MCP SDK is installed.")
+            DoctorFinding(
+                "mcp-sdk",
+                "healthy",
+                "mcp-sdk-ready",
+                "Optional MCP SDK is installed.",
+            )
         )
     else:
         findings.append(
@@ -124,7 +132,13 @@ def _mcp_findings(config_path: Path) -> tuple[tuple[DoctorFinding, ...], tuple[s
         )
         return tuple(findings), None
 
-    command = (executable, "--config", str(config_path.resolve()))
+    command = (
+        executable,
+        "--config",
+        str(config_path.resolve()),
+        "--actor-id",
+        "<actor-id>",
+    )
     findings.append(
         DoctorFinding(
             "mcp-server",
@@ -153,7 +167,10 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
         _bootstrap_finding(config),
         *mcp_findings,
     )
-    blocked = any(finding.state == "blocked" for finding in findings) or vault_status.exit_code != 0
+    blocked = (
+        any(finding.state == "blocked" for finding in findings)
+        or vault_status.exit_code != 0
+    )
     return DoctorResult(
         lifeos_version=__version__,
         config_path=str(config_path.resolve()),
@@ -178,19 +195,26 @@ def format_doctor_text(result: DoctorResult) -> str:
         "Readiness checks",
     ]
     for finding in result.findings:
-        lines.append(f"  {finding.subsystem}: {finding.state} [{finding.code}] - {finding.detail}")
+        lines.append(
+            f"  {finding.subsystem}: {finding.state} "
+            f"[{finding.code}] - {finding.detail}"
+        )
         if finding.next_action:
             lines.append(f"    next: {finding.next_action}")
 
     lines.extend(["", f"Vault health: {result.vault_status.overall_state}"])
     for check in result.vault_status.checks:
-        lines.append(f"  {check.subsystem}: {check.state} [{check.code}] - {check.detail}")
+        lines.append(
+            f"  {check.subsystem}: {check.state} [{check.code}] - {check.detail}"
+        )
         if check.next_action:
             lines.append(f"    next: {check.next_action}")
 
     if result.mcp_command:
-        lines.extend(["", "MCP server command", f"  {' '.join(result.mcp_command)}"])
-        lines.append("  Configure this command explicitly in the MCP client you choose.")
+        lines.extend(["", "MCP server command template", f"  {' '.join(result.mcp_command)}"])
+        lines.append(
+            "  Replace <actor-id> and configure this command explicitly in your MCP client."
+        )
     return "\n".join(lines)
 
 
