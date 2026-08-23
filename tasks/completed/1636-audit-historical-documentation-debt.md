@@ -57,12 +57,46 @@ uv run pytest -q
 
 # Completion evidence
 
-- Audit report: `docs/documentation-audit-2026-08-23.md`.
-- User manual now describes the preferred agent-directed Wiki ingestion flow and one-confirmation Obsidian proposal acceptance consistently.
-- Registry documentation now uses the shipped `.lifeos/registry.db` default and distinguishes file/proposal refresh from the separate provenance-index refresh.
-- README and architecture now reflect the first-party `lifeos init` application/vault boundary.
-- DD-088 records the durable first-party, deterministic, non-destructive bootstrap contract.
-- Existing setup/init, ownership recovery, immutable review snapshot, cumulative provenance, MCP policy, and documentation-impact docs were verified against current code/tests and left unchanged where already accurate.
-- No additional documentation-structure backlog task was required.
+The audit used completed tasks as change-history pointers, but code and tests as the source of truth. Evidence checked included `bootstrap.py`, CLI and init integration tests, MCP server/schema tests, registry tools and migrations, ingestion proposal/facade tests, proposal review/application/recovery tests, generated-ownership reconciliation, and cumulative generated-Wiki provenance tests. Recent task history reviewed included LIFEOS-1613, 1624, 1627, 1628, 1629, 1630, 1631, 1632, 1633, 1633A, 1634, and 1635.
+
+## Audit findings and resolutions
+
+| Area | Finding | Resolution |
+| --- | --- | --- |
+| MCP-only ingestion | Troubleshooting still recommended older single-create, single-update, fixed compound tools and initially suggested `page_kind + slug`. | Updated to the current search/read/context/decide flow with `ingestion_evolve_wiki_proposal`; older routes are documented only as compatibility surfaces. |
+| Proposal acceptance | Weekly workflow still described separate Submit, Approve, Apply actions while the desktop flow uses one composite confirmation. | Updated weekly workflow to **Accept changes**, while preserving the internal durable lifecycle explanation. |
+| Registry location | `docs/registry.md` named `state.sqlite`, while the shipped default is `<runtime_dir>/registry.db`. | Corrected the documented path to `.lifeos/registry.db` under the default bootstrap. |
+| Registry refresh semantics | Docs blurred general registry capabilities with what `lifeos scan` / MCP `registry_refresh` actually refresh. | Clarified that the supported refresh path updates file + proposal indexes; provenance uses the separate `refresh_provenance_index()` path. |
+| Registry scope | Architecture implied SQLite stored ownership, task, and graph state. | Narrowed the contract to implemented registry data: file/source facts, generated outputs, proposal indexing, and provenance indexing. |
+| Canonical domain inventory | Architecture omitted several implemented canonical areas. | Expanded the inventory and distinguished feature-owned canonical areas from the minimal first-party bootstrap roots. |
+| First-party bootstrap | Setup was current, but README still read like an implementation scaffold and the non-destructive bootstrap contract lived mainly in code/task history. | Reframed README around the application-vs-vault model, added the `lifeos init` quick start, documented the architecture boundary, and promoted the contract to DD-088. |
+
+## Verified as already current
+
+No rewrite was made where documentation already matched implementation. This included:
+
+- `docs/user-manual/04-setup-and-installation.md` and the tested `lifeos init` flow;
+- generated-ownership restore/release recovery behavior;
+- immutable proposal `review.json` history and digest binding;
+- cumulative generated-Wiki provenance from LIFEOS-1628;
+- MCP local-STDIO runtime policy and `system/instructions.yml` authority;
+- the LIFEOS-1635 documentation-impact development gate.
+
+## Durable decision promoted
+
+DD-088 now records the first-party bootstrap contract: LifeOS owns its vault bootstrap; initialization is deterministic and non-destructive; recognized-vault reruns do not rewrite user content; conflicting or partial targets fail closed; and client configuration is not mutated implicitly.
+
+## Follow-up
+
+No additional documentation-structure backlog task was required. Future implementation work is protected by the LIFEOS-1635 documentation-impact gate so new drift should be caught during task completion rather than accumulating into another historical sweep.
+
+## Validation evidence
+
 - PR: #7 (`LIFEOS-1636: Audit historical documentation debt`).
-- GitHub Actions validation passed before completion: documentation-impact gate, Ruff, mypy over 183 source files, Python compilation, manual-link validation across 15 chapters, all 1523 tests, and the Docker clean-room setup/MCP gate.
+- Documentation-impact gate passed.
+- Ruff passed.
+- mypy passed over 183 source files.
+- Python compilation passed.
+- Manual-link validation passed across 15 chapters.
+- Full test suite passed: 1523/1523.
+- Docker clean-room setup + MCP gate passed.
