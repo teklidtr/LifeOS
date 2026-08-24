@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import lifeos.registry.file_tracking as file_tracking
+import lifeos.registry.coherent_tracking as coherent_tracking
 from lifeos.registry import (
     FileTrackingError,
     Registry,
@@ -13,7 +13,7 @@ from lifeos.registry import (
     register_scan,
     resolve_registered_stable_id,
 )
-from lifeos.scanner import scan_vault
+from lifeos.scanner import VaultFile, scan_vault
 
 
 def _note(stable_id: str | None, body: str = "Body\n") -> str:
@@ -107,8 +107,105 @@ def test_registry_reconciles_deleted_destination_before_relocation(tmp_path: Pat
             (displaced_row_id,),
         ).fetchone()
     assert displaced["is_deleted"] == 1
-    assert displaced["stable_id"] is None
+    assert displaced["stable_id"] == "note-b"
     assert displaced["vault_path"].startswith(".lifeos/registry-tombstones/")
+
+
+def test_registry_preserves_both_row_identities_when_notes_swap_paths(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    wiki = vault / "wiki"
+    wiki.mkdir(parents=True)
+    path_a = wiki / "a.md"
+    path_b = wiki / "b.md"
+    content_a = _note("note-a", "A\n")
+    content_b = _note("note-b", "B\n")
+    path_a.write_text(content_a, encoding="utf-8")
+    path_b.write_text(content_b, encoding="utf-8")
+    registry = _registry(tmp_path)
+    register_scan(registry, vault, scan_vault(vault))
+
+    with registry.connect() as connection:
+        rows = {
+            row["stable_id"]: row["id"]
+            for row in connection.execute(
+                "SELECT id, stable_id FROM files WHERE stable_id IS NOT NULL"
+            ).fetchall()
+        }
+        connection.execute(
+            "INSERT INTO source_versions (source_id, version_hash, original_file_id) "
+            "VALUES (?, ?, ?)",
+            ("source-a", "hash-a", rows["note-a"]),
+        )
+        connection.execute(
+            "INSERT INTO source_versions (source_id, version_hash, original_file_id) "
+            "VALUES (?, ?, ?)",
+            ("source-b", "hash-b", rows["note-b"]),
+        )
+        connection.commit()
+
+    path_a.write_text(content_b, encoding="utf-8")
+    path_b.write_text(content_a, encoding="utf-8")
+    result = register_scan(registry, vault, scan_vault(vault))
+
+    assert result.renamed == [
+        ("wiki/a.md", "wiki/b.md"),
+        ("wiki/b.md", "wiki/a.md"),
+    ]
+    with registry.connect_read_only() as connection:
+        current = {
+            row["stable_id"]: (row["id"], row["vault_path"])
+            for row in connection.execute(
+                "SELECT id, stable_id, vault_path FROM files WHERE is_deleted = 0"
+            ).fetchall()
+        }
+        source_rows = {
+            row["source_id"]: row["original_file_id"]
+            for row in connection.execute(
+                "SELECT source_id, original_file_id FROM source_versions"
+            ).fetchall()
+        }
+    assert current["note-a"] == (rows["note-a"], "wiki/b.md")
+    assert current["note-b"] == (rows["note-b"], "wiki/a.md")
+    assert source_rows == {"source-a": rows["note-a"], "source-b": rows["note-b"]}
+
+
+def test_new_identity_can_reuse_path_after_old_identity_was_confirmed_deleted(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    wiki = vault / "wiki"
+    wiki.mkdir(parents=True)
+    path = wiki / "note.md"
+    path.write_text(_note("old-id"), encoding="utf-8")
+    registry = _registry(tmp_path)
+    register_scan(registry, vault, scan_vault(vault))
+
+    path.unlink()
+    register_scan(registry, vault, scan_vault(vault))
+    path.write_text(_note("new-id"), encoding="utf-8")
+    result = register_scan(registry, vault, scan_vault(vault))
+
+    assert result.new == ["wiki/note.md"]
+    new_identity = resolve_registered_stable_id(registry, "new-id")
+    assert new_identity is not None
+    assert new_identity.path == "wiki/note.md"
+    assert resolve_registered_stable_id(registry, "old-id") is None
+    with registry.connect_read_only() as connection:
+        old_row = connection.execute(
+            "SELECT vault_path, stable_id, is_deleted FROM files WHERE stable_id = 'old-id'"
+        ).fetchone()
+    assert old_row["is_deleted"] == 1
+    assert old_row["vault_path"].startswith(".lifeos/registry-tombstones/")
+
+
+def test_binary_scan_capture_discards_attachment_bytes() -> None:
+    capture = coherent_tracking._capture_for(
+        VaultFile(path=Path("captures/large.pdf"), file_type=".pdf", size_bytes=10_000_000)
+    )
+
+    assert not isinstance(capture.chunks, list)
+    capture.chunks.append(b"x" * 1_000_000)
+    assert not isinstance(capture.chunks, list)
 
 
 def test_duplicate_stable_ids_abort_refresh_before_registry_mutation(tmp_path: Path) -> None:
@@ -158,14 +255,14 @@ def test_registry_derives_id_and_hash_from_same_file_snapshot(
     replacement = _note("new-id", "Replacement bytes\n").encode()
     path.write_bytes(original)
     registry = _registry(tmp_path)
-    real_parser = file_tracking.parse_markdown_note
+    real_parser = coherent_tracking.parse_markdown_note
 
     def parse_then_mutate(note_path: Path, *, content: str | None = None):
         parsed = real_parser(note_path, content=content)
         path.write_bytes(replacement)
         return parsed
 
-    monkeypatch.setattr(file_tracking, "parse_markdown_note", parse_then_mutate)
+    monkeypatch.setattr(coherent_tracking, "parse_markdown_note", parse_then_mutate)
     register_scan(registry, vault, scan_vault(vault))
 
     resolved = resolve_registered_stable_id(registry, "old-id")
