@@ -8,11 +8,11 @@ from mcp.server.fastmcp import FastMCP
 
 from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.mcp.coherence_tools import build_coherence_tools
-from lifeos.mcp.coherent_server import create_mcp_server as create_core_mcp_server
 from lifeos.mcp.exploration_tools import build_exploration_tools, build_policy_read_tools
 from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS as CORE_MCP_INSTRUCTIONS,
     _invoke_mcp_tool,
+    create_mcp_server as create_core_mcp_server,
 )
 from lifeos.registry import Registry
 from lifeos.runtime import ActivityStore
