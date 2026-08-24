@@ -117,12 +117,15 @@ def describe_topology(config: LifeOSConfig) -> VaultTopology:
     """Describe canonical versus node-local state for the configured LifeOS node."""
     vault_root = config.vault_root.resolve(strict=False)
     runtime_dir = config.runtime_dir.resolve(strict=False)
+    runtime_exclusions: tuple[str, ...] = ()
     try:
-        runtime_dir.relative_to(vault_root)
+        runtime_relative = runtime_dir.relative_to(vault_root)
     except ValueError:
         location: RuntimeLocation = "node-local-outside-vault"
     else:
         location = "inside-canonical-vault"
+        relative = runtime_relative.as_posix()
+        runtime_exclusions = ("./" if relative in {"", "."} else relative.rstrip("/") + "/",)
 
     return VaultTopology(
         canonical_vault_root=str(vault_root),
@@ -142,7 +145,11 @@ def describe_topology(config: LifeOSConfig) -> VaultTopology:
             "runtime activity",
             "temporary/rebuild state",
         ),
-        required_sync_exclusions=(".lifeos/", ".git/", ".obsidian/workspace*.json"),
+        required_sync_exclusions=(
+            *runtime_exclusions,
+            ".git/",
+            ".obsidian/workspace*.json",
+        ),
     )
 
 
