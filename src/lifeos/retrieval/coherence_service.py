@@ -16,9 +16,9 @@ from lifeos.retrieval.index import RetrievalIndex
 from lifeos.retrieval.models import ChunkedNote
 from lifeos.vault import VaultMarkdownFile
 
-_AMBIGUOUS_DOCUMENT_IDS: ContextVar[frozenset[str]] = ContextVar(
-    "lifeos_ambiguous_retrieval_document_ids",
-    default=frozenset(),
+_EXPECTED_DOCUMENT_IDS: ContextVar[dict[str, str] | None] = ContextVar(
+    "lifeos_expected_retrieval_document_ids",
+    default=None,
 )
 
 
@@ -74,19 +74,21 @@ def _coherent_chunk_markdown_file(
         indexed_at=indexed_at,
         max_chunk_characters=max_chunk_characters,
     )
-    if note.document.document_id in _AMBIGUOUS_DOCUMENT_IDS.get():
-        return reidentify_note(note, _path_document_id(source.relative_path))
+    expected = _EXPECTED_DOCUMENT_IDS.get()
+    expected_id = expected.get(source.relative_path) if expected is not None else None
+    if expected_id is not None and note.document.document_id != expected_id:
+        return reidentify_note(note, expected_id)
     return note
 
 
 class RetrievalIndexService(_service.RetrievalIndexService):
     """Base retrieval service plus deterministic duplicate-ID handling.
 
-    A durable ``id:<stable-id>`` document key is used only while that identity is unique among
-    policy-visible indexed notes. If the identity is duplicated, every colliding note gets a
-    path-derived document key so the SQLite primary key cannot silently hide one of them. The
-    expected key map is reconciled even when canonical content bytes did not change, allowing
-    duplicate introduction/resolution to update disposable identity metadata incrementally.
+    A normalized durable ``id:<stable-id>`` document key is used only while that identity is
+    unique among policy-visible indexed notes. If the identity is duplicated, every colliding
+    note gets a path-derived document key so the SQLite primary key cannot silently hide one of
+    them. The expected key map is applied during rebuild and reconciled during incremental sync,
+    including when canonical content bytes did not change.
     """
 
     _coherence_sources: tuple[VaultMarkdownFile, ...] | None = None
@@ -106,8 +108,8 @@ class RetrievalIndexService(_service.RetrievalIndexService):
         stop_after: int | None = None,
     ) -> _service.IndexResult:
         sources = super()._allowed_sources()
-        ambiguous, _expected = _identity_plan(sources)
-        token = _AMBIGUOUS_DOCUMENT_IDS.set(ambiguous)
+        _ambiguous, expected = _identity_plan(sources)
+        token = _EXPECTED_DOCUMENT_IDS.set(expected)
         self._coherence_sources = sources
         try:
             return super().rebuild(
@@ -119,7 +121,7 @@ class RetrievalIndexService(_service.RetrievalIndexService):
             )
         finally:
             self._coherence_sources = None
-            _AMBIGUOUS_DOCUMENT_IDS.reset(token)
+            _EXPECTED_DOCUMENT_IDS.reset(token)
 
     def incremental_sync(
         self,
@@ -128,7 +130,7 @@ class RetrievalIndexService(_service.RetrievalIndexService):
         progress: _service.ProgressSink | None = None,
     ) -> _service.IndexResult:
         sources = super()._allowed_sources()
-        ambiguous, expected = _identity_plan(sources)
+        _ambiguous, expected = _identity_plan(sources)
         source_by_path = {source.relative_path: source for source in sources}
         identity_refresh: set[str] = set()
         if self.active_path.exists():
@@ -138,7 +140,7 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                     if expected_id is not None and document.document_id != expected_id:
                         identity_refresh.add(document.path)
 
-        token = _AMBIGUOUS_DOCUMENT_IDS.set(ambiguous)
+        token = _EXPECTED_DOCUMENT_IDS.set(expected)
         self._coherence_sources = sources
         try:
             result = super().incremental_sync(
@@ -148,8 +150,8 @@ class RetrievalIndexService(_service.RetrievalIndexService):
             if result.status != "complete" or not self.active_path.exists():
                 return result
 
-            # New duplicate introduction can require re-identifying an unchanged existing note;
-            # duplicate resolution can likewise restore a durable key without a content edit.
+            # Duplicate introduction/resolution and normalized durable IDs can require
+            # re-identifying an unchanged note even when its canonical content did not change.
             with RetrievalIndex(self.active_path, create=False) as index:
                 current_by_path = {document.path: document for document in index.documents()}
                 for path, expected_id in expected.items():
@@ -170,7 +172,7 @@ class RetrievalIndexService(_service.RetrievalIndexService):
             )
         finally:
             self._coherence_sources = None
-            _AMBIGUOUS_DOCUMENT_IDS.reset(token)
+            _EXPECTED_DOCUMENT_IDS.reset(token)
 
 
 # Base service methods resolve this module-level name at call time, so one wrapper keeps rebuild
