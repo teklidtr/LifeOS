@@ -15,6 +15,7 @@ from lifeos.mcp.exploration_tools import _strict_tool
 from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
+from lifeos.runtime import ActivityStore
 
 Invoke = Callable[[Callable[[], object]], object]
 
@@ -37,7 +38,9 @@ NOTE_IDENTITY_MCP_DESCRIPTION = (
 def build_coherence_tools(
     *,
     vault_root: Path,
+    activity: ActivityStore,
     invoke: Invoke,
+    runtime_dir: Path | None = None,
 ) -> tuple[Tool, ...]:
     """Build the provider-neutral identity lookup used by relocation-aware agents."""
 
@@ -78,6 +81,7 @@ def build_coherence_tools(
                         policy=policy,
                         mode="external",
                     ).allowed,
+                    runtime_dir=runtime_dir,
                 )
             except (CoherenceError, RetrievalError) as exc:
                 raise ToolExecutionError("Could not rebuild authorized note identity") from exc
@@ -87,6 +91,7 @@ def build_coherence_tools(
                 raise ToolNotFoundError("Canonical Markdown note is missing")
             if note.stable_id is not None and len(snapshot.by_stable_id(note.stable_id)) != 1:
                 raise ToolValidationError("Stable note id is duplicated or ambiguous")
+            activity.append(tool="vault_note_identity", source_paths=[note.path])
             return {
                 "stable_id": note.stable_id,
                 "current_path": note.path,
