@@ -305,24 +305,40 @@ def create_mcp_server(
 
     def _refresh_for_ingestion(source_path: str) -> None:
         result = refresh_registry(vault_root=vault_root, registry=registry)
+        relocated_paths = [path for pair in result.renamed for path in pair]
         activity.append(
             tool="ingestion_registry_preflight",
             source_paths=[source_path],
-            changed_paths=[*result.new, *result.modified, *result.deleted],
+            changed_paths=[
+                *result.new,
+                *result.modified,
+                *result.deleted,
+                *relocated_paths,
+            ],
         )
 
     def registry_refresh_tool() -> RegistryRefreshMCPResult:
         def op() -> RegistryRefreshMCPResult:
             result = refresh_registry(vault_root=vault_root, registry=registry)
+            relocated_paths = [path for pair in result.renamed for path in pair]
             activity.append(
                 tool="registry_refresh",
-                changed_paths=[*result.new, *result.modified, *result.deleted],
+                changed_paths=[
+                    *result.new,
+                    *result.modified,
+                    *result.deleted,
+                    *relocated_paths,
+                ],
             )
             return {
                 "new": list(result.new),
                 "modified": list(result.modified),
                 "unchanged": list(result.unchanged),
                 "deleted": list(result.deleted),
+                "renamed": [
+                    {"from_path": old_path, "to_path": new_path}
+                    for old_path, new_path in result.renamed
+                ],
                 "proposals_indexed": result.proposals_indexed,
             }
 
