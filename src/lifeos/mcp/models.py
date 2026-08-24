@@ -21,6 +21,7 @@ class VaultListMCPResult(TypedDict):
     prefix: str | None
     entries: list[VaultPathEntryMCPResult]
     truncated: bool
+    next_after: str | None
 
 
 class VaultSearchHitMCPResult(TypedDict):
