@@ -19,7 +19,8 @@ A useful agent workflow is:
 3. Read one note with `vault_read_markdown`, or compare up to eight selected notes with
    `vault_read_many`.
 4. Call `vault_links` to follow outgoing references or backlinks and discover adjacent notes. If
-   it returns `truncated=true`, continue with `offset=<next_offset>`.
+   it returns `truncated=true`, continue with `offset=<next_offset>`. Inspect diagnostics before
+   treating a backlink set as complete.
 5. Use `vault_context` when goals, study purpose, journal state, experiments, or scoped
    `system/instructions.yml` rules may change how the evidence should be interpreted.
 6. Use `wiki_search` when the immediate question is specifically about existing durable wiki
@@ -48,7 +49,8 @@ file inspection or decoding.
 Runs deterministic lexical search across canonical Markdown rather than only `wiki/`. The
 response includes paths, titles, descriptions, excerpts, scores, matched terms, and bounded
 parser diagnostics for allowed notes that had to be omitted. `prefix` can narrow the search. The
-default limit is 20 and the hard maximum is 50.
+default limit is 20 and the hard maximum is 50. Returned titles are capped at 512 characters and
+descriptions at 1,024 characters so oversized frontmatter cannot defeat the bounded MCP response.
 
 Retrieval-policy eligibility is applied before file decoding, ranking, and the result limit, so
 hidden or excluded candidates cannot crowd an allowed result out of a bounded search or leak
@@ -80,6 +82,11 @@ such as `[[topic]]` resolves only when exactly one allowed canonical Markdown pa
 basename. Ambiguous or unresolved targets are not guessed. The same canonicalized target is used
 for backlink discovery.
 
+Backlink and `both` scans also return bounded diagnostics when an otherwise allowed candidate
+cannot be read or structurally parsed. Such a diagnostic means the returned backlink set may be
+incomplete; the failure is no longer silently indistinguishable from “no backlink”. Diagnostic
+output itself is capped so malformed vault state cannot create an unbounded response.
+
 ## 15.3 Protected scopes and external disclosure
 
 The complete user-facing MCP read surface reuses the retrieval privacy policy as an **external
@@ -92,6 +99,12 @@ agent to include a protected scope**. That explicit request is necessary but not
 MCP disclosure: the protected path must also match `external_allowed_prefixes` in
 `system/retrieval-policy.yml`. Without both conditions, the MCP read fails closed. Protected-read
 eligibility never grants canonical edit authority.
+
+A protected read grant applies only to that request. `runtime_activity` therefore re-applies the
+current external retrieval policy with protected access disabled before returning any path fields.
+A protected path may exist in disposable activity state for debugging provenance after an
+explicitly authorized read, but a later activity call cannot use that record to rediscover the
+protected path name. Public allowed path metadata remains visible.
 
 Retrieval policy itself is read through the same symlink-safe vault I/O boundary. A policy file
 that is a symlink, unsafe file type, unreadable file, invalid UTF-8, or invalid YAML is rejected
@@ -141,6 +154,7 @@ inspect search.diagnostics when present
 vault_read_many(paths=[study hit, relevant wiki hit])
   ↓
 links = vault_links(path="wiki/right-of-way.md", direction="both")
+inspect links.diagnostics when present
 while links.truncated:
     links = vault_links(
         path="wiki/right-of-way.md",
