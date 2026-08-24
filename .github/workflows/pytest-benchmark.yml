@@ -13,11 +13,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  testmon:
+  seed-durations:
     if: ${{ github.event.label.name == 'pytest-benchmark' }}
-    name: testmon
+    name: seed-durations
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -28,20 +28,94 @@ jobs:
           enable-cache: true
       - name: Install locked dependencies
         run: uv sync --frozen --extra dev --extra mcp
-      - name: Restore testmon dependency database
-        id: testmon-cache
+      - name: Restore duration history
+        id: durations-cache
         uses: actions/cache@v4
         with:
-          path: .testmondata
-          key: testmon-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number }}-${{ github.sha }}
+          path: .test_durations
+          key: pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.sha }}
           restore-keys: |
-            testmon-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number }}-
-      - name: Run affected tests
+            pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
+      - name: Seed duration history when missing
+        if: steps.durations-cache.outputs.cache-hit != 'true'
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         shell: bash
         run: |
-          echo "testmon exact cache hit: ${{ steps.testmon-cache.outputs.cache-hit || 'false' }}"
           /usr/bin/time -f 'wall=%e user=%U sys=%S maxrss_kb=%M' \
-            uv run --with pytest-testmon==2.2.0 pytest -q --testmon --durations=20
-          ls -lh .testmondata || true
+            uv run --with pytest-split==0.11.0 pytest -q --store-durations
+          ls -lh .test_durations
+
+  split-2:
+    if: ${{ github.event.label.name == 'pytest-benchmark' }}
+    needs: seed-durations
+    name: split-2-group-${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+      - name: Restore duration history
+        uses: actions/cache@v4
+        with:
+          path: .test_durations
+          key: pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.sha }}
+          restore-keys: |
+            pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
+      - name: Run shard
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        shell: bash
+        run: |
+          /usr/bin/time -f 'wall=%e user=%U sys=%S maxrss_kb=%M' \
+            uv run --with pytest-split==0.11.0 pytest -q \
+              --splits 2 --group ${{ matrix.group }} \
+              --splitting-algorithm=least_duration --durations=10
+
+  split-4:
+    if: ${{ github.event.label.name == 'pytest-benchmark' }}
+    needs: seed-durations
+    name: split-4-group-${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+      - name: Restore duration history
+        uses: actions/cache@v4
+        with:
+          path: .test_durations
+          key: pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.sha }}
+          restore-keys: |
+            pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
+      - name: Run shard
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        shell: bash
+        run: |
+          /usr/bin/time -f 'wall=%e user=%U sys=%S maxrss_kb=%M' \
+            uv run --with pytest-split==0.11.0 pytest -q \
+              --splits 4 --group ${{ matrix.group }} \
+              --splitting-algorithm=least_duration --durations=10
