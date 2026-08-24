@@ -16,12 +16,16 @@ ownership/provenance files, and other ordinary canonical vault artifacts.
 
 Do **not** treat these as shared authoritative state:
 
-- `.lifeos/` registry, retrieval indexes, embeddings, journals, and temporary runtime state
+- the configured LifeOS `runtime_dir` when it lives inside the vault, including the default
+  `.lifeos/` location
 - `.git/` internals through a file-sync merge
 - `.obsidian/workspace*.json` device-specific workspace state
 
 A default `lifeos init` keeps runtime files at `<vault>/.lifeos`. That is fine as long as `.lifeos/`
-is excluded from synchronization. You can also configure `runtime_dir` outside the vault.
+is excluded from synchronization. If you configure another `runtime_dir` under the vault, exclude
+that exact vault-relative directory instead, for example `runtime/node-a/`. You can also configure
+`runtime_dir` outside the vault, in which case no runtime-directory sync exclusion is needed inside
+the vault. `lifeos doctor` reports the resolved required exclusions for the current configuration.
 
 ## Check the topology
 
@@ -46,7 +50,7 @@ Look for:
 - stable identity diagnostics
 
 A warning that runtime state is inside the vault is expected for the default layout. It means the
-`.lifeos/` exclusion matters; it does not mean the vault is unhealthy.
+configured runtime-directory exclusion matters; it does not mean the vault is unhealthy.
 
 ## Renaming and moving notes
 
@@ -70,7 +74,12 @@ may move from `wiki/concepts/sleep-pressure.md` to `wiki/concepts/sleep/homeosta
 without becoming a different note. The stable `id` preserves identity; the path records where it
 lives now.
 
-If you edit it at the same time, its content hash changes. LifeOS can still recognize the same
+After registry refresh, a pure stable-ID relocation is reported separately from create/delete
+churn. `lifeos scan` text output prints `Renamed: old-path -> new-path`; `lifeos scan --json`
+includes the equivalent `renamed` old/new path pair. MCP `registry_refresh` exposes the same
+relocation evidence when a move is present.
+
+If you edit the note at the same time, its content hash changes. LifeOS can still recognize the same
 identity, but any proposal reviewed against the old hash is stale.
 
 ## Legacy notes without IDs
