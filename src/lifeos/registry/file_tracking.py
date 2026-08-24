@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -67,6 +68,16 @@ class ScanResult:
     renamed: list[tuple[str, str]] = field(default_factory=list)
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedScanEntry:
+    """Registry facts derived from exactly one observed file byte snapshot."""
+
+    stable_id: str | None
+    content_hash: str
+    size_bytes: int
+    mtime_ns: int
+
+
 def _hash_chunks(chunks: Iterable[bytes]) -> str:
     hasher = hashlib.sha256()
     for chunk in chunks:
@@ -105,29 +116,57 @@ def _hash_file(path: Path) -> str:
     return content_hash
 
 
-def _stable_id_for_entry(full_path: Path, entry: VaultFile) -> str | None:
-    if entry.file_type != ".md":
-        return None
+def _prepare_scan_entry(vault_root: Path, entry: VaultFile) -> _PreparedScanEntry:
+    full_path = vault_root / entry.path
     try:
-        parsed = parse_markdown_note(full_path)
-    except (OSError, UnicodeError) as exc:
-        raise FileTrackingError(f"Could not inspect Markdown identity for {full_path}: {exc}") from exc
-    stable_id = parsed.durable_fields.id
-    if stable_id is None:
-        return None
-    normalized = stable_id.strip()
-    return normalized or None
+        with open(full_path, "rb") as handle:
+            stat_before = os.fstat(handle.fileno())
+            content = handle.read()
+            stat_after = os.fstat(handle.fileno())
+    except OSError as exc:
+        raise FileTrackingError(f"Could not read {full_path}: {exc}") from exc
+
+    if (
+        stat_before.st_mtime_ns != stat_after.st_mtime_ns
+        or stat_before.st_size != stat_after.st_size
+        or len(content) != stat_after.st_size
+    ):
+        raise FileTrackingError(f"File {full_path} changed while preparing registry facts.")
+
+    stable_id: str | None = None
+    first_root = entry.path.parts[0] if entry.path.parts else ""
+    if entry.file_type == ".md" and first_root != "proposals":
+        try:
+            text = content.decode("utf-8")
+        except UnicodeError as exc:
+            raise FileTrackingError(
+                f"Could not inspect Markdown identity for {full_path}: {exc}"
+            ) from exc
+        parsed = parse_markdown_note(full_path, content=text)
+        parsed_id = parsed.durable_fields.id
+        if parsed_id is not None:
+            stable_id = parsed_id.strip() or None
+
+    return _PreparedScanEntry(
+        stable_id=stable_id,
+        content_hash=hash_file_content(content),
+        size_bytes=stat_after.st_size,
+        mtime_ns=stat_after.st_mtime_ns,
+    )
 
 
-def _scan_stable_ids(vault_root: Path, entries: list[VaultFile]) -> dict[str, str | None]:
-    stable_ids: dict[str, str | None] = {}
+def _prepare_scan_entries(
+    vault_root: Path,
+    entries: list[VaultFile],
+) -> dict[str, _PreparedScanEntry]:
+    prepared: dict[str, _PreparedScanEntry] = {}
     id_paths: dict[str, list[str]] = {}
     for entry in entries:
-        path_str = str(entry.path)
-        stable_id = _stable_id_for_entry(vault_root / entry.path, entry)
-        stable_ids[path_str] = stable_id
-        if stable_id is not None:
-            id_paths.setdefault(stable_id, []).append(path_str)
+        path_str = entry.path.as_posix()
+        facts = _prepare_scan_entry(vault_root, entry)
+        prepared[path_str] = facts
+        if facts.stable_id is not None:
+            id_paths.setdefault(facts.stable_id, []).append(path_str)
 
     duplicates = {stable_id: paths for stable_id, paths in id_paths.items() if len(paths) > 1}
     if duplicates:
@@ -138,7 +177,11 @@ def _scan_stable_ids(vault_root: Path, entries: list[VaultFile]) -> dict[str, st
         raise FileTrackingError(
             "Ambiguous stable note id(s) in canonical Markdown; registry refresh aborted: " + details
         )
-    return stable_ids
+    return prepared
+
+
+def _registry_tombstone_path(row_id: int, prior_path: str) -> str:
+    return f".lifeos/registry-tombstones/{row_id}/{prior_path}"
 
 
 def validate_vault_path(vault_path: str) -> None:
@@ -255,17 +298,18 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
 
     Markdown frontmatter ``id`` is recorded as disposable identity metadata. When exactly one
     existing registry record has that stable id, a changed path is reconciled as a relocation
-    while preserving the registry row identity. Duplicate stable ids abort the entire refresh
-    before any registry write.
+    while preserving the registry row identity. Duplicate canonical-note stable ids abort the
+    entire refresh before any registry write. Proposal frontmatter ids are proposal identifiers,
+    not note identities, and therefore never participate in this mapping.
     """
-    seen = set()
+    seen: set[str] = set()
     for entry in entries:
-        path_str = str(entry.path)
+        path_str = entry.path.as_posix()
         if path_str in seen:
             raise FileTrackingError(f"Duplicate normalized path in scan entries: {path_str}")
         seen.add(path_str)
 
-    stable_ids = _scan_stable_ids(vault_root, entries)
+    prepared = _prepare_scan_entries(vault_root, entries)
     new_paths: list[str] = []
     modified_paths: list[str] = []
     unchanged_paths: list[str] = []
@@ -287,20 +331,12 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
             now_expr = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
 
             for entry in entries:
-                path_str = str(entry.path)
-                full_path = vault_root / entry.path
-                stable_id = stable_ids[path_str]
-                content_hash = _hash_file(full_path)
-
-                try:
-                    stat = full_path.stat()
-                except OSError as exc:
-                    raise FileTrackingError(
-                        f"Could not read metadata for {full_path}: {exc}"
-                    ) from exc
-
-                mtime_ns = stat.st_mtime_ns
-                size_bytes = stat.st_size
+                path_str = entry.path.as_posix()
+                facts = prepared[path_str]
+                stable_id = facts.stable_id
+                content_hash = facts.content_hash
+                mtime_ns = facts.mtime_ns
+                size_bytes = facts.size_bytes
                 conn.execute("INSERT INTO seen_paths (vault_path) VALUES (?)", (path_str,))
 
                 row = conn.execute(
@@ -327,9 +363,16 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                 ):
                     old_path = str(identity_row["vault_path"])
                     if row is not None and row["id"] != identity_row["id"]:
-                        raise FileTrackingError(
-                            f"Cannot relocate stable note id {stable_id!r} to {path_str}: "
-                            "the destination path already belongs to another registry record."
+                        displaced_id = int(row["id"])
+                        tombstone_path = _registry_tombstone_path(displaced_id, path_str)
+                        conn.execute(
+                            f"""
+                            UPDATE files
+                            SET vault_path = ?, stable_id = NULL, is_deleted = 1,
+                                last_seen_at = {now_expr}
+                            WHERE id = ?
+                            """,
+                            (tombstone_path, displaced_id),
                         )
                     previous_hash = identity_row["content_hash"]
                     conn.execute(
@@ -404,10 +447,10 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         conn.execute(
                             f"""
                             UPDATE files
-                            SET stable_id = ?, last_seen_at = {now_expr}
+                            SET stable_id = ?, size_bytes = ?, mtime_ns = ?, last_seen_at = {now_expr}
                             WHERE vault_path = ?
                             """,
-                            (effective_stable_id, path_str),
+                            (effective_stable_id, size_bytes, mtime_ns, path_str),
                         )
                         unchanged_paths.append(path_str)
 
