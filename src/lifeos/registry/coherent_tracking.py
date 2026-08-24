@@ -16,6 +16,8 @@ from lifeos.registry import file_tracking as _base
 from lifeos.registry._registry import Registry
 from lifeos.scanner import VaultFile
 
+_TOMBSTONE_PREFIX = ".lifeos/registry-tombstones/"
+
 
 @dataclass(frozen=True, slots=True)
 class _PreparedScanEntry:
@@ -101,11 +103,21 @@ def _prepare_scan_entries(
     return prepared
 
 
-def _parking_path(row_id: int) -> str:
-    return f".lifeos/registry-tombstones/{row_id}/reserved"
+def _canonical_path_from_storage(path: str) -> str:
+    """Recover the last canonical path from a disposable parked-row storage key."""
+    if not path.startswith(_TOMBSTONE_PREFIX):
+        return path
+    remainder = path[len(_TOMBSTONE_PREFIX) :]
+    _row_id, separator, canonical_path = remainder.partition("/")
+    return canonical_path if separator and canonical_path else path
 
 
-def _park_row(conn: Any, *, row_id: int, now_expr: str) -> None:
+def _parking_path(row_id: int, prior_path: str) -> str:
+    canonical_path = _canonical_path_from_storage(prior_path)
+    return f"{_TOMBSTONE_PREFIX}{row_id}/{canonical_path}"
+
+
+def _park_row(conn: Any, *, row_id: int, prior_path: str, now_expr: str) -> None:
     """Move one historical row out of the live path namespace without losing its identity."""
     conn.execute(
         f"""
@@ -113,7 +125,7 @@ def _park_row(conn: Any, *, row_id: int, now_expr: str) -> None:
         SET vault_path = ?, is_deleted = 1, last_seen_at = {now_expr}
         WHERE id = ?
         """,
-        (_parking_path(row_id), row_id),
+        (_parking_path(row_id, prior_path), row_id),
     )
 
 
@@ -124,7 +136,9 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
     and longer cycles safe: each surviving stable identity keeps the same ``files.id`` and thus
     retains every foreign-keyed provenance/source-version relationship. A confirmed-deleted
     path may be reused by a different identity because the historical row is moved into the
-    disposable tombstone namespace instead of being rewritten into the new note.
+    disposable tombstone namespace instead of being rewritten into the new note. Parked rows
+    retain their last canonical path inside the disposable key so later reappearance never
+    exposes a synthetic runtime path as relocation evidence.
     """
     seen: set[str] = set()
     for entry in entries:
@@ -170,17 +184,22 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                 ).fetchone()
                 if row is None:
                     continue
-                old_path = str(row["vault_path"])
-                if old_path != target_path:
+                stored_path = str(row["vault_path"])
+                if stored_path != target_path:
                     relocations[durable_id] = (
                         int(row["id"]),
-                        old_path,
+                        _canonical_path_from_storage(stored_path),
                         str(row["content_hash"]) if row["content_hash"] is not None else None,
                         int(row["is_deleted"]),
                     )
 
-            for row_id, _old_path, _old_hash, _was_deleted in relocations.values():
-                _park_row(conn, row_id=row_id, now_expr=now_expr)
+            for row_id, old_path, _old_hash, _was_deleted in relocations.values():
+                _park_row(
+                    conn,
+                    row_id=row_id,
+                    prior_path=old_path,
+                    now_expr=now_expr,
+                )
 
             for entry in entries:
                 path_str = entry.path.as_posix()
@@ -214,7 +233,12 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                                 "Registry relocation reservation failed for a surviving stable "
                                 f"identity at {path_str}."
                             )
-                        _park_row(conn, row_id=int(occupant["id"]), now_expr=now_expr)
+                        _park_row(
+                            conn,
+                            row_id=int(occupant["id"]),
+                            prior_path=path_str,
+                            now_expr=now_expr,
+                        )
 
                     conn.execute(
                         f"""
@@ -233,7 +257,8 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                             moving_id,
                         ),
                     )
-                    renamed_paths.append((old_path, path_str))
+                    if old_path != path_str:
+                        renamed_paths.append((old_path, path_str))
                     if previous_hash != content_hash or was_deleted:
                         modified_paths.append(path_str)
                     continue
@@ -253,7 +278,12 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         and entry_stable_id != str(old_stable_id)
                         and _participates_in_stable_note_identity(entry)
                     ):
-                        _park_row(conn, row_id=int(row["id"]), now_expr=now_expr)
+                        _park_row(
+                            conn,
+                            row_id=int(row["id"]),
+                            prior_path=path_str,
+                            now_expr=now_expr,
+                        )
                         row = None
 
                 if row is None:
