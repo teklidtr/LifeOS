@@ -1,5 +1,6 @@
 """Public SQLite registry interface for deterministic LifeOS state."""
 
+from lifeos.registry import file_tracking as _file_tracking
 from lifeos.registry._migrations import CURRENT_SCHEMA_VERSION
 from lifeos.registry._registry import (
     Registry,
@@ -18,10 +19,10 @@ from lifeos.registry.file_tracking import (
     compare_registered_file,
     hash_file_content,
     list_registered_stable_identities,
-    register_scan,
     resolve_registered_stable_id,
     validate_vault_path,
 )
+from lifeos.registry.coherent_tracking import register_scan
 from lifeos.registry.proposals import (
     ProposalQueryError,
     ProposalScanError,
@@ -41,6 +42,9 @@ from lifeos.registry.provenance import (
     get_provenance_for_derived,
     list_derived_for_source,
 )
+
+# Keep direct ``lifeos.registry.file_tracking.register_scan`` imports aligned with the public API.
+setattr(_file_tracking, "register_scan", register_scan)
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
