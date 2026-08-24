@@ -10,7 +10,6 @@ from typing import Literal, cast
 import yaml
 
 from lifeos.context.search import (
-    ContextSearchError,
     ContextSearchExecutionError,
     PathFilter,
     SearchResult,

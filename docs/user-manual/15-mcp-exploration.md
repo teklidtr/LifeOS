@@ -73,12 +73,12 @@ default limit is 50 and the hard maximum is 100. Results use deterministic order
 `truncated=true`, the response includes `next_offset`; pass it back as `offset` to continue.
 
 Normal Markdown links and Obsidian wikilinks retain different resolution rules. A relative
-Markdown link such as `[Topic](concepts/topic.md)` resolves relative to the source note even when
-a vault-root path with the same suffix also exists. A path-qualified wikilink is interpreted as
-a canonical vault path, not silently reinterpreted as source-relative. A basename wikilink such
-as `[[topic]]` resolves only when exactly one allowed canonical Markdown path has that basename.
-Ambiguous or unresolved targets are not guessed. The same canonicalized target is used for
-backlink discovery.
+Markdown link whose destination is `concepts/topic.md` resolves relative to the source note even
+when a vault-root path with the same suffix also exists. A path-qualified wikilink is interpreted
+as a canonical vault path, not silently reinterpreted as source-relative. A basename wikilink
+such as `[[topic]]` resolves only when exactly one allowed canonical Markdown path has that
+basename. Ambiguous or unresolved targets are not guessed. The same canonicalized target is used
+for backlink discovery.
 
 ## 15.3 Protected scopes and external disclosure
 
