@@ -100,7 +100,7 @@ from .validation import (
 # runtime. Repoint both globals after normal imports so every public application path gets the
 # same fail-closed stable-identity checks without import-order side effects.
 _validation.preflight_proposal = _coherent_preflight_proposal
-_application.preflight_proposal = _coherent_preflight_proposal
+setattr(_application, "preflight_proposal", _coherent_preflight_proposal)
 preflight_proposal = _coherent_preflight_proposal
 
 __all__ = [
