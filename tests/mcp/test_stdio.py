@@ -86,6 +86,7 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
                 "vault_search",
                 "vault_read_many",
                 "vault_links",
+                "vault_note_identity",
                 "ingestion_evolve_wiki_proposal",
                 "study_evolve_learning_proposal",
                 "ingestion_create_wiki_proposal",
@@ -109,6 +110,7 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             assert advertised["vault_search"].annotations.readOnlyHint is True
             assert advertised["vault_read_many"].annotations.readOnlyHint is True
             assert advertised["vault_links"].annotations.readOnlyHint is True
+            assert advertised["vault_note_identity"].annotations.readOnlyHint is True
             assert advertised["study_evolve_learning_proposal"].annotations.destructiveHint is False
             assert advertised["runtime_activity"].annotations.readOnlyHint is True
             assert advertised["ingestion_evolve_wiki_proposal"].annotations.destructiveHint is False
