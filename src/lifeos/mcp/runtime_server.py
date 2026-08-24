@@ -7,7 +7,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from lifeos.facade.authorization import ConsequentialAuthorizer
-from lifeos.mcp.exploration_tools import build_exploration_tools
+from lifeos.mcp.exploration_tools import build_exploration_tools, build_policy_read_tools
 from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS as CORE_MCP_INSTRUCTIONS,
     _invoke_mcp_tool,
@@ -15,6 +15,8 @@ from lifeos.mcp.server import (
 )
 from lifeos.registry import Registry
 from lifeos.runtime import ActivityStore
+
+_POLICY_READ_OVERRIDES = frozenset({"vault_read_markdown", "vault_context"})
 
 LIFEOS_MCP_INSTRUCTIONS = (
     "Exploration is encouraged: use vault_list, vault_search, vault_read_markdown, "
@@ -35,7 +37,7 @@ def create_mcp_server(
     authorizer: ConsequentialAuthorizer,
     runtime_dir: Path | None = None,
 ) -> FastMCP:
-    """Compose the stable core MCP server with read-only exploration primitives."""
+    """Compose the stable core MCP server with policy-aware exploration primitives."""
     core = create_core_mcp_server(
         vault_root=vault_root,
         registry=registry,
@@ -43,13 +45,23 @@ def create_mcp_server(
         runtime_dir=runtime_dir,
     )
     activity = ActivityStore(runtime_dir or (vault_root / ".lifeos"))
+    policy_reads = build_policy_read_tools(
+        vault_root=vault_root,
+        activity=activity,
+        invoke=_invoke_mcp_tool,
+    )
     exploration = build_exploration_tools(
         vault_root=vault_root,
         activity=activity,
         invoke=_invoke_mcp_tool,
     )
+    core_tools = [
+        tool
+        for tool in core._tool_manager.list_tools()
+        if tool.name not in _POLICY_READ_OVERRIDES
+    ]
     return FastMCP(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
-        tools=[*core._tool_manager.list_tools(), *exploration],
+        tools=[*core_tools, *policy_reads, *exploration],
     )
