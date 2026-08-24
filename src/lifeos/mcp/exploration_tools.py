@@ -10,7 +10,7 @@ from mcp.server.fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict
 
-from lifeos.facade.errors import ToolValidationError
+from lifeos.facade.errors import ToolExecutionError, ToolValidationError
 from lifeos.facade.exploration import (
     VAULT_LINKS_DESCRIPTOR,
     VAULT_LIST_DESCRIPTOR,
@@ -35,12 +35,15 @@ from lifeos.facade.read_only import (
 )
 from lifeos.mcp.models import (
     ReadMarkdownMCPResult,
+    RuntimeActivityMCPResult,
     VaultContextMCPResult,
     VaultLinksMCPResult,
     VaultListMCPResult,
     VaultReadManyMCPResult,
     VaultSearchMCPResult,
 )
+from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime import ActivityStore
 
 Invoke = Callable[[Callable[[], object]], object]
@@ -56,7 +59,8 @@ VAULT_LIST_MCP_DESCRIPTION = (
 VAULT_SEARCH_MCP_DESCRIPTION = (
     f"{VAULT_SEARCH_DESCRIPTOR.description} Use this like a bounded vault-native grep before "
     "choosing what to read. It is read-only, filtered for external disclosure by retrieval "
-    "policy, can be narrowed with prefix, and reports parser omissions in diagnostics."
+    "policy, can be narrowed with prefix, and reports parser omissions in diagnostics. Search "
+    "titles and descriptions are separately bounded."
 )
 VAULT_READ_MANY_MCP_DESCRIPTION = (
     f"{VAULT_READ_MANY_DESCRIPTOR.description} Use this to compare up to eight agent-selected "
@@ -66,7 +70,8 @@ VAULT_READ_MANY_MCP_DESCRIPTION = (
 VAULT_LINKS_MCP_DESCRIPTION = (
     f"{VAULT_LINKS_DESCRIPTOR.description} Follow current canonical Markdown references in "
     "either direction without shell access. Markdown links remain source-relative; basename "
-    "wikilinks are resolved only when unique. Continue truncated results with next_offset."
+    "wikilinks are resolved only when unique. Continue truncated results with next_offset. "
+    "Allowed backlink sources that cannot be read or parsed are reported in bounded diagnostics."
 )
 READ_MARKDOWN_MCP_DESCRIPTION = (
     f"{READ_MARKDOWN_DESCRIPTOR.description} This runtime read is filtered for external "
@@ -78,6 +83,11 @@ VAULT_CONTEXT_MCP_DESCRIPTION = (
     "filtered for external disclosure by retrieval policy before content access. Set "
     "allow_protected only when the user explicitly asks to include a protected scope and policy "
     "also permits external disclosure."
+)
+RUNTIME_ACTIVITY_MCP_DESCRIPTION = (
+    "Read recent disposable MCP routing/activity metadata for debugging. Path fields are "
+    "re-filtered through the current external retrieval policy, so protected or excluded path "
+    "names are not disclosed by a later activity read."
 )
 
 
@@ -130,6 +140,19 @@ def _validated_request(factory: Callable[[], RequestT]) -> RequestT:
         return factory()
     except ValueError as exc:
         raise ToolValidationError(str(exc)) from exc
+
+
+def _activity_path_allowed(path: str, *, vault_root: Path) -> bool:
+    try:
+        policy = load_retrieval_policy(vault_root)
+        return scope_decision(
+            path,
+            scope=RetrievalScope(),
+            policy=policy,
+            mode="external",
+        ).allowed
+    except RetrievalError:
+        return False
 
 
 def build_policy_read_tools(
@@ -226,6 +249,43 @@ def build_policy_read_tools(
 
         return cast(VaultContextMCPResult, invoke(op))
 
+    def runtime_activity_tool(limit: int = 20) -> RuntimeActivityMCPResult:
+        def op() -> RuntimeActivityMCPResult:
+            try:
+                records = activity.read(limit=limit)
+            except ValueError as exc:
+                raise ToolValidationError(str(exc)) from exc
+            try:
+                load_retrieval_policy(vault_root)
+            except RetrievalError as exc:
+                raise ToolExecutionError("Retrieval policy is invalid") from exc
+
+            def visible(paths: tuple[str, ...]) -> list[str]:
+                return [
+                    path
+                    for path in paths
+                    if _activity_path_allowed(path, vault_root=vault_root)
+                ]
+
+            return {
+                "records": [
+                    {
+                        "timestamp": item.timestamp,
+                        "tool": item.tool,
+                        "focus_paths": visible(item.focus_paths),
+                        "instruction_ids": list(item.instruction_ids),
+                        "source_paths": visible(item.source_paths),
+                        "proposal_id": item.proposal_id,
+                        "target_paths": visible(item.target_paths),
+                        "changed_paths": visible(item.changed_paths),
+                        "operation_count": item.operation_count,
+                    }
+                    for item in records
+                ]
+            }
+
+        return cast(RuntimeActivityMCPResult, invoke(op))
+
     return (
         _strict_tool(
             vault_read_markdown_tool,
@@ -238,6 +298,12 @@ def build_policy_read_tools(
             name="vault_context",
             description=VAULT_CONTEXT_MCP_DESCRIPTION,
             title="Build vault context",
+        ),
+        _strict_tool(
+            runtime_activity_tool,
+            name="runtime_activity",
+            description=RUNTIME_ACTIVITY_MCP_DESCRIPTION,
+            title="Read runtime activity",
         ),
     )
 
@@ -404,6 +470,16 @@ def build_exploration_tools(
                 ],
                 "truncated": result.truncated,
                 "next_offset": result.next_offset,
+                "diagnostics": [
+                    {
+                        "code": item.code,
+                        "severity": item.severity,
+                        "source_path": item.source_path,
+                        "line": item.line,
+                        "message": item.message,
+                    }
+                    for item in result.diagnostics
+                ],
             }
 
         return cast(VaultLinksMCPResult, invoke(op))
