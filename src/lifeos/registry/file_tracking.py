@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -78,6 +77,15 @@ class _PreparedScanEntry:
     mtime_ns: int
 
 
+@dataclass(slots=True)
+class _HashCapture:
+    """Optional byte/metadata capture populated by the existing streamed hash seam."""
+
+    chunks: list[bytes] = field(default_factory=list)
+    size_bytes: int | None = None
+    mtime_ns: int | None = None
+
+
 def _hash_chunks(chunks: Iterable[bytes]) -> str:
     hasher = hashlib.sha256()
     for chunk in chunks:
@@ -90,15 +98,23 @@ def hash_file_content(content: bytes) -> str:
     return _hash_chunks((content,))
 
 
-def _hash_file(path: Path) -> str:
+def _hash_file(path: Path, *, capture: _HashCapture | None = None) -> str:
+    """Stream-hash one stable file observation and optionally retain those exact bytes."""
     try:
         stat_before = path.stat()
     except OSError as exc:
         raise FileTrackingError(f"Could not read metadata for {path}: {exc}") from exc
 
+    hasher = hashlib.sha256()
     try:
         with open(path, "rb") as f:
-            content_hash = _hash_chunks(iter(lambda: f.read(65536), b""))
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+                if capture is not None:
+                    capture.chunks.append(chunk)
     except OSError as exc:
         raise FileTrackingError(f"Could not read {path}: {exc}") from exc
 
@@ -113,29 +129,29 @@ def _hash_file(path: Path) -> str:
     ):
         raise FileTrackingError(f"File {path} changed during hashing.")
 
-    return content_hash
+    if capture is not None:
+        capture.size_bytes = stat_after.st_size
+        capture.mtime_ns = stat_after.st_mtime_ns
+    return hasher.hexdigest()
+
+
+def _participates_in_stable_note_identity(entry: VaultFile) -> bool:
+    first_root = entry.path.parts[0] if entry.path.parts else ""
+    return entry.file_type == ".md" and first_root != "proposals"
 
 
 def _prepare_scan_entry(vault_root: Path, entry: VaultFile) -> _PreparedScanEntry:
     full_path = vault_root / entry.path
-    try:
-        with open(full_path, "rb") as handle:
-            stat_before = os.fstat(handle.fileno())
-            content = handle.read()
-            stat_after = os.fstat(handle.fileno())
-    except OSError as exc:
-        raise FileTrackingError(f"Could not read {full_path}: {exc}") from exc
-
-    if (
-        stat_before.st_mtime_ns != stat_after.st_mtime_ns
-        or stat_before.st_size != stat_after.st_size
-        or len(content) != stat_after.st_size
-    ):
-        raise FileTrackingError(f"File {full_path} changed while preparing registry facts.")
+    capture = _HashCapture()
+    content_hash = _hash_file(full_path, capture=capture)
+    if capture.size_bytes is None or capture.mtime_ns is None:
+        raise FileTrackingError(f"Could not capture registry metadata for {full_path}.")
+    content = b"".join(capture.chunks)
+    if len(content) != capture.size_bytes:
+        raise FileTrackingError(f"File {full_path} changed during hashing.")
 
     stable_id: str | None = None
-    first_root = entry.path.parts[0] if entry.path.parts else ""
-    if entry.file_type == ".md" and first_root != "proposals":
+    if _participates_in_stable_note_identity(entry):
         try:
             text = content.decode("utf-8")
         except UnicodeError as exc:
@@ -149,9 +165,9 @@ def _prepare_scan_entry(vault_root: Path, entry: VaultFile) -> _PreparedScanEntr
 
     return _PreparedScanEntry(
         stable_id=stable_id,
-        content_hash=hash_file_content(content),
-        size_bytes=stat_after.st_size,
-        mtime_ns=stat_after.st_mtime_ns,
+        content_hash=content_hash,
+        size_bytes=capture.size_bytes,
+        mtime_ns=capture.mtime_ns,
     )
 
 
@@ -417,7 +433,11 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                     new_paths.append(path_str)
                 else:
                     existing_stable_id = row["stable_id"]
-                    if existing_stable_id is not None and stable_id != existing_stable_id:
+                    if (
+                        existing_stable_id is not None
+                        and stable_id != existing_stable_id
+                        and _participates_in_stable_note_identity(entry)
+                    ):
                         raise FileTrackingError(
                             f"Stable note identity changed in place at {path_str}: "
                             f"{existing_stable_id!r} -> {stable_id!r}."
