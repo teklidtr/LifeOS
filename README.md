@@ -93,11 +93,19 @@ Pull requests targeting `master` use two validation levels:
   installation and Python application checks, but still runs both documentation checks with
   the runner's standard Python.
 - A full checkpoint is requested by adding the `full-validation` label to the PR. That event
-  runs `full-test`, including the complete pytest suite, together with `docker-setup-e2e` for
-  the clean-room setup/MCP gate. If material commits land after a successful checkpoint,
-  remove and re-add `full-validation` to validate the new head without creating a dummy commit.
+  runs the complete pytest suite across four stateless `full-test-shard-*` runners plus the
+  clean-room `docker-setup-e2e` gate. The aggregate `full-test` check succeeds only when every
+  pytest shard succeeds. If material commits land after a successful checkpoint, remove and
+  re-add `full-validation` to validate the new head without creating a dummy commit.
 - Every push to `master` and every manual `workflow_dispatch` of the full-validation workflow
   runs the complete full checkpoint automatically.
+
+The pytest shards partition the collected suite by count with an exact-pinned `pytest-split`
+version. They do not use test-result, affected-test, or duration-history caches, so every full
+checkpoint executes every collected test and has no cache state that can change test selection.
+The separate full-path `pytest --collect-only` pass is intentionally omitted because each shard
+performs normal pytest collection before execution; the fast PR path keeps collect-only as its
+cheap import/collection contract.
 
 The fast and full PR workflows share the same concurrency group. A newer PR synchronization
 therefore cancels a superseded in-progress full checkpoint; a requested full checkpoint can
