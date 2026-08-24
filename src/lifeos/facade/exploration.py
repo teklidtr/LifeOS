@@ -1,0 +1,387 @@
+"""Bounded, policy-aware read primitives for agent-led vault exploration."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import Literal
+
+from lifeos.context import ContextSearchError, lexical_search_report
+from lifeos.facade.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
+from lifeos.facade.models import ToolDescriptor, ToolEffect
+from lifeos.markdown.parser import parse_markdown_note
+from lifeos.retrieval import RetrievalError, RetrievalPolicy, RetrievalScope, scope_decision
+from lifeos.retrieval.chunking import chunk_markdown_file
+from lifeos.retrieval.policy import load_retrieval_policy
+from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
+
+VAULT_LIST_DESCRIPTOR = ToolDescriptor(
+    name="vault.list",
+    description="Discover bounded canonical Markdown paths and folders in the vault.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+VAULT_SEARCH_DESCRIPTOR = ToolDescriptor(
+    name="vault.search",
+    description="Search canonical Markdown across allowed vault scopes with lexical matching.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+VAULT_READ_MANY_DESCRIPTOR = ToolDescriptor(
+    name="vault.read_many",
+    description="Read a bounded set of canonical Markdown notes for comparison.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+VAULT_LINKS_DESCRIPTOR = ToolDescriptor(
+    name="vault.links",
+    description="Inspect outgoing references and backlinks between canonical Markdown notes.",
+    effect=ToolEffect.READ_ONLY,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class VaultListRequest:
+    prefix: str | None = None
+    limit: int = 100
+    allow_protected: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.limit) is not int or not 1 <= self.limit <= 200:
+            raise ValueError("limit must be an integer between 1 and 200")
+        if type(self.allow_protected) is not bool:
+            raise ValueError("allow_protected must be a boolean")
+        if self.prefix is not None:
+            _validate_prefix(self.prefix)
+
+
+@dataclass(frozen=True, slots=True)
+class VaultPathEntry:
+    path: str
+    kind: Literal["file", "folder"]
+
+
+@dataclass(frozen=True, slots=True)
+class VaultListResult:
+    prefix: str | None
+    entries: tuple[VaultPathEntry, ...]
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class VaultSearchRequest:
+    query: str
+    prefix: str | None = None
+    limit: int = 20
+    allow_protected: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.query, str) or not self.query.strip():
+            raise ValueError("query must be a non-empty string")
+        if self.query != self.query.strip():
+            raise ValueError("query must not contain surrounding whitespace")
+        if type(self.limit) is not int or not 1 <= self.limit <= 50:
+            raise ValueError("limit must be an integer between 1 and 50")
+        if type(self.allow_protected) is not bool:
+            raise ValueError("allow_protected must be a boolean")
+        if self.prefix is not None:
+            _validate_prefix(self.prefix)
+
+
+@dataclass(frozen=True, slots=True)
+class VaultSearchHit:
+    path: str
+    title: str
+    description: str
+    excerpt: str
+    score: int
+    matched_terms: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class VaultSearchResult:
+    query: str
+    hits: tuple[VaultSearchHit, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class VaultReadManyRequest:
+    paths: tuple[str, ...]
+    max_characters: int = 40_000
+    allow_protected: bool = False
+
+    def __post_init__(self) -> None:
+        if not 1 <= len(self.paths) <= 8:
+            raise ValueError("paths must contain between 1 and 8 entries")
+        if len(set(self.paths)) != len(self.paths):
+            raise ValueError("paths must not contain duplicates")
+        if type(self.max_characters) is not int or not 1 <= self.max_characters <= 100_000:
+            raise ValueError("max_characters must be an integer between 1 and 100000")
+        if type(self.allow_protected) is not bool:
+            raise ValueError("allow_protected must be a boolean")
+        for path in self.paths:
+            _validate_markdown_path(path)
+
+
+@dataclass(frozen=True, slots=True)
+class VaultReadItem:
+    path: str
+    markdown_body: str
+    title: str
+    content_hash: str
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class VaultReadManyResult:
+    items: tuple[VaultReadItem, ...]
+    total_characters: int
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class VaultLinksRequest:
+    path: str
+    direction: Literal["outgoing", "backlinks", "both"] = "both"
+    limit: int = 50
+    allow_protected: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_markdown_path(self.path)
+        if self.direction not in {"outgoing", "backlinks", "both"}:
+            raise ValueError("direction must be outgoing, backlinks, or both")
+        if type(self.limit) is not int or not 1 <= self.limit <= 100:
+            raise ValueError("limit must be an integer between 1 and 100")
+        if type(self.allow_protected) is not bool:
+            raise ValueError("allow_protected must be a boolean")
+
+
+@dataclass(frozen=True, slots=True)
+class VaultLink:
+    source_path: str
+    target_path: str
+    target_heading: str | None
+    direction: Literal["outgoing", "backlink"]
+
+
+@dataclass(frozen=True, slots=True)
+class VaultLinksResult:
+    path: str
+    links: tuple[VaultLink, ...]
+    truncated: bool
+
+
+def list_vault_paths(*, vault_root: Path, request: VaultListRequest) -> VaultListResult:
+    """List allowed canonical Markdown files plus their folder paths deterministically."""
+    policy = _policy(vault_root)
+    scope = RetrievalScope(allow_protected=request.allow_protected)
+    try:
+        files = iter_vault_markdown(vault_root)
+    except VaultAccessError as exc:
+        raise ToolExecutionError(str(exc)) from exc
+
+    allowed_files = [
+        source.relative_path
+        for source in files
+        if _matches_prefix(source.relative_path, request.prefix)
+        and _allowed(source.relative_path, scope=scope, policy=policy)
+    ]
+    folders: set[str] = set()
+    for path in allowed_files:
+        parent = PurePosixPath(path).parent
+        while parent.as_posix() not in {".", ""}:
+            folder = parent.as_posix()
+            if _matches_prefix(folder, request.prefix):
+                folders.add(folder)
+            parent = parent.parent
+
+    entries = [*(VaultPathEntry(path, "folder") for path in folders)]
+    entries.extend(VaultPathEntry(path, "file") for path in allowed_files)
+    entries.sort(key=lambda item: (item.path, item.kind))
+    truncated = len(entries) > request.limit
+    return VaultListResult(request.prefix, tuple(entries[: request.limit]), truncated)
+
+
+def search_vault(*, vault_root: Path, request: VaultSearchRequest) -> VaultSearchResult:
+    """Search allowed canonical Markdown without exposing excluded/protected results."""
+    policy = _policy(vault_root)
+    scope = RetrievalScope(allow_protected=request.allow_protected)
+    try:
+        report = lexical_search_report(
+            vault_root=vault_root,
+            query=request.query,
+            limit=200,
+            path_prefix=request.prefix,
+        )
+    except ContextSearchError as exc:
+        raise ToolValidationError(str(exc)) from exc
+    hits = tuple(
+        VaultSearchHit(
+            path=item.path,
+            title=item.title,
+            description=item.description,
+            excerpt=item.excerpt,
+            score=item.score,
+            matched_terms=item.matched_terms,
+        )
+        for item in report.results
+        if _allowed(item.path, scope=scope, policy=policy)
+    )
+    return VaultSearchResult(request.query, hits[: request.limit])
+
+
+def read_many(*, vault_root: Path, request: VaultReadManyRequest) -> VaultReadManyResult:
+    """Read up to eight allowed notes under one total output budget."""
+    policy = _policy(vault_root)
+    scope = RetrievalScope(allow_protected=request.allow_protected)
+    remaining = request.max_characters
+    items: list[VaultReadItem] = []
+    any_truncated = False
+
+    for path in request.paths:
+        _require_allowed(path, scope=scope, policy=policy)
+        try:
+            source = read_vault_markdown(vault_root, path)
+        except VaultAccessError as exc:
+            if exc.code == "not-found":
+                raise ToolNotFoundError("Target file not found") from exc
+            if exc.code in {"unsafe-symlink", "invalid-path"}:
+                raise ToolValidationError("Unsafe vault path") from exc
+            raise ToolExecutionError("Failed to read file") from exc
+        parsed = parse_markdown_note(source.path, content=source.content)
+        body = parsed.body
+        included = body[:remaining]
+        truncated = len(included) < len(body)
+        any_truncated = any_truncated or truncated
+        title = parsed.durable_fields.title or source.path.stem.replace("-", " ")
+        items.append(
+            VaultReadItem(
+                path=path,
+                markdown_body=included,
+                title=title,
+                content_hash=_sha256_prefixed(source.content_bytes),
+                truncated=truncated,
+            )
+        )
+        remaining -= len(included)
+        if remaining <= 0:
+            any_truncated = any_truncated or len(items) < len(request.paths)
+            break
+
+    return VaultReadManyResult(
+        items=tuple(items),
+        total_characters=request.max_characters - remaining,
+        truncated=any_truncated or len(items) < len(request.paths),
+    )
+
+
+def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinksResult:
+    """Resolve current canonical outgoing links/backlinks by deterministic Markdown parsing."""
+    policy = _policy(vault_root)
+    scope = RetrievalScope(allow_protected=request.allow_protected)
+    _require_allowed(request.path, scope=scope, policy=policy)
+    try:
+        files = iter_vault_markdown(vault_root)
+    except VaultAccessError as exc:
+        raise ToolExecutionError(str(exc)) from exc
+    allowed = tuple(
+        source
+        for source in files
+        if _allowed(source.relative_path, scope=scope, policy=policy)
+    )
+    if not any(source.relative_path == request.path for source in allowed):
+        raise ToolNotFoundError("Target file not found")
+
+    links: set[VaultLink] = set()
+    for source in allowed:
+        try:
+            chunks = chunk_markdown_file(source).chunks
+        except RetrievalError:
+            continue
+        for chunk in chunks:
+            for target_path, target_heading in chunk.links:
+                if request.direction in {"outgoing", "both"} and source.relative_path == request.path:
+                    if _allowed(target_path, scope=scope, policy=policy):
+                        links.add(
+                            VaultLink(
+                                source_path=request.path,
+                                target_path=target_path,
+                                target_heading=target_heading,
+                                direction="outgoing",
+                            )
+                        )
+                if request.direction in {"backlinks", "both"} and target_path == request.path:
+                    links.add(
+                        VaultLink(
+                            source_path=source.relative_path,
+                            target_path=request.path,
+                            target_heading=target_heading,
+                            direction="backlink",
+                        )
+                    )
+    ordered = tuple(
+        sorted(
+            links,
+            key=lambda item: (
+                item.direction,
+                item.source_path,
+                item.target_path,
+                item.target_heading or "",
+            ),
+        )
+    )
+    return VaultLinksResult(request.path, ordered[: request.limit], len(ordered) > request.limit)
+
+
+def _policy(vault_root: Path) -> RetrievalPolicy:
+    try:
+        return load_retrieval_policy(vault_root)
+    except RetrievalError as exc:
+        raise ToolExecutionError("Retrieval policy is invalid") from exc
+
+
+def _allowed(path: str, *, scope: RetrievalScope, policy: RetrievalPolicy) -> bool:
+    try:
+        return scope_decision(path, scope=scope, policy=policy, mode="local").allowed
+    except RetrievalError:
+        return False
+
+
+def _require_allowed(path: str, *, scope: RetrievalScope, policy: RetrievalPolicy) -> None:
+    try:
+        decision = scope_decision(path, scope=scope, policy=policy, mode="local")
+    except RetrievalError as exc:
+        raise ToolValidationError("Invalid vault path") from exc
+    if not decision.allowed:
+        raise ToolValidationError(f"Vault path is not available for exploration: {decision.reason}")
+
+
+def _validate_prefix(prefix: str) -> None:
+    if not isinstance(prefix, str) or not prefix.strip() or prefix != prefix.strip():
+        raise ValueError("prefix must be a non-empty vault-relative path")
+    if "\\" in prefix or "\x00" in prefix:
+        raise ValueError("prefix must be a POSIX vault-relative path")
+    pure = PurePosixPath(prefix.rstrip("/"))
+    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+        raise ValueError("prefix must stay within the vault")
+
+
+def _validate_markdown_path(path: str) -> None:
+    if not isinstance(path, str) or not path.strip() or path != path.strip():
+        raise ValueError("paths must be non-empty vault-relative strings")
+    if not path.endswith(".md"):
+        raise ValueError("only Markdown paths are supported")
+    _validate_prefix(path)
+
+
+def _matches_prefix(path: str, prefix: str | None) -> bool:
+    if prefix is None:
+        return True
+    normalized = prefix.rstrip("/")
+    return path == normalized or path.startswith(normalized + "/")
+
+
+def _sha256_prefixed(content: bytes) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(content).hexdigest()
