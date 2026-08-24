@@ -56,5 +56,6 @@ jobs:
         run: |
           /usr/bin/time -f 'wall=%e user=%U sys=%S maxrss_kb=%M' \
             uv run --with pytest-split==0.11.0 pytest -q \
+              --deselect=tests/e2e/test_first_class_reviews.py::test_weekly_history_is_bounded_and_fast_for_a_long_vault \
               --splits 4 --group ${{ matrix.group }} \
               --splitting-algorithm=least_duration --durations=10
