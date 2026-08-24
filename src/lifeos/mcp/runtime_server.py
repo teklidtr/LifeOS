@@ -7,6 +7,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from lifeos.facade.authorization import ConsequentialAuthorizer
+from lifeos.mcp.coherence_tools import build_coherence_tools
 from lifeos.mcp.exploration_tools import build_exploration_tools, build_policy_read_tools
 from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS as CORE_MCP_INSTRUCTIONS,
@@ -20,8 +21,10 @@ _POLICY_READ_OVERRIDES = frozenset({"vault_read_markdown", "vault_context", "run
 
 LIFEOS_MCP_INSTRUCTIONS = (
     "Exploration is encouraged: use vault_list, vault_search, vault_read_markdown, "
-    "vault_read_many, vault_links, wiki_search, and vault_context iteratively to decide what "
-    "matters and what to inspect next. Protected retrieval scopes remain default-deny and can "
+    "vault_read_many, vault_links, wiki_search, vault_context, and vault_note_identity "
+    "iteratively to decide what matters and what to inspect next. A canonical note's stable "
+    "frontmatter id, current path, and content hash are separate facts; use vault_note_identity "
+    "when rename/move continuity matters. Protected retrieval scopes remain default-deny and can "
     "cross the MCP boundary only when the user explicitly asks to include them and retrieval "
     "policy permits external disclosure. Runtime activity re-filters path metadata through the "
     "current external policy and never acts as a protected-scope bypass. Semantic interpretation "
@@ -57,6 +60,10 @@ def create_mcp_server(
         activity=activity,
         invoke=_invoke_mcp_tool,
     )
+    coherence = build_coherence_tools(
+        vault_root=vault_root,
+        invoke=_invoke_mcp_tool,
+    )
     core_tools = [
         tool
         for tool in core._tool_manager.list_tools()
@@ -65,5 +72,5 @@ def create_mcp_server(
     return FastMCP(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
-        tools=[*core_tools, *policy_reads, *exploration],
+        tools=[*core_tools, *policy_reads, *exploration, *coherence],
     )
