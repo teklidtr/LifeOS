@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1644
 title: Split fast PR checks from full validation CI and add measured caching
-status: backlog
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1639
@@ -181,6 +181,97 @@ uv run pytest -q
 
 In addition to command correctness, compare GitHub Actions step/job timings for representative
 cold-cache and warm-cache runs and record the observed cache sizes/hit status in the task or PR.
+
+# Implementation evidence
+
+## Baseline and fast path
+
+Representative pre-change CI measured approximately 68 seconds on the critical `test` job:
+`uv sync` ~2.25s with a setup-uv cache hit, Ruff ~0.09s, mypy ~7.4s without a persisted
+incremental cache, pytest collection ~4.6s wall, full pytest ~48.2s wall, and the clean-room
+Docker command ~36.1s in its parallel job.
+
+The split PR path measured ~22s with a cold/missing mypy Actions cache and ~16.4s on a compatible
+warm run. The warm `.mypy_cache` was ~1.85 MB compressed / ~15 MB unpacked; cache restore plus
+mypy was ~1.73s versus ~5.0s for cold mypy. Ruff remained around 0.1s, so persisting
+`.ruff_cache` was rejected because Actions restore/save overhead would dominate the work.
+
+Persistent Docker layer caching was also rejected for this iteration. Once Docker was removed
+from ordinary PR synchronizations, a representative explicit checkpoint spent ~11.5s in
+build/export. Adding a persisted layer cache would introduce transfer/storage/maintenance cost
+for an infrequent gate while leaving the clean-room runtime validation unchanged.
+
+## Pytest acceleration
+
+A disposable benchmark PR compared serial pytest, pytest-xdist, pytest-testmon, and four-way
+pytest-split sharding. Xdist showed large hosted-runner variance and testmon instrumentation was
+slower than the uninstrumented full suite even on warm affected-test runs. Four stateless
+pytest-split shards were therefore selected: every checkpoint still executes every test, and no
+pytest result cache, affected-test cache, or duration-history cache can affect selection.
+
+The largest original pytest bottleneck was
+`test_weekly_history_is_bounded_and_fast_for_a_long_vault`. Its ~13s runtime came from fixture
+setup creating 120 review artifacts through `open_or_create()`, repeatedly exercising the
+production duplicate-ID scan and making setup effectively O(n^2). The test now directly seeds
+the same 120 valid canonical artifacts, while the production history/load/metadata-validation
+path and duplicate-ID safety remain unchanged. The test measured ~0.17s afterward.
+
+A second combined experiment-rebuild test was split by behavior so only the interruption/large
+history scenario retains a 105-artifact vault. Runtime deletion, rename, and duplicate-identity
+checks now use small isolated vaults. The large scenario measured ~1.95s instead of the earlier
+combined test's ~4.92s while failure localization improved. The complete suite grew from 1570 to
+1573 tests because one combined scenario became four focused tests.
+
+A representative post-refactor full checkpoint executed all 1573 tests across four stateless
+shards: 394/393/393/393 tests, with test phases of ~10.90s, ~18.94s, ~11.47s, and ~14.27s. The
+slower second shard contained several 1-2s recovery/integration tests rather than a single
+pathological test, so no correctness-affecting selection cache was introduced to chase hosted
+runner variance.
+
+## Safety experiments
+
+A temporary test containing an intentional `assert False` was committed to the implementation
+PR. Ordinary `fast-checks` remained green because the fast path successfully collected the
+complete suite but did not execute the full suite. Explicit full validation run `32759864216`
+then failed exactly on that probe in `full-test-shard-1`, and the aggregate `full-test` gate
+failed. The probe was removed immediately afterward, and the fixed head returned to green fast
+and full validation.
+
+Supersession was also tested with a temporary full-only sleep probe. Fast checks collected the
+probe without executing it. Full validation run `32760355439` was started on that head; while
+its pytest shards were running, the probe was removed in a newer commit. The shared
+`lifeos-pr-11` concurrency group cancelled the stale run rather than allowing obsolete work to
+continue. No temporary probe remains in the branch.
+
+## Review fixes and final checkpoint
+
+Codex review tightened three CI safety details before completion. The docs-only fast path now uses
+a conservative ownership allowlist and parses `git diff --name-status -z --find-renames`, so code
+to docs renames and implementation-owned Markdown cannot bypass Python checks. Unrelated label
+events no longer emit the stable required full-validation check names. PR concurrency is now
+asymmetric: fast synchronize runs use `cancel-in-progress: true`, while an explicitly requested
+full checkpoint waits for the current head's fast check instead of cancelling it; a newer
+synchronize event can still cancel obsolete full work.
+
+Mypy cache keys now rotate per commit while retaining a compatible PR/default-branch restore
+prefix. This avoids immutable Actions caches freezing at the first PR snapshot while preserving
+incremental reuse. In the live verification, the new cache generation was saved on the first run
+and the matching full checkpoint restored the exact snapshot; mypy completed in roughly 0.23s.
+
+The final material head passed fast checks and an explicit full checkpoint with all four pytest
+shards, aggregate `full-test`, and `docker-setup-e2e` green. Codex's subsequent review reported
+no major issues. A separate security review was not requested because the change does not alter
+authentication, authorization, secret handling, user-data trust boundaries, or privileged
+runtime mutation; Actions permissions remain read-only and caches remain disposable build/tool
+state rather than validation authority.
+
+## Scope extension
+
+The original task listed distributed test infrastructure as out of scope. During measured
+implementation, the user explicitly approved bounded four-way pytest sharding after the serial
+suite's bottlenecks were identified. The adopted design is deliberately minimal: four ordinary
+GitHub-hosted jobs, an exact-pinned pytest-split plugin, no remote execution service, no affected-
+test selection, and no duration/result cache affecting correctness.
 
 # Relevant decisions
 

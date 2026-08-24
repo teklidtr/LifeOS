@@ -1,0 +1,124 @@
+name: Full validation
+
+on:
+  pull_request:
+    branches: [master]
+    types: [labeled]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    ${{ github.event_name != 'pull_request'
+        && format('lifeos-full-{0}', github.ref)
+        || github.event.label.name == 'full-validation'
+        && format('lifeos-pr-{0}', github.event.pull_request.number)
+        || format('lifeos-label-{0}-{1}', github.event.pull_request.number, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name != 'pull_request' }}
+
+jobs:
+  full_test_shard:
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'full-validation' }}
+    name: ${{ github.event_name == 'pull_request' && github.event.label.name != 'full-validation' && format('full-test-shard-{0}-not-requested', matrix.group) || format('full-test-shard-{0}', matrix.group) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Restore mypy incremental cache
+        if: matrix.group == 1
+        id: mypy-cache
+        uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: mypy-v2-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            mypy-v2-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number || github.ref_name }}-
+            mypy-v2-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
+
+      - name: Documentation impact gate
+        if: ${{ matrix.group == 1 && github.event_name == 'pull_request' }}
+        run: uv run python scripts/check_documentation_impact.py --base-ref "origin/${{ github.base_ref }}"
+
+      - name: Ruff repository gate
+        if: matrix.group == 1
+        run: uv run ruff check .
+
+      - name: Mypy repository gate
+        if: matrix.group == 1
+        run: uv run mypy src
+
+      - name: Report mypy cache
+        if: ${{ always() && matrix.group == 1 }}
+        shell: bash
+        run: |
+          echo "mypy exact primary cache hit: ${{ steps.mypy-cache.outputs.cache-hit || 'false' }}"
+          echo "Compatible restore-key matches are reported by the cache restore step above."
+          if [[ -d .mypy_cache ]]; then
+            echo "mypy cache size: $(du -sh .mypy_cache | cut -f1)"
+          else
+            echo "mypy cache size: 0 (cache directory absent)"
+          fi
+
+      - name: Compile Python sources
+        if: matrix.group == 1
+        run: uv run python -m compileall -q src tests
+
+      - name: Validate manual links
+        if: matrix.group == 1
+        run: uv run python scripts/validate_manual_links.py
+
+      - name: Run full pytest shard
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: >-
+          uv run --with pytest-split==0.11.0 pytest -q
+          --splits 4
+          --group ${{ matrix.group }}
+          --splitting-algorithm=least_duration
+          --durations=10
+
+  full_test:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.label.name == 'full-validation') }}
+    needs: full_test_shard
+    name: ${{ github.event_name == 'pull_request' && github.event.label.name != 'full-validation' && 'full-test-not-requested' || 'full-test' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all full pytest shards
+        env:
+          SHARD_RESULT: ${{ needs.full_test_shard.result }}
+        run: |
+          echo "full-test shard matrix result: $SHARD_RESULT"
+          test "$SHARD_RESULT" = "success"
+
+  docker-setup-e2e:
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'full-validation' }}
+    name: ${{ github.event_name == 'pull_request' && github.event.label.name != 'full-validation' && 'docker-setup-e2e-not-requested' || 'docker-setup-e2e' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Run clean-room setup and MCP gate
+        run: ./scripts/run-setup-integration-docker.sh

@@ -12,6 +12,9 @@ parse_documentation_impact: Callable[[str], Any] = _NAMESPACE["parse_documentati
 evaluate_documentation_impact: Callable[..., tuple[str, ...]] = _NAMESPACE[
     "evaluate_documentation_impact"
 ]
+parse_name_status_z: Callable[[bytes], tuple[Any, ...]] = _NAMESPACE["parse_name_status_z"]
+evaluate_ci_scope: Callable[[tuple[Any, ...]], tuple[bool, int]] = _NAMESPACE["evaluate_ci_scope"]
+is_ci_documentation_path: Callable[[str], bool] = _NAMESPACE["is_ci_documentation_path"]
 
 
 def _task(status: str, reason: str | None = None) -> str:
@@ -97,3 +100,32 @@ def test_multiple_active_task_files_fail_one_task_rule() -> None:
     )
 
     assert errors[0].startswith("implementation-changing PRs must contain exactly one")
+
+
+def test_ci_documentation_allowlist_rejects_implementation_owned_markdown() -> None:
+    assert is_ci_documentation_path("README.md") is True
+    assert is_ci_documentation_path("AGENTS.md") is True
+    assert is_ci_documentation_path("docs/user-manual/example.md") is True
+    assert is_ci_documentation_path("tasks/in-progress/999-example.md") is True
+    assert is_ci_documentation_path("prompts/system.md") is False
+    assert is_ci_documentation_path("packages/plugin/README.md") is False
+    assert is_ci_documentation_path(".github/workflows/notes.md") is False
+    assert is_ci_documentation_path("src/lifeos/example.py") is False
+
+
+def test_ci_scope_checks_both_rename_endpoints() -> None:
+    docs_rename = parse_name_status_z(
+        b"R100\0docs/old.md\0docs/new.md\0M\0README.md\0"
+    )
+    assert evaluate_ci_scope(docs_rename) == (True, 2)
+
+    implementation_to_docs = parse_name_status_z(
+        b"R100\0src/lifeos/example.py\0docs/example.md\0"
+    )
+    assert evaluate_ci_scope(implementation_to_docs) == (False, 1)
+
+
+def test_ci_scope_rejects_empty_and_non_markdown_diffs() -> None:
+    assert evaluate_ci_scope(()) == (False, 0)
+    changes = parse_name_status_z(b"M\0docs/diagram.png\0")
+    assert evaluate_ci_scope(changes) == (False, 1)
