@@ -54,6 +54,12 @@ def with_target_identity_extension(
         note = snapshot.by_path(operation.target_path)
         if note is None or note.stable_id is None:
             continue
+        matches = snapshot.by_stable_id(note.stable_id)
+        if len(matches) != 1:
+            paths = ", ".join(item.path for item in matches)
+            raise ProposalTargetIdentityError(
+                f"Operation {operation.id!r} stable id {note.stable_id!r} is ambiguous: {paths}"
+            )
         if note.content_hash != reviewed_hash:
             raise ProposalTargetIdentityError(
                 f"Operation {operation.id!r} base hash does not match the reviewed canonical note"
