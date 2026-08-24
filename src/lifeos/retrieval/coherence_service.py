@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 from contextvars import ContextVar
 from dataclasses import replace
+from datetime import datetime
 
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.retrieval import service as _service
 from lifeos.retrieval.chunking import chunk_markdown_file as _base_chunk_markdown_file
 from lifeos.retrieval.chunking import reidentify_note
+from lifeos.retrieval.contracts import CancellationToken
 from lifeos.retrieval.index import RetrievalIndex
 from lifeos.retrieval.models import ChunkedNote
 from lifeos.vault import VaultMarkdownFile
@@ -63,9 +65,15 @@ def _identity_plan(
 
 def _coherent_chunk_markdown_file(
     source: VaultMarkdownFile,
-    **kwargs: object,
+    *,
+    indexed_at: datetime | None = None,
+    max_chunk_characters: int = 1_800,
 ) -> ChunkedNote:
-    note = _base_chunk_markdown_file(source, **kwargs)
+    note = _base_chunk_markdown_file(
+        source,
+        indexed_at=indexed_at,
+        max_chunk_characters=max_chunk_characters,
+    )
     if note.document.document_id in _AMBIGUOUS_DOCUMENT_IDS.get():
         return reidentify_note(note, _path_document_id(source.relative_path))
     return note
@@ -88,18 +96,37 @@ class RetrievalIndexService(_service.RetrievalIndexService):
             return self._coherence_sources
         return super()._allowed_sources()
 
-    def rebuild(self, **kwargs: object) -> _service.IndexResult:
+    def rebuild(
+        self,
+        *,
+        cancellation: CancellationToken | None = None,
+        progress: _service.ProgressSink | None = None,
+        batch_size: int = 64,
+        resume: bool = True,
+        stop_after: int | None = None,
+    ) -> _service.IndexResult:
         sources = super()._allowed_sources()
         ambiguous, _expected = _identity_plan(sources)
         token = _AMBIGUOUS_DOCUMENT_IDS.set(ambiguous)
         self._coherence_sources = sources
         try:
-            return super().rebuild(**kwargs)
+            return super().rebuild(
+                cancellation=cancellation,
+                progress=progress,
+                batch_size=batch_size,
+                resume=resume,
+                stop_after=stop_after,
+            )
         finally:
             self._coherence_sources = None
             _AMBIGUOUS_DOCUMENT_IDS.reset(token)
 
-    def incremental_sync(self, **kwargs: object) -> _service.IndexResult:
+    def incremental_sync(
+        self,
+        *,
+        cancellation: CancellationToken | None = None,
+        progress: _service.ProgressSink | None = None,
+    ) -> _service.IndexResult:
         sources = super()._allowed_sources()
         ambiguous, expected = _identity_plan(sources)
         source_by_path = {source.relative_path: source for source in sources}
@@ -114,7 +141,10 @@ class RetrievalIndexService(_service.RetrievalIndexService):
         token = _AMBIGUOUS_DOCUMENT_IDS.set(ambiguous)
         self._coherence_sources = sources
         try:
-            result = super().incremental_sync(**kwargs)
+            result = super().incremental_sync(
+                cancellation=cancellation,
+                progress=progress,
+            )
             if result.status != "complete" or not self.active_path.exists():
                 return result
 
