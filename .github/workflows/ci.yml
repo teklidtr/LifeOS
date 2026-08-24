@@ -1,72 +1,108 @@
-name: CI
+name: PR checks
 
 on:
   pull_request:
     branches: [master]
-  push:
-    branches: [master]
-  workflow_dispatch:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: lifeos-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: test
+  fast-checks:
+    name: fast-checks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Determine PR change scope
+        id: scope
+        shell: bash
+        run: |
+          base_ref="origin/${{ github.base_ref }}"
+          docs_only=true
+          changed_count=0
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            changed_count=$((changed_count + 1))
+            case "$path" in
+              *.md) ;;
+              *) docs_only=false ;;
+            esac
+          done < <(git diff --name-only --find-renames "$base_ref...HEAD")
+          if [[ "$changed_count" -eq 0 ]]; then
+            docs_only=false
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
+          echo "PR scope: docs_only=$docs_only changed_count=$changed_count"
+
+      - name: Documentation impact gate
+        run: python scripts/check_documentation_impact.py --base-ref "origin/${{ github.base_ref }}"
+
+      - name: Validate manual links
+        run: python scripts/validate_manual_links.py
+
       - name: Install uv
+        if: steps.scope.outputs.docs_only != 'true'
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.12.0"
           enable-cache: true
 
       - name: Install locked dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         run: uv sync --frozen --extra dev --extra mcp
 
-      - name: Documentation impact gate
-        if: github.event_name == 'pull_request'
-        run: uv run python scripts/check_documentation_impact.py --base-ref "origin/${{ github.base_ref }}"
+      - name: Restore mypy incremental cache
+        if: steps.scope.outputs.docs_only != 'true'
+        id: mypy-cache
+        uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: mypy-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number }}
+          restore-keys: |
+            mypy-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
 
       - name: Ruff repository gate
+        if: steps.scope.outputs.docs_only != 'true'
         run: uv run ruff check .
 
       - name: Mypy repository gate
+        if: steps.scope.outputs.docs_only != 'true'
         run: uv run mypy src
 
+      - name: Report mypy cache
+        if: ${{ always() && steps.scope.outputs.docs_only != 'true' }}
+        shell: bash
+        run: |
+          echo "mypy exact cache hit: ${{ steps.mypy-cache.outputs.cache-hit }}"
+          if [[ -d .mypy_cache ]]; then
+            echo "mypy cache size: $(du -sh .mypy_cache | cut -f1)"
+          else
+            echo "mypy cache size: 0 (cache directory absent)"
+          fi
+
       - name: Compile Python sources
+        if: steps.scope.outputs.docs_only != 'true'
         run: uv run python -m compileall -q src tests
 
-      - name: Validate manual links
-        run: uv run python scripts/validate_manual_links.py
-
       - name: Collect test suite
+        if: steps.scope.outputs.docs_only != 'true'
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: uv run pytest --collect-only -q
 
-      - name: Run test suite
+      - name: Run project contract smoke tests
+        if: steps.scope.outputs.docs_only != 'true'
         env:
           PYTHONPATH: ${{ github.workspace }}/src
-        run: uv run pytest -q
-
-  docker-setup-e2e:
-    name: docker-setup-e2e
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Run clean-room setup and MCP gate
-        run: ./scripts/run-setup-integration-docker.sh
+        run: uv run pytest -q tests/project

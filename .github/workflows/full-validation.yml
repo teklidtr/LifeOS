@@ -1,0 +1,99 @@
+name: Full validation
+
+on:
+  pull_request:
+    branches: [master]
+    types: [labeled]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    ${{ github.event_name != 'pull_request'
+        && format('lifeos-full-{0}', github.ref)
+        || github.event.label.name == 'full-validation'
+        && format('lifeos-pr-{0}', github.event.pull_request.number)
+        || format('lifeos-label-{0}-{1}', github.event.pull_request.number, github.run_id) }}
+  cancel-in-progress: true
+
+jobs:
+  full-test:
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'full-validation' }}
+    name: full-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Restore mypy incremental cache
+        id: mypy-cache
+        uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: mypy-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number || github.ref_name }}
+          restore-keys: |
+            mypy-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
+
+      - name: Documentation impact gate
+        if: github.event_name == 'pull_request'
+        run: uv run python scripts/check_documentation_impact.py --base-ref "origin/${{ github.base_ref }}"
+
+      - name: Ruff repository gate
+        run: uv run ruff check .
+
+      - name: Mypy repository gate
+        run: uv run mypy src
+
+      - name: Report mypy cache
+        if: always()
+        shell: bash
+        run: |
+          echo "mypy exact cache hit: ${{ steps.mypy-cache.outputs.cache-hit }}"
+          if [[ -d .mypy_cache ]]; then
+            echo "mypy cache size: $(du -sh .mypy_cache | cut -f1)"
+          else
+            echo "mypy cache size: 0 (cache directory absent)"
+          fi
+
+      - name: Compile Python sources
+        run: uv run python -m compileall -q src tests
+
+      - name: Validate manual links
+        run: uv run python scripts/validate_manual_links.py
+
+      - name: Collect test suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: uv run pytest --collect-only -q
+
+      - name: Run test suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: uv run pytest -q
+
+  docker-setup-e2e:
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'full-validation' }}
+    name: docker-setup-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Run clean-room setup and MCP gate
+        run: ./scripts/run-setup-integration-docker.sh

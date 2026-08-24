@@ -82,3 +82,34 @@ When changing the LifeOS application itself:
 
 Small verifiable tasks evolve the application; completed task files are implementation
 history, not a substitute for current user or architecture documentation.
+
+### Continuous integration
+
+Pull requests targeting `master` use two validation levels:
+
+- `fast-checks` runs on ordinary PR open, reopen, and synchronize events. It keeps the
+  documentation-impact gate, manual-link validation, Ruff, mypy, compileall, pytest
+  collection, and the project contract smoke tests. A Markdown-only diff skips dependency
+  installation and Python application checks, but still runs both documentation checks with
+  the runner's standard Python.
+- A full checkpoint is requested by adding the `full-validation` label to the PR. That event
+  runs `full-test`, including the complete pytest suite, together with `docker-setup-e2e` for
+  the clean-room setup/MCP gate. If material commits land after a successful checkpoint,
+  remove and re-add `full-validation` to validate the new head without creating a dummy commit.
+- Every push to `master` and every manual `workflow_dispatch` of the full-validation workflow
+  runs the complete full checkpoint automatically.
+
+The fast and full PR workflows share the same concurrency group. A newer PR synchronization
+therefore cancels a superseded in-progress full checkpoint; a requested full checkpoint can
+also supersede an older fast run for the same PR.
+
+`astral-sh/setup-uv` dependency caching remains enabled. `.mypy_cache` is additionally cached
+as disposable performance state using runner/Python/dependency/configuration inputs plus a PR
+or branch scope. Cache restoration never skips mypy, and a miss or eviction changes only CI
+speed. Ruff and pytest result caches are not persisted. The clean-room Docker gate currently
+uses no persisted layer cache so its isolated semantics remain unchanged.
+
+`master` currently has no repository-enforced required status checks, so merge readiness is
+also governed by the PR workflow in `AGENTS.md`. If branch protection is enabled later, use
+unique check names and require `fast-checks`, `full-test`, and `docker-setup-e2e`; the latter
+two appear for PRs only after the explicit full-validation checkpoint.
