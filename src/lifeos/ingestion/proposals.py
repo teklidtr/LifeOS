@@ -1,17 +1,21 @@
-"""Public ingestion proposal API with cumulative generated-wiki provenance.
+"""Public ingestion proposal API with cumulative provenance and stable target identity.
 
 The existing implementation lives in ``_proposals_core``. This module keeps that API
-stable while adding source-reference accumulation only to generated-owned wiki updates.
-Human-owned patches continue to use the unchanged core behavior.
+stable while layering two cross-cutting contracts over existing builders/persistence:
+source-reference accumulation for generated-owned wiki updates, and review-bound stable
+identity for existing canonical targets. Human-owned patch semantics remain unchanged.
 """
 
 from __future__ import annotations
 
 from contextvars import ContextVar
+from dataclasses import replace
+import json
 from pathlib import Path
 import sys
 from typing import Any
 
+from lifeos.coherence import collect_identity_snapshot
 from lifeos.ingestion import _proposals_core as _core
 from lifeos.ingestion._proposals_core import *  # noqa: F403
 from lifeos.ingestion.drafts import SourceSnapshot
@@ -24,7 +28,13 @@ from lifeos.ingestion.provenance import (
     provenance_to_frontmatter_value,
 )
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.proposals.patches import ReplaceGeneratedFileV2
+from lifeos.proposals.lifecycle import serialize_proposal_markdown
+from lifeos.proposals.patches import ReplaceGeneratedFileV2, validate_patch_document
+from lifeos.proposals.schema import ProposalSchemaError, validate_metadata
+from lifeos.proposals.target_identity import (
+    ProposalTargetIdentityError,
+    with_target_identity_extension,
+)
 
 
 _current_source: ContextVar[SourceSnapshot | None] = ContextVar(
@@ -127,6 +137,85 @@ def build_study_learning_proposal(  # type: ignore[no-redef]
     return _with_source(_original_build_study_learning_proposal, source=source, **kwargs)
 
 
+def _bind_existing_target_identities(*, proposals_root: Path, documents: Any) -> Any:
+    """Bind stable IDs before a draft and its review snapshot become durable proposal state."""
+    try:
+        proposal_text = documents.proposal_markdown.decode("utf-8")
+        parsed = parse_markdown_note(Path("proposal.md"), content=proposal_text)
+        if any(finding.severity == "error" for finding in parsed.findings):
+            raise ProposalTargetIdentityError("Proposal Markdown is structurally invalid")
+        metadata = validate_metadata(dict(parsed.frontmatter))
+        patch_data = json.loads(documents.patches_json.decode("utf-8"))
+        patch = validate_patch_document(patch_data)
+        bound = with_target_identity_extension(
+            metadata,
+            patch,
+            collect_identity_snapshot(proposals_root.parent),
+        )
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ProposalSchemaError,
+        ProposalTargetIdentityError,
+        ValueError,
+    ) as exc:
+        raise _core.ProposalPublicationError(
+            "Could not bind stable identity for an existing proposal target"
+        ) from exc
+
+    if bound == metadata:
+        return documents
+    proposal_markdown = serialize_proposal_markdown(bound, parsed.body)
+    proposal_markdown = proposal_markdown.replace(b"\nreview_digest: null\n", b"\n")
+    return replace(documents, proposal_markdown=proposal_markdown)
+
+
+_original_persist_wiki_section_update_proposal = _core.persist_wiki_section_update_proposal
+_original_persist_compound_wiki_proposal = _core.persist_compound_wiki_proposal
+_original_persist_compounding_wiki_proposal = _core.persist_compounding_wiki_proposal
+_original_persist_study_learning_proposal = _core.persist_study_learning_proposal
+
+
+def persist_wiki_section_update_proposal(*, proposals_root: Path, documents: Any) -> Path:
+    return _original_persist_wiki_section_update_proposal(
+        proposals_root=proposals_root,
+        documents=_bind_existing_target_identities(
+            proposals_root=proposals_root,
+            documents=documents,
+        ),
+    )
+
+
+def persist_compound_wiki_proposal(*, proposals_root: Path, documents: Any) -> Path:
+    return _original_persist_compound_wiki_proposal(
+        proposals_root=proposals_root,
+        documents=_bind_existing_target_identities(
+            proposals_root=proposals_root,
+            documents=documents,
+        ),
+    )
+
+
+def persist_compounding_wiki_proposal(*, proposals_root: Path, documents: Any) -> Path:
+    return _original_persist_compounding_wiki_proposal(
+        proposals_root=proposals_root,
+        documents=_bind_existing_target_identities(
+            proposals_root=proposals_root,
+            documents=documents,
+        ),
+    )
+
+
+def persist_study_learning_proposal(*, proposals_root: Path, documents: Any) -> Path:
+    return _original_persist_study_learning_proposal(
+        proposals_root=proposals_root,
+        documents=_bind_existing_target_identities(
+            proposals_root=proposals_root,
+            documents=documents,
+        ),
+    )
+
+
 # Core builders resolve this global at call time, so installing the wrapper here covers
 # single, compound, compounding, and study wiki updates without changing their public API.
 _core._build_wiki_section_operation = _build_wiki_section_operation
@@ -134,6 +223,13 @@ _core.build_wiki_section_update_proposal = build_wiki_section_update_proposal
 _core.build_compound_wiki_proposal = build_compound_wiki_proposal
 _core.build_compounding_wiki_proposal = build_compounding_wiki_proposal
 _core.build_study_learning_proposal = build_study_learning_proposal
+
+# Existing-target publication is the narrowest point shared by all ingestion update routes.
+# Create-only proposals stay intentionally path-oriented.
+_core.persist_wiki_section_update_proposal = persist_wiki_section_update_proposal
+_core.persist_compound_wiki_proposal = persist_compound_wiki_proposal
+_core.persist_compounding_wiki_proposal = persist_compounding_wiki_proposal
+_core.persist_study_learning_proposal = persist_study_learning_proposal
 
 # Preserve the historical module surface, including globals patched directly by tests.
 sys.modules[__name__] = _core
