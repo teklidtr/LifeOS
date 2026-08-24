@@ -80,38 +80,19 @@ A completed task file is historical evidence; it does not replace updating the d
 
 ## Code Review Rules
 
-Treat code review as an invariant check across the complete exposed surface, not only the lines changed in the current diff.
+Use these rules to catch LifeOS-specific invariant violations that may not be obvious from the diff alone. Keep mechanical checks in tests and CI.
 
-### Privacy, authorization, and policy boundaries
+### Canonical state and mutation
 
-- Enforce privacy, retrieval, authorization, and routing policy in deterministic code. Prompt text, tool descriptions, or agent instructions may explain policy but must never be the only enforcement layer.
-- Review composed and legacy entry points for bypasses whenever a policy-aware surface is added or changed. Equivalent read or mutation paths must enforce the same boundary unless an explicit documented contract says otherwise.
-- Apply eligibility and privacy filters before reading, opening, decoding, parsing, scoring, ranking, or descending into denied content whenever the decision can be made from safe path metadata. Protected or excluded content must not affect allowed results or leak through errors and diagnostics.
-- Fail closed on symlinks, traversal, special files, malformed canonical state, and other unsafe filesystem states. Error messages exposed to agents must remain bounded and must not disclose denied or host-absolute paths.
+- Flag any change that lets an agent, adapter, integration, or derived subsystem directly mutate human-authored canonical Markdown, bypass proposal and authorization boundaries, or make disposable/derived state authoritative. Safe path: agents propose semantic changes; deterministic LifeOS code validates and applies explicitly authorized mutations; Markdown remains canonical.
 
-### Search, traversal, and bounded exploration
+### Privacy and retrieval boundaries
 
-- Apply result limits only after policy filtering and eligibility checks. A bounded search must not let denied higher-ranked candidates crowd valid lower-ranked candidates out of the returned window.
-- Path-only operations such as listing must remain path-only. Do not read Markdown contents merely to discover file names or folders.
-- Bounded enumeration must remain traversable. If a result can be truncated, provide deterministic continuation or another complete discovery mechanism so an MCP-only caller is not stranded at the first page.
+- Flag any read, search, listing, indexing, context, graph, export, or traversal flow where protected or excluded vault content can be accessed, disclosed, or influence results before retrieval policy permits it. Safe path: enforce policy from safe metadata before content access and require explicit protected-scope intent where the contract allows protected access.
 
-### Parsing, links, and identity
+### Human authority and semantic truth
 
-- Preserve link semantics explicitly. Relative Markdown links resolve relative to their source note; Obsidian wikilinks may resolve by canonical path or unique basename.
-- Never guess when a basename, durable ID, canonical target, or other identity is ambiguous. Ambiguous identity must fail closed or remain unresolved according to the documented contract.
-- Distinguish failure of the explicitly requested source from failure of unrelated candidates. A requested unreadable or structurally invalid note must produce a deterministic tool error; malformed neighboring backlink or search candidates may be omitted or diagnosed according to the documented contract.
-
-### Validation and error contracts
-
-- Validate caller-controlled bounds and shapes at the adapter boundary and again in authoritative business logic where appropriate.
-- Expected input failures must become stable argument or validation errors, never generic internal errors.
-- Preserve established safe error contracts when refactoring lower-level traversal or I/O. Security hardening must not unnecessarily collapse actionable allowed-path errors into opaque failures.
-
-### Regression and review resolution
-
-- For every accepted review finding that represents a reproducible bug or boundary failure, add a regression test when practical.
-- Prefer adversarial tests that prove ordering and composition properties, such as policy filtering before decode or cap, rather than only happy-path examples.
-- Before resolving a review thread, run the narrow regression plus the relevant broader validation. Do not mark a finding resolved merely because the implementation appears correct by inspection.
+- Flag automation that silently rewrites human-owned content, turns uncertain inference into durable fact, or treats agent-generated interpretation as established user truth. Safe path: preserve human-owned text and uncertainty; route consequential semantic changes through reviewable proposals backed by source evidence.
 
 ## Completion standard
 
