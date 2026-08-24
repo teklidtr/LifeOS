@@ -567,3 +567,35 @@ concurrent user content.
 Bootstrap does not configure Codex, Claude, Obsidian, shell state, or another
 external client. MCP and desktop client registration remains explicit and
 client-specific after the vault exists.
+
+## DD-089: Cross-device operation has one active LifeOS writer and external sync transport
+
+The supported cross-device default is one human user and one active LifeOS mutation authority
+for a canonical synchronized vault view. Desktop and mobile Obsidian copies may create, edit,
+rename, move, and delete ordinary Markdown; an external provider may transport those canonical
+changes. LifeOS core does not implement synchronization, distributed locking, CRDTs,
+multi-master merge, or provider-specific freshness semantics. A synchronized replica therefore
+does not become an independent LifeOS writer merely because it contains the same Markdown.
+
+Canonical Markdown, proposal history, generated ownership, provenance, and the active node's Git
+history remain durable state. Registry, retrieval indexes, embeddings, caches, activity, locks,
+and other `.lifeos/` state remain disposable and node-local. The active LifeOS node reconciles
+those indexes from the filesystem after manual or synchronized changes. Offline mobile capture
+requires no LifeOS or MCP process and becomes ordinary canonical input after synchronization.
+
+## DD-090: Stable note identity, current path, and content version are separate review facts
+
+Where an artifact carries a durable frontmatter `id`, that ID identifies **which canonical
+note** is being referenced; the vault-relative path identifies **where it is now**; the SHA-256
+content hash identifies **which version** was observed or reviewed. Registry and retrieval
+mappings from ID to current path/hash are rebuildable derived state, not authority. Duplicate or
+ambiguous stable IDs fail closed. Notes without IDs remain path-addressable but cannot obtain
+rename/move continuity by pretending that their path is durable identity.
+
+Existing-note ingestion proposals bind stable target ID, reviewed path, and reviewed base hash
+into review-digest-covered metadata when the target supports stable identity. Identity
+resolution never weakens containment, ownership, authorization, policy, or base-hash checks. A
+pure relocation may be recognized, but pending or approved proposals are never silently
+retargeted; they require renewed review at the new path. Same ID with changed content remains
+stale, and missing, changed, or ambiguous identity blocks mutation. Create operations remain
+path-oriented because an intentionally absent target has no existing note identity to resolve.
