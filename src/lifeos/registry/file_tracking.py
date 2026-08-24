@@ -374,18 +374,14 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                     new_paths.append(path_str)
                 else:
                     existing_stable_id = row["stable_id"]
-                    if (
-                        stable_id is not None
-                        and existing_stable_id is not None
-                        and existing_stable_id != stable_id
-                    ):
+                    if existing_stable_id is not None and stable_id != existing_stable_id:
                         raise FileTrackingError(
                             f"Stable note identity changed in place at {path_str}: "
                             f"{existing_stable_id!r} -> {stable_id!r}."
                         )
                     db_hash = row["content_hash"]
                     is_deleted = row["is_deleted"]
-                    effective_stable_id = stable_id if stable_id is not None else existing_stable_id
+                    effective_stable_id = stable_id
 
                     if is_deleted == 1 or db_hash != content_hash:
                         conn.execute(
