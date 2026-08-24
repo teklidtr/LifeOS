@@ -177,7 +177,9 @@ _original_persist_compounding_wiki_proposal = _core.persist_compounding_wiki_pro
 _original_persist_study_learning_proposal = _core.persist_study_learning_proposal
 
 
-def persist_wiki_section_update_proposal(*, proposals_root: Path, documents: Any) -> Path:
+def persist_wiki_section_update_proposal(  # type: ignore[no-redef]
+    *, proposals_root: Path, documents: Any
+) -> Path:
     return _original_persist_wiki_section_update_proposal(
         proposals_root=proposals_root,
         documents=_bind_existing_target_identities(
@@ -187,7 +189,9 @@ def persist_wiki_section_update_proposal(*, proposals_root: Path, documents: Any
     )
 
 
-def persist_compound_wiki_proposal(*, proposals_root: Path, documents: Any) -> Path:
+def persist_compound_wiki_proposal(  # type: ignore[no-redef]
+    *, proposals_root: Path, documents: Any
+) -> Path:
     return _original_persist_compound_wiki_proposal(
         proposals_root=proposals_root,
         documents=_bind_existing_target_identities(
@@ -197,7 +201,9 @@ def persist_compound_wiki_proposal(*, proposals_root: Path, documents: Any) -> P
     )
 
 
-def persist_compounding_wiki_proposal(*, proposals_root: Path, documents: Any) -> Path:
+def persist_compounding_wiki_proposal(  # type: ignore[no-redef]
+    *, proposals_root: Path, documents: Any
+) -> Path:
     return _original_persist_compounding_wiki_proposal(
         proposals_root=proposals_root,
         documents=_bind_existing_target_identities(
@@ -207,7 +213,9 @@ def persist_compounding_wiki_proposal(*, proposals_root: Path, documents: Any) -
     )
 
 
-def persist_study_learning_proposal(*, proposals_root: Path, documents: Any) -> Path:
+def persist_study_learning_proposal(  # type: ignore[no-redef]
+    *, proposals_root: Path, documents: Any
+) -> Path:
     return _original_persist_study_learning_proposal(
         proposals_root=proposals_root,
         documents=_bind_existing_target_identities(
