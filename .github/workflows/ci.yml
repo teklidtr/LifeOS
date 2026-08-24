@@ -25,25 +25,11 @@ jobs:
 
       - name: Determine PR change scope
         id: scope
-        shell: bash
-        run: |
-          base_ref="origin/${{ github.base_ref }}"
-          docs_only=true
-          changed_count=0
-          while IFS= read -r path; do
-            [[ -z "$path" ]] && continue
-            changed_count=$((changed_count + 1))
-            case "$path" in
-              *.md) ;;
-              *) docs_only=false ;;
-            esac
-          done < <(git diff --name-only --find-renames "$base_ref...HEAD")
-          if [[ "$changed_count" -eq 0 ]]; then
-            docs_only=false
-          fi
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-          echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
-          echo "PR scope: docs_only=$docs_only changed_count=$changed_count"
+        run: >-
+          python scripts/check_documentation_impact.py
+          --base-ref "origin/${{ github.base_ref }}"
+          --ci-scope-output "$GITHUB_OUTPUT"
+          --scope-only
 
       - name: Documentation impact gate
         run: python scripts/check_documentation_impact.py --base-ref "origin/${{ github.base_ref }}"
