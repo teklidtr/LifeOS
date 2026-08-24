@@ -211,7 +211,7 @@ UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
 COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown has "
     "inspected both the source and existing update target. LifeOS automatically refreshes the "
-    "disposable registry before source and target verification. Supply the absent create "
+    "disposable registry before source verification. Supply the absent create "
     "target with its grounded title and body, plus one exact heading and replacement body for "
     "the existing target. LifeOS selects the update operation from canonical ownership. This "
     "creates one atomic two-operation draft and does not modify either target."
@@ -330,17 +330,19 @@ def create_mcp_server(
                     *relocated_paths,
                 ],
             )
-            return {
+            payload: RegistryRefreshMCPResult = {
                 "new": list(result.new),
                 "modified": list(result.modified),
                 "unchanged": list(result.unchanged),
                 "deleted": list(result.deleted),
-                "renamed": [
-                    {"from_path": old_path, "to_path": new_path}
-                    for old_path, new_path in result.renamed
-                ],
                 "proposals_indexed": result.proposals_indexed,
             }
+            if result.renamed:
+                payload["renamed"] = [
+                    {"from_path": old_path, "to_path": new_path}
+                    for old_path, new_path in result.renamed
+                ]
+            return payload
 
         return _invoke_mcp_tool(op)
 
