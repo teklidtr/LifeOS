@@ -64,8 +64,14 @@ from .validation import (
     PreflightFinding,
     PreflightState,
     ProposalPreflightResult,
-    preflight_proposal,
 )
+from . import validation as _validation
+from .coherence_validation import preflight_proposal as _coherent_preflight_proposal
+
+# Application imports ``preflight_proposal`` from the validation module below. Install the
+# coherence layer first so every application path receives the same fail-closed identity check.
+_validation.preflight_proposal = _coherent_preflight_proposal
+preflight_proposal = _coherent_preflight_proposal
 
 __all__ = [
     "AnyPatchDocument",
