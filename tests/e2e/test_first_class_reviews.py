@@ -57,6 +57,68 @@ def open_review(app: BridgeApplication, *, kind: str = "daily", phase: str | Non
     return app.dispatch("review.artifact.open", payload)
 
 
+def _seed_weekly_review(root: Path, day: date) -> None:
+    iso = day.isocalendar()
+    label = f"{iso.year}-W{iso.week:02d}"
+    timestamp = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    write(
+        root / "reviews" / "weekly" / f"{label}.md",
+        f"""---
+type: review
+review_schema: 1
+review_id: weekly-{label}
+review_kind: weekly
+period_start: {day.isoformat()}
+period_end: {(day + timedelta(days=6)).isoformat()}
+timezone: UTC
+status: open
+created_at: "{timestamp}"
+updated_at: "{timestamp}"
+phases:
+  - phase_id: weekly
+    state: pending
+    completed_sections: []
+    skipped_sections: []
+current_phase: weekly
+item_decisions: []
+answers: []
+proposal_refs: []
+migrated_from: []
+snapshot_history: []
+lifecycle_events: []
+---
+
+# Weekly review: {label}
+
+<!-- lifeos:managed:start facts -->
+## Review facts
+
+Seeded history fixture.
+<!-- lifeos:managed:end facts -->
+
+<!-- lifeos:managed:start items -->
+## Review items
+
+No review items.
+<!-- lifeos:managed:end items -->
+
+<!-- lifeos:managed:start continuity -->
+## Continuity
+
+No previous review is linked.
+<!-- lifeos:managed:end continuity -->
+
+## Weekly reflection
+
+<!-- lifeos:managed:start completion-summary -->
+## Completion summary
+
+Review is open.
+<!-- lifeos:managed:end completion-summary -->
+""",
+    )
+
+
 def test_daily_review_survives_human_edits_runtime_deletion_and_rebuild(tmp_path: Path) -> None:
     app = seeded_app(tmp_path)
     opened = open_review(app)
@@ -160,11 +222,9 @@ def test_sparse_degraded_concurrent_and_migrated_paths_fail_safe(tmp_path: Path)
 
 
 def test_weekly_history_is_bounded_and_fast_for_a_long_vault(tmp_path: Path) -> None:
-    service = ReviewArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
     start = date(2024, 1, 1)
     for offset in range(120):
-        day = start + timedelta(weeks=offset)
-        service.open_or_create(kind="weekly", day=day, timezone="UTC", now=datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc), idempotency_key=f"history-{offset}")
+        _seed_weekly_review(tmp_path, start + timedelta(weeks=offset))
     app = BridgeApplication(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos", actor_id="tester")
     began = time.perf_counter()
     history = app.dispatch("review.artifact.history", {"kind": "weekly", "limit": 50})
