@@ -15,7 +15,7 @@ concurrency:
 jobs:
   split-4:
     if: ${{ github.event.label.name == 'pytest-benchmark' }}
-    name: split-4-group-${{ matrix.group }}
+    name: split-4-duration-group-${{ matrix.group }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -54,6 +54,37 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/src
         shell: bash
         run: |
+          /usr/bin/time -f 'wall=%e user=%U sys=%S maxrss_kb=%M' \
+            uv run --with pytest-split==0.11.0 pytest -q \
+              --deselect=tests/e2e/test_first_class_reviews.py::test_weekly_history_is_bounded_and_fast_for_a_long_vault \
+              --splits 4 --group ${{ matrix.group }} \
+              --splitting-algorithm=least_duration --durations=10
+
+  split-4-no-history:
+    if: ${{ github.event.label.name == 'pytest-benchmark' }}
+    name: split-4-no-history-group-${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+      - name: Run shard without duration history
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        shell: bash
+        run: |
+          rm -f .test_durations
           /usr/bin/time -f 'wall=%e user=%U sys=%S maxrss_kb=%M' \
             uv run --with pytest-split==0.11.0 pytest -q \
               --deselect=tests/e2e/test_first_class_reviews.py::test_weekly_history_is_bounded_and_fast_for_a_long_vault \
