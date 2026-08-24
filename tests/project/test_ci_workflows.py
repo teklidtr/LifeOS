@@ -33,15 +33,23 @@ def test_fast_pr_workflow_has_safe_markdown_only_path() -> None:
     assert "if: steps.scope.outputs.docs_only != 'true'" in workflow
 
 
-def test_full_validation_is_explicit_and_complete() -> None:
+def test_full_validation_is_explicit_complete_and_statelessly_sharded() -> None:
     workflow = _read(FULL_WORKFLOW)
 
     assert "types: [labeled]" in workflow
     assert "github.event.label.name == 'full-validation'" in workflow
     assert "push:\n    branches: [master]" in workflow
     assert "workflow_dispatch:" in workflow
+    assert "name: full-test-shard-${{ matrix.group }}" in workflow
+    assert "group: [1, 2, 3, 4]" in workflow
+    assert "pytest-split==0.11.0" in workflow
+    assert "--splits 4" in workflow
+    assert "--group ${{ matrix.group }}" in workflow
     assert "name: full-test" in workflow
-    assert "run: uv run pytest -q\n" in workflow
+    assert "needs: full_test_shard" in workflow
+    assert "needs.full_test_shard.result" in workflow
+    assert "uv run pytest --collect-only -q" not in workflow
+    assert ".test_durations" not in workflow
     assert "run: ./scripts/run-setup-integration-docker.sh" in workflow
 
 
