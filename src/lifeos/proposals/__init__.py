@@ -50,6 +50,15 @@ from .review_snapshot import (
     serialize_review_snapshot_bytes,
     validate_review_snapshot,
 )
+from .target_identity import (
+    TARGET_IDENTITY_EXTENSION,
+    TARGET_IDENTITY_SCHEMA_VERSION,
+    ProposalTargetIdentity,
+    ProposalTargetIdentityError,
+    assess_proposal_target_identities,
+    parse_target_identities,
+    with_target_identity_extension,
+)
 from .validation import (
     OperationPreflightResult,
     PreflightFinding,
@@ -83,6 +92,8 @@ __all__ = [
     "ProposalReviewSnapshot",
     "ProposalSchemaError",
     "ProposalStatus",
+    "ProposalTargetIdentity",
+    "ProposalTargetIdentityError",
     "ReplaceGeneratedFile",
     "ReplaceGeneratedFileV2",
     "ReleaseGeneratedOwnershipV2",
@@ -91,11 +102,15 @@ __all__ = [
     "REVIEW_SNAPSHOT_SCHEMA_VERSION",
     "ReviewSnapshotError",
     "OperationReviewSnapshot",
+    "TARGET_IDENTITY_EXTENSION",
+    "TARGET_IDENTITY_SCHEMA_VERSION",
+    "assess_proposal_target_identities",
     "build_review_snapshot",
     "build_review_snapshot_bytes_from_patches",
     "generate_proposal_id",
     "load_proposal_directory",
     "load_proposals",
+    "parse_target_identities",
     "preflight_proposal",
     "operation_unified_diff",
     "parse_review_snapshot_bytes",
@@ -108,6 +123,7 @@ __all__ = [
     "validate_patch_document",
     "validate_proposal_id",
     "validate_review_snapshot",
+    "with_target_identity_extension",
 ]
 from .lifecycle import (
     ProposalTransitionResult,
