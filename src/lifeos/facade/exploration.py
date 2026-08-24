@@ -45,6 +45,7 @@ class VaultListRequest:
     prefix: str | None = None
     limit: int = 100
     allow_protected: bool = False
+    after: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.limit) is not int or not 1 <= self.limit <= 200:
@@ -53,6 +54,10 @@ class VaultListRequest:
             raise ValueError("allow_protected must be a boolean")
         if self.prefix is not None:
             _validate_prefix(self.prefix)
+        if self.after is not None:
+            _validate_prefix(self.after)
+            if self.prefix is not None and not _matches_prefix(self.after, self.prefix):
+                raise ValueError("after must remain within prefix when prefix is provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +71,7 @@ class VaultListResult:
     prefix: str | None
     entries: tuple[VaultPathEntry, ...]
     truncated: bool
+    next_after: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,20 +204,25 @@ def list_vault_paths(*, vault_root: Path, request: VaultListRequest) -> VaultLis
     entries = [*(VaultPathEntry(path, "folder") for path in folders)]
     entries.extend(VaultPathEntry(path, "file") for path in allowed_files)
     entries.sort(key=lambda item: (item.path, item.kind))
+    if request.after is not None:
+        entries = [item for item in entries if item.path > request.after]
     truncated = len(entries) > request.limit
-    return VaultListResult(request.prefix, tuple(entries[: request.limit]), truncated)
+    page = tuple(entries[: request.limit])
+    next_after = page[-1].path if truncated and page else None
+    return VaultListResult(request.prefix, page, truncated, next_after)
 
 
 def search_vault(*, vault_root: Path, request: VaultSearchRequest) -> VaultSearchResult:
-    """Search allowed canonical Markdown without exposing excluded/protected results."""
+    """Search allowed canonical Markdown without protected candidates crowding out results."""
     policy = _policy(vault_root)
     scope = RetrievalScope(allow_protected=request.allow_protected)
     try:
         report = lexical_search_report(
             vault_root=vault_root,
             query=request.query,
-            limit=200,
+            limit=request.limit,
             path_prefix=request.prefix,
+            path_filter=lambda path: _allowed(path, scope=scope, policy=policy),
         )
     except ContextSearchError as exc:
         raise ToolValidationError(str(exc)) from exc
@@ -225,9 +236,8 @@ def search_vault(*, vault_root: Path, request: VaultSearchRequest) -> VaultSearc
             matched_terms=item.matched_terms,
         )
         for item in report.results
-        if _allowed(item.path, scope=scope, policy=policy)
     )
-    return VaultSearchResult(request.query, hits[: request.limit])
+    return VaultSearchResult(request.query, hits)
 
 
 def read_many(*, vault_root: Path, request: VaultReadManyRequest) -> VaultReadManyResult:
@@ -289,8 +299,13 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
         for source in files
         if _allowed(source.relative_path, scope=scope, policy=policy)
     )
-    if not any(source.relative_path == request.path for source in allowed):
+    allowed_paths = {source.relative_path for source in allowed}
+    if request.path not in allowed_paths:
         raise ToolNotFoundError("Target file not found")
+
+    basename_index: dict[str, list[str]] = {}
+    for path in allowed_paths:
+        basename_index.setdefault(PurePosixPath(path).name, []).append(path)
 
     links: set[VaultLink] = set()
     for source in allowed:
@@ -299,7 +314,15 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
         except RetrievalError:
             continue
         for chunk in chunks:
-            for target_path, target_heading in chunk.links:
+            for parsed_target, target_heading in chunk.links:
+                target_path = _canonical_link_target(
+                    parsed_target,
+                    source_path=source.relative_path,
+                    allowed_paths=allowed_paths,
+                    basename_index=basename_index,
+                )
+                if target_path is None:
+                    continue
                 if request.direction in {"outgoing", "both"} and source.relative_path == request.path:
                     if _allowed(target_path, scope=scope, policy=policy):
                         links.add(
@@ -331,6 +354,25 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
         )
     )
     return VaultLinksResult(request.path, ordered[: request.limit], len(ordered) > request.limit)
+
+
+def _canonical_link_target(
+    target_path: str,
+    *,
+    source_path: str,
+    allowed_paths: set[str],
+    basename_index: dict[str, list[str]],
+) -> str | None:
+    if target_path in allowed_paths:
+        return target_path
+    if PurePosixPath(target_path).parent != PurePosixPath(source_path).parent:
+        return target_path
+    candidates = basename_index.get(PurePosixPath(target_path).name, [])
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        return None
+    return target_path
 
 
 def _policy(vault_root: Path) -> RetrievalPolicy:
