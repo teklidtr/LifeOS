@@ -12,6 +12,58 @@ class ReadMarkdownMCPResult(TypedDict):
     source_topics: list[str]
 
 
+class VaultPathEntryMCPResult(TypedDict):
+    path: str
+    kind: Literal["file", "folder"]
+
+
+class VaultListMCPResult(TypedDict):
+    prefix: str | None
+    entries: list[VaultPathEntryMCPResult]
+    truncated: bool
+
+
+class VaultSearchHitMCPResult(TypedDict):
+    path: str
+    title: str
+    description: str
+    excerpt: str
+    score: int
+    matched_terms: list[str]
+
+
+class VaultSearchMCPResult(TypedDict):
+    query: str
+    hits: list[VaultSearchHitMCPResult]
+
+
+class VaultReadItemMCPResult(TypedDict):
+    path: str
+    markdown_body: str
+    title: str
+    content_hash: str
+    truncated: bool
+
+
+class VaultReadManyMCPResult(TypedDict):
+    items: list[VaultReadItemMCPResult]
+    total_characters: int
+    truncated: bool
+
+
+class VaultLinkMCPResult(TypedDict):
+    source_path: str
+    target_path: str
+    target_heading: str | None
+    direction: Literal["outgoing", "backlink"]
+
+
+class VaultLinksMCPResult(TypedDict):
+    path: str
+    links: list[VaultLinkMCPResult]
+    truncated: bool
+
+
 class RegistryRefreshMCPResult(TypedDict):
     new: list[str]
     modified: list[str]
