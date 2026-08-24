@@ -23,11 +23,12 @@ def test_fast_pr_workflow_keeps_expensive_gates_out_of_synchronize_path() -> Non
     assert "run-setup-integration-docker.sh" not in workflow
 
 
-def test_fast_pr_workflow_has_safe_markdown_only_path() -> None:
+def test_fast_pr_workflow_has_safe_documentation_only_path() -> None:
     workflow = _read(FAST_WORKFLOW)
 
-    assert "docs_only=true" in workflow
-    assert "*.md) ;;" in workflow
+    assert "--ci-scope-output \"$GITHUB_OUTPUT\"" in workflow
+    assert "--scope-only" in workflow
+    assert "*.md) ;;" not in workflow
     assert 'python scripts/check_documentation_impact.py --base-ref' in workflow
     assert "python scripts/validate_manual_links.py" in workflow
     assert "if: steps.scope.outputs.docs_only != 'true'" in workflow
