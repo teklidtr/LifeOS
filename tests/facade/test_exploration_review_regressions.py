@@ -263,6 +263,26 @@ def test_search_exposes_parser_diagnostics_for_omitted_allowed_notes(tmp_path: P
     assert any(item.source_path == "wiki/broken.md" for item in result.diagnostics)
 
 
+def test_search_bounds_title_and_description_metadata(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    huge_title = "T" * 10_000
+    huge_description = "D" * 20_000
+    _write(
+        vault,
+        "wiki/huge.md",
+        f"---\ntitle: {huge_title}\ndescription: {huge_description}\n---\nneedle\n",
+    )
+
+    result = search_vault(
+        vault_root=vault,
+        request=VaultSearchRequest(query="needle"),
+    )
+
+    assert len(result.hits[0].title) == 512
+    assert len(result.hits[0].description) == 1_024
+
+
 def test_read_many_bounds_title_metadata_separately_from_body_budget(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -403,3 +423,21 @@ def test_vault_links_surfaces_requested_source_parse_failure(tmp_path: Path) -> 
             vault_root=vault,
             request=VaultLinksRequest(path="wiki/broken.md", direction="outgoing"),
         )
+
+
+def test_vault_links_reports_malformed_backlink_candidates(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _write(vault, "wiki/target.md", "Target.\n")
+    _write(vault, "wiki/broken.md", "---\ntitle: Broken\nSee [[target]].\n")
+
+    result = inspect_links(
+        vault_root=vault,
+        request=VaultLinksRequest(path="wiki/target.md", direction="backlinks"),
+    )
+
+    assert result.links == ()
+    assert any(
+        item.code == "link-source-parse-failed" and item.source_path == "wiki/broken.md"
+        for item in result.diagnostics
+    )

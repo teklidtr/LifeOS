@@ -27,6 +27,8 @@ LinkKind = Literal["wikilink", "markdown"]
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]+)?\]\]")
 _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+?)(?:#([^)]*))?\)")
 _MAX_TITLE_CHARACTERS = 512
+_MAX_DESCRIPTION_CHARACTERS = 1_024
+_MAX_LINK_DIAGNOSTICS = 100
 
 VAULT_LIST_DESCRIPTOR = ToolDescriptor(
     name="vault.list",
@@ -201,6 +203,7 @@ class VaultLinksResult:
     links: tuple[VaultLink, ...]
     truncated: bool
     next_offset: int | None
+    diagnostics: tuple[DomainDiagnostic, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,8 +280,8 @@ def search_vault(*, vault_root: Path, request: VaultSearchRequest) -> VaultSearc
     hits = tuple(
         VaultSearchHit(
             path=item.path,
-            title=item.title,
-            description=item.description,
+            title=item.title[:_MAX_TITLE_CHARACTERS],
+            description=item.description[:_MAX_DESCRIPTION_CHARACTERS],
             excerpt=item.excerpt,
             score=item.score,
             matched_terms=item.matched_terms,
@@ -363,18 +366,42 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
         basename_index.setdefault(PurePosixPath(path).name, []).append(path)
 
     links: set[VaultLink] = set()
-    for source_path in sorted(allowed_paths):
+    diagnostics: list[DomainDiagnostic] = []
+    source_paths = (
+        (request.path,)
+        if request.direction == "outgoing"
+        else tuple(sorted(allowed_paths))
+    )
+    for source_path in source_paths:
         try:
             source = read_vault_markdown(vault_root, source_path)
         except VaultAccessError as exc:
             if source_path == request.path:
                 raise ToolExecutionError("Requested note could not be read") from exc
+            diagnostics.append(
+                DomainDiagnostic(
+                    code="link-source-read-failed",
+                    severity="warning",
+                    source_path=source_path,
+                    line=1,
+                    message="Source was skipped because it could not be read for link discovery.",
+                )
+            )
             continue
         try:
             chunks = chunk_markdown_file(source).chunks
         except RetrievalError as exc:
             if source_path == request.path:
                 raise ToolExecutionError("Requested note could not be parsed") from exc
+            diagnostics.append(
+                DomainDiagnostic(
+                    code="link-source-parse-failed",
+                    severity="warning",
+                    source_path=source_path,
+                    line=1,
+                    message="Source was skipped because it could not be parsed for link discovery.",
+                )
+            )
             continue
         for chunk in chunks:
             for parsed_link in _typed_links(chunk.text):
@@ -419,7 +446,46 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
     consumed = request.offset + len(page)
     truncated = consumed < len(ordered)
     next_offset = consumed if truncated else None
-    return VaultLinksResult(request.path, page, truncated, next_offset)
+    return VaultLinksResult(
+        request.path,
+        page,
+        truncated,
+        next_offset,
+        _bounded_link_diagnostics(diagnostics, request_path=request.path),
+    )
+
+
+def _bounded_link_diagnostics(
+    diagnostics: list[DomainDiagnostic],
+    *,
+    request_path: str,
+) -> tuple[DomainDiagnostic, ...]:
+    ordered = sorted(
+        set(diagnostics),
+        key=lambda item: (
+            item.source_path,
+            item.line,
+            item.code,
+            item.severity,
+            item.message,
+        ),
+    )
+    if len(ordered) <= _MAX_LINK_DIAGNOSTICS:
+        return tuple(ordered)
+    visible = ordered[: _MAX_LINK_DIAGNOSTICS - 1]
+    visible.append(
+        DomainDiagnostic(
+            code="link-diagnostics-truncated",
+            severity="warning",
+            source_path=request_path,
+            line=1,
+            message=(
+                f"{len(ordered) - len(visible)} additional link-source diagnostics were "
+                "omitted by the output bound."
+            ),
+        )
+    )
+    return tuple(visible)
 
 
 def _typed_links(text: str) -> tuple[_ParsedLink, ...]:
