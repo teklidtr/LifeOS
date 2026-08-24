@@ -8,7 +8,7 @@ from typing import Any
 
 from lifeos.coherence import IdentitySnapshot, TargetResolution, assess_proposal_target
 from lifeos.proposals.patches import AnyPatchDocument, PatchOperation
-from lifeos.proposals.schema import ProposalMetadata
+from lifeos.proposals.schema import ProposalMetadata, serialize_metadata
 
 TARGET_IDENTITY_EXTENSION = "lifeos_target_identity"
 TARGET_IDENTITY_SCHEMA_VERSION = 1
@@ -76,7 +76,14 @@ def with_target_identity_extension(
     if not targets:
         return metadata
 
-    extensions = dict(metadata.extensions)
+    # ProposalMetadata freezes arbitrary extension mappings so callers cannot mutate
+    # review-bound state in place. Reuse the schema serializer to obtain a fully thawed,
+    # canonical copy before adding this extension; a shallow dict(metadata.extensions)
+    # leaves nested mappingproxy values behind and PyYAML cannot serialize them.
+    serialized_extensions = serialize_metadata(metadata)["extensions"]
+    if not isinstance(serialized_extensions, dict):
+        raise ProposalTargetIdentityError("Proposal metadata extensions did not serialize to a mapping")
+    extensions = dict(serialized_extensions)
     if TARGET_IDENTITY_EXTENSION in extensions:
         raise ProposalTargetIdentityError(
             f"Proposal metadata already contains {TARGET_IDENTITY_EXTENSION!r}"
