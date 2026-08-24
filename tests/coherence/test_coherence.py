@@ -161,3 +161,15 @@ def test_topology_keeps_sync_transport_outside_core(tmp_path: Path) -> None:
     assert ".lifeos/" in inside.required_sync_exclusions
     assert inside.sync_transport_owner == "external"
     assert outside.runtime_location == "node-local-outside-vault"
+    assert ".lifeos/" not in outside.required_sync_exclusions
+
+
+def test_topology_excludes_configured_runtime_path_inside_vault(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+
+    topology = describe_topology(LifeOSConfig(vault, vault / "runtime" / "node-a"))
+
+    assert topology.runtime_location == "inside-canonical-vault"
+    assert topology.required_sync_exclusions[0] == "runtime/node-a/"
+    assert ".lifeos/" not in topology.required_sync_exclusions
