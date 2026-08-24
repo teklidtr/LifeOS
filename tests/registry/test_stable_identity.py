@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
 
+import lifeos.registry.file_tracking as file_tracking
 from lifeos.registry import (
     FileTrackingError,
     Registry,
@@ -73,6 +75,42 @@ def test_registry_reports_relocation_plus_modification(tmp_path: Path) -> None:
     assert result.deleted == []
 
 
+def test_registry_reconciles_deleted_destination_before_relocation(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    wiki = vault / "wiki"
+    wiki.mkdir(parents=True)
+    source = wiki / "a.md"
+    destination = wiki / "b.md"
+    source.write_text(_note("note-a"), encoding="utf-8")
+    destination.write_text(_note("note-b"), encoding="utf-8")
+    registry = _registry(tmp_path)
+    register_scan(registry, vault, scan_vault(vault))
+
+    with registry.connect_read_only() as connection:
+        displaced_row_id = connection.execute(
+            "SELECT id FROM files WHERE stable_id = 'note-b'"
+        ).fetchone()["id"]
+
+    destination.unlink()
+    source.rename(destination)
+    result = register_scan(registry, vault, scan_vault(vault))
+
+    assert result.renamed == [("wiki/a.md", "wiki/b.md")]
+    assert result.deleted == []
+    resolved = resolve_registered_stable_id(registry, "note-a")
+    assert resolved is not None
+    assert resolved.path == "wiki/b.md"
+    assert resolve_registered_stable_id(registry, "note-b") is None
+    with registry.connect_read_only() as connection:
+        displaced = connection.execute(
+            "SELECT vault_path, stable_id, is_deleted FROM files WHERE id = ?",
+            (displaced_row_id,),
+        ).fetchone()
+    assert displaced["is_deleted"] == 1
+    assert displaced["stable_id"] is None
+    assert displaced["vault_path"].startswith(".lifeos/registry-tombstones/")
+
+
 def test_duplicate_stable_ids_abort_refresh_before_registry_mutation(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     (vault / "wiki").mkdir(parents=True)
@@ -90,6 +128,50 @@ def test_duplicate_stable_ids_abort_refresh_before_registry_mutation(tmp_path: P
     ]
     with registry.connect_read_only() as connection:
         assert connection.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 1
+
+
+def test_proposal_frontmatter_id_does_not_collide_with_note_identity(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    (vault / "wiki").mkdir(parents=True)
+    proposal_dir = vault / "proposals" / "proposal-1"
+    proposal_dir.mkdir(parents=True)
+    (vault / "wiki" / "note.md").write_text(_note("shared-id"), encoding="utf-8")
+    (proposal_dir / "proposal.md").write_text(_note("shared-id"), encoding="utf-8")
+    registry = _registry(tmp_path)
+
+    register_scan(registry, vault, scan_vault(vault))
+
+    identities = list_registered_stable_identities(registry)
+    assert [(item.stable_id, item.path) for item in identities] == [
+        ("shared-id", "wiki/note.md")
+    ]
+
+
+def test_registry_derives_id_and_hash_from_same_file_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    (vault / "wiki").mkdir(parents=True)
+    path = vault / "wiki" / "note.md"
+    original = _note("old-id", "Original bytes\n").encode()
+    replacement = _note("new-id", "Replacement bytes\n").encode()
+    path.write_bytes(original)
+    registry = _registry(tmp_path)
+    real_parser = file_tracking.parse_markdown_note
+
+    def parse_then_mutate(note_path: Path, *, content: str | None = None):
+        parsed = real_parser(note_path, content=content)
+        path.write_bytes(replacement)
+        return parsed
+
+    monkeypatch.setattr(file_tracking, "parse_markdown_note", parse_then_mutate)
+    register_scan(registry, vault, scan_vault(vault))
+
+    resolved = resolve_registered_stable_id(registry, "old-id")
+    assert resolved is not None
+    assert resolved.content_hash == hashlib.sha256(original).hexdigest()
+    assert resolve_registered_stable_id(registry, "new-id") is None
 
 
 def test_removing_stable_id_is_identity_change_and_rolls_back(tmp_path: Path) -> None:
