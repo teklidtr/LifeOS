@@ -111,6 +111,69 @@ def test_incremental_index_reconciles_duplicate_identity_without_content_edit(
     assert resolved_documents == {"wiki/a.md": "id:shared-id"}
 
 
+def test_retrieval_suppresses_stable_id_when_uniqueness_proof_is_stale(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    wiki = vault / "wiki"
+    wiki.mkdir(parents=True)
+    first = wiki / "a.md"
+    first.write_text(
+        "---\nid: shared-id\ntype: concept\ntitle: First\n---\n"
+        "The vermilion-marker phrase belongs to the indexed note.\n",
+        encoding="utf-8",
+    )
+    runtime = vault / ".lifeos"
+    RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
+
+    # Introduce a duplicate after the last synchronization. Text retrieval may continue from the
+    # stale index, but build-time uniqueness is no longer proof of current stable identity.
+    (wiki / "b.md").write_text(
+        "---\nid: shared-id\ntype: concept\ntitle: Second\n---\nOther body.\n",
+        encoding="utf-8",
+    )
+    response = HybridRetriever(vault_root=vault, runtime_dir=runtime).search(
+        RetrievalRequest("vermilion-marker")
+    )
+
+    assert response.index_state == "stale"
+    assert response.results
+    assert response.results[0].path == "wiki/a.md"
+    assert response.results[0].stable_id is None
+
+
+def test_retrieval_normalizes_durable_id_during_rebuild_and_incremental_sync(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    note = vault / "wiki" / "spaced-id.md"
+    note.parent.mkdir(parents=True)
+    note.write_text(
+        '---\nid: " durable-id "\ntype: concept\ntitle: Spaced ID\n---\n'
+        "The indigo-marker phrase is indexed here.\n",
+        encoding="utf-8",
+    )
+    runtime = vault / ".lifeos"
+    service = RetrievalIndexService(vault_root=vault, runtime_dir=runtime)
+    service.rebuild()
+
+    with RetrievalIndex(service.active_path, create=False) as index:
+        documents = {document.path: document.document_id for document in index.documents()}
+    assert documents == {"wiki/spaced-id.md": "id:durable-id"}
+    response = HybridRetriever(vault_root=vault, runtime_dir=runtime).search(
+        RetrievalRequest("indigo-marker")
+    )
+    assert response.results[0].stable_id == "durable-id"
+
+    note.write_text(
+        '---\nid: " durable-id "\ntype: concept\ntitle: Spaced ID\n---\n'
+        "The indigo-marker phrase changed after rebuild.\n",
+        encoding="utf-8",
+    )
+    service.incremental_sync()
+    with RetrievalIndex(service.active_path, create=False) as index:
+        refreshed = {document.path: document.document_id for document in index.documents()}
+    assert refreshed == {"wiki/spaced-id.md": "id:durable-id"}
+
+
 def test_retrieval_identity_verification_reads_only_returned_stable_candidates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
