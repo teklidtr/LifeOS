@@ -1,5 +1,6 @@
 """Public SQLite registry interface for deterministic LifeOS state."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 from lifeos.registry import file_tracking as _file_tracking
@@ -51,13 +52,16 @@ def register_scan(
     registry: Registry,
     vault_root: Path,
     entries: list[VaultFile],
+    *,
+    identity_allow_path: Callable[[str], bool] | None = None,
 ) -> ScanResult:
     """Register canonical scan entries while excluding this registry's runtime subtree.
 
     A custom in-vault runtime directory is disposable node-local state just like the default
     ``.lifeos`` directory. ``scan_vault`` already ignores the default name, while this boundary
-    removes any configured custom runtime subtree before file hashing or stable-ID parsing. The
-    registry database location is authoritative for the active runtime used by registry refresh.
+    removes any configured custom runtime subtree before file hashing or stable-ID parsing. An
+    optional identity predicate scopes only stable-ID interpretation; ordinary file/hash tracking
+    still covers every canonical entry supplied to this boundary.
     """
     root = Path(vault_root).resolve(strict=False)
     runtime_dir = registry.database_path.parent.resolve(strict=False)
@@ -76,7 +80,12 @@ def register_scan(
             for entry in entries
             if entry.path.parts[: len(prefix)] != prefix
         ]
-    return _coherent_register_scan(registry, root, canonical_entries)
+    return _coherent_register_scan(
+        registry,
+        root,
+        canonical_entries,
+        identity_allow_path=identity_allow_path,
+    )
 
 
 # Keep direct ``lifeos.registry.file_tracking.register_scan`` imports aligned with the public API.
