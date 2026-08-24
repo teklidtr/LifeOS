@@ -2,7 +2,7 @@ import sys
 import pytest
 from pathlib import Path
 
-from lifeos.mcp.server import LIFEOS_MCP_INSTRUCTIONS
+from lifeos.mcp.runtime_server import LIFEOS_MCP_INSTRUCTIONS
 
 pytestmark = pytest.mark.anyio
 
@@ -43,6 +43,14 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
         "Prepare.\n",
         encoding="utf-8",
     )
+    (tmp_path / "wiki/right-of-way.md").write_text(
+        "---\ntitle: Right of way\n---\nRight of way links to [[driving-safety]].\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "wiki/driving-safety.md").write_text(
+        "---\ntitle: Driving safety\n---\nSafety principles.\n",
+        encoding="utf-8",
+    )
     config_file = tmp_path / "lifeos.yml"
     config_file.write_text(
         "vault_root: .\nruntime_dir: .lifeos\nfeatures:\n  graphify: true\n  exports: false\n"
@@ -74,6 +82,10 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
                 "vault_read_markdown",
                 "vault_context",
                 "wiki_search",
+                "vault_list",
+                "vault_search",
+                "vault_read_many",
+                "vault_links",
                 "ingestion_evolve_wiki_proposal",
                 "study_evolve_learning_proposal",
                 "ingestion_create_wiki_proposal",
@@ -93,6 +105,10 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             assert advertised["vault_read_markdown"].annotations.readOnlyHint is True
             assert advertised["wiki_search"].annotations.readOnlyHint is True
             assert advertised["vault_context"].annotations.readOnlyHint is True
+            assert advertised["vault_list"].annotations.readOnlyHint is True
+            assert advertised["vault_search"].annotations.readOnlyHint is True
+            assert advertised["vault_read_many"].annotations.readOnlyHint is True
+            assert advertised["vault_links"].annotations.readOnlyHint is True
             assert advertised["study_evolve_learning_proposal"].annotations.destructiveHint is False
             assert advertised["runtime_activity"].annotations.readOnlyHint is True
             assert advertised["ingestion_evolve_wiki_proposal"].annotations.destructiveHint is False
@@ -108,6 +124,51 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
                 is False
             )
             assert advertised["proposal_apply"].annotations.destructiveHint is True
+
+            listing = await session.call_tool(
+                "vault_list",
+                arguments={"prefix": "study", "limit": 20},
+            )
+            assert listing.isError is False
+            assert listing.structuredContent is not None
+            assert any(
+                item["path"] == "study/driving-licence/intersections.md"
+                for item in listing.structuredContent["entries"]
+            )
+
+            search = await session.call_tool(
+                "vault_search",
+                arguments={"query": "right way", "limit": 10},
+            )
+            assert search.isError is False
+            assert search.structuredContent is not None
+            search_paths = [item["path"] for item in search.structuredContent["hits"]]
+            assert "study/driving-licence/intersections.md" in search_paths
+            assert "wiki/right-of-way.md" in search_paths
+
+            comparison = await session.call_tool(
+                "vault_read_many",
+                arguments={
+                    "paths": [
+                        "study/driving-licence/intersections.md",
+                        "wiki/right-of-way.md",
+                    ],
+                    "max_characters": 10_000,
+                },
+            )
+            assert comparison.isError is False
+            assert comparison.structuredContent is not None
+            assert len(comparison.structuredContent["items"]) == 2
+
+            links = await session.call_tool(
+                "vault_links",
+                arguments={"path": "wiki/right-of-way.md", "direction": "outgoing"},
+            )
+            assert links.isError is False
+            assert links.structuredContent is not None
+            assert links.structuredContent["links"][0]["target_path"] == (
+                "wiki/driving-safety.md"
+            )
 
             context_result = await session.call_tool(
                 "vault_context",
@@ -127,7 +188,7 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             ] == ["driving-exam"]
 
             activity_result = await session.call_tool(
-                "runtime_activity", arguments={"limit": 5}
+                "runtime_activity", arguments={"limit": 10}
             )
             assert activity_result.isError is False
             assert activity_result.structuredContent is not None
