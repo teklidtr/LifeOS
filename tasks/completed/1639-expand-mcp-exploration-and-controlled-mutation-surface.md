@@ -122,7 +122,7 @@ contract across several broad chapters:
 
 # Validation
 
-Repository CI run #110 passed on the completed implementation:
+Repository CI run #110 passed on the initial completed implementation:
 
 - documentation impact gate;
 - Ruff repository gate;
@@ -131,6 +131,9 @@ Repository CI run #110 passed on the completed implementation:
 - manual link validation;
 - full pytest suite, including MCP and integration coverage;
 - clean-room Docker setup and MCP gate.
+
+Subsequent code-review hardening remains subject to the same required PR gates before merge. The
+PR is not merge-ready while those gates fail or relevant review findings remain unresolved.
 
 The deterministic MCP STDIO test exercises a real `vault_list` → `vault_search` →
 `vault_read_many` → `vault_links` crawl before continuing into `vault_context`. Mutation-boundary
@@ -143,8 +146,14 @@ application remains consequential and authorized.
   MCP primitives over an authoritative Python exploration facade.
 - Reused secure vault traversal, canonical retrieval policy, lexical search, Markdown parsing,
   link parsing, runtime activity, proposal lifecycle, ownership, and authorization contracts.
-- Protected scopes remain default-deny for broad exploration and require an explicit
-  `allow_protected` request; excluded prefixes remain unavailable.
+- Protected scopes remain default-deny. MCP disclosure additionally requires both explicit
+  protected-scope intent and a matching canonical `external_allowed_prefixes` policy entry.
+- Retrieval policy and context-instruction discovery use symlink-safe, policy-first vault I/O so
+  denied content cannot influence allowed results through decoding, diagnostics, or traversal.
+- MCP exploration inputs are type-strict; bounded list and link results expose deterministic
+  continuation; search exposes parser omissions; multi-read metadata is separately bounded.
+- Markdown links retain source-relative semantics while Obsidian wikilinks retain canonical-path
+  or unique-basename semantics instead of sharing an ambiguous resolver heuristic.
 - Existing focused reads, wiki search, and `vault_context` remain composable rather than being
   replaced by a monolithic ingestion tool.
 - Semantic retrieval remains the existing derived subsystem. Direct MCP convergence with hybrid

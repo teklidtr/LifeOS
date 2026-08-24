@@ -48,32 +48,36 @@ RequestT = TypeVar("RequestT")
 
 VAULT_LIST_MCP_DESCRIPTION = (
     f"{VAULT_LIST_DESCRIPTOR.description} Use this like a bounded, vault-native find operation. "
-    "It returns only canonical Markdown paths/folders allowed by retrieval policy, never host "
-    "filesystem paths. Continue a truncated listing with next_after. Set allow_protected only "
-    "when the user explicitly asks to include a protected scope."
+    "It returns only canonical Markdown paths/folders allowed for external disclosure by "
+    "retrieval policy, never host filesystem paths. Continue a truncated listing with "
+    "next_after. Set allow_protected only when the user explicitly asks to include a protected "
+    "scope; protected content must also be externally allowlisted by policy."
 )
 VAULT_SEARCH_MCP_DESCRIPTION = (
     f"{VAULT_SEARCH_DESCRIPTOR.description} Use this like a bounded vault-native grep before "
-    "choosing what to read. It is read-only, policy-aware, and can be narrowed with prefix."
+    "choosing what to read. It is read-only, filtered for external disclosure by retrieval "
+    "policy, can be narrowed with prefix, and reports parser omissions in diagnostics."
 )
 VAULT_READ_MANY_MCP_DESCRIPTION = (
     f"{VAULT_READ_MANY_DESCRIPTOR.description} Use this to compare up to eight agent-selected "
-    "notes under one total character budget. It is read-only and does not grant mutation "
-    "authority."
+    "notes under one Markdown-body character budget with separately bounded metadata. It is "
+    "read-only and does not grant mutation authority."
 )
 VAULT_LINKS_MCP_DESCRIPTION = (
     f"{VAULT_LINKS_DESCRIPTOR.description} Follow current canonical Markdown references in "
-    "either direction without shell access. Basename wikilinks are resolved only when unique; "
-    "results are bounded and policy-aware."
+    "either direction without shell access. Markdown links remain source-relative; basename "
+    "wikilinks are resolved only when unique. Continue truncated results with next_offset."
 )
 READ_MARKDOWN_MCP_DESCRIPTION = (
-    f"{READ_MARKDOWN_DESCRIPTOR.description} This runtime read is retrieval-policy aware. "
-    "Set allow_protected only when the user explicitly asks to include a protected scope."
+    f"{READ_MARKDOWN_DESCRIPTOR.description} This runtime read is filtered for external "
+    "disclosure by retrieval policy. Set allow_protected only when the user explicitly asks to "
+    "include a protected scope; the path must also be externally allowlisted by policy."
 )
 VAULT_CONTEXT_MCP_DESCRIPTION = (
-    f"{VAULT_CONTEXT_DESCRIPTOR.description} Focused and lexical context sources are filtered "
-    "by retrieval policy before selection. Set allow_protected only when the user explicitly "
-    "asks to include a protected scope."
+    f"{VAULT_CONTEXT_DESCRIPTOR.description} Focused, lexical, and instruction sources are "
+    "filtered for external disclosure by retrieval policy before content access. Set "
+    "allow_protected only when the user explicitly asks to include a protected scope and policy "
+    "also permits external disclosure."
 )
 
 
@@ -106,6 +110,7 @@ def _strict_tool(
                 "model_config": ConfigDict(
                     arbitrary_types_allowed=True,
                     extra="forbid",
+                    strict=True,
                 )
             },
         ),
@@ -144,6 +149,7 @@ def build_policy_read_tools(
                 lambda: ReadMarkdownRequest(
                     vault_path=vault_path,
                     allow_protected=allow_protected,
+                    mode="external",
                 )
             )
             result = read_markdown(vault_root=vault_root, request=request)
@@ -170,6 +176,7 @@ def build_policy_read_tools(
                     focus_paths=tuple(focus_paths or ()),
                     limit=limit,
                     allow_protected=allow_protected,
+                    mode="external",
                 )
             )
             pack = get_vault_context(vault_root=vault_root, request=request)
@@ -256,6 +263,7 @@ def build_exploration_tools(
                     limit=limit,
                     allow_protected=allow_protected,
                     after=after,
+                    mode="external",
                 )
             )
             result = list_vault_paths(vault_root=vault_root, request=request)
@@ -285,6 +293,7 @@ def build_exploration_tools(
                     prefix=prefix,
                     limit=limit,
                     allow_protected=allow_protected,
+                    mode="external",
                 )
             )
             result = search_vault(vault_root=vault_root, request=request)
@@ -305,6 +314,16 @@ def build_exploration_tools(
                     }
                     for item in result.hits
                 ],
+                "diagnostics": [
+                    {
+                        "code": item.code,
+                        "severity": item.severity,
+                        "source_path": item.source_path,
+                        "line": item.line,
+                        "message": item.message,
+                    }
+                    for item in result.diagnostics
+                ],
             }
 
         return cast(VaultSearchMCPResult, invoke(op))
@@ -320,6 +339,7 @@ def build_exploration_tools(
                     paths=tuple(paths),
                     max_characters=max_characters,
                     allow_protected=allow_protected,
+                    mode="external",
                 )
             )
             result = read_many(vault_root=vault_root, request=request)
@@ -349,6 +369,7 @@ def build_exploration_tools(
         direction: Literal["outgoing", "backlinks", "both"] = "both",
         limit: int = 50,
         allow_protected: bool = False,
+        offset: int = 0,
     ) -> VaultLinksMCPResult:
         def op() -> VaultLinksMCPResult:
             request = _validated_request(
@@ -357,6 +378,8 @@ def build_exploration_tools(
                     direction=direction,
                     limit=limit,
                     allow_protected=allow_protected,
+                    offset=offset,
+                    mode="external",
                 )
             )
             result = inspect_links(vault_root=vault_root, request=request)
@@ -380,6 +403,7 @@ def build_exploration_tools(
                     for item in result.links
                 ],
                 "truncated": result.truncated,
+                "next_offset": result.next_offset,
             }
 
         return cast(VaultLinksMCPResult, invoke(op))

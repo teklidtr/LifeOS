@@ -77,10 +77,14 @@ def test_exploration_tool_schemas_are_strict_and_bounded(tmp_path: Path) -> None
         "direction",
         "limit",
         "allow_protected",
+        "offset",
     }
-    assert all(tools[name].parameters["additionalProperties"] is False for name in (
-        "vault_list",
-        "vault_search",
-        "vault_read_many",
-        "vault_links",
-    ))
+    assert all(
+        tools[name].parameters["additionalProperties"] is False
+        for name in (
+            "vault_list",
+            "vault_search",
+            "vault_read_many",
+            "vault_links",
+        )
+    )

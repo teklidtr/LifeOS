@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from lifeos.context import ContextSearchError, lexical_search_report
+from lifeos.context import (
+    ContextSearchError,
+    ContextSearchExecutionError,
+    lexical_search_report,
+)
+from lifeos.diagnostics import DomainDiagnostic
 from lifeos.facade.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
 from lifeos.facade.models import ToolDescriptor, ToolEffect
 from lifeos.markdown.parser import parse_markdown_note
@@ -15,6 +21,12 @@ from lifeos.retrieval.chunking import chunk_markdown_file
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.vault_paths import iter_vault_markdown_paths
+
+RetrievalMode = Literal["local", "external"]
+LinkKind = Literal["wikilink", "markdown"]
+_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]+)?\]\]")
+_MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+?)(?:#([^)]*))?\)")
+_MAX_TITLE_CHARACTERS = 512
 
 VAULT_LIST_DESCRIPTOR = ToolDescriptor(
     name="vault.list",
@@ -47,12 +59,14 @@ class VaultListRequest:
     limit: int = 100
     allow_protected: bool = False
     after: str | None = None
+    mode: RetrievalMode = "local"
 
     def __post_init__(self) -> None:
         if type(self.limit) is not int or not 1 <= self.limit <= 200:
             raise ValueError("limit must be an integer between 1 and 200")
         if type(self.allow_protected) is not bool:
             raise ValueError("allow_protected must be a boolean")
+        _validate_mode(self.mode)
         if self.prefix is not None:
             _validate_prefix(self.prefix)
         if self.after is not None:
@@ -81,6 +95,7 @@ class VaultSearchRequest:
     prefix: str | None = None
     limit: int = 20
     allow_protected: bool = False
+    mode: RetrievalMode = "local"
 
     def __post_init__(self) -> None:
         if not isinstance(self.query, str) or not self.query.strip():
@@ -91,6 +106,7 @@ class VaultSearchRequest:
             raise ValueError("limit must be an integer between 1 and 50")
         if type(self.allow_protected) is not bool:
             raise ValueError("allow_protected must be a boolean")
+        _validate_mode(self.mode)
         if self.prefix is not None:
             _validate_prefix(self.prefix)
 
@@ -109,6 +125,7 @@ class VaultSearchHit:
 class VaultSearchResult:
     query: str
     hits: tuple[VaultSearchHit, ...]
+    diagnostics: tuple[DomainDiagnostic, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +133,7 @@ class VaultReadManyRequest:
     paths: tuple[str, ...]
     max_characters: int = 40_000
     allow_protected: bool = False
+    mode: RetrievalMode = "local"
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.paths) <= 8:
@@ -126,6 +144,7 @@ class VaultReadManyRequest:
             raise ValueError("max_characters must be an integer between 1 and 100000")
         if type(self.allow_protected) is not bool:
             raise ValueError("allow_protected must be a boolean")
+        _validate_mode(self.mode)
         for path in self.paths:
             _validate_markdown_path(path)
 
@@ -152,6 +171,8 @@ class VaultLinksRequest:
     direction: Literal["outgoing", "backlinks", "both"] = "both"
     limit: int = 50
     allow_protected: bool = False
+    offset: int = 0
+    mode: RetrievalMode = "local"
 
     def __post_init__(self) -> None:
         _validate_markdown_path(self.path)
@@ -161,6 +182,9 @@ class VaultLinksRequest:
             raise ValueError("limit must be an integer between 1 and 100")
         if type(self.allow_protected) is not bool:
             raise ValueError("allow_protected must be a boolean")
+        if type(self.offset) is not int or self.offset < 0:
+            raise ValueError("offset must be a non-negative integer")
+        _validate_mode(self.mode)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +200,14 @@ class VaultLinksResult:
     path: str
     links: tuple[VaultLink, ...]
     truncated: bool
+    next_offset: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedLink:
+    kind: LinkKind
+    target_path: str
+    target_heading: str | None
 
 
 def list_vault_paths(*, vault_root: Path, request: VaultListRequest) -> VaultListResult:
@@ -184,9 +216,12 @@ def list_vault_paths(*, vault_root: Path, request: VaultListRequest) -> VaultLis
     scope = RetrievalScope(allow_protected=request.allow_protected)
 
     def traversal_filter(path: str) -> bool:
-        return _allowed(path, scope=scope, policy=policy) and _matches_prefix_or_ancestor(
-            path, request.prefix
-        )
+        return _allowed(
+            path,
+            scope=scope,
+            policy=policy,
+            mode=request.mode,
+        ) and _matches_prefix_or_ancestor(path, request.prefix)
 
     try:
         allowed_files = list(
@@ -196,7 +231,7 @@ def list_vault_paths(*, vault_root: Path, request: VaultListRequest) -> VaultLis
             )
         )
     except VaultAccessError as exc:
-        raise ToolExecutionError("Failed to list vault paths") from exc
+        raise ToolExecutionError(f"{exc.code}: {exc}") from exc
 
     folders: set[str] = set()
     for path in allowed_files:
@@ -228,8 +263,15 @@ def search_vault(*, vault_root: Path, request: VaultSearchRequest) -> VaultSearc
             query=request.query,
             limit=request.limit,
             path_prefix=request.prefix,
-            path_filter=lambda path: _allowed(path, scope=scope, policy=policy),
+            path_filter=lambda path: _allowed(
+                path,
+                scope=scope,
+                policy=policy,
+                mode=request.mode,
+            ),
         )
+    except ContextSearchExecutionError as exc:
+        raise ToolExecutionError(str(exc)) from exc
     except ContextSearchError as exc:
         raise ToolValidationError(str(exc)) from exc
     hits = tuple(
@@ -243,11 +285,11 @@ def search_vault(*, vault_root: Path, request: VaultSearchRequest) -> VaultSearc
         )
         for item in report.results
     )
-    return VaultSearchResult(request.query, hits)
+    return VaultSearchResult(request.query, hits, report.diagnostics)
 
 
 def read_many(*, vault_root: Path, request: VaultReadManyRequest) -> VaultReadManyResult:
-    """Read up to eight allowed notes under one total output budget."""
+    """Read up to eight allowed notes under one body budget and bounded metadata."""
     policy = _policy(vault_root)
     scope = RetrievalScope(allow_protected=request.allow_protected)
     remaining = request.max_characters
@@ -255,7 +297,7 @@ def read_many(*, vault_root: Path, request: VaultReadManyRequest) -> VaultReadMa
     any_truncated = False
 
     for path in request.paths:
-        _require_allowed(path, scope=scope, policy=policy)
+        _require_allowed(path, scope=scope, policy=policy, mode=request.mode)
         try:
             source = read_vault_markdown(vault_root, path)
         except VaultAccessError as exc:
@@ -267,9 +309,12 @@ def read_many(*, vault_root: Path, request: VaultReadManyRequest) -> VaultReadMa
         parsed = parse_markdown_note(source.path, content=source.content)
         body = parsed.body
         included = body[:remaining]
-        truncated = len(included) < len(body)
+        body_truncated = len(included) < len(body)
+        raw_title = parsed.durable_fields.title or source.path.stem.replace("-", " ")
+        title = raw_title[:_MAX_TITLE_CHARACTERS]
+        title_truncated = len(title) < len(raw_title)
+        truncated = body_truncated or title_truncated
         any_truncated = any_truncated or truncated
-        title = parsed.durable_fields.title or source.path.stem.replace("-", " ")
         items.append(
             VaultReadItem(
                 path=path,
@@ -295,16 +340,21 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
     """Resolve current canonical outgoing links/backlinks by deterministic Markdown parsing."""
     policy = _policy(vault_root)
     scope = RetrievalScope(allow_protected=request.allow_protected)
-    _require_allowed(request.path, scope=scope, policy=policy)
+    _require_allowed(request.path, scope=scope, policy=policy, mode=request.mode)
     try:
         allowed_paths = set(
             iter_vault_markdown_paths(
                 vault_root,
-                path_filter=lambda path: _allowed(path, scope=scope, policy=policy),
+                path_filter=lambda path: _allowed(
+                    path,
+                    scope=scope,
+                    policy=policy,
+                    mode=request.mode,
+                ),
             )
         )
     except VaultAccessError as exc:
-        raise ToolExecutionError("Failed to enumerate vault links") from exc
+        raise ToolExecutionError(f"{exc.code}: {exc}") from exc
     if request.path not in allowed_paths:
         raise ToolNotFoundError("Target file not found")
 
@@ -327,9 +377,9 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
                 raise ToolExecutionError("Requested note could not be parsed") from exc
             continue
         for chunk in chunks:
-            for parsed_target, target_heading in chunk.links:
-                target_path = _canonical_link_target(
-                    parsed_target,
+            for parsed_link in _typed_links(chunk.text):
+                target_path = _resolve_typed_link(
+                    parsed_link,
                     source_path=source_path,
                     allowed_paths=allowed_paths,
                     basename_index=basename_index,
@@ -341,7 +391,7 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
                         VaultLink(
                             source_path=request.path,
                             target_path=target_path,
-                            target_heading=target_heading,
+                            target_heading=parsed_link.target_heading,
                             direction="outgoing",
                         )
                     )
@@ -350,7 +400,7 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
                         VaultLink(
                             source_path=source_path,
                             target_path=request.path,
-                            target_heading=target_heading,
+                            target_heading=parsed_link.target_heading,
                             direction="backlink",
                         )
                     )
@@ -365,24 +415,54 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
             ),
         )
     )
-    return VaultLinksResult(request.path, ordered[: request.limit], len(ordered) > request.limit)
+    page = ordered[request.offset : request.offset + request.limit]
+    consumed = request.offset + len(page)
+    truncated = consumed < len(ordered)
+    next_offset = consumed if truncated else None
+    return VaultLinksResult(request.path, page, truncated, next_offset)
 
 
-def _canonical_link_target(
-    target_path: str,
+def _typed_links(text: str) -> tuple[_ParsedLink, ...]:
+    results: set[_ParsedLink] = set()
+    for target, heading in _WIKILINK_RE.findall(text):
+        path = target.strip().strip("/")
+        if not path.endswith(".md"):
+            path += ".md"
+        results.add(_ParsedLink("wikilink", path, heading.strip() or None))
+    for target, heading in _MARKDOWN_LINK_RE.findall(text):
+        if "://" in target or target.startswith("#"):
+            continue
+        path = target.split("?", 1)[0]
+        if path.endswith(".md"):
+            results.add(_ParsedLink("markdown", path, heading.strip() or None))
+    return tuple(
+        sorted(
+            results,
+            key=lambda item: (item.kind, item.target_path, item.target_heading or ""),
+        )
+    )
+
+
+def _resolve_typed_link(
+    link: _ParsedLink,
     *,
     source_path: str,
     allowed_paths: set[str],
     basename_index: dict[str, list[str]],
 ) -> str | None:
-    if target_path in allowed_paths:
-        return target_path
-    source_relative = _source_relative_target(target_path, source_path=source_path)
-    if source_relative in allowed_paths:
-        return source_relative
-    if PurePosixPath(target_path).parent != PurePosixPath(source_path).parent:
+    if link.kind == "markdown":
+        if link.target_path.startswith("/"):
+            candidate = link.target_path.strip("/")
+        else:
+            candidate = _source_relative_target(link.target_path, source_path=source_path)
+        return candidate if candidate in allowed_paths else None
+
+    candidate = link.target_path.strip("/")
+    if candidate in allowed_paths:
+        return candidate
+    if "/" in candidate:
         return None
-    candidates = basename_index.get(PurePosixPath(target_path).name, [])
+    candidates = basename_index.get(PurePosixPath(candidate).name, [])
     if len(candidates) == 1:
         return candidates[0]
     return None
@@ -407,20 +487,37 @@ def _policy(vault_root: Path) -> RetrievalPolicy:
         raise ToolExecutionError("Retrieval policy is invalid") from exc
 
 
-def _allowed(path: str, *, scope: RetrievalScope, policy: RetrievalPolicy) -> bool:
+def _allowed(
+    path: str,
+    *,
+    scope: RetrievalScope,
+    policy: RetrievalPolicy,
+    mode: RetrievalMode,
+) -> bool:
     try:
-        return scope_decision(path, scope=scope, policy=policy, mode="local").allowed
+        return scope_decision(path, scope=scope, policy=policy, mode=mode).allowed
     except RetrievalError:
         return False
 
 
-def _require_allowed(path: str, *, scope: RetrievalScope, policy: RetrievalPolicy) -> None:
+def _require_allowed(
+    path: str,
+    *,
+    scope: RetrievalScope,
+    policy: RetrievalPolicy,
+    mode: RetrievalMode,
+) -> None:
     try:
-        decision = scope_decision(path, scope=scope, policy=policy, mode="local")
+        decision = scope_decision(path, scope=scope, policy=policy, mode=mode)
     except RetrievalError as exc:
         raise ToolValidationError("Invalid vault path") from exc
     if not decision.allowed:
         raise ToolValidationError(f"Vault path is not available for exploration: {decision.reason}")
+
+
+def _validate_mode(mode: RetrievalMode) -> None:
+    if mode not in {"local", "external"}:
+        raise ValueError("mode must be local or external")
 
 
 def _validate_prefix(prefix: str) -> None:

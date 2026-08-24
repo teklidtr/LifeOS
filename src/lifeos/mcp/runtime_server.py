@@ -21,11 +21,12 @@ _POLICY_READ_OVERRIDES = frozenset({"vault_read_markdown", "vault_context"})
 LIFEOS_MCP_INSTRUCTIONS = (
     "Exploration is encouraged: use vault_list, vault_search, vault_read_markdown, "
     "vault_read_many, vault_links, wiki_search, and vault_context iteratively to decide what "
-    "matters and what to inspect next. Protected retrieval scopes remain default-deny unless "
-    "the user explicitly asks to include them. Semantic interpretation belongs to the external "
-    "agent. LifeOS constrains mutation, not exploration: canonical changes remain available "
-    "only through bounded proposal and consequential authorization tools; there is no generic "
-    "vault write, delete, move, or shell surface. "
+    "matters and what to inspect next. Protected retrieval scopes remain default-deny and can "
+    "cross the MCP boundary only when the user explicitly asks to include them and retrieval "
+    "policy permits external disclosure. Semantic interpretation belongs to the external agent. "
+    "LifeOS constrains mutation, not exploration: canonical changes remain available only "
+    "through bounded proposal and consequential authorization tools; there is no generic vault "
+    "write, delete, move, or shell surface. "
     + CORE_MCP_INSTRUCTIONS
 )
 
