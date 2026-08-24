@@ -9,9 +9,10 @@ from pathlib import Path
 from lifeos.context.instructions import ContextInstruction, load_instruction_report
 from lifeos.context.search import (
     ContextSearchError,
+    PathFilter,
     SearchResult,
-    lexical_search_report,
     focused_search_results,
+    lexical_search_report,
 )
 from lifeos.diagnostics import DomainDiagnostic
 
@@ -36,16 +37,22 @@ def build_context_pack(
     question: str,
     limit: int = 8,
     focus_paths: tuple[str, ...] = (),
+    path_filter: PathFilter | None = None,
 ) -> ContextPack:
     if type(limit) is not int or limit <= 0:
         raise ContextSearchError("limit must be a positive integer")
-    focused = focused_search_results(vault_root=vault_root, paths=focus_paths)
+    focused = focused_search_results(
+        vault_root=vault_root,
+        paths=focus_paths,
+        path_filter=path_filter,
+    )
     if len(focused) > limit:
         raise ContextSearchError("focus_paths cannot exceed the context source limit")
     search_report = lexical_search_report(
         vault_root=vault_root,
         query=question,
         limit=limit + len(focused) + 1,
+        path_filter=path_filter,
     )
     focused_paths = {item.path for item in focused}
     lexical = tuple(item for item in search_report.results if item.path not in focused_paths)
@@ -56,6 +63,7 @@ def build_context_pack(
         vault_root=vault_root,
         question=question,
         sources=sources,
+        path_filter=path_filter,
     )
     gaps: list[str] = []
     omissions: list[str] = []

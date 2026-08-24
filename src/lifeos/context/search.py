@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from lifeos.diagnostics import DomainDiagnostic, DiagnosticError, diagnostics_from_findings
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
+from lifeos.vault import (
+    VaultAccessError,
+    VaultMarkdownFile,
+    iter_vault_markdown,
+    read_vault_markdown,
+)
+from lifeos.vault_paths import iter_vault_markdown_paths
 
 _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 _FIELD_WEIGHTS: dict[str, tuple[int, int]] = {
@@ -20,10 +27,15 @@ _FIELD_WEIGHTS: dict[str, tuple[int, int]] = {
     "body": (1, 5),
 }
 SearchField = Literal["title", "description", "path", "body"]
+PathFilter = Callable[[str], bool]
 
 
 class ContextSearchError(DiagnosticError):
     """Raised when a context search request is invalid."""
+
+
+class ContextSearchExecutionError(ContextSearchError):
+    """Raised when an otherwise valid context search cannot read allowed vault state."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +131,7 @@ def lexical_search_report(
     query: str,
     limit: int = 8,
     path_prefix: str | None = None,
+    path_filter: PathFilter | None = None,
 ) -> SearchReport:
     """Search Markdown by exact tokens and report parser omissions deterministically."""
     if not isinstance(vault_root, Path):
@@ -135,6 +148,8 @@ def lexical_search_report(
         normalized_prefix = path_prefix.rstrip("/") + "/"
     else:
         normalized_prefix = None
+    if path_filter is not None and not callable(path_filter):
+        raise ContextSearchError("path_filter must be callable or None")
 
     terms = lexical_terms(query)
     if not terms:
@@ -144,15 +159,16 @@ def lexical_search_report(
     diagnostics: list[DomainDiagnostic] = []
 
     try:
-        files = iter_vault_markdown(vault_root)
+        files = _search_sources(
+            vault_root=vault_root,
+            normalized_prefix=normalized_prefix,
+            path_filter=path_filter,
+        )
     except VaultAccessError as exc:
-        raise ContextSearchError(str(exc)) from exc
+        raise ContextSearchExecutionError(str(exc)) from exc
 
     for source in files:
         relative = source.relative_path
-        if normalized_prefix is not None and not relative.startswith(normalized_prefix):
-            continue
-
         path = source.path
         parsed = parse_markdown_note(path, content=source.content)
         source_diagnostics = diagnostics_from_findings(parsed.findings, vault_root=vault_root)
@@ -202,17 +218,46 @@ def lexical_search_report(
     return SearchReport(tuple(results[:limit]), deduped_diagnostics)
 
 
+def _search_sources(
+    *,
+    vault_root: Path,
+    normalized_prefix: str | None,
+    path_filter: PathFilter | None,
+) -> tuple[VaultMarkdownFile, ...]:
+    if normalized_prefix is None and path_filter is None:
+        return iter_vault_markdown(vault_root)
+
+    prefix = normalized_prefix.rstrip("/") if normalized_prefix is not None else None
+
+    def traversal_filter(path: str) -> bool:
+        if path_filter is not None and not path_filter(path):
+            return False
+        if prefix is None:
+            return True
+        candidate = path.rstrip("/")
+        return (
+            candidate == prefix
+            or candidate.startswith(prefix + "/")
+            or prefix.startswith(candidate + "/")
+        )
+
+    paths = iter_vault_markdown_paths(vault_root, path_filter=traversal_filter)
+    return tuple(read_vault_markdown(vault_root, relative) for relative in paths)
+
 
 def focused_search_results(
     *,
     vault_root: Path,
     paths: tuple[str, ...],
+    path_filter: PathFilter | None = None,
 ) -> tuple[SearchResult, ...]:
     """Load explicitly focused canonical Markdown as deterministic context sources."""
     if len(paths) > 8:
         raise ContextSearchError("focus_paths may contain at most 8 paths")
     if len(set(paths)) != len(paths):
         raise ContextSearchError("focus_paths must not contain duplicates")
+    if path_filter is not None and not callable(path_filter):
+        raise ContextSearchError("path_filter must be callable or None")
 
     results: list[SearchResult] = []
     for relative in paths:
@@ -220,10 +265,12 @@ def focused_search_results(
             raise ContextSearchError("focus_paths must contain non-empty strings")
         if relative != relative.strip():
             raise ContextSearchError("focus_paths must not contain surrounding whitespace")
+        if path_filter is not None and not path_filter(relative):
+            raise ContextSearchError(f"Focus path is not available for retrieval: {relative}")
         try:
             source = read_vault_markdown(vault_root, relative)
         except VaultAccessError as exc:
-            raise ContextSearchError(f"Invalid focus path {relative}: {exc}") from exc
+            raise ContextSearchExecutionError(f"Invalid focus path {relative}: {exc}") from exc
         parsed = parse_markdown_note(source.path, content=source.content)
         diagnostics = diagnostics_from_findings(parsed.findings, vault_root=vault_root)
         if diagnostics:
@@ -246,6 +293,7 @@ def focused_search_results(
             )
         )
     return tuple(results)
+
 
 def lexical_search(
     *,

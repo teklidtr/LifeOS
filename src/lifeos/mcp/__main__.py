@@ -10,13 +10,14 @@ from lifeos.config import ConfigError, load_config
 from lifeos.mcp.authorizer import InteractiveTtyAuthorizer
 from lifeos.registry import Registry
 
+
 class MCPDependencyUnavailableError(Exception):
     pass
 
 
 def _load_server_factory() -> Callable[..., Any]:
     try:
-        from lifeos.mcp.server import create_mcp_server
+        from lifeos.mcp.runtime_server import create_mcp_server
     except ModuleNotFoundError as error:
         if error.name == "mcp":
             raise MCPDependencyUnavailableError from error

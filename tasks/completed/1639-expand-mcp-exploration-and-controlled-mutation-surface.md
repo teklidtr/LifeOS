@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1639
 title: Expand MCP exploration and controlled mutation surface
-status: backlog
+status: completed
 phase: 16
 depends_on: []
 risk: medium
@@ -109,26 +109,57 @@ single deterministic black box.
 
 Status: required
 
-- `docs/architecture.md`: record the durable principle that LifeOS constrains mutation, not
-  exploration, and define the agent/MCP/core/vault responsibility boundary.
-- `docs/user-manual/03-feature-breakdown.md`: explain the agent-facing exploration and
-  controlled-mutation capabilities.
-- `docs/user-manual/05-workflow.md`: document iterative MCP-only vault exploration and the
-  proposal-based write path.
-- MCP setup/reference documentation affected by the finalized tool inventory must be updated
-  in the same PR.
+Implemented as a dedicated cross-cutting reference rather than scattering the finalized
+contract across several broad chapters:
+
+- `docs/mcp-exploration-architecture.md`: records the durable exploration-versus-mutation
+  principle, the agent/MCP/core/vault responsibility boundary, privacy rules, output bounds,
+  runtime composition, and proposal-only mutation path.
+- `docs/user-manual/15-mcp-exploration.md`: documents the agent-facing tool inventory,
+  iterative MCP-only exploration workflow, protected-scope behavior, and controlled mutation
+  path.
+- `docs/user-manual/README.md`: links the new manual chapter into the canonical reading path.
 
 # Validation
 
-```bash
-uv run pytest --import-mode=importlib -q tests/mcp tests/integration
-uv run pytest --import-mode=importlib -q
-uv run ruff check src tests
-uv run mypy src
-uv run python -m compileall -q src tests
-uv run python scripts/validate_manual_links.py
-./scripts/run-setup-integration-docker.sh
-```
+Repository CI run #110 passed on the initial completed implementation:
+
+- documentation impact gate;
+- Ruff repository gate;
+- mypy over `src`;
+- Python compileall over `src` and `tests`;
+- manual link validation;
+- full pytest suite, including MCP and integration coverage;
+- clean-room Docker setup and MCP gate.
+
+Subsequent code-review hardening remains subject to the same required PR gates before merge. The
+PR is not merge-ready while those gates fail or relevant review findings remain unresolved.
+
+The deterministic MCP STDIO test exercises a real `vault_list` → `vault_search` →
+`vault_read_many` → `vault_links` crawl before continuing into `vault_context`. Mutation-boundary
+tests assert that no generic write/delete/move/shell tool is exposed and that proposal
+application remains consequential and authorized.
+
+# Implementation notes
+
+- Added `vault_list`, `vault_search`, `vault_read_many`, and `vault_links` as bounded read-only
+  MCP primitives over an authoritative Python exploration facade.
+- Reused secure vault traversal, canonical retrieval policy, lexical search, Markdown parsing,
+  link parsing, runtime activity, proposal lifecycle, ownership, and authorization contracts.
+- Protected scopes remain default-deny. MCP disclosure additionally requires both explicit
+  protected-scope intent and a matching canonical `external_allowed_prefixes` policy entry.
+- Retrieval policy and context-instruction discovery use symlink-safe, policy-first vault I/O so
+  denied content cannot influence allowed results through decoding, diagnostics, or traversal.
+- MCP exploration inputs are type-strict; bounded list and link results expose deterministic
+  continuation; search exposes parser omissions; multi-read metadata is separately bounded.
+- Markdown links retain source-relative semantics while Obsidian wikilinks retain canonical-path
+  or unique-basename semantics instead of sharing an ambiguous resolver heuristic.
+- Existing focused reads, wiki search, and `vault_context` remain composable rather than being
+  replaced by a monolithic ingestion tool.
+- Semantic retrieval remains the existing derived subsystem. Direct MCP convergence with hybrid
+  retrieval/context packs is intentionally left to LIFEOS-1642, which depends on this task.
+- The user-facing STDIO runtime composes the existing core MCP server with the exploration
+  surface; no network transport was introduced.
 
 # Relevant decisions
 

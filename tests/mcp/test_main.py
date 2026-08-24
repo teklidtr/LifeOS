@@ -13,18 +13,18 @@ def test_mcp_package_imports_without_sdk(monkeypatch) -> None:
     # Importing lifeos.mcp should not require `mcp` extra
     import builtins
     original_import = builtins.__import__
-    
+
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
         if name == "mcp":
             raise ModuleNotFoundError("No module named 'mcp'", name="mcp")
         return original_import(name, globals, locals, fromlist, level)
-        
+
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    
+
     import sys
     if "lifeos.mcp" in sys.modules:
         del sys.modules["lifeos.mcp"]
-        
+
     import lifeos.mcp  # noqa: F401
 
 
@@ -34,17 +34,17 @@ def test_entrypoint_missing_extra_writes_only_to_stderr(capsys, monkeypatch, tmp
 
     import builtins
     original_import = builtins.__import__
-    
+
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        # When _load_server_factory tries to import server, we mock mcp not found
-        if name == "lifeos.mcp.server":
+        # When _load_server_factory imports the composed runtime, mock mcp not found.
+        if name == "lifeos.mcp.runtime_server":
             raise ModuleNotFoundError("No module named 'mcp'", name="mcp")
         return original_import(name, globals, locals, fromlist, level)
-        
+
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    
+
     result = main(["--actor-id", "test-actor", "--config", str(config_file)])
-    
+
     assert result == 1
     out, err = capsys.readouterr()
     assert not out
@@ -57,18 +57,17 @@ def test_entrypoint_unrelated_missing_module_propagates(capsys, monkeypatch, tmp
 
     import builtins
     original_import = builtins.__import__
-    
+
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "lifeos.mcp.server":
+        if name == "lifeos.mcp.runtime_server":
             raise ModuleNotFoundError("No module named 'random_pkg'", name="random_pkg")
         return original_import(name, globals, locals, fromlist, level)
-        
+
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    
-    import pytest
+
     with pytest.raises(ModuleNotFoundError) as exc_info:
         main(["--actor-id", "test-actor", "--config", str(config_file)])
-    
+
     assert exc_info.value.name == "random_pkg"
 
 
@@ -105,13 +104,13 @@ def test_stdio_output_contains_only_protocol_json(
 
 
 def test_no_http_transport_symbols_are_configured() -> None:
-    from pathlib import Path
     production_files = (
         Path("src/lifeos/mcp/server.py"),
+        Path("src/lifeos/mcp/runtime_server.py"),
         Path("src/lifeos/mcp/__main__.py"),
         Path("src/lifeos/mcp/authorizer.py"),
     )
-    source = "\\n".join(path.read_text(encoding="utf-8") for path in production_files)
+    source = "\n".join(path.read_text(encoding="utf-8") for path in production_files)
 
     forbidden = {
         "streamable-http",
