@@ -40,3 +40,57 @@ def test_retrieval_reports_none_for_legacy_path_identity(tmp_path: Path) -> None
 
     assert response.results[0].path == "journal/legacy.md"
     assert response.results[0].stable_id is None
+
+
+def test_retrieval_does_not_expose_ambiguous_stable_id_hidden_by_index_key(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    wiki = vault / "wiki"
+    wiki.mkdir(parents=True)
+    (wiki / "a.md").write_text(
+        "---\nid: duplicate-id\ntype: concept\ntitle: First\n---\nFirst duplicate body.\n",
+        encoding="utf-8",
+    )
+    (wiki / "b.md").write_text(
+        "---\nid: duplicate-id\ntype: concept\ntitle: Second\n---\n"
+        "Surviving duplicate carries the saffron-marker phrase.\n",
+        encoding="utf-8",
+    )
+    runtime = vault / ".lifeos"
+    RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
+
+    response = HybridRetriever(vault_root=vault, runtime_dir=runtime).search(
+        RetrievalRequest("saffron-marker")
+    )
+
+    assert response.results
+    assert response.results[0].path == "wiki/b.md"
+    assert response.results[0].stable_id is None
+
+
+def test_retrieval_does_not_attach_old_index_identity_to_changed_canonical_path(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    note = vault / "wiki" / "note.md"
+    note.parent.mkdir(parents=True)
+    note.write_text(
+        "---\nid: old-id\ntype: concept\ntitle: Old\n---\n"
+        "The cobalt-marker phrase is indexed here.\n",
+        encoding="utf-8",
+    )
+    runtime = vault / ".lifeos"
+    RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
+
+    note.write_text(
+        "---\nid: new-id\ntype: concept\ntitle: New\n---\nCanonical content changed after indexing.\n",
+        encoding="utf-8",
+    )
+    response = HybridRetriever(vault_root=vault, runtime_dir=runtime).search(
+        RetrievalRequest("cobalt-marker")
+    )
+
+    assert response.results
+    assert response.results[0].path == "wiki/note.md"
+    assert response.results[0].stable_id is None
