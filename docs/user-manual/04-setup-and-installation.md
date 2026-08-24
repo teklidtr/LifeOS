@@ -396,6 +396,41 @@ git commit -m "chore(vault): initialize LifeOS vault"
 
 You now have a minimal, recoverable canonical foundation.
 
+## 4.14 Cross-device placement and synchronization
+
+The supported cross-device model is one human and **one active LifeOS mutation endpoint** for
+a synchronized canonical vault view. Sync transports remain external to LifeOS. Supported
+patterns include:
+
+- one desktop vault with its local STDIO LifeOS process;
+- one authoritative always-on LifeOS node while desktop/mobile Obsidian copies synchronize
+  canonical files to it;
+- one always-on LifeOS node operating directly on a mounted/shared canonical filesystem;
+- offline mobile capture where the phone writes normal Markdown and LifeOS discovers it only
+  after synchronization reaches the active node.
+
+Do not run independent LifeOS mutation authorities against separate synchronized replicas at
+the same time. LifeOS does not provide distributed locking, CRDTs, multi-master merge, or a
+provider freshness oracle. The sync provider may copy Markdown and other canonical vault
+artifacts, but `.lifeos/` registry/retrieval/cache state should stay node-local and rebuildable.
+Likewise, the active LifeOS node owns Git commits for LifeOS proposal/application activity;
+every phone or desktop replica does not need to commit independently.
+
+If `runtime_dir` remains `.lifeos` inside the vault directory, configure the sync provider to
+exclude it where possible. Also avoid syncing `.git/` as a live multi-client working state and
+avoid treating Obsidian workspace files as canonical LifeOS state. `lifeos doctor` reports the
+resolved writer model, runtime placement, and stable-ID diagnostics so an operator can inspect
+this boundary before enabling an always-on node.
+
+For notes that need rename/move continuity, preserve their frontmatter `id`. Durable wiki notes
+are expected to have one. The ID answers **which note**, the current vault-relative path answers
+**where**, and the SHA-256 content hash answers **which version**. Duplicate IDs are unsafe and
+block identity resolution. A legacy note without an ID remains usable but a later rename cannot
+be proven to be the same note automatically.
+
+See [Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) before configuring a
+synchronized or mounted deployment.
+
 ---
 
 [← Previous: Feature Breakdown](03-feature-breakdown.md) · [Manual home](README.md) · [Next: Workflow →](05-workflow.md)
