@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -20,6 +21,7 @@ _FIELD_WEIGHTS: dict[str, tuple[int, int]] = {
     "body": (1, 5),
 }
 SearchField = Literal["title", "description", "path", "body"]
+PathFilter = Callable[[str], bool]
 
 
 class ContextSearchError(DiagnosticError):
@@ -119,6 +121,7 @@ def lexical_search_report(
     query: str,
     limit: int = 8,
     path_prefix: str | None = None,
+    path_filter: PathFilter | None = None,
 ) -> SearchReport:
     """Search Markdown by exact tokens and report parser omissions deterministically."""
     if not isinstance(vault_root, Path):
@@ -135,6 +138,8 @@ def lexical_search_report(
         normalized_prefix = path_prefix.rstrip("/") + "/"
     else:
         normalized_prefix = None
+    if path_filter is not None and not callable(path_filter):
+        raise ContextSearchError("path_filter must be callable or None")
 
     terms = lexical_terms(query)
     if not terms:
@@ -151,6 +156,8 @@ def lexical_search_report(
     for source in files:
         relative = source.relative_path
         if normalized_prefix is not None and not relative.startswith(normalized_prefix):
+            continue
+        if path_filter is not None and not path_filter(relative):
             continue
 
         path = source.path
@@ -202,17 +209,19 @@ def lexical_search_report(
     return SearchReport(tuple(results[:limit]), deduped_diagnostics)
 
 
-
 def focused_search_results(
     *,
     vault_root: Path,
     paths: tuple[str, ...],
+    path_filter: PathFilter | None = None,
 ) -> tuple[SearchResult, ...]:
     """Load explicitly focused canonical Markdown as deterministic context sources."""
     if len(paths) > 8:
         raise ContextSearchError("focus_paths may contain at most 8 paths")
     if len(set(paths)) != len(paths):
         raise ContextSearchError("focus_paths must not contain duplicates")
+    if path_filter is not None and not callable(path_filter):
+        raise ContextSearchError("path_filter must be callable or None")
 
     results: list[SearchResult] = []
     for relative in paths:
@@ -220,6 +229,8 @@ def focused_search_results(
             raise ContextSearchError("focus_paths must contain non-empty strings")
         if relative != relative.strip():
             raise ContextSearchError("focus_paths must not contain surrounding whitespace")
+        if path_filter is not None and not path_filter(relative):
+            raise ContextSearchError(f"Focus path is not available for retrieval: {relative}")
         try:
             source = read_vault_markdown(vault_root, relative)
         except VaultAccessError as exc:
@@ -246,6 +257,7 @@ def focused_search_results(
             )
         )
     return tuple(results)
+
 
 def lexical_search(
     *,
