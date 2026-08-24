@@ -33,7 +33,8 @@ def atomic_write_file_secure(
         # Write content completely
         written = 0
         while written < len(content):
-            chunk = os.write(temp_fd, content[written:])
+            remaining = content[written:]
+            chunk = os.write(temp_fd, remaining)
             if chunk == 0:
                 raise OSError("write returned 0 bytes")
             written += chunk
