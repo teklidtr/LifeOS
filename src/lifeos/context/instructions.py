@@ -9,13 +9,16 @@ from typing import Literal, cast
 
 import yaml
 
-from lifeos.context.search import ContextSearchError, SearchResult, lexical_terms
-from lifeos.diagnostics import DomainDiagnostic
-from lifeos.vault import (
-    VaultAccessError,
-    iter_vault_text_files,
-    read_vault_text,
+from lifeos.context.search import (
+    ContextSearchError,
+    ContextSearchExecutionError,
+    PathFilter,
+    SearchResult,
+    lexical_terms,
 )
+from lifeos.diagnostics import DomainDiagnostic
+from lifeos.vault import VaultAccessError, read_vault_text
+from lifeos.vault_paths import iter_vault_text_paths
 
 InstructionAuthority = Literal["system", "repository", "scope", "note-local"]
 InstructionScope = Literal["global", "domain", "path", "note"]
@@ -231,15 +234,27 @@ def _apply_instruction(
     )
 
 
-def _unauthorized_source_diagnostics(vault_root: Path) -> tuple[DomainDiagnostic, ...]:
+def _unauthorized_source_diagnostics(
+    vault_root: Path,
+    *,
+    path_filter: PathFilter | None,
+) -> tuple[DomainDiagnostic, ...]:
     try:
-        files = iter_vault_text_files(vault_root, suffixes=(".yml", ".yaml"))
+        paths = iter_vault_text_paths(
+            vault_root,
+            suffixes=(".yml", ".yaml"),
+            path_filter=path_filter,
+        )
     except VaultAccessError as exc:
-        raise ContextSearchError(str(exc)) from exc
+        raise ContextSearchExecutionError(str(exc)) from exc
     diagnostics: list[DomainDiagnostic] = []
-    for source in files:
-        if source.relative_path == _ALLOWED_SOURCE:
+    for relative_path in paths:
+        if relative_path == _ALLOWED_SOURCE:
             continue
+        try:
+            source = read_vault_text(vault_root, relative_path)
+        except VaultAccessError as exc:
+            raise ContextSearchExecutionError(str(exc)) from exc
         basename = source.relative_path.rsplit("/", 1)[-1].casefold()
         if "instruction" in basename or _INSTRUCTION_MARKER_RE.search(source.content):
             diagnostics.append(
@@ -257,15 +272,20 @@ def load_instruction_report(
     vault_root: Path,
     question: str,
     sources: tuple[SearchResult, ...],
+    path_filter: PathFilter | None = None,
 ) -> InstructionReport:
     """Load validated instructions from the one authoritative source."""
-    diagnostics = list(_unauthorized_source_diagnostics(vault_root))
+    diagnostics = list(
+        _unauthorized_source_diagnostics(vault_root, path_filter=path_filter)
+    )
+    if path_filter is not None and not path_filter(_ALLOWED_SOURCE):
+        return InstructionReport((), tuple(diagnostics), False)
     try:
         source = read_vault_text(vault_root, _ALLOWED_SOURCE)
     except VaultAccessError as exc:
         if exc.code == "not-found":
             return InstructionReport((), tuple(diagnostics), False)
-        raise ContextSearchError(str(exc)) from exc
+        raise ContextSearchExecutionError(str(exc)) from exc
 
     try:
         document: object = yaml.safe_load(source.content)
