@@ -171,6 +171,14 @@ def _bind_existing_target_identities(*, proposals_root: Path, documents: Any) ->
     return replace(documents, proposal_markdown=proposal_markdown)
 
 
+def _raise_existing_create_target(*, proposals_root: Path, target_paths: tuple[str, ...]) -> None:
+    """Preserve the core persistence contract before inspecting proposal payload bytes."""
+    vault_root = proposals_root.parent
+    for target_path in target_paths:
+        if (vault_root / target_path).exists():
+            raise _core.WikiTargetExistsError(f"Target path already exists: {target_path}")
+
+
 _original_persist_wiki_section_update_proposal = _core.persist_wiki_section_update_proposal
 _original_persist_compound_wiki_proposal = _core.persist_compound_wiki_proposal
 _original_persist_compounding_wiki_proposal = _core.persist_compounding_wiki_proposal
@@ -192,6 +200,10 @@ def persist_wiki_section_update_proposal(  # type: ignore[no-redef]
 def persist_compound_wiki_proposal(  # type: ignore[no-redef]
     *, proposals_root: Path, documents: Any
 ) -> Path:
+    _raise_existing_create_target(
+        proposals_root=proposals_root,
+        target_paths=(documents.create_target_path,),
+    )
     return _original_persist_compound_wiki_proposal(
         proposals_root=proposals_root,
         documents=_bind_existing_target_identities(
@@ -204,6 +216,10 @@ def persist_compound_wiki_proposal(  # type: ignore[no-redef]
 def persist_compounding_wiki_proposal(  # type: ignore[no-redef]
     *, proposals_root: Path, documents: Any
 ) -> Path:
+    _raise_existing_create_target(
+        proposals_root=proposals_root,
+        target_paths=tuple(documents.create_target_paths),
+    )
     return _original_persist_compounding_wiki_proposal(
         proposals_root=proposals_root,
         documents=_bind_existing_target_identities(
@@ -216,6 +232,10 @@ def persist_compounding_wiki_proposal(  # type: ignore[no-redef]
 def persist_study_learning_proposal(  # type: ignore[no-redef]
     *, proposals_root: Path, documents: Any
 ) -> Path:
+    _raise_existing_create_target(
+        proposals_root=proposals_root,
+        target_paths=tuple(documents.create_target_paths),
+    )
     return _original_persist_study_learning_proposal(
         proposals_root=proposals_root,
         documents=_bind_existing_target_identities(
