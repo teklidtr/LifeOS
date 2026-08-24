@@ -1,8 +1,10 @@
 """Semantic retrieval and evidence-grounded knowledge conversation primitives."""
 
 from . import search as _search
+from . import service as _service
 from .chunking import chunk_markdown_file, reidentify_note
 from .coherence_search import HybridRetriever, StableRetrievalEvidence
+from .coherence_service import RetrievalIndexService
 from .contracts import (
     AnswerEvidence,
     AnswerProvider,
@@ -37,10 +39,11 @@ from .providers import (
     UnavailableEmbeddingProvider,
 )
 from .search import RankingComponents, RetrievalEvidence, RetrievalResponse
-from .service import IndexHealth, IndexProgress, IndexRecoveryPlan, IndexResult, RetrievalIndexService
+from .service import IndexHealth, IndexProgress, IndexRecoveryPlan, IndexResult
 
-# Keep direct ``lifeos.retrieval.search.HybridRetriever`` imports aligned with the package API.
+# Keep direct module imports aligned with the package-level coherence wrappers.
 setattr(_search, "HybridRetriever", HybridRetriever)
+setattr(_service, "RetrievalIndexService", RetrievalIndexService)
 
 __all__ = [
     "AnswerEvidence",
