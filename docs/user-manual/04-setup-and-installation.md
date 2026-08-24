@@ -175,7 +175,7 @@ Configuration rules:
 - `~` and environment variables are not expanded inside YAML;
 - configuration loading does not create directories.
 
-## 4.8 Initialize and populate the registry
+## 4.8 Initialize or explicitly refresh the registry
 
 From the vault root, with the **application repository's virtual environment activated**:
 
@@ -190,8 +190,12 @@ Or invoke the executable by absolute path without activating the environment:
   scan --config /absolute/path/to/LifeOS-vault/lifeos.yml
 ```
 
-Run the same scan after manual imports, edits, moves, or deletions, or when intentionally
-rebuilding the disposable registry. Use `--json` for structured automation output.
+This is the explicit maintenance surface for populating or rebuilding disposable file and
+proposal indexes, and `--json` provides structured automation output. You may run it after
+manual imports, edits, moves, or deletions when you want registry state refreshed
+immediately. A separate scan is **not** required before normal MCP proposal-building
+ingestion: those ingestion tools run the authoritative full registry refresh automatically
+immediately before source verification.
 
 ## 4.9 Open the vault in Obsidian
 
@@ -340,17 +344,21 @@ plus relevant canonical study, goals, journal, experiments, plans, wiki, or othe
 Folder location is context, not an allowlist: any registered canonical Markdown source may
 ground durable wiki evolution when relevant.
 
-For durable knowledge, the preferred loop is `registry_refresh` as needed -> read the source
--> `vault_context` when situational context matters -> `wiki_search` -> read relevant wiki
-hits -> decide. If no durable knowledge changes, create no proposal. Otherwise use
+For durable knowledge, the preferred loop is read the source -> `vault_context` when
+situational context matters -> `wiki_search` -> read relevant wiki hits -> decide. If no
+durable knowledge changes, create no proposal. Otherwise use
 `ingestion_evolve_wiki_proposal` with 1..12 distinct reviewed wiki creates/section updates.
+The proposal-building ingestion call automatically refreshes the disposable registry before
+source verification, so a separate `registry_refresh` call is unnecessary even when the
+source was just created or edited.
 
 For a registered source under `study/`, `study_evolve_learning_proposal` may combine those
-wiki changes with selective flashcard creates in the **same atomic draft**. The external
-agent chooses what merits retrieval practice according to the inferred learning context.
-Examples include exam relevance, future prerequisites, conceptual leverage, mechanisms, and
-confusable distinctions. LifeOS validates the reviewed paths, hashes, ownership, provenance,
-and operation bounds; deterministic code does not decide which facts are educationally
+wiki changes with selective flashcard creates in the **same atomic draft**. The same
+automatic registry preflight runs before source verification. The external agent chooses
+what merits retrieval practice according to the inferred learning context. Examples include
+exam relevance, future prerequisites, conceptual leverage, mechanisms, and confusable
+distinctions. LifeOS validates the reviewed paths, hashes, ownership, provenance, and
+operation bounds; deterministic code does not decide which facts are educationally
 important. Non-study sources do not get automatic flashcards by default.
 
 Every proposal-producing ingestion tool still stops at draft. `proposal_submit`,
@@ -358,7 +366,8 @@ Every proposal-producing ingestion tool still stops at draft. `proposal_submit`,
 
 For debugging, `runtime_activity` exposes recent disposable routing metadata such as tool
 names, focus/source paths, applied instruction IDs, proposal IDs, targets, and changed paths.
-It does **not** copy canonical Markdown bodies or flashcard answers into `.lifeos` activity
+Automatic ingestion refreshes appear as `ingestion_registry_preflight` activity records. It
+does **not** copy canonical Markdown bodies or flashcard answers into `.lifeos` activity
 logs.
 
 ## 4.12 Build the semantic retrieval index

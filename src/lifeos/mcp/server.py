@@ -127,6 +127,7 @@ class StudyFlashcardCreateMCPInput(BaseModel):
     knowledge_refs: list[str] | None = None
     estimated_seconds: int = 30
 
+
 LIFEOS_MCP_INSTRUCTIONS = (
     "LifeOS keeps user-owned Markdown canonical and constrains mutations rather than "
     "prescribing a universal semantic taxonomy. Application AGENTS.md governs LifeOS "
@@ -134,32 +135,36 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "purpose, journal context, experiments, or path-scoped system/instructions.yml rules "
     "could change how a source should be interpreted. Folder location supplies context, "
     "not permission: any registered canonical Markdown source may ground durable wiki "
-    "evolution when relevant. Before wiki mutation, refresh the registry as needed, read "
-    "the source, search existing durable knowledge with wiki_search, and read relevant hits. "
+    "evolution when relevant. Read the source, search existing durable knowledge with "
+    "wiki_search, and read relevant hits before choosing mutations. Proposal-building "
+    "ingestion tools automatically refresh the disposable registry immediately before source "
+    "verification, so a separate registry_refresh call is not required for normal ingestion. "
     "Prefer reuse over creation and allow useful wiki folders to emerge from the vault. "
     "If no durable knowledge changes, create no proposal. Otherwise use "
-    "ingestion_evolve_wiki_proposal for 1..12 reviewed wiki mutations. For a registered "
-    "study/ source, use vault_context first when learning purpose matters; "
-    "study_evolve_learning_proposal may combine selective flashcards with wiki evolution. "
-    "Flashcard selection should reflect the inferred learning context, such as exam relevance, "
-    "future prerequisites, conceptual leverage, mechanisms, or confusions, rather than "
-    "generating cards for every fact. Do not generate flashcards from non-study sources by "
-    "default. LifeOS verifies paths, hashes, ownership, provenance, operation bounds, review "
-    "snapshots, and atomic application. Stop after draft unless the user explicitly requests "
-    "an exact submit, approve, or apply transition. Never rewrite canonical notes directly "
-    "when a proposal workflow exists. runtime_activity is read-only disposable diagnostics "
-    "and contains routing metadata, not canonical note bodies."
+    "ingestion_evolve_wiki_proposal for 1..12 reviewed wiki mutations. For a study/ source, "
+    "use vault_context first when learning purpose matters; study_evolve_learning_proposal "
+    "may combine selective flashcards with wiki evolution. Flashcard selection should reflect "
+    "the inferred learning context, such as exam relevance, future prerequisites, conceptual "
+    "leverage, mechanisms, or confusions, rather than generating cards for every fact. Do not "
+    "generate flashcards from non-study sources by default. LifeOS verifies paths, hashes, "
+    "ownership, provenance, operation bounds, review snapshots, and atomic application. Stop "
+    "after draft unless the user explicitly requests an exact submit, approve, or apply "
+    "transition. Never rewrite canonical notes directly when a proposal workflow exists. "
+    "runtime_activity is read-only disposable diagnostics and contains routing metadata, not "
+    "canonical note bodies."
 )
 
 
 REGISTRY_REFRESH_MCP_DESCRIPTION = (
-    f"{REGISTRY_REFRESH_DESCRIPTOR.description} Use after files are added, changed, moved, "
-    "or deleted. This writes only rebuildable registry data and does not change Markdown."
+    f"{REGISTRY_REFRESH_DESCRIPTOR.description} Use this explicit maintenance tool when "
+    "derived indexes should be refreshed outside proposal-building ingestion; ingestion "
+    "proposal tools refresh automatically. This writes only rebuildable registry data and "
+    "does not change Markdown."
 )
 
 READ_MARKDOWN_MCP_DESCRIPTION = (
-    f"{READ_MARKDOWN_DESCRIPTOR.description} Use this before ingestion to inspect the "
-    "registered source and any relevant wiki notes; paths are vault-relative."
+    f"{READ_MARKDOWN_DESCRIPTOR.description} Use this before ingestion to inspect the source "
+    "and any relevant wiki notes; paths are vault-relative."
 )
 WIKI_SEARCH_MCP_DESCRIPTION = (
     f"{WIKI_SEARCH_DESCRIPTOR.description} Search after reading a source and before choosing "
@@ -171,10 +176,12 @@ VAULT_CONTEXT_MCP_DESCRIPTION = (
     "not retrieve those files. This is read-only and grants no mutation authority."
 )
 STUDY_EVOLVE_LEARNING_MCP_DESCRIPTION = (
-    f"{STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR.description} Use only for a registered "
-    "study/ source after gathering relevant vault context. The external agent chooses which "
-    "facts merit retrieval practice for the inferred learning goal; LifeOS validates the "
-    "bounded reviewed mutations. This creates only a draft."
+    f"{STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR.description} Use for a registered study/ "
+    "source after gathering relevant vault context. LifeOS automatically refreshes the "
+    "disposable registry before source verification, so new or edited study sources do not "
+    "need a separate refresh call. The external agent chooses which facts merit retrieval "
+    "practice for the inferred learning goal; LifeOS validates the bounded reviewed mutations. "
+    "This creates only a draft."
 )
 RUNTIME_ACTIVITY_MCP_DESCRIPTION = (
     "Read recent disposable MCP routing/activity metadata for debugging. Records contain "
@@ -182,29 +189,32 @@ RUNTIME_ACTIVITY_MCP_DESCRIPTION = (
 )
 EVOLVE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{EVOLVE_WIKI_PROPOSAL_DESCRIPTOR.description} Prefer this after wiki_search and "
-    "vault_read_markdown have inspected relevant existing knowledge. Supply 1..12 distinct "
+    "vault_read_markdown have inspected relevant existing knowledge. LifeOS automatically "
+    "refreshes the disposable registry before source verification. Supply 1..12 distinct "
     "agent-selected wiki targets with a rationale for each create/update. Folder structure "
     "may emerge under wiki/; this creates only a draft and never applies it."
 )
 CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{CREATE_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown and "
-    "supply a source-grounded title and body. This is a compatibility single-create tool; "
+    "supply a source-grounded title and body. LifeOS automatically refreshes the disposable "
+    "registry before source verification. This is a compatibility single-create tool; "
     "explicit target_path is preferred here and page_kind+slug remains legacy-compatible. "
     "For new ingestion workflows prefer ingestion_evolve_wiki_proposal."
 )
 UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
     f"{UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
-    "has inspected both the registered source and existing target. Supply the exact "
-    "heading text without # markers and only its replacement body. This creates a "
+    "has inspected both the registered source and existing target. LifeOS automatically "
+    "refreshes the disposable registry before source and target verification. Supply the "
+    "exact heading text without # markers and only its replacement body. This creates a "
     "base-hash-bound, ownership-aware draft and does not modify the target wiki note."
 )
 COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION = (
-    f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown "
-    "has inspected both the registered source and existing update target. Supply the "
-    "absent create target with its grounded title and body, plus one exact heading and "
-    "replacement body for the existing target. LifeOS selects the update operation from "
-    "canonical ownership. This creates one atomic two-operation draft and does not modify "
-    "either target."
+    f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown has "
+    "inspected both the source and existing update target. LifeOS automatically refreshes the "
+    "disposable registry before source and target verification. Supply the absent create "
+    "target with its grounded title and body, plus one exact heading and replacement body for "
+    "the existing target. LifeOS selects the update operation from canonical ownership. This "
+    "creates one atomic two-operation draft and does not modify either target."
 )
 SUBMIT_PROPOSAL_MCP_DESCRIPTION = (
     f"{SUBMIT_PROPOSAL_DESCRIPTOR.description} Call only when the user explicitly requests "
@@ -292,6 +302,15 @@ def create_mcp_server(
     runtime_dir: Path | None = None,
 ) -> FastMCP:
     activity = ActivityStore(runtime_dir or (vault_root / ".lifeos"))
+
+    def _refresh_for_ingestion(source_path: str) -> None:
+        result = refresh_registry(vault_root=vault_root, registry=registry)
+        activity.append(
+            tool="ingestion_registry_preflight",
+            source_paths=[source_path],
+            changed_paths=[*result.new, *result.modified, *result.deleted],
+        )
+
     def registry_refresh_tool() -> RegistryRefreshMCPResult:
         def op() -> RegistryRefreshMCPResult:
             result = refresh_registry(vault_root=vault_root, registry=registry)
@@ -403,34 +422,36 @@ def create_mcp_server(
         updates: list[EvolveWikiUpdateMCPInput] | None = None,
     ) -> EvolveWikiProposalMCPResult:
         def op() -> EvolveWikiProposalMCPResult:
+            request = EvolveWikiProposalRequest(
+                source_path=source_path,
+                creates=tuple(
+                    EvolveWikiCreateRequest(
+                        target_path=item.target_path,
+                        title=item.title,
+                        body=item.body,
+                        rationale=item.rationale,
+                        tags=tuple(item.tags or ()),
+                        tag_rationale=item.tag_rationale,
+                    )
+                    for item in creates or []
+                ),
+                updates=tuple(
+                    EvolveWikiUpdateRequest(
+                        target_path=item.target_path,
+                        heading=item.heading,
+                        body=item.body,
+                        rationale=item.rationale,
+                        tags=None if item.tags is None else tuple(item.tags),
+                        tag_rationale=item.tag_rationale,
+                    )
+                    for item in updates or []
+                ),
+            )
+            _refresh_for_ingestion(source_path)
             result = evolve_wiki_proposal(
                 vault_root=vault_root,
                 registry=registry,
-                request=EvolveWikiProposalRequest(
-                    source_path=source_path,
-                    creates=tuple(
-                        EvolveWikiCreateRequest(
-                            target_path=item.target_path,
-                            title=item.title,
-                            body=item.body,
-                            rationale=item.rationale,
-                            tags=tuple(item.tags or ()),
-                            tag_rationale=item.tag_rationale,
-                        )
-                        for item in creates or []
-                    ),
-                    updates=tuple(
-                        EvolveWikiUpdateRequest(
-                            target_path=item.target_path,
-                            heading=item.heading,
-                            body=item.body,
-                            rationale=item.rationale,
-                            tags=None if item.tags is None else tuple(item.tags),
-                            tag_rationale=item.tag_rationale,
-                        )
-                        for item in updates or []
-                    ),
-                ),
+                request=request,
             )
             activity.append(
                 tool="ingestion_evolve_wiki_proposal", source_paths=[source_path],
@@ -454,39 +475,41 @@ def create_mcp_server(
         flashcards: list[StudyFlashcardCreateMCPInput] | None = None,
     ) -> StudyLearningProposalMCPResult:
         def op() -> StudyLearningProposalMCPResult:
+            request = EvolveStudyLearningProposalRequest(
+                source_path=source_path,
+                wiki_creates=tuple(
+                    EvolveWikiCreateRequest(
+                        target_path=item.target_path, title=item.title, body=item.body,
+                        rationale=item.rationale, tags=tuple(item.tags or ()),
+                        tag_rationale=item.tag_rationale,
+                    )
+                    for item in wiki_creates or []
+                ),
+                wiki_updates=tuple(
+                    EvolveWikiUpdateRequest(
+                        target_path=item.target_path, heading=item.heading, body=item.body,
+                        rationale=item.rationale,
+                        tags=None if item.tags is None else tuple(item.tags),
+                        tag_rationale=item.tag_rationale,
+                    )
+                    for item in wiki_updates or []
+                ),
+                flashcards=tuple(
+                    StudyFlashcardCreateRequest(
+                        target_path=item.target_path, card_id=item.card_id, topic=item.topic,
+                        question=item.question, answer=item.answer, rationale=item.rationale,
+                        learning_context=item.learning_context,
+                        knowledge_refs=tuple(item.knowledge_refs or ()),
+                        estimated_seconds=item.estimated_seconds,
+                    )
+                    for item in flashcards or []
+                ),
+            )
+            _refresh_for_ingestion(source_path)
             result = evolve_study_learning_proposal(
                 vault_root=vault_root,
                 registry=registry,
-                request=EvolveStudyLearningProposalRequest(
-                    source_path=source_path,
-                    wiki_creates=tuple(
-                        EvolveWikiCreateRequest(
-                            target_path=item.target_path, title=item.title, body=item.body,
-                            rationale=item.rationale, tags=tuple(item.tags or ()),
-                            tag_rationale=item.tag_rationale,
-                        )
-                        for item in wiki_creates or []
-                    ),
-                    wiki_updates=tuple(
-                        EvolveWikiUpdateRequest(
-                            target_path=item.target_path, heading=item.heading, body=item.body,
-                            rationale=item.rationale,
-                            tags=None if item.tags is None else tuple(item.tags),
-                            tag_rationale=item.tag_rationale,
-                        )
-                        for item in wiki_updates or []
-                    ),
-                    flashcards=tuple(
-                        StudyFlashcardCreateRequest(
-                            target_path=item.target_path, card_id=item.card_id, topic=item.topic,
-                            question=item.question, answer=item.answer, rationale=item.rationale,
-                            learning_context=item.learning_context,
-                            knowledge_refs=tuple(item.knowledge_refs or ()),
-                            estimated_seconds=item.estimated_seconds,
-                        )
-                        for item in flashcards or []
-                    ),
-                ),
+                request=request,
             )
             activity.append(
                 tool="study_evolve_learning_proposal", source_paths=[source_path],
@@ -512,19 +535,21 @@ def create_mcp_server(
         tag_rationale: str | None = None,
     ) -> CreateWikiProposalMCPResult:
         def op() -> CreateWikiProposalMCPResult:
+            request = CreateWikiProposalRequest(
+                source_path=source_path,
+                target_path=target_path,
+                title=title,
+                body=body,
+                tags=tuple(tags or ()),
+                tag_rationale=tag_rationale,
+                page_kind=page_kind,
+                slug=slug,
+            )
+            _refresh_for_ingestion(source_path)
             res = create_wiki_proposal(
                 vault_root=vault_root,
                 registry=registry,
-                request=CreateWikiProposalRequest(
-                    source_path=source_path,
-                    target_path=target_path,
-                    title=title,
-                    body=body,
-                    tags=tuple(tags or ()),
-                    tag_rationale=tag_rationale,
-                    page_kind=page_kind,
-                    slug=slug,
-                ),
+                request=request,
             )
             activity.append(
                 tool="ingestion_create_wiki_proposal", source_paths=[source_path],
@@ -548,17 +573,19 @@ def create_mcp_server(
         tag_rationale: str | None = None,
     ) -> UpdateWikiSectionProposalMCPResult:
         def op() -> UpdateWikiSectionProposalMCPResult:
+            request = UpdateWikiSectionProposalRequest(
+                source_path=source_path,
+                target_path=target_path,
+                heading=heading,
+                body=body,
+                tags=None if tags is None else tuple(tags),
+                tag_rationale=tag_rationale,
+            )
+            _refresh_for_ingestion(source_path)
             res = update_wiki_section_proposal(
                 vault_root=vault_root,
                 registry=registry,
-                request=UpdateWikiSectionProposalRequest(
-                    source_path=source_path,
-                    target_path=target_path,
-                    heading=heading,
-                    body=body,
-                    tags=None if tags is None else tuple(tags),
-                    tag_rationale=tag_rationale,
-                ),
+                request=request,
             )
             activity.append(
                 tool="ingestion_update_wiki_section_proposal", source_paths=[source_path],
@@ -588,22 +615,24 @@ def create_mcp_server(
         create_tag_rationale: str | None = None,
     ) -> CompoundWikiProposalMCPResult:
         def op() -> CompoundWikiProposalMCPResult:
+            request = CompoundWikiProposalRequest(
+                source_path=source_path,
+                create_target_path=create_target_path,
+                create_title=create_title,
+                create_body=create_body,
+                update_target_path=update_target_path,
+                update_heading=update_heading,
+                update_body=update_body,
+                create_tags=tuple(create_tags or ()),
+                create_tag_rationale=create_tag_rationale,
+                create_page_kind=create_page_kind,
+                create_slug=create_slug,
+            )
+            _refresh_for_ingestion(source_path)
             res = create_wiki_and_update_section_proposal(
                 vault_root=vault_root,
                 registry=registry,
-                request=CompoundWikiProposalRequest(
-                    source_path=source_path,
-                    create_target_path=create_target_path,
-                    create_title=create_title,
-                    create_body=create_body,
-                    update_target_path=update_target_path,
-                    update_heading=update_heading,
-                    update_body=update_body,
-                    create_tags=tuple(create_tags or ()),
-                    create_tag_rationale=create_tag_rationale,
-                    create_page_kind=create_page_kind,
-                    create_slug=create_slug,
-                ),
+                request=request,
             )
             activity.append(
                 tool="ingestion_create_wiki_and_update_section_proposal",
