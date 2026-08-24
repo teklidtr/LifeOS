@@ -82,7 +82,7 @@ def build_context_pack(
             omissions.append(f"Results were limited to the top {limit} sources.")
 
     if not instruction_report.allowlisted_source_present:
-        omissions.append("No system/instructions.yml file was present.")
+        omissions.append("No system/instructions.yml file was available for this context.")
     elif not instruction_report.instructions:
         omissions.append("No validated instructions applied to this context pack.")
 
