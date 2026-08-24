@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from lifeos.facade.errors import ToolValidationError
+from lifeos.facade.errors import ToolExecutionError, ToolValidationError
 from lifeos.facade.exploration import (
     VaultLinksRequest,
     VaultListRequest,
@@ -115,6 +115,32 @@ def test_vault_list_supports_stable_continuation(tmp_path: Path) -> None:
     assert len(collected) == len(set(collected))
 
 
+def test_policy_filtered_exploration_prunes_invalid_utf8_before_decoding(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _write(vault, "wiki/public.md", "Public needle note.\n")
+    secret = vault / "journal/private/secret.md"
+    secret.parent.mkdir(parents=True)
+    secret.write_bytes(b"\xff\xfe\xfd")
+
+    listing = list_vault_paths(vault_root=vault, request=VaultListRequest())
+    listed_paths = [item.path for item in listing.entries]
+    assert "wiki/public.md" in listed_paths
+    assert "journal/private/secret.md" not in listed_paths
+
+    search = search_vault(
+        vault_root=vault,
+        request=VaultSearchRequest(query="needle"),
+    )
+    assert [item.path for item in search.hits] == ["wiki/public.md"]
+
+    context = get_vault_context(
+        vault_root=vault,
+        request=VaultContextRequest(question="needle"),
+    )
+    assert [item.path for item in context.sources] == ["wiki/public.md"]
+
+
 def test_vault_links_resolves_unique_basename_and_rejects_ambiguous_targets(
     tmp_path: Path,
 ) -> None:
@@ -141,3 +167,35 @@ def test_vault_links_resolves_unique_basename_and_rejects_ambiguous_targets(
         request=VaultLinksRequest(path="wiki/source.md", direction="outgoing"),
     )
     assert not ambiguous.links
+
+
+def test_vault_links_resolves_nested_markdown_links_relative_to_source(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _write(vault, "wiki/source.md", "See [Topic](concepts/topic.md).\n")
+    _write(vault, "wiki/concepts/topic.md", "Canonical topic.\n")
+
+    outgoing = inspect_links(
+        vault_root=vault,
+        request=VaultLinksRequest(path="wiki/source.md", direction="outgoing"),
+    )
+    assert [item.target_path for item in outgoing.links] == ["wiki/concepts/topic.md"]
+
+    backlinks = inspect_links(
+        vault_root=vault,
+        request=VaultLinksRequest(path="wiki/concepts/topic.md", direction="backlinks"),
+    )
+    assert [item.source_path for item in backlinks.links] == ["wiki/source.md"]
+
+
+def test_vault_links_surfaces_requested_source_parse_failure(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _write(vault, "wiki/broken.md", "---\ntitle: Broken\nSee [[topic]].\n")
+    _write(vault, "wiki/topic.md", "Topic.\n")
+
+    with pytest.raises(ToolExecutionError, match="Requested note could not be parsed"):
+        inspect_links(
+            vault_root=vault,
+            request=VaultLinksRequest(path="wiki/broken.md", direction="outgoing"),
+        )
