@@ -561,6 +561,39 @@ values into zero. After collection, inspect the raw evidence and deterministic
 descriptive analysis before recording a conclusion. Follow-up actions remain
 reviewable proposals. See [Personal Experiments](12-personal-experiments.md).
 
+## 5.4 Manual edits, synchronization, and note moves
+
+Normal Obsidian editing remains first-class. You may create, edit, rename, move, or delete
+Markdown directly without routing the filesystem action through LifeOS. After a synchronized or
+manual change reaches the active LifeOS node, an explicit `lifeos scan` refreshes registry state;
+proposal-building ingestion performs the same registry refresh automatically, and retrieval
+indexes reconcile through their own rebuild/incremental synchronization.
+
+When a durable note has a frontmatter `id`, preserve it during a rename or move. LifeOS can then
+recognize the unique ID at its new path while treating the content hash as an independent version
+check. MCP-connected agents may call `vault_note_identity` to inspect stable ID, current path, and
+current content hash without treating the path as permanent semantic identity.
+
+A proposal does not gain permission merely because its stable ID can be found elsewhere. Existing
+identified targets are review-bound to **stable ID + reviewed path + base hash**. If you move an
+unchanged note after drafting a proposal, the draft must be regenerated/reviewed against the new
+path before it can proceed. If you move it after submission or approval, LifeOS marks the target
+stale and requires renewed review rather than silently retargeting the approved operation. If the
+content changed as well, the content hash is stale. If the ID changed, disappeared, or became
+duplicated, mutation is blocked.
+
+This conservative behavior matters because a move can cross instruction, privacy, ownership,
+authorization, or target-type boundaries even when the Markdown bytes are identical. The safe
+recovery path is to let synchronization settle, refresh/rebuild derived state, inspect the current
+note, and create or review a proposal against its current path. Do not repair an old approved
+proposal by hand-editing its target path.
+
+Offline mobile capture is simpler: create a normal Markdown note while disconnected, allow your
+chosen sync provider to deliver it later, then let the active node reconcile. The phone does not
+need LifeOS or MCP. Conflict copies and partially synchronized states are ordinary filesystem
+states; LifeOS does not guess which copy is newest. Resolve the conflict in canonical Markdown,
+then refresh. See [Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) for the full
+operating model.
 
 ---
 
