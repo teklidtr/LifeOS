@@ -7,6 +7,7 @@ and change-during-read behavior remain covered by the older registry tests.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -17,11 +18,13 @@ from lifeos.registry._registry import Registry
 from lifeos.scanner import VaultFile
 
 _TOMBSTONE_PREFIX = ".lifeos/registry-tombstones/"
+IdentityPathPredicate = Callable[[str], bool]
 
 
 @dataclass(frozen=True, slots=True)
 class _PreparedScanEntry:
     stable_id: str | None
+    identity_observed: bool
     content_hash: str
     size_bytes: int
     mtime_ns: int
@@ -39,23 +42,33 @@ def _participates_in_stable_note_identity(entry: VaultFile) -> bool:
     return entry.file_type == ".md" and first_root != "proposals"
 
 
-def _capture_for(entry: VaultFile) -> _base._HashCapture:
-    if _participates_in_stable_note_identity(entry):
+def _capture_for(
+    entry: VaultFile,
+    *,
+    inspect_identity: bool = True,
+) -> _base._HashCapture:
+    if _participates_in_stable_note_identity(entry) and inspect_identity:
         return _base._HashCapture()
     capture = _base._HashCapture()
     capture.chunks = cast(Any, _DiscardingChunks())
     return capture
 
 
-def _prepare_scan_entry(vault_root: Path, entry: VaultFile) -> _PreparedScanEntry:
+def _prepare_scan_entry(
+    vault_root: Path,
+    entry: VaultFile,
+    *,
+    inspect_identity: bool = True,
+) -> _PreparedScanEntry:
     full_path = vault_root / entry.path
-    capture = _capture_for(entry)
+    identity_observed = _participates_in_stable_note_identity(entry) and inspect_identity
+    capture = _capture_for(entry, inspect_identity=identity_observed)
     content_hash = _base._hash_file(full_path, capture=capture)
     if capture.size_bytes is None or capture.mtime_ns is None:
         raise _base.FileTrackingError(f"Could not capture registry metadata for {full_path}.")
 
     stable_id: str | None = None
-    if _participates_in_stable_note_identity(entry):
+    if identity_observed:
         content = b"".join(capture.chunks)
         if len(content) != capture.size_bytes:
             raise _base.FileTrackingError(f"File {full_path} changed during hashing.")
@@ -72,6 +85,7 @@ def _prepare_scan_entry(vault_root: Path, entry: VaultFile) -> _PreparedScanEntr
 
     return _PreparedScanEntry(
         stable_id=stable_id,
+        identity_observed=identity_observed,
         content_hash=content_hash,
         size_bytes=capture.size_bytes,
         mtime_ns=capture.mtime_ns,
@@ -81,14 +95,21 @@ def _prepare_scan_entry(vault_root: Path, entry: VaultFile) -> _PreparedScanEntr
 def _prepare_scan_entries(
     vault_root: Path,
     entries: list[VaultFile],
+    *,
+    identity_allow_path: IdentityPathPredicate | None = None,
 ) -> dict[str, _PreparedScanEntry]:
     prepared: dict[str, _PreparedScanEntry] = {}
     id_paths: dict[str, list[str]] = {}
     for entry in entries:
         path_str = entry.path.as_posix()
-        facts = _prepare_scan_entry(vault_root, entry)
+        inspect_identity = identity_allow_path is None or identity_allow_path(path_str)
+        facts = _prepare_scan_entry(
+            vault_root,
+            entry,
+            inspect_identity=inspect_identity,
+        )
         prepared[path_str] = facts
-        if facts.stable_id is not None:
+        if facts.identity_observed and facts.stable_id is not None:
             id_paths.setdefault(facts.stable_id, []).append(path_str)
 
     duplicates = {stable_id: paths for stable_id, paths in id_paths.items() if len(paths) > 1}
@@ -129,16 +150,43 @@ def _park_row(conn: Any, *, row_id: int, prior_path: str, now_expr: str) -> None
     )
 
 
-def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]) -> _base.ScanResult:
+def _drop_unobserved_identity_metadata(
+    conn: Any,
+    *,
+    identity_allow_path: IdentityPathPredicate | None,
+) -> None:
+    """Prevent out-of-scope disposable IDs from influencing a scoped refresh.
+
+    File/hash tracking remains global. Only stable-ID metadata is forgotten for paths whose
+    identity is outside the caller's scope. A later broader local refresh can deterministically
+    restore those IDs from canonical Markdown.
+    """
+    if identity_allow_path is None:
+        return
+    rows = conn.execute(
+        "SELECT id, vault_path FROM files WHERE stable_id IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        canonical_path = _canonical_path_from_storage(str(row["vault_path"]))
+        if not identity_allow_path(canonical_path):
+            conn.execute("UPDATE files SET stable_id = NULL WHERE id = ?", (int(row["id"]),))
+
+
+def register_scan(
+    registry: Registry,
+    vault_root: Path,
+    entries: list[VaultFile],
+    *,
+    identity_allow_path: IdentityPathPredicate | None = None,
+) -> _base.ScanResult:
     """Register a complete scan while reconciling stable identities as one transaction.
 
-    All identity relocations are reserved before any final path is assigned. That makes swaps
-    and longer cycles safe: each surviving stable identity keeps the same ``files.id`` and thus
-    retains every foreign-keyed provenance/source-version relationship. A confirmed-deleted
-    path may be reused by a different identity because the historical row is moved into the
-    disposable tombstone namespace instead of being rewritten into the new note. Parked rows
-    retain their last canonical path inside the disposable key so later reappearance never
-    exposes a synthetic runtime path as relocation evidence.
+    All files remain visible to ordinary hash/path tracking. Stable-ID parsing can optionally be
+    scoped by path metadata before Markdown bytes are interpreted, so an externally callable
+    refresh cannot read or be influenced by protected identity content. All identity relocations
+    are reserved before any final path is assigned. That makes swaps and longer cycles safe while
+    preserving each surviving registry row and its foreign-keyed provenance/source-version
+    relationships.
     """
     seen: set[str] = set()
     for entry in entries:
@@ -149,7 +197,11 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
             )
         seen.add(path_str)
 
-    prepared = _prepare_scan_entries(vault_root, entries)
+    prepared = _prepare_scan_entries(
+        vault_root,
+        entries,
+        identity_allow_path=identity_allow_path,
+    )
     new_paths: list[str] = []
     modified_paths: list[str] = []
     unchanged_paths: list[str] = []
@@ -167,11 +219,15 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                 conn.execute("INSERT INTO seen_paths (vault_path) VALUES (?)", (path_str,))
 
             now_expr = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+            _drop_unobserved_identity_metadata(
+                conn,
+                identity_allow_path=identity_allow_path,
+            )
 
             current_targets = {
                 facts.stable_id: path
                 for path, facts in prepared.items()
-                if facts.stable_id is not None
+                if facts.identity_observed and facts.stable_id is not None
             }
             relocations: dict[str, tuple[int, str, str | None, int]] = {}
             for durable_id, target_path in sorted(current_targets.items()):
@@ -205,13 +261,14 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                 path_str = entry.path.as_posix()
                 facts = prepared[path_str]
                 entry_stable_id = facts.stable_id
+                identity_observed = facts.identity_observed
                 content_hash = facts.content_hash
                 mtime_ns = facts.mtime_ns
                 size_bytes = facts.size_bytes
 
                 relocation = (
                     relocations.get(entry_stable_id)
-                    if entry_stable_id is not None
+                    if identity_observed and entry_stable_id is not None
                     else None
                 )
                 if relocation is not None:
@@ -274,9 +331,9 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                 if row is not None and int(row["is_deleted"]) == 1:
                     old_stable_id = row["stable_id"]
                     if (
-                        old_stable_id is not None
+                        identity_observed
+                        and old_stable_id is not None
                         and entry_stable_id != str(old_stable_id)
-                        and _participates_in_stable_note_identity(entry)
                     ):
                         _park_row(
                             conn,
@@ -296,7 +353,7 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         """,
                         (
                             path_str,
-                            entry_stable_id,
+                            entry_stable_id if identity_observed else None,
                             entry.file_type,
                             content_hash,
                             size_bytes,
@@ -308,16 +365,21 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
 
                 existing_stable_id = row["stable_id"]
                 if (
-                    int(row["is_deleted"]) == 0
+                    identity_observed
+                    and int(row["is_deleted"]) == 0
                     and existing_stable_id is not None
                     and entry_stable_id != str(existing_stable_id)
-                    and _participates_in_stable_note_identity(entry)
                 ):
                     raise _base.FileTrackingError(
                         f"Stable note identity changed in place at {path_str}: "
                         f"{existing_stable_id!r} -> {entry_stable_id!r}."
                     )
 
+                effective_stable_id = (
+                    entry_stable_id
+                    if identity_observed
+                    else (str(existing_stable_id) if existing_stable_id is not None else None)
+                )
                 db_hash = row["content_hash"]
                 is_deleted = int(row["is_deleted"])
                 if is_deleted == 1 or db_hash != content_hash:
@@ -329,7 +391,7 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         WHERE id = ?
                         """,
                         (
-                            entry_stable_id,
+                            effective_stable_id,
                             entry.file_type,
                             content_hash,
                             size_bytes,
@@ -347,7 +409,7 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         WHERE id = ?
                         """,
                         (
-                            entry_stable_id,
+                            effective_stable_id,
                             entry.file_type,
                             size_bytes,
                             mtime_ns,
