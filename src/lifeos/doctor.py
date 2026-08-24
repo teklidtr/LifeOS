@@ -229,6 +229,7 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
     vault_status = collect_status(config, registry)
     mcp_findings, mcp_command = _mcp_findings(config_path)
     topology = describe_topology(config)
+    coherence_findings: tuple[DoctorFinding, ...]
 
     try:
         identity_snapshot = collect_identity_snapshot(config.vault_root)
