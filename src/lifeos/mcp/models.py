@@ -76,11 +76,17 @@ class VaultLinksMCPResult(TypedDict):
     diagnostics: list[VaultDiagnosticMCPResult]
 
 
+class RegistryRenameMCPResult(TypedDict):
+    from_path: str
+    to_path: str
+
+
 class RegistryRefreshMCPResult(TypedDict):
     new: list[str]
     modified: list[str]
     unchanged: list[str]
     deleted: list[str]
+    renamed: list[RegistryRenameMCPResult]
     proposals_indexed: int
 
 
