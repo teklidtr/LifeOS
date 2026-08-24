@@ -94,6 +94,33 @@ Use these rules to catch LifeOS-specific invariant violations that may not be ob
 
 - Flag automation that silently rewrites human-owned content, turns uncertain inference into durable fact, or treats agent-generated interpretation as established user truth. Safe path: preserve human-owned text and uncertainty; route consequential semantic changes through reviewable proposals backed by source evidence.
 
+## Pull Request Review Workflow
+
+Before a pull request is considered ready to merge:
+
+1. Complete the implementation, documentation impact, and required validation.
+2. Once the implementation is stable, request `@codex review`.
+3. Address valid findings, add regression coverage where appropriate, and re-run the relevant validation.
+4. Request another `@codex review` when review fixes materially change behavior, architecture, public interfaces, trust boundaries, or a substantial portion of the implementation. Batch related fixes before requesting the next review. Do not request another review for trivial or purely mechanical changes.
+5. Repeat the review/fix cycle only while material changes continue to be introduced.
+6. For a security-sensitive pull request, request `@codex security review` after the normal review cycle has stabilized.
+7. Address valid security findings and re-run affected validation. Request another security review only if those fixes materially change a security or trust boundary.
+8. Do not merge while required CI is failing or relevant review findings remain unresolved.
+
+### Security-sensitive changes
+
+Treat a pull request as security-sensitive when it changes or exposes areas such as:
+
+- authentication, authorization, permissions, or protected-scope enforcement
+- privacy or retrieval-policy boundaries
+- MCP, API, or other externally callable surfaces
+- filesystem access, path traversal, or symlink handling
+- canonical-state mutation or proposal/authorization boundaries
+- secrets, credentials, configuration trust, or external execution boundaries
+- parsing or processing of untrusted external input
+
+Security review is not required for changes that clearly do not affect a security boundary, such as documentation-only edits or isolated presentation changes.
+
 ## Completion standard
 
 A task is complete only when acceptance criteria pass, tests pass, unrelated files remain untouched, newly discovered work is captured separately, and documentation impact has been resolved in the same PR. A task that changes documented behavior or contracts without updating the affected documentation is not complete.
