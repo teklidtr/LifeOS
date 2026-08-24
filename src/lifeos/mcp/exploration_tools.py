@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import Literal, cast
 
 from mcp.server.fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
@@ -32,8 +32,7 @@ from lifeos.mcp.models import (
 )
 from lifeos.runtime import ActivityStore
 
-T = TypeVar("T")
-Invoke = Callable[[Callable[[], T]], T]
+Invoke = Callable[[Callable[[], object]], object]
 
 VAULT_LIST_MCP_DESCRIPTION = (
     f"{VAULT_LIST_DESCRIPTOR.description} Use this like a bounded, vault-native find operation. "
@@ -47,7 +46,8 @@ VAULT_SEARCH_MCP_DESCRIPTION = (
 )
 VAULT_READ_MANY_MCP_DESCRIPTION = (
     f"{VAULT_READ_MANY_DESCRIPTOR.description} Use this to compare up to eight agent-selected "
-    "notes under one total character budget. It is read-only and does not grant mutation authority."
+    "notes under one total character budget. It is read-only and does not grant mutation "
+    "authority."
 )
 VAULT_LINKS_MCP_DESCRIPTION = (
     f"{VAULT_LINKS_DESCRIPTOR.description} Follow current canonical Markdown references in "
@@ -102,7 +102,7 @@ def build_exploration_tools(
     *,
     vault_root: Path,
     activity: ActivityStore,
-    invoke: Invoke[object],
+    invoke: Invoke,
 ) -> tuple[Tool, ...]:
     """Build the MCP-only adapters over the authoritative exploration facade."""
 
@@ -148,7 +148,10 @@ def build_exploration_tools(
                     allow_protected=allow_protected,
                 ),
             )
-            activity.append(tool="vault_search", source_paths=[item.path for item in result.hits])
+            activity.append(
+                tool="vault_search",
+                source_paths=[item.path for item in result.hits],
+            )
             return {
                 "query": result.query,
                 "hits": [
@@ -180,7 +183,10 @@ def build_exploration_tools(
                     allow_protected=allow_protected,
                 ),
             )
-            activity.append(tool="vault_read_many", source_paths=[item.path for item in result.items])
+            activity.append(
+                tool="vault_read_many",
+                source_paths=[item.path for item in result.items],
+            )
             return {
                 "items": [
                     {
@@ -200,7 +206,7 @@ def build_exploration_tools(
 
     def vault_links_tool(
         path: str,
-        direction: str = "both",
+        direction: Literal["outgoing", "backlinks", "both"] = "both",
         limit: int = 50,
         allow_protected: bool = False,
     ) -> VaultLinksMCPResult:
@@ -209,13 +215,17 @@ def build_exploration_tools(
                 vault_root=vault_root,
                 request=VaultLinksRequest(
                     path=path,
-                    direction=cast("object", direction),
+                    direction=direction,
                     limit=limit,
                     allow_protected=allow_protected,
                 ),
             )
             source_paths = sorted(
-                {result.path, *(item.source_path for item in result.links), *(item.target_path for item in result.links)}
+                {
+                    result.path,
+                    *(item.source_path for item in result.links),
+                    *(item.target_path for item in result.links),
+                }
             )
             activity.append(tool="vault_links", source_paths=source_paths)
             return {
