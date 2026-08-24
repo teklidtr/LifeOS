@@ -310,7 +310,10 @@ Hybrid ranking keeps exact, lexical, semantic, metadata, link, optional graph,
 pin, and optional reranking signals separate and inspectable. Filters and
 protected-scope policy run before ranking. Results preserve note path, heading,
 line range, hashes, source metadata, duplicate provenance, and deterministic tie
-ordering. No-provider mode retains all local non-vector signals.
+ordering. Where a canonical note has a durable frontmatter `id`, retrieval also
+exposes that stable ID beside the note's current path so agents do not mistake the
+filesystem address for permanent identity. No-provider mode retains all local
+non-vector signals.
 
 Knowledge conversations are canonical Markdown under `conversations/YYYY/`.
 Their managed block stores scope, turns, evidence fingerprints, validated
@@ -362,3 +365,48 @@ timelines, and charts. Deleting it cannot delete canonical Markdown or original
 files. See [Rich Capture Architecture](rich-capture-architecture.md),
 [Rich Capture Protocol](rich-capture-protocol.md), and
 [Rich Capture User Manual](user-manual/13-rich-capture.md).
+
+## Cross-device vault coherence
+
+LifeOS supports one human using one canonical Markdown vault view across several devices, but
+its initial distributed-systems contract deliberately has **one active LifeOS mutation
+authority at a time**. Obsidian Sync, Syncthing, Google Drive, a mounted filesystem, Git-based
+transport, or another provider may replicate canonical files; the sync transport is outside
+LifeOS core and does not become a second writer protocol.
+
+Human Obsidian edits remain ordinary filesystem edits. A later `lifeos scan`, MCP ingestion
+preflight, retrieval synchronization, or other deterministic refresh reconciles disposable
+state from the filesystem. `.lifeos/` registries, retrieval indexes, embeddings, caches, and
+runtime activity are node-local rebuildable state and should not be treated as authoritative
+sync payload. The active LifeOS node owns proposal/application Git activity for that canonical
+view; synchronized clients do not need to commit independently.
+
+For canonical artifacts that carry a durable frontmatter `id`, LifeOS treats three facts
+separately:
+
+```text
+stable note id  -> which canonical note is this?
+current path    -> where is that note in this vault view now?
+content hash    -> which exact reviewed version is this?
+```
+
+The registry and retrieval index rebuild this mapping from Markdown. A unique stable ID can
+therefore preserve note identity across a pure rename/move, while duplicate IDs fail closed.
+Legacy notes without a stable ID remain path-addressable but cannot be automatically followed
+through relocation. Durable wiki notes are expected to acquire stable IDs; the broader
+selective-ID policy remains defined by DD-006.
+
+Existing-note ingestion proposals bind stable target ID, reviewed path, and reviewed base hash
+into proposal metadata before publication. Because metadata extensions participate in the
+review digest, this identity evidence is itself reviewed. Application never uses the ID to
+weaken the patch's base-hash guard. If an identified target moves, pending or approved proposals
+are not silently retargeted. They are stale until a fresh draft/review establishes the new path
+and re-runs path-scoped instruction, privacy, ownership, authorization, and target-type checks.
+The same ID with changed content is stale; a missing, changed, or ambiguous ID is blocked.
+
+Offline mobile capture needs no LifeOS process: the phone may create normal Markdown, sync it
+later, and the active node discovers it on reconciliation. Conflict copies, partial sync views,
+and delayed edits are treated as observable filesystem state, not provider-specific signals.
+When LifeOS cannot prove identity and version from the current canonical view it stops rather
+than guessing. See [Cross-Device Vault Coherence](cross-device-vault-coherence.md) and the
+[user workflow chapter](user-manual/16-cross-device-vault-coherence.md).
