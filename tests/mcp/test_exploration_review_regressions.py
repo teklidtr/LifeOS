@@ -1,0 +1,31 @@
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
+
+from lifeos.facade.exploration import VaultListRequest
+from lifeos.mcp.exploration_tools import _validated_request
+from lifeos.mcp.runtime_server import create_mcp_server
+from lifeos.mcp.server import _invoke_mcp_tool
+
+
+def test_runtime_replaces_legacy_reads_with_policy_aware_inputs(tmp_path: Path) -> None:
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault",
+        registry=MagicMock(),
+        authorizer=MagicMock(),
+        runtime_dir=tmp_path / ".lifeos",
+    )
+    tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
+
+    assert "allow_protected" in tools["vault_read_markdown"].parameters["properties"]
+    assert "allow_protected" in tools["vault_context"].parameters["properties"]
+    assert "after" in tools["vault_list"].parameters["properties"]
+
+
+def test_exploration_request_value_errors_are_mapped_to_argument_errors() -> None:
+    with pytest.raises(ToolError, match="Invalid LifeOS tool arguments"):
+        _invoke_mcp_tool(
+            lambda: _validated_request(lambda: VaultListRequest(limit=201))
+        )
