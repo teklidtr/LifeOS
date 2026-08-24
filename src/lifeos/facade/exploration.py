@@ -13,7 +13,8 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.retrieval import RetrievalError, RetrievalPolicy, RetrievalScope, scope_decision
 from lifeos.retrieval.chunking import chunk_markdown_file
 from lifeos.retrieval.policy import load_retrieval_policy
-from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
+from lifeos.vault import VaultAccessError, read_vault_markdown
+from lifeos.vault_paths import iter_vault_markdown_paths
 
 VAULT_LIST_DESCRIPTOR = ToolDescriptor(
     name="vault.list",
@@ -181,17 +182,22 @@ def list_vault_paths(*, vault_root: Path, request: VaultListRequest) -> VaultLis
     """List allowed canonical Markdown files plus their folder paths deterministically."""
     policy = _policy(vault_root)
     scope = RetrievalScope(allow_protected=request.allow_protected)
-    try:
-        files = iter_vault_markdown(vault_root)
-    except VaultAccessError as exc:
-        raise ToolExecutionError(str(exc)) from exc
 
-    allowed_files = [
-        source.relative_path
-        for source in files
-        if _matches_prefix(source.relative_path, request.prefix)
-        and _allowed(source.relative_path, scope=scope, policy=policy)
-    ]
+    def traversal_filter(path: str) -> bool:
+        return _allowed(path, scope=scope, policy=policy) and _matches_prefix_or_ancestor(
+            path, request.prefix
+        )
+
+    try:
+        allowed_files = list(
+            iter_vault_markdown_paths(
+                vault_root,
+                path_filter=traversal_filter,
+            )
+        )
+    except VaultAccessError as exc:
+        raise ToolExecutionError("Failed to list vault paths") from exc
+
     folders: set[str] = set()
     for path in allowed_files:
         parent = PurePosixPath(path).parent
@@ -291,15 +297,14 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
     scope = RetrievalScope(allow_protected=request.allow_protected)
     _require_allowed(request.path, scope=scope, policy=policy)
     try:
-        files = iter_vault_markdown(vault_root)
+        allowed_paths = set(
+            iter_vault_markdown_paths(
+                vault_root,
+                path_filter=lambda path: _allowed(path, scope=scope, policy=policy),
+            )
+        )
     except VaultAccessError as exc:
-        raise ToolExecutionError(str(exc)) from exc
-    allowed = tuple(
-        source
-        for source in files
-        if _allowed(source.relative_path, scope=scope, policy=policy)
-    )
-    allowed_paths = {source.relative_path for source in allowed}
+        raise ToolExecutionError("Failed to enumerate vault links") from exc
     if request.path not in allowed_paths:
         raise ToolNotFoundError("Target file not found")
 
@@ -308,22 +313,30 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
         basename_index.setdefault(PurePosixPath(path).name, []).append(path)
 
     links: set[VaultLink] = set()
-    for source in allowed:
+    for source_path in sorted(allowed_paths):
+        try:
+            source = read_vault_markdown(vault_root, source_path)
+        except VaultAccessError as exc:
+            if source_path == request.path:
+                raise ToolExecutionError("Requested note could not be read") from exc
+            continue
         try:
             chunks = chunk_markdown_file(source).chunks
-        except RetrievalError:
+        except RetrievalError as exc:
+            if source_path == request.path:
+                raise ToolExecutionError("Requested note could not be parsed") from exc
             continue
         for chunk in chunks:
             for parsed_target, target_heading in chunk.links:
                 target_path = _canonical_link_target(
                     parsed_target,
-                    source_path=source.relative_path,
+                    source_path=source_path,
                     allowed_paths=allowed_paths,
                     basename_index=basename_index,
                 )
                 if target_path is None:
                     continue
-                if request.direction in {"outgoing", "both"} and source.relative_path == request.path:
+                if request.direction in {"outgoing", "both"} and source_path == request.path:
                     links.add(
                         VaultLink(
                             source_path=request.path,
@@ -335,7 +348,7 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
                 if request.direction in {"backlinks", "both"} and target_path == request.path:
                     links.add(
                         VaultLink(
-                            source_path=source.relative_path,
+                            source_path=source_path,
                             target_path=request.path,
                             target_heading=target_heading,
                             direction="backlink",
@@ -364,12 +377,27 @@ def _canonical_link_target(
 ) -> str | None:
     if target_path in allowed_paths:
         return target_path
+    source_relative = _source_relative_target(target_path, source_path=source_path)
+    if source_relative in allowed_paths:
+        return source_relative
     if PurePosixPath(target_path).parent != PurePosixPath(source_path).parent:
         return None
     candidates = basename_index.get(PurePosixPath(target_path).name, [])
     if len(candidates) == 1:
         return candidates[0]
     return None
+
+
+def _source_relative_target(target_path: str, *, source_path: str) -> str:
+    parent = PurePosixPath(source_path).parent
+    parts: list[str] = []
+    for part in (parent / target_path).parts:
+        if part == "..":
+            if parts:
+                parts.pop()
+        elif part not in {"", "."}:
+            parts.append(part)
+    return PurePosixPath(*parts).as_posix()
 
 
 def _policy(vault_root: Path) -> RetrievalPolicy:
@@ -418,6 +446,14 @@ def _matches_prefix(path: str, prefix: str | None) -> bool:
         return True
     normalized = prefix.rstrip("/")
     return path == normalized or path.startswith(normalized + "/")
+
+
+def _matches_prefix_or_ancestor(path: str, prefix: str | None) -> bool:
+    if prefix is None:
+        return True
+    normalized = prefix.rstrip("/")
+    candidate = path.rstrip("/")
+    return _matches_prefix(candidate, normalized) or normalized.startswith(candidate + "/")
 
 
 def _sha256_prefixed(content: bytes) -> str:
