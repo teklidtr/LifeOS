@@ -12,6 +12,10 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _restore_keys_block(workflow: str) -> str:
+    return workflow.split("restore-keys: |", 1)[1].split("\n\n", 1)[0]
+
+
 def test_fast_pr_workflow_keeps_expensive_gates_out_of_synchronize_path() -> None:
     workflow = _read(FAST_WORKFLOW)
 
@@ -63,23 +67,31 @@ def test_unrelated_labels_cannot_emit_required_full_validation_check_names() -> 
     assert "github.event.label.name != 'full-validation'" in workflow
 
 
-def test_pr_workflows_share_supersession_concurrency_group() -> None:
+def test_pr_concurrency_preserves_current_fast_check_and_supersedes_stale_full_run() -> None:
     fast = _read(FAST_WORKFLOW)
     full = _read(FULL_WORKFLOW)
 
     assert "lifeos-pr-${{ github.event.pull_request.number }}" in fast
     assert "format('lifeos-pr-{0}', github.event.pull_request.number)" in full
     assert "cancel-in-progress: true" in fast
-    assert "cancel-in-progress: true" in full
+    assert "cancel-in-progress: ${{ github.event_name != 'pull_request' }}" in full
 
 
-def test_mypy_cache_is_toolchain_scoped_not_source_sha_scoped() -> None:
+def test_mypy_cache_rotates_primary_key_and_restores_compatible_state() -> None:
     expected_hash = "hashFiles('.python-version', 'uv.lock', 'pyproject.toml')"
+    fast = _read(FAST_WORKFLOW)
+    full = _read(FULL_WORKFLOW)
 
-    for path in (FAST_WORKFLOW, FULL_WORKFLOW):
-        workflow = _read(path)
+    for workflow in (fast, full):
         assert "uses: actions/cache@v4" in workflow
         assert "path: .mypy_cache" in workflow
+        assert "mypy-v2-" in workflow
         assert expected_hash in workflow
-        assert "github.sha" not in workflow
+        assert "${{ github.sha }}" in workflow
+        assert "github.sha" not in _restore_keys_block(workflow)
         assert "uv run mypy src" in workflow
+
+    assert "${{ github.event.pull_request.number }}-${{ github.sha }}" in fast
+    assert "${{ github.event.pull_request.number }}-\n" in _restore_keys_block(fast)
+    assert "${{ github.event.pull_request.number || github.ref_name }}-${{ github.sha }}" in full
+    assert "${{ github.event.pull_request.number || github.ref_name }}-\n" in _restore_keys_block(full)
