@@ -18,19 +18,19 @@ This preserves the existing split:
 
 ## Runtime composition
 
-The user-facing STDIO MCP runtime composes two surfaces:
+The user-facing STDIO MCP runtime starts from the existing core server and then composes the
+exploration surface. The core still owns registry maintenance, ingestion proposals, proposal
+lifecycle, and runtime diagnostics. The user-facing runtime replaces the legacy
+`vault_read_markdown` and `vault_context` entries with policy-aware adapters over the same
+facades, then adds the four exploration primitives.
 
-1. the existing core server, which owns registry maintenance, context, ingestion proposals,
-   proposal lifecycle, and runtime diagnostics;
-2. a read-only exploration adapter over the LifeOS exploration facade.
-
-The exploration adapter does not implement vault business rules. It maps typed MCP inputs to
-facade requests, records bounded disposable activity metadata, and maps facade results back to
-structured MCP output.
+MCP adapters do not own vault business rules. They map typed inputs to facade requests, record
+bounded disposable activity metadata, translate deterministic validation failures, and map
+facade results back to structured MCP output.
 
 This composition keeps future transports independent from the business rules. A later local
 network or home-node transport can expose the same Python capabilities without reimplementing
-vault access or mutation semantics.
+vault access, privacy, or mutation semantics.
 
 ## Exploration primitives
 
@@ -43,10 +43,10 @@ The runtime adds four composable read-only operations:
   total character budget;
 - `vault_links`: bounded outgoing-link and backlink discovery from current canonical Markdown.
 
-They complement existing tools:
+They complement policy-aware runtime reads:
 
 - `vault_read_markdown` for a focused single-note read;
-- `wiki_search` for the existing wiki-specific lexical path;
+- `wiki_search` for wiki-specific lexical search;
 - `vault_context` for instruction-aware pre-reasoning context;
 - semantic retrieval and knowledge-conversation facilities where their derived index is in use.
 
@@ -69,19 +69,21 @@ against the host filesystem. LifeOS supplies the useful vault-scoped capability 
 
 ## Path and privacy boundary
 
-Exploration uses the existing secure vault traversal implementation. Host-absolute paths,
-traversal, hidden runtime directories, and symlink escapes are not part of the agent-facing
-contract.
+The complete user-facing read surface enforces the canonical retrieval policy. This includes
+focused single-note reads and focused/lexical context assembly, not only the newly added broad
+exploration tools. Excluded prefixes remain unavailable. Protected prefixes are default-deny;
+tools that support protected reads require an explicit `allow_protected=true` request, and the
+runtime instructs clients to use that only when the user explicitly asks to include a protected
+scope.
 
-The exploration facade also applies the canonical retrieval policy. Excluded prefixes remain
-unavailable. Protected prefixes are default-deny and become available only when the MCP request
-sets `allow_protected=true`; the server instructions tell clients to do that only when the user
-explicitly asks to include a protected scope.
+Policy filtering occurs before lexical ranking and result caps. Disallowed candidates therefore
+cannot crowd allowed results out of a bounded search or context pack.
 
-This flag grants read eligibility only. It grants no write, proposal, ownership, or lifecycle
-authority.
+Secure vault traversal still enforces vault-root containment and rejects host-absolute paths,
+traversal, hidden runtime directories, unsafe file types, and symlink escapes. Protected-read
+eligibility grants no write, proposal, ownership, or lifecycle authority.
 
-## Output bounds
+## Output bounds and continuation
 
 Exploration operations expose explicit bounds rather than returning an unbounded vault dump:
 
@@ -90,8 +92,17 @@ Exploration operations expose explicit bounds rather than returning an unbounded
 - `vault_read_many`: at most eight paths and at most 100,000 returned Markdown characters;
 - `vault_links`: at most 100 references per request.
 
-Defaults are lower than those hard maxima. Results expose truncation where content or path/link
-lists can be cut by a requested bound.
+`vault_list` uses deterministic path ordering. When a page is truncated it returns `next_after`;
+passing that value back as `after` continues after the last returned path. Other bounded results
+report truncation where applicable.
+
+## Canonical link resolution
+
+`vault_links` compares references against the allowed canonical path set. Explicit canonical
+paths win. An Obsidian wikilink that omits its folder, such as `[[topic]]`, may fall back to
+basename resolution only when exactly one allowed canonical Markdown path has that basename.
+Ambiguous or unresolved targets are not guessed. The same canonicalized target is used for
+outgoing links and backlink comparisons.
 
 ## Mutation boundary
 
@@ -131,7 +142,13 @@ Deterministic tests cover both halves of the boundary:
 
 - a real STDIO MCP client performs a multi-step list → search → multi-read → link crawl without
   direct vault filesystem access;
-- protected content is omitted by default and requires an explicit protected-read request;
+- legacy focused reads and context cannot bypass protected-scope default-deny behavior;
+- policy filtering happens before lexical ranking/capping, including when more than 200
+  protected candidates score above an allowed match;
+- truncated path discovery can continue deterministically without guessing sibling names;
+- invalid bounded exploration arguments are reported as tool argument errors rather than
+  internal failures;
+- unique basename wikilinks resolve to canonical paths while ambiguous basenames are not guessed;
 - exploration tools are advertised as read-only, non-destructive, idempotent, and closed-world;
 - the runtime exposes no generic canonical filesystem mutation tool;
 - the existing proposal application surface remains explicitly destructive and authorized.

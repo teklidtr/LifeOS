@@ -12,7 +12,8 @@ The governing rule is simple: **exploration is broad; mutation is constrained**.
 
 A useful agent workflow is:
 
-1. Call `vault_list` to discover canonical Markdown paths in a relevant area.
+1. Call `vault_list` to discover canonical Markdown paths in a relevant area. If it returns
+   `truncated=true`, continue with `after=<next_after>` until the relevant listing is complete.
 2. Call `vault_search` to search the whole allowed vault or narrow the query with `prefix`.
 3. Read one note with `vault_read_markdown`, or compare up to eight selected notes with
    `vault_read_many`.
@@ -34,7 +35,9 @@ change canonical Markdown.
 Discovers canonical Markdown files and their folder paths. `prefix` narrows discovery to one
 vault-relative subtree. The default result limit is 100 and the hard maximum is 200.
 
-Use it when the agent does not yet know exact filenames.
+Listings use stable path ordering. When `truncated=true`, the response includes `next_after`.
+Pass that exact value back as `after` to continue after the final entry in the current page.
+This lets an MCP-only agent enumerate a large flat folder without already knowing omitted names.
 
 ### `vault_search`
 
@@ -42,7 +45,9 @@ Runs deterministic lexical search across canonical Markdown rather than only `wi
 response includes paths, titles, descriptions, excerpts, scores, and matched terms. `prefix`
 can narrow the search. The default limit is 20 and the hard maximum is 50.
 
-Use `wiki_search` instead when deliberately searching only durable wiki knowledge.
+Retrieval-policy eligibility is applied before ranking and the result limit, so hidden or
+excluded candidates cannot crowd an allowed result out of a bounded search. Use `wiki_search`
+instead when deliberately searching only durable wiki knowledge.
 
 ### `vault_read_many`
 
@@ -58,17 +63,20 @@ to dump the whole vault.
 Returns bounded outgoing references, backlinks, or both for one canonical Markdown path. The
 default limit is 50 and the hard maximum is 100.
 
-Use it to continue a crawl from evidence already judged relevant rather than relying only on
-keyword similarity.
+Obsidian wikilinks that omit a folder, such as `[[topic]]`, resolve to a canonical vault path
+only when the basename is unique among allowed Markdown paths. Ambiguous or unresolved targets
+are not guessed. The same resolution is used for backlink discovery.
 
 ## 15.3 Protected scopes
 
-The exploration surface reuses the retrieval privacy policy. Excluded paths remain unavailable.
-Protected prefixes are hidden by default.
+The complete user-facing MCP read surface reuses the retrieval privacy policy. Excluded paths
+remain unavailable. Protected prefixes are hidden by default from broad discovery/search,
+focused `vault_read_markdown` reads, and `vault_context` source selection.
 
-The optional `allow_protected` request flag should be set only when **you explicitly asked the
+Tools that expose `allow_protected` should receive `true` only when **you explicitly asked the
 agent to include a protected scope**. It expands read eligibility for that request only. It does
-not authorize any canonical edit.
+not authorize any canonical edit. `wiki_search` is also policy-filtered and does not provide a
+protected-scope bypass.
 
 ## 15.4 Mutation still uses proposals
 
@@ -99,7 +107,9 @@ Broad exploration therefore does not make the agent autonomous over canonical da
 For a question about driving-licence study material, an MCP-connected agent might:
 
 ```text
-vault_list(prefix="study/driving-licence")
+page = vault_list(prefix="study/driving-licence")
+while page.truncated:
+    page = vault_list(prefix="study/driving-licence", after=page.next_after)
   ↓
 vault_search(query="right of way")
   ↓
