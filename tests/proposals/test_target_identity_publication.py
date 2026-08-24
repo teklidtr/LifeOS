@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import lifeos.coherence_scoped as coherence_scoped
 from lifeos.ingestion.drafts import SourceSnapshot
 from lifeos.ingestion.proposals import (
     ProposalPublicationError,
@@ -81,3 +82,39 @@ def test_publication_fails_closed_when_target_id_is_duplicated(tmp_path: Path) -
             proposals_root=proposals,
             documents=documents,
         )
+
+
+def test_publication_does_not_read_or_leak_unrelated_protected_duplicate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    proposals = vault / "proposals"
+    proposals.mkdir(parents=True)
+    documents = _documents(vault)
+    protected = vault / "private" / "hidden.md"
+    protected.parent.mkdir(parents=True)
+    protected.write_text(
+        "---\nid: stable-wiki-target\ntype: concept\ntitle: Hidden\n---\nProtected body\n",
+        encoding="utf-8",
+    )
+
+    real_parser = coherence_scoped.parse_markdown_note
+
+    def reject_protected_read(note_path: Path, *, content: str | None = None):
+        assert "private" not in note_path.parts
+        return real_parser(note_path, content=content)
+
+    monkeypatch.setattr(coherence_scoped, "parse_markdown_note", reject_protected_read)
+
+    proposal_dir = persist_wiki_section_update_proposal(
+        proposals_root=proposals,
+        documents=documents,
+    )
+    loaded = load_proposal_directory(proposal_dir, proposals_root=proposals).proposal
+
+    assert loaded is not None
+    targets = parse_target_identities(loaded.metadata, loaded.patch_document)
+    assert len(targets) == 1
+    assert targets[0].stable_id == "stable-wiki-target"
+    assert targets[0].reviewed_path == "wiki/target.md"
