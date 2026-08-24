@@ -156,7 +156,7 @@ def lexical_search_report(
             path_filter=path_filter,
         )
     except VaultAccessError as exc:
-        raise ContextSearchError("Vault search sources could not be enumerated safely") from exc
+        raise ContextSearchError(str(exc)) from exc
 
     for source in files:
         relative = source.relative_path
@@ -233,17 +233,7 @@ def _search_sources(
         )
 
     paths = iter_vault_markdown_paths(vault_root, path_filter=traversal_filter)
-    sources: list[VaultMarkdownFile] = []
-    for relative in paths:
-        try:
-            sources.append(read_vault_markdown(vault_root, relative))
-        except VaultAccessError as exc:
-            raise VaultAccessError(
-                "filesystem-unavailable",
-                "",
-                "An allowed vault search source could not be read safely",
-            ) from exc
-    return tuple(sources)
+    return tuple(read_vault_markdown(vault_root, relative) for relative in paths)
 
 
 def focused_search_results(
