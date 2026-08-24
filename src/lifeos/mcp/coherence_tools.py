@@ -8,7 +8,8 @@ from typing import TypedDict, cast
 
 from mcp.server.fastmcp.tools import Tool
 
-from lifeos.coherence import CoherenceError, collect_identity_snapshot
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import collect_scoped_identity_snapshot
 from lifeos.facade.errors import ToolExecutionError, ToolNotFoundError, ToolValidationError
 from lifeos.mcp.exploration_tools import _strict_tool
 from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
@@ -29,7 +30,7 @@ NOTE_IDENTITY_MCP_DESCRIPTION = (
     "Resolve one current canonical Markdown path to its durable frontmatter id, current path, "
     "and content hash. Stable id, path, and content version are separate facts. This tool is "
     "read-only, follows the external retrieval policy, and fails closed when a stable id is "
-    "duplicated or ambiguous."
+    "duplicated or ambiguous within the caller-visible scope."
 )
 
 
@@ -51,11 +52,13 @@ def build_coherence_tools(
                 raise ToolValidationError("Invalid vault path") from exc
             if not vault_path.endswith(".md"):
                 raise ToolValidationError("Only Markdown files have canonical note identity")
+
+            scope = RetrievalScope(allow_protected=allow_protected)
             try:
                 policy = load_retrieval_policy(vault_root)
                 decision = scope_decision(
                     vault_path,
-                    scope=RetrievalScope(allow_protected=allow_protected),
+                    scope=scope,
                     policy=policy,
                     mode="external",
                 )
@@ -67,9 +70,18 @@ def build_coherence_tools(
                 )
 
             try:
-                snapshot = collect_identity_snapshot(vault_root)
-            except CoherenceError as exc:
-                raise ToolExecutionError("Could not rebuild canonical note identity") from exc
+                snapshot = collect_scoped_identity_snapshot(
+                    vault_root,
+                    allow_path=lambda path: scope_decision(
+                        path,
+                        scope=scope,
+                        policy=policy,
+                        mode="external",
+                    ).allowed,
+                )
+            except (CoherenceError, RetrievalError) as exc:
+                raise ToolExecutionError("Could not rebuild authorized note identity") from exc
+
             note = snapshot.by_path(vault_path)
             if note is None:
                 raise ToolNotFoundError("Canonical Markdown note is missing")
