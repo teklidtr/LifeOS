@@ -15,6 +15,7 @@ from lifeos.context.packs import (
 )
 from lifeos.context.search import (
     ContextSearchError,
+    ContextSearchExecutionError,
     ScoreEvidence,
     SearchReport,
     SearchResult,
@@ -28,6 +29,7 @@ __all__ = [
     "ContextInstruction",
     "ContextPack",
     "ContextSearchError",
+    "ContextSearchExecutionError",
     "InstructionAuthority",
     "InstructionReport",
     "InstructionScope",
