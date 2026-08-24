@@ -82,17 +82,35 @@ A completed task file is historical evidence; it does not replace updating the d
 
 Treat code review as an invariant check across the complete exposed surface, not only the lines changed in the current diff.
 
+### Privacy, authorization, and policy boundaries
+
 - Enforce privacy, retrieval, authorization, and routing policy in deterministic code. Prompt text, tool descriptions, or agent instructions may explain policy but must never be the only enforcement layer.
 - Review composed and legacy entry points for bypasses whenever a policy-aware surface is added or changed. Equivalent read or mutation paths must enforce the same boundary unless an explicit documented contract says otherwise.
 - Apply eligibility and privacy filters before reading, opening, decoding, parsing, scoring, ranking, or descending into denied content whenever the decision can be made from safe path metadata. Protected or excluded content must not affect allowed results or leak through errors and diagnostics.
+- Fail closed on symlinks, traversal, special files, malformed canonical state, and other unsafe filesystem states. Error messages exposed to agents must remain bounded and must not disclose denied or host-absolute paths.
+
+### Search, traversal, and bounded exploration
+
 - Apply result limits only after policy filtering and eligibility checks. A bounded search must not let denied higher-ranked candidates crowd valid lower-ranked candidates out of the returned window.
 - Path-only operations such as listing must remain path-only. Do not read Markdown contents merely to discover file names or folders.
 - Bounded enumeration must remain traversable. If a result can be truncated, provide deterministic continuation or another complete discovery mechanism so an MCP-only caller is not stranded at the first page.
-- Validate caller-controlled bounds and shapes at the adapter boundary and again in authoritative business logic where appropriate. Expected input failures must become stable argument or validation errors, never generic internal errors.
-- Preserve link semantics explicitly. Relative Markdown links resolve relative to their source note; Obsidian wikilinks may resolve by canonical path or unique basename. Never guess when a basename is ambiguous.
-- Distinguish failure of the explicitly requested source from failure of unrelated candidates. A requested unreadable or structurally invalid note must produce a deterministic tool error; malformed neighboring backlink/search candidates may be omitted or diagnosed according to the documented contract.
-- Fail closed on symlinks, traversal, special files, malformed canonical state, and ambiguous identity. Error messages exposed to agents must remain bounded and must not disclose denied or host-absolute paths.
-- For every accepted review finding that represents a reproducible bug or boundary failure, add a regression test when practical. Prefer adversarial tests that prove ordering and composition properties, such as policy filtering before decode or cap, rather than only happy-path examples.
+
+### Parsing, links, and identity
+
+- Preserve link semantics explicitly. Relative Markdown links resolve relative to their source note; Obsidian wikilinks may resolve by canonical path or unique basename.
+- Never guess when a basename, durable ID, canonical target, or other identity is ambiguous. Ambiguous identity must fail closed or remain unresolved according to the documented contract.
+- Distinguish failure of the explicitly requested source from failure of unrelated candidates. A requested unreadable or structurally invalid note must produce a deterministic tool error; malformed neighboring backlink or search candidates may be omitted or diagnosed according to the documented contract.
+
+### Validation and error contracts
+
+- Validate caller-controlled bounds and shapes at the adapter boundary and again in authoritative business logic where appropriate.
+- Expected input failures must become stable argument or validation errors, never generic internal errors.
+- Preserve established safe error contracts when refactoring lower-level traversal or I/O. Security hardening must not unnecessarily collapse actionable allowed-path errors into opaque failures.
+
+### Regression and review resolution
+
+- For every accepted review finding that represents a reproducible bug or boundary failure, add a regression test when practical.
+- Prefer adversarial tests that prove ordering and composition properties, such as policy filtering before decode or cap, rather than only happy-path examples.
 - Before resolving a review thread, run the narrow regression plus the relevant broader validation. Do not mark a finding resolved merely because the implementation appears correct by inspection.
 
 ## Completion standard
