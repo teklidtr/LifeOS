@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from lifeos.coherence import CoherenceError, collect_identity_snapshot
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import collect_scoped_identity_snapshot
 from lifeos.proposals.loader import LoadedProposal
 from lifeos.proposals.target_identity import (
     ProposalTargetIdentityError,
@@ -18,6 +19,8 @@ from lifeos.proposals.validation import (
     ProposalPreflightResult,
     preflight_proposal as _base_preflight_proposal,
 )
+from lifeos.retrieval.contracts import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
 
 
 def preflight_proposal(
@@ -33,6 +36,11 @@ def preflight_proposal(
     target disappears, changes identity, becomes ambiguous, changes content, or relocates.
     Relocation is deliberately not applied in place: a fresh draft/review must establish the
     new path-scoped authorization context.
+
+    Identity discovery is policy-scoped before Markdown is opened. An explicitly reviewed
+    target may authorize protected-scope intent for that exact path only; unrelated protected
+    or excluded notes cannot be read or influence the proposal result merely because they share
+    the same frontmatter id.
     """
     base = _base_preflight_proposal(
         proposal,
@@ -46,14 +54,31 @@ def preflight_proposal(
     if not targets:
         return base
 
+    reviewed_paths = frozenset(target.reviewed_path for target in targets)
     try:
-        snapshot = collect_identity_snapshot(vault_root)
+        policy = load_retrieval_policy(vault_root)
+
+        def allow_identity_path(path: str) -> bool:
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
+            decision = scope_decision(
+                path,
+                scope=RetrievalScope(allow_protected=path in reviewed_paths),
+                policy=policy,
+                mode="local",
+            )
+            return decision.allowed
+
+        snapshot = collect_scoped_identity_snapshot(
+            vault_root,
+            allow_path=allow_identity_path,
+        )
         resolutions = assess_proposal_target_identities(
             proposal.metadata,
             proposal.patch_document,
             snapshot,
         )
-    except (CoherenceError, ProposalTargetIdentityError) as error:
+    except (CoherenceError, ProposalTargetIdentityError, RetrievalError) as error:
         return _invalidate(base, code="target_identity_unresolvable", message=str(error))
 
     operations: list[OperationPreflightResult] = []
