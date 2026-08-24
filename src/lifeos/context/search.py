@@ -11,7 +11,12 @@ from typing import Literal
 
 from lifeos.diagnostics import DomainDiagnostic, DiagnosticError, diagnostics_from_findings
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown, read_vault_markdown
+from lifeos.vault import (
+    VaultAccessError,
+    VaultMarkdownFile,
+    iter_vault_markdown,
+    read_vault_markdown,
+)
 from lifeos.vault_paths import iter_vault_markdown_paths
 
 _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
@@ -27,6 +32,10 @@ PathFilter = Callable[[str], bool]
 
 class ContextSearchError(DiagnosticError):
     """Raised when a context search request is invalid."""
+
+
+class ContextSearchExecutionError(ContextSearchError):
+    """Raised when an otherwise valid context search cannot read allowed vault state."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +165,7 @@ def lexical_search_report(
             path_filter=path_filter,
         )
     except VaultAccessError as exc:
-        raise ContextSearchError(str(exc)) from exc
+        raise ContextSearchExecutionError(str(exc)) from exc
 
     for source in files:
         relative = source.relative_path
@@ -261,7 +270,7 @@ def focused_search_results(
         try:
             source = read_vault_markdown(vault_root, relative)
         except VaultAccessError as exc:
-            raise ContextSearchError(f"Invalid focus path {relative}: {exc}") from exc
+            raise ContextSearchExecutionError(f"Invalid focus path {relative}: {exc}") from exc
         parsed = parse_markdown_note(source.path, content=source.content)
         diagnostics = diagnostics_from_findings(parsed.findings, vault_root=vault_root)
         if diagnostics:
