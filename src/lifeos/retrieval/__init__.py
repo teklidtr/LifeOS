@@ -27,7 +27,9 @@ from .index import INDEX_SCHEMA_VERSION, RetrievalIndex, StoredEmbedding
 from .evaluation import FixtureResult, RetrievalEvaluation, RetrievalFixture, evaluate_retrieval
 from .models import ChunkedNote, IndexedChunk, IndexedDocument
 from .policy import load_retrieval_policy
-from .search import HybridRetriever, RankingComponents, RetrievalEvidence, RetrievalResponse
+from . import search as _search
+from .search import RankingComponents, RetrievalEvidence, RetrievalResponse
+from .coherence_search import HybridRetriever, StableRetrievalEvidence
 from .service import IndexHealth, IndexProgress, IndexRecoveryPlan, IndexResult, RetrievalIndexService
 from .providers import (
     DeterministicAnswerProvider,
@@ -36,6 +38,9 @@ from .providers import (
     FailingAnswerProvider,
     UnavailableEmbeddingProvider,
 )
+
+# Keep direct ``lifeos.retrieval.search.HybridRetriever`` imports aligned with the package API.
+_search.HybridRetriever = HybridRetriever
 
 __all__ = [
     "AnswerEvidence",
@@ -77,6 +82,7 @@ __all__ = [
     "RerankResult",
     "RerankingProvider",
     "ScopeDecision",
+    "StableRetrievalEvidence",
     "StoredEmbedding",
     "UnavailableEmbeddingProvider",
     "build_provider_disclosure",
