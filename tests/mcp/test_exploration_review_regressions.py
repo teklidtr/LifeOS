@@ -49,3 +49,22 @@ def test_runtime_exploration_inputs_are_type_strict(tmp_path: Path) -> None:
         list_model.model_validate({"limit": "20"})
     with pytest.raises(ValidationError):
         list_model.model_validate({"limit": True})
+
+
+def test_runtime_protected_read_uses_external_disclosure_policy(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    secret = vault / "journal/private/secret.md"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("secret\n", encoding="utf-8")
+    server = create_mcp_server(
+        vault_root=vault,
+        registry=MagicMock(),
+        authorizer=MagicMock(),
+        runtime_dir=tmp_path / ".lifeos",
+    )
+
+    with pytest.raises(ToolError, match="protected-external-deny"):
+        server._tool_manager.get_tool("vault_read_markdown").fn(
+            vault_path="journal/private/secret.md",
+            allow_protected=True,
+        )
