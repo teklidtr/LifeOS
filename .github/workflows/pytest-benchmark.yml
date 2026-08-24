@@ -13,79 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  seed-durations:
-    if: ${{ github.event.label.name == 'pytest-benchmark' }}
-    name: seed-durations
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.12.0"
-          enable-cache: true
-      - name: Install locked dependencies
-        run: uv sync --frozen --extra dev --extra mcp
-      - name: Restore duration history
-        id: durations-cache
-        uses: actions/cache@v4
-        with:
-          path: .test_durations
-          key: pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.sha }}
-          restore-keys: |
-            pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
-      - name: Seed duration history when missing
-        if: steps.durations-cache.outputs.cache-hit != 'true'
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src
-        shell: bash
-        run: |
-          /usr/bin/time -f 'wall=%e user=%U sys=%S maxrss_kb=%M' \
-            uv run --with pytest-split==0.11.0 pytest -q --store-durations
-          ls -lh .test_durations
-
-  split-2:
-    if: ${{ github.event.label.name == 'pytest-benchmark' }}
-    needs: seed-durations
-    name: split-2-group-${{ matrix.group }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [1, 2]
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.12.0"
-          enable-cache: true
-      - name: Install locked dependencies
-        run: uv sync --frozen --extra dev --extra mcp
-      - name: Restore duration history
-        uses: actions/cache@v4
-        with:
-          path: .test_durations
-          key: pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.sha }}
-          restore-keys: |
-            pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
-      - name: Run shard
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src
-        shell: bash
-        run: |
-          /usr/bin/time -f 'wall=%e user=%U sys=%S maxrss_kb=%M' \
-            uv run --with pytest-split==0.11.0 pytest -q \
-              --splits 2 --group ${{ matrix.group }} \
-              --splitting-algorithm=least_duration --durations=10
-
   split-4:
     if: ${{ github.event.label.name == 'pytest-benchmark' }}
-    needs: seed-durations
     name: split-4-group-${{ matrix.group }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -104,12 +33,22 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --extra dev --extra mcp
       - name: Restore duration history
+        id: durations-cache
         uses: actions/cache@v4
         with:
           path: .test_durations
           key: pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.sha }}
           restore-keys: |
             pytest-durations-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
+      - name: Report duration cache
+        shell: bash
+        run: |
+          echo "duration exact cache hit: ${{ steps.durations-cache.outputs.cache-hit || 'false' }}"
+          if [[ -f .test_durations ]]; then
+            echo "duration history restored: yes ($(wc -c < .test_durations) bytes)"
+          else
+            echo "duration history restored: no; pytest-split will safely balance by test count"
+          fi
       - name: Run shard
         env:
           PYTHONPATH: ${{ github.workspace }}/src
