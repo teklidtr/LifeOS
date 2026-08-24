@@ -324,15 +324,14 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
                 if target_path is None:
                     continue
                 if request.direction in {"outgoing", "both"} and source.relative_path == request.path:
-                    if _allowed(target_path, scope=scope, policy=policy):
-                        links.add(
-                            VaultLink(
-                                source_path=request.path,
-                                target_path=target_path,
-                                target_heading=target_heading,
-                                direction="outgoing",
-                            )
+                    links.add(
+                        VaultLink(
+                            source_path=request.path,
+                            target_path=target_path,
+                            target_heading=target_heading,
+                            direction="outgoing",
                         )
+                    )
                 if request.direction in {"backlinks", "both"} and target_path == request.path:
                     links.add(
                         VaultLink(
@@ -366,13 +365,11 @@ def _canonical_link_target(
     if target_path in allowed_paths:
         return target_path
     if PurePosixPath(target_path).parent != PurePosixPath(source_path).parent:
-        return target_path
+        return None
     candidates = basename_index.get(PurePosixPath(target_path).name, [])
     if len(candidates) == 1:
         return candidates[0]
-    if len(candidates) > 1:
-        return None
-    return target_path
+    return None
 
 
 def _policy(vault_root: Path) -> RetrievalPolicy:
