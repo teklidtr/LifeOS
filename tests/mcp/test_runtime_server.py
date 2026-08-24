@@ -59,6 +59,7 @@ def test_exploration_tool_schemas_are_strict_and_bounded(tmp_path: Path) -> None
         "prefix",
         "limit",
         "allow_protected",
+        "after",
     }
     assert set(tools["vault_search"].parameters["properties"]) == {
         "query",
