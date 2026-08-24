@@ -54,9 +54,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .mypy_cache
-          key: mypy-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number }}
+          key: mypy-v2-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number }}-${{ github.sha }}
           restore-keys: |
-            mypy-v1-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
+            mypy-v2-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number }}-
+            mypy-v2-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
 
       - name: Ruff repository gate
         if: steps.scope.outputs.docs_only != 'true'
@@ -70,7 +71,8 @@ jobs:
         if: ${{ always() && steps.scope.outputs.docs_only != 'true' }}
         shell: bash
         run: |
-          echo "mypy exact cache hit: ${{ steps.mypy-cache.outputs.cache-hit || 'false' }}"
+          echo "mypy exact primary cache hit: ${{ steps.mypy-cache.outputs.cache-hit || 'false' }}"
+          echo "Compatible restore-key matches are reported by the cache restore step above."
           if [[ -d .mypy_cache ]]; then
             echo "mypy cache size: $(du -sh .mypy_cache | cut -f1)"
           else
