@@ -101,6 +101,8 @@ Before a pull request is considered ready to merge:
 1. Complete the implementation, documentation impact, and required validation.
 2. Once the implementation is stable, request `@codex review`.
 3. Address valid findings, add regression coverage where appropriate, and re-run the relevant validation.
+   - Review findings are normally implemented by the current implementation agent. Do not comment `@codex address that feedback` or otherwise delegate implementation to Codex merely because Codex found the issue.
+   - Use `@codex address that feedback` only as an exceptional fallback when a finding is too complex to resolve safely within the current implementation effort. If used, review Codex's resulting diff as external implementation work, preserve repository invariants, add or update regression coverage, and run the normal validation before resolving the finding.
 4. Request another `@codex review` when review fixes materially change behavior, architecture, public interfaces, trust boundaries, or a substantial portion of the implementation. Batch related fixes before requesting the next review. Do not request another review for trivial or purely mechanical changes.
 5. Repeat the review/fix cycle only while material changes continue to be introduced.
 6. For a security-sensitive pull request, request `@codex security review` after the normal review cycle has stabilized.
