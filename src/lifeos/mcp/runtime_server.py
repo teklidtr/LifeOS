@@ -43,13 +43,14 @@ def create_mcp_server(
     runtime_dir: Path | None = None,
 ) -> FastMCP:
     """Compose the stable core MCP server with policy-aware exploration primitives."""
+    resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
     core = create_core_mcp_server(
         vault_root=vault_root,
         registry=registry,
         authorizer=authorizer,
-        runtime_dir=runtime_dir,
+        runtime_dir=resolved_runtime_dir,
     )
-    activity = ActivityStore(runtime_dir or (vault_root / ".lifeos"))
+    activity = ActivityStore(resolved_runtime_dir)
     policy_reads = build_policy_read_tools(
         vault_root=vault_root,
         activity=activity,
@@ -62,7 +63,9 @@ def create_mcp_server(
     )
     coherence = build_coherence_tools(
         vault_root=vault_root,
+        activity=activity,
         invoke=_invoke_mcp_tool,
+        runtime_dir=resolved_runtime_dir,
     )
     core_tools = [
         tool
