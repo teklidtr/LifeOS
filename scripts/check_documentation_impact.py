@@ -35,6 +35,12 @@ class DocumentationImpact:
     reason: str | None
 
 
+@dataclass(frozen=True)
+class GitChange:
+    status: str
+    paths: tuple[str, ...]
+
+
 def parse_documentation_impact(task_text: str) -> DocumentationImpact:
     section_match = _SECTION_PATTERN.search(task_text)
     if section_match is None:
@@ -60,6 +66,45 @@ def is_implementation_change(path: str) -> bool:
 
 def is_documentation_change(path: str) -> bool:
     return path in _DOCUMENTATION_FILES or path.startswith(_DOCUMENTATION_PREFIXES)
+
+
+def is_ci_documentation_path(path: str) -> bool:
+    """Return whether a path is safe for the dependency-free documentation-only CI path."""
+    if is_implementation_change(path) or not path.endswith(".md"):
+        return False
+    return is_documentation_change(path) or _TASK_PATTERN.fullmatch(path) is not None
+
+
+def parse_name_status_z(raw: bytes) -> tuple[GitChange, ...]:
+    """Parse `git diff --name-status -z`, preserving both rename/copy endpoints."""
+    tokens = raw.split(b"\0")
+    if tokens and tokens[-1] == b"":
+        tokens.pop()
+
+    changes: list[GitChange] = []
+    index = 0
+    while index < len(tokens):
+        status = tokens[index].decode("utf-8", errors="surrogateescape")
+        index += 1
+        path_count = 2 if status.startswith(("R", "C")) else 1
+        if index + path_count > len(tokens):
+            raise ValueError("truncated git --name-status -z output")
+        paths = tuple(
+            token.decode("utf-8", errors="surrogateescape")
+            for token in tokens[index : index + path_count]
+        )
+        index += path_count
+        changes.append(GitChange(status=status, paths=paths))
+    return tuple(changes)
+
+
+def evaluate_ci_scope(changes: Iterable[GitChange]) -> tuple[bool, int]:
+    """Return `(docs_only, changed_entry_count)` using a conservative documentation allowlist."""
+    entries = tuple(changes)
+    docs_only = bool(entries) and all(
+        is_ci_documentation_path(path) for change in entries for path in change.paths
+    )
+    return docs_only, len(entries)
 
 
 def evaluate_documentation_impact(
@@ -107,16 +152,52 @@ def changed_paths_from_git(base_ref: str) -> tuple[str, ...]:
     return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
 
 
+def git_changes_from_git(base_ref: str) -> tuple[GitChange, ...]:
+    result = subprocess.run(
+        ["git", "diff", "--name-status", "-z", "--find-renames", f"{base_ref}...HEAD"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+    )
+    return parse_name_status_z(result.stdout)
+
+
+def _write_ci_scope(path: Path, *, base_ref: str) -> None:
+    docs_only, changed_count = evaluate_ci_scope(git_changes_from_git(base_ref))
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"docs_only={'true' if docs_only else 'false'}\n")
+        handle.write(f"changed_count={changed_count}\n")
+    print(f"PR scope: docs_only={str(docs_only).lower()} changed_count={changed_count}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Validate the task documentation-impact contract for a pull-request diff."
+        description="Validate documentation impact and classify the pull-request diff."
     )
     parser.add_argument(
         "--base-ref",
         required=True,
         help="Git ref used as the pull-request merge base, for example origin/master.",
     )
+    parser.add_argument(
+        "--ci-scope-output",
+        type=Path,
+        help="Append docs_only/changed_count outputs for a GitHub Actions step.",
+    )
+    parser.add_argument(
+        "--scope-only",
+        action="store_true",
+        help="Only classify CI scope; requires --ci-scope-output.",
+    )
     args = parser.parse_args()
+
+    if args.scope_only and args.ci_scope_output is None:
+        parser.error("--scope-only requires --ci-scope-output")
+
+    if args.ci_scope_output is not None:
+        _write_ci_scope(args.ci_scope_output, base_ref=args.base_ref)
+        if args.scope_only:
+            return 0
 
     changed_paths = changed_paths_from_git(args.base_ref)
     errors = evaluate_documentation_impact(
