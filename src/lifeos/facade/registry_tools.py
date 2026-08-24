@@ -35,6 +35,7 @@ class RegistryRefreshResult:
     unchanged: tuple[str, ...]
     deleted: tuple[str, ...]
     proposals_indexed: int
+    renamed: tuple[tuple[str, str], ...] = ()
 
 
 def refresh_registry(*, vault_root: Path, registry: Registry) -> RegistryRefreshResult:
@@ -54,4 +55,5 @@ def refresh_registry(*, vault_root: Path, registry: Registry) -> RegistryRefresh
         unchanged=tuple(scan_result.unchanged),
         deleted=tuple(scan_result.deleted),
         proposals_indexed=proposals_indexed,
+        renamed=tuple(scan_result.renamed),
     )
