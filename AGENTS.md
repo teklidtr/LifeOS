@@ -98,7 +98,7 @@ Use these rules to catch LifeOS-specific invariant violations that may not be ob
 
 Before a pull request is considered ready to merge:
 
-1. Complete the implementation, documentation impact, and required validation.
+1. Complete the implementation, documentation impact, and relevant local validation. Ordinary PR pushes should receive a green `fast-checks` result.
 2. Once the implementation is stable, request `@codex review`.
 3. Address valid findings, add regression coverage where appropriate, and re-run the relevant validation.
    - Review findings are normally implemented by the current implementation agent. Do not comment `@codex address that feedback` or otherwise delegate implementation to Codex merely because Codex found the issue.
@@ -107,7 +107,8 @@ Before a pull request is considered ready to merge:
 5. Repeat the review/fix cycle only while material changes continue to be introduced.
 6. For a security-sensitive pull request, request `@codex security review` after the normal review cycle has stabilized.
 7. Address valid security findings and re-run affected validation. Request another security review only if those fixes materially change a security or trust boundary.
-8. Do not merge while required CI is failing or relevant review findings remain unresolved.
+8. After the final material commit and required review cycle are stable, request the GitHub full-validation checkpoint by adding the `full-validation` label to the PR. The checkpoint must produce green `full-test` and `docker-setup-e2e` checks for the current PR head. If material commits land afterward, remove and re-add the label to request a fresh checkpoint without a dummy commit.
+9. Do not merge while `fast-checks`, the latest required full-validation checkpoint, or relevant review findings are unresolved or failing.
 
 ### Security-sensitive changes
 

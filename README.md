@@ -82,3 +82,52 @@ When changing the LifeOS application itself:
 
 Small verifiable tasks evolve the application; completed task files are implementation
 history, not a substitute for current user or architecture documentation.
+
+### Continuous integration
+
+Pull requests targeting `master` use two validation levels:
+
+- `fast-checks` runs on ordinary PR open, reopen, and synchronize events. It keeps the
+  documentation-impact gate, manual-link validation, Ruff, mypy, compileall, pytest
+  collection, and the project contract smoke tests. A documentation-only diff confined to
+  allowlisted Markdown under `docs/` or the task lifecycle, plus `README.md`/`AGENTS.md`, can
+  skip dependency installation and Python application checks. Implementation-owned Markdown
+  such as `prompts/`, `packages/`, workflow files, and either endpoint of a code-to-doc rename
+  remains on the full fast-check path. Documentation checks always run with the runner's
+  standard Python.
+- A full checkpoint is requested by adding the `full-validation` label to the PR. That event
+  runs the complete pytest suite across four stateless `full-test-shard-*` runners plus the
+  clean-room `docker-setup-e2e` gate. The aggregate `full-test` check succeeds only when every
+  pytest shard succeeds. If material commits land after a successful checkpoint, remove and
+  re-add `full-validation` to validate the new head without creating a dummy commit. Other
+  label events do not emit the required `full-test` or `docker-setup-e2e` check names.
+- Every push to `master` and every manual `workflow_dispatch` of the full-validation workflow
+  runs the complete full checkpoint automatically.
+
+The pytest shards partition the collected suite by count with an exact-pinned `pytest-split`
+version. They do not use test-result, affected-test, or duration-history caches, so every full
+checkpoint executes every collected test and has no cache state that can change test selection.
+The separate full-path `pytest --collect-only` pass is intentionally omitted because each shard
+performs normal pytest collection before execution; the fast PR path keeps collect-only as its
+cheap import/collection contract.
+
+The fast and full PR workflows share the same concurrency group with asymmetric cancellation.
+A requested full checkpoint does not cancel an in-progress `fast-checks` run for the same head;
+it waits for that required feedback to finish. A later PR synchronization starts a new
+`fast-checks` run with cancellation enabled, so an obsolete in-progress full checkpoint is still
+cancelled when a newer commit makes it irrelevant.
+
+`astral-sh/setup-uv` dependency caching remains enabled. `.mypy_cache` is additionally cached
+as disposable performance state. Its primary key includes runner/Python/dependency/configuration
+inputs, a PR-or-branch scope, and the current commit. Each new commit can therefore restore the
+most recent compatible scoped cache and, after mypy runs, publish a fresh immutable snapshot;
+an exact rerun of the same commit can reuse the primary key directly. Restore keys deliberately
+omit the commit suffix so incremental reuse survives source edits. Cache restoration never
+skips mypy, and a miss or eviction changes only CI speed. Ruff and pytest result caches are not
+persisted. The clean-room Docker gate currently uses no persisted layer cache so its isolated
+semantics remain unchanged.
+
+`master` currently has no repository-enforced required status checks, so merge readiness is
+also governed by the PR workflow in `AGENTS.md`. If branch protection is enabled later, use
+unique check names and require `fast-checks`, `full-test`, and `docker-setup-e2e`; the latter
+two appear for PRs only after the explicit full-validation checkpoint.
