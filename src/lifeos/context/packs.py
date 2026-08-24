@@ -63,6 +63,7 @@ def build_context_pack(
         vault_root=vault_root,
         question=question,
         sources=sources,
+        path_filter=path_filter,
     )
     gaps: list[str] = []
     omissions: list[str] = []
