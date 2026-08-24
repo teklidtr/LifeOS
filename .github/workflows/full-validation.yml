@@ -18,7 +18,7 @@ concurrency:
         || github.event.label.name == 'full-validation'
         && format('lifeos-pr-{0}', github.event.pull_request.number)
         || format('lifeos-label-{0}-{1}', github.event.pull_request.number, github.run_id) }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name != 'pull_request' }}
 
 jobs:
   full_test_shard:
