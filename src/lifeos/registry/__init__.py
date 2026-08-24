@@ -11,13 +11,16 @@ from lifeos.registry._registry import (
 )
 from lifeos.registry.file_tracking import (
     FileComparison,
-    validate_vault_path,
     FileRegistrationState,
     FileTrackingError,
+    RegisteredStableIdentity,
     ScanResult,
     compare_registered_file,
     hash_file_content,
+    list_registered_stable_identities,
     register_scan,
+    resolve_registered_stable_id,
+    validate_vault_path,
 )
 from lifeos.registry.proposals import (
     ProposalQueryError,
@@ -52,6 +55,7 @@ __all__ = [
     "ProvenanceIndexError",
     "ProvenanceSourceRow",
     "ProvenanceSourceSummary",
+    "RegisteredStableIdentity",
     "Registry",
     "RegistryError",
     "RegistryHistoryError",
@@ -65,8 +69,10 @@ __all__ = [
     "hash_file_content",
     "list_derived_for_source",
     "list_proposals",
+    "list_registered_stable_identities",
     "refresh_provenance_index",
     "register_proposals_scan",
     "register_scan",
+    "resolve_registered_stable_id",
     "validate_vault_path",
 ]
