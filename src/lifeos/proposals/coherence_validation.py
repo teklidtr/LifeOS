@@ -66,13 +66,19 @@ def preflight_proposal(
 
         invalid = resolution.state in {"ambiguous", "identity-changed"}
         state = "invalid" if invalid else "stale"
+        message = resolution.detail
+        if resolution.current_path is not None and resolution.current_path != resolution.reviewed_path:
+            message = (
+                f"{message} Current stable-id location: {resolution.current_path}. "
+                f"Reviewed location: {resolution.reviewed_path}."
+            )
         finding = PreflightFinding(
             severity="error",
             code=f"target_identity_{resolution.state.replace('-', '_')}",
             operation_id=operation.operation_id,
             target_path=operation.target_path,
             field_path="extensions.lifeos_target_identity",
-            message=resolution.detail,
+            message=message,
         )
         operations.append(
             replace(
