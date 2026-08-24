@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
-from lifeos.coherence import CoherenceError, IdentitySnapshot
-from lifeos.coherence_scoped import collect_scoped_identity_snapshot
+from lifeos.markdown.parser import parse_markdown_note
 from lifeos.retrieval.contracts import (
     CancellationToken,
     EmbeddingProvider,
-    RetrievalError,
     RetrievalRequest,
     RerankingProvider,
     scope_decision,
@@ -22,6 +21,7 @@ from lifeos.retrieval.search import (
     RetrievalEvidence,
     RetrievalResponse,
 )
+from lifeos.vault import VaultAccessError, read_vault_markdown
 
 _IDENTITY_CAPTURE: ContextVar[dict[str, str | None] | None] = ContextVar(
     "lifeos_retrieval_identity_capture",
@@ -64,34 +64,12 @@ class HybridRetriever(_BaseHybridRetriever):
         if not response.results:
             return response
 
-        try:
-            snapshot = collect_scoped_identity_snapshot(
-                self.vault_root,
-                allow_path=lambda path: (
-                    not path.startswith("conversations/")
-                    and not path.startswith("proposals/")
-                    and scope_decision(
-                        path,
-                        scope=request.scope,
-                        policy=self.policy,
-                        mode="local",
-                    ).allowed
-                ),
-            )
-        except (CoherenceError, RetrievalError):
-            return replace(
-                response,
-                results=tuple(_with_stable_id(item, None) for item in response.results),
-                diagnostics=(*response.diagnostics, "stable-identity-unavailable"),
-            )
-
         enriched = tuple(
             _with_stable_id(
                 item,
-                _verified_stable_id(
-                    snapshot,
-                    path=item.path,
-                    source_hash=item.source_hash,
+                self._verified_current_stable_id(
+                    request=request,
+                    item=item,
                     candidate=captured.get(item.path),
                 ),
             )
@@ -111,22 +89,43 @@ class HybridRetriever(_BaseHybridRetriever):
             captured[document.path] = _stable_id(document.document_id)
         return allowed
 
+    def _verified_current_stable_id(
+        self,
+        *,
+        request: RetrievalRequest,
+        item: RetrievalEvidence,
+        candidate: str | None,
+    ) -> str | None:
+        """Verify one indexed candidate against only its returned canonical note.
 
-def _verified_stable_id(
-    snapshot: IdentitySnapshot,
-    *,
-    path: str,
-    source_hash: str,
-    candidate: str | None,
-) -> str | None:
-    if candidate is None:
-        return None
-    current = snapshot.by_path(path)
-    if current is None:
-        return None
-    if current.stable_id != candidate or current.content_hash != source_hash:
-        return None
-    return candidate if len(snapshot.by_stable_id(candidate)) == 1 else None
+        Duplicate durable IDs are removed from the retrieval index's durable document-key
+        namespace by ``RetrievalIndexService``. Search therefore needs only to prove that the
+        result path still contains the same candidate ID and exact indexed bytes. It never
+        rescans unrelated Markdown and never reopens the mutable SQLite active path.
+        """
+        if candidate is None:
+            return None
+        if item.path.startswith("conversations/") or item.path.startswith("proposals/"):
+            return None
+        decision = scope_decision(
+            item.path,
+            scope=request.scope,
+            policy=self.policy,
+            mode="local",
+        )
+        if not decision.allowed:
+            return None
+        try:
+            source = read_vault_markdown(self.vault_root, item.path)
+        except VaultAccessError:
+            return None
+        if "sha256:" + hashlib.sha256(source.content_bytes).hexdigest() != item.source_hash:
+            return None
+        parsed = parse_markdown_note(source.path, content=source.content)
+        current_id = parsed.durable_fields.id
+        if current_id is None:
+            return None
+        return candidate if current_id.strip() == candidate else None
 
 
 def _with_stable_id(item: RetrievalEvidence, stable_id: str | None) -> StableRetrievalEvidence:
