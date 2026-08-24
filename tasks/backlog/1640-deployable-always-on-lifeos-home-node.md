@@ -5,6 +5,7 @@ status: backlog
 phase: 16
 depends_on:
   - LIFEOS-1639
+  - LIFEOS-1643
 risk: high
 ---
 
@@ -25,8 +26,9 @@ continue to work alongside the new deployment mode.
 - Keep local STDIO MCP as a supported first-class mode.
 - Add an explicit long-lived service mode rather than changing `lifeos init` into a daemon
   installer or client configurator.
-- The node may own, mount, or receive a synchronized vault copy; LifeOS does not require the
-  user's agent device to store the vault.
+- The node may own, mount, or receive a synchronized vault copy according to the authoritative
+  topology/coherence contract from LIFEOS-1643; LifeOS does not require the user's agent device
+  to store the vault.
 - Agent semantic reasoning stays in Codex/ChatGPT/Claude/other external agents. The node
   performs deterministic LifeOS tools, validation, authorization, proposal lifecycle,
   registry/index work, and vault I/O.
@@ -72,9 +74,8 @@ continue to work alongside the new deployment mode.
   where Home Assistant OS requires platform packaging, provide or specify the thinnest
   Home Assistant App/add-on wrapper needed without moving Home Assistant concerns into
   LifeOS core.
-- Document how Obsidian/mobile synchronization relates to the node: the vault may be local
-  to the node or synchronized/mounted, but the node must have a coherent filesystem view
-  before it performs LifeOS operations.
+- Implement/document the vault placement or synchronization topology selected by LIFEOS-1643;
+  the node must satisfy that coherence contract before it performs LifeOS operations.
 - Add integration coverage proving that a remote client with no local vault can perform the
   MCP-only exploratory flow from LIFEOS-1639 and create a guarded proposal through the
   home node.
@@ -87,7 +88,7 @@ continue to work alongside the new deployment mode.
 - Automatically changing Codex, Claude, ChatGPT, Obsidian, shell, router, VPN, DNS, or Home
   Assistant client configuration from `lifeos init`.
 - Requiring the canonical vault to move permanently off the user's computer; mounted or
-  synchronized deployment models remain valid if the service has a coherent filesystem view.
+  synchronized deployment models remain valid when they satisfy LIFEOS-1643 coherence rules.
 - Granting remote agents unrestricted host shell access.
 - Supporting arbitrary unauthenticated WAN exposure.
 - Running large local language models on Home Assistant Yellow.
@@ -102,6 +103,8 @@ continue to work alongside the new deployment mode.
   stable actor identity, use the LIFEOS-1639 exploration surface, and submit a proposal.
 - Remote mutation cannot bypass the same ownership, provenance, proposal, lifecycle, and
   authorization rules enforced locally.
+- The service refuses or degrades safely when the configured vault does not satisfy the
+  LIFEOS-1643 authoritative topology/coherence assumptions required for mutation.
 - Default service configuration does not create an unauthenticated publicly reachable vault
   endpoint; insecure exposure requires neither hidden defaults nor accidental wildcard
   binding.
@@ -151,6 +154,8 @@ uv run python scripts/validate_manual_links.py
 
 - LIFEOS-1639 defines the MCP exploration-versus-mutation surface required for a useful
   vault-less remote client.
+- LIFEOS-1643 defines the cross-device vault topology and writer/coherence contract that the
+  home node must satisfy rather than inventing sync semantics inside deployment code.
 - DD-033: SQLite/runtime-derived state remains disposable and rebuildable; persistent node
   deployment must not make it canonical.
 - DD-035: generated ownership remains canonical authorization data and must fail closed
