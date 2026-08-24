@@ -15,7 +15,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from lifeos.coherence import collect_identity_snapshot
+from lifeos.coherence import CoherenceError, collect_identity_snapshot
 from lifeos.ingestion import _proposals_core as _core
 from lifeos.ingestion._proposals_core import *  # noqa: F403
 from lifeos.ingestion.drafts import SourceSnapshot
@@ -153,6 +153,7 @@ def _bind_existing_target_identities(*, proposals_root: Path, documents: Any) ->
             collect_identity_snapshot(proposals_root.parent),
         )
     except (
+        CoherenceError,
         UnicodeDecodeError,
         json.JSONDecodeError,
         ProposalSchemaError,
