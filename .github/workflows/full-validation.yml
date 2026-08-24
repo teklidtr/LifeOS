@@ -64,7 +64,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "mypy exact cache hit: ${{ steps.mypy-cache.outputs.cache-hit }}"
+          echo "mypy exact cache hit: ${{ steps.mypy-cache.outputs.cache-hit || 'false' }}"
           if [[ -d .mypy_cache ]]; then
             echo "mypy cache size: $(du -sh .mypy_cache | cut -f1)"
           else
