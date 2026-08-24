@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 
 class ReadMarkdownMCPResult(TypedDict):
@@ -86,7 +86,7 @@ class RegistryRefreshMCPResult(TypedDict):
     modified: list[str]
     unchanged: list[str]
     deleted: list[str]
-    renamed: list[RegistryRenameMCPResult]
+    renamed: NotRequired[list[RegistryRenameMCPResult]]
     proposals_indexed: int
 
 
