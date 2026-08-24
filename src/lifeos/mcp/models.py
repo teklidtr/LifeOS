@@ -33,7 +33,7 @@ class VaultSearchHitMCPResult(TypedDict):
     matched_terms: list[str]
 
 
-class VaultSearchDiagnosticMCPResult(TypedDict):
+class VaultDiagnosticMCPResult(TypedDict):
     code: str
     severity: str
     source_path: str
@@ -44,7 +44,7 @@ class VaultSearchDiagnosticMCPResult(TypedDict):
 class VaultSearchMCPResult(TypedDict):
     query: str
     hits: list[VaultSearchHitMCPResult]
-    diagnostics: list[VaultSearchDiagnosticMCPResult]
+    diagnostics: list[VaultDiagnosticMCPResult]
 
 
 class VaultReadItemMCPResult(TypedDict):
@@ -73,6 +73,7 @@ class VaultLinksMCPResult(TypedDict):
     links: list[VaultLinkMCPResult]
     truncated: bool
     next_offset: int | None
+    diagnostics: list[VaultDiagnosticMCPResult]
 
 
 class RegistryRefreshMCPResult(TypedDict):
