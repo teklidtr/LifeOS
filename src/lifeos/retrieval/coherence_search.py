@@ -64,13 +64,18 @@ class HybridRetriever(_BaseHybridRetriever):
         if not response.results:
             return response
 
+        # Base search already computes index health against the current policy-visible vault.
+        # A stale index can still be queried for text evidence, but its build-time uniqueness
+        # proof is no longer current. Suppress stable IDs until synchronization restores a
+        # healthy identity snapshot rather than doing a second vault-wide scan per query.
+        identity_proof_current = response.index_state == "healthy"
         enriched = tuple(
             _with_stable_id(
                 item,
                 self._verified_current_stable_id(
                     request=request,
                     item=item,
-                    candidate=captured.get(item.path),
+                    candidate=captured.get(item.path) if identity_proof_current else None,
                 ),
             )
             for item in response.results
@@ -98,10 +103,10 @@ class HybridRetriever(_BaseHybridRetriever):
     ) -> str | None:
         """Verify one indexed candidate against only its returned canonical note.
 
-        Duplicate durable IDs are removed from the retrieval index's durable document-key
-        namespace by ``RetrievalIndexService``. Search therefore needs only to prove that the
-        result path still contains the same candidate ID and exact indexed bytes. It never
-        rescans unrelated Markdown and never reopens the mutable SQLite active path.
+        Build/sync-time duplicate handling proves uniqueness only while index health is current.
+        The caller therefore supplies no candidate when the index is stale. For a healthy index,
+        search still proves that the result path contains the same candidate ID and exact indexed
+        bytes without reopening the mutable SQLite active path or doing another vault-wide scan.
         """
         if candidate is None:
             return None
