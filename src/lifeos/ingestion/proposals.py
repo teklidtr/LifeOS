@@ -15,7 +15,8 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from lifeos.coherence import CoherenceError, collect_identity_snapshot
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import collect_scoped_identity_snapshot
 from lifeos.ingestion import _proposals_core as _core
 from lifeos.ingestion._proposals_core import *  # noqa: F403
 from lifeos.ingestion.drafts import SourceSnapshot
@@ -35,6 +36,8 @@ from lifeos.proposals.target_identity import (
     ProposalTargetIdentityError,
     with_target_identity_extension,
 )
+from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
 
 
 _current_source: ContextVar[SourceSnapshot | None] = ContextVar(
@@ -137,8 +140,23 @@ def build_study_learning_proposal(  # type: ignore[no-redef]
     return _with_source(_original_build_study_learning_proposal, source=source, **kwargs)
 
 
+def _replacement_target_paths(patch: Any) -> frozenset[str]:
+    return frozenset(
+        operation.target_path
+        for operation in patch.operations
+        if isinstance(getattr(operation, "base_hash", None), str)
+        or isinstance(getattr(operation, "expected_content_hash", None), str)
+    )
+
+
 def _bind_existing_target_identities(*, proposals_root: Path, documents: Any) -> Any:
-    """Bind stable IDs before a draft and its review snapshot become durable proposal state."""
+    """Bind stable IDs before a draft and its review snapshot become durable proposal state.
+
+    Identity discovery applies path policy before unrelated Markdown is opened. Only exact
+    replacement targets carried by the reviewed patch may opt into protected local scope; an
+    unrelated protected or excluded note cannot affect publication merely because it shares an
+    ID with a public target.
+    """
     try:
         proposal_text = documents.proposal_markdown.decode("utf-8")
         parsed = parse_markdown_note(Path("proposal.md"), content=proposal_text)
@@ -147,17 +165,32 @@ def _bind_existing_target_identities(*, proposals_root: Path, documents: Any) ->
         metadata = validate_metadata(dict(parsed.frontmatter))
         patch_data = json.loads(documents.patches_json.decode("utf-8"))
         patch = validate_patch_document(patch_data)
-        bound = with_target_identity_extension(
-            metadata,
-            patch,
-            collect_identity_snapshot(proposals_root.parent),
+        vault_root = proposals_root.parent
+        reviewed_paths = _replacement_target_paths(patch)
+        policy = load_retrieval_policy(vault_root)
+
+        def allow_identity_path(path: str) -> bool:
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
+            return scope_decision(
+                path,
+                scope=RetrievalScope(allow_protected=path in reviewed_paths),
+                policy=policy,
+                mode="local",
+            ).allowed
+
+        snapshot = collect_scoped_identity_snapshot(
+            vault_root,
+            allow_path=allow_identity_path,
         )
+        bound = with_target_identity_extension(metadata, patch, snapshot)
     except (
         CoherenceError,
         UnicodeDecodeError,
         json.JSONDecodeError,
         ProposalSchemaError,
         ProposalTargetIdentityError,
+        RetrievalError,
         ValueError,
     ) as exc:
         raise _core.ProposalPublicationError(
