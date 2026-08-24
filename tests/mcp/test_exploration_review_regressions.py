@@ -63,7 +63,7 @@ def test_runtime_protected_read_uses_external_disclosure_policy(tmp_path: Path) 
         runtime_dir=tmp_path / ".lifeos",
     )
 
-    with pytest.raises(ToolError, match="protected-external-deny"):
+    with pytest.raises(ToolError, match="Invalid LifeOS tool arguments"):
         server._tool_manager.get_tool("vault_read_markdown").fn(
             vault_path="journal/private/secret.md",
             allow_protected=True,
