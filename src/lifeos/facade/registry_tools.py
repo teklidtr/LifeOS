@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,11 +39,26 @@ class RegistryRefreshResult:
     renamed: tuple[tuple[str, str], ...] = ()
 
 
-def refresh_registry(*, vault_root: Path, registry: Registry) -> RegistryRefreshResult:
-    """Rebuild disposable registry facts without changing canonical vault files."""
+def refresh_registry(
+    *,
+    vault_root: Path,
+    registry: Registry,
+    identity_allow_path: Callable[[str], bool] | None = None,
+) -> RegistryRefreshResult:
+    """Rebuild disposable registry facts without changing canonical vault files.
+
+    ``identity_allow_path`` scopes only stable-ID parsing/reconciliation. File hashes and path
+    presence still refresh globally, allowing externally scoped callers to preserve complete
+    disposable file tracking without reading protected Markdown identity content.
+    """
     try:
         registry.initialize()
-        scan_result = register_scan(registry, vault_root, scan_vault(vault_root))
+        scan_result = register_scan(
+            registry,
+            vault_root,
+            scan_vault(vault_root),
+            identity_allow_path=identity_allow_path,
+        )
         register_proposals_scan(registry, vault_root=vault_root)
         with registry.connect_read_only() as connection:
             proposals_indexed = sum(count_proposals_by_status(connection).values())
