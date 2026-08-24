@@ -32,6 +32,8 @@ single deterministic black box.
   authoritative Python business rules.
 - Prefer LifeOS-native read primitives over granting agents arbitrary shell/filesystem
   access to the vault.
+- Read/discovery correctness must use portable Python/LifeOS filesystem abstractions rather
+  than depend on GNU/Linux versus BSD/macOS command-line utility behavior.
 - Reuse existing secure traversal, privacy scopes, retrieval, proposal, ownership, and
   provenance contracts rather than duplicating them in MCP-specific code.
 
@@ -48,6 +50,10 @@ single deterministic black box.
   - metadata/context inspection;
   - link/reference/backlink discovery where available from authoritative LifeOS indexes;
   - bounded multi-read/comparison workflows when they materially reduce tool-call overhead.
+- Implement filesystem-facing exploration primitives with portable Python 3.11+/LifeOS
+  abstractions such as `pathlib` and existing secure I/O helpers. Do not rely on subprocess
+  invocation of GNU/BSD `find`, `grep`, `sed`, `cat`, or platform-specific shell behavior for
+  the authoritative operation semantics.
 - Preserve iterative agent-led exploration. A client must be able to search, inspect one or
   more results, refine the search, follow references, and continue reasoning without a
   local vault copy.
@@ -87,6 +93,9 @@ single deterministic black box.
   concrete capability gaps identified by the audit.
 - All read operations enforce vault-root containment, privacy/routing policy, stable typed
   DTO boundaries, bounded outputs, and safe failure behavior.
+- Authoritative read/discovery behavior does not depend on GNU-only or BSD/macOS-only shell
+  utilities and uses portable Python/LifeOS abstractions so the same MCP contract can run on
+  supported Linux and macOS hosts, including ARM64 Linux home-node targets.
 - Canonical mutation remains unavailable through generic filesystem operations and continues
   to flow through LifeOS proposal/consequential authorization contracts.
 - Tool descriptions/instructions clearly tell the agent that exploration is encouraged and
@@ -128,7 +137,7 @@ uv run python scripts/validate_manual_links.py
 - DD-036: Python remains the sole business-rule engine; MCP adapters do not reimplement
   authorization or mutation semantics.
 - DD-087: MCP integration validation remains deterministic infrastructure testing without an
-  LLM in the test loop.
+  LLM in the loop.
 - DD-088: vault bootstrap remains first-party and does not mutate external client config.
 - Existing secure vault traversal, privacy scopes, retrieval, proposal, provenance, and MCP
   routing/safety contracts remain authoritative and should be composed rather than forked.
