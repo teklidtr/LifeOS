@@ -99,7 +99,8 @@ Pull requests targeting `master` use two validation levels:
   runs the complete pytest suite across four stateless `full-test-shard-*` runners plus the
   clean-room `docker-setup-e2e` gate. The aggregate `full-test` check succeeds only when every
   pytest shard succeeds. If material commits land after a successful checkpoint, remove and
-  re-add `full-validation` to validate the new head without creating a dummy commit.
+  re-add `full-validation` to validate the new head without creating a dummy commit. Other
+  label events do not emit the required `full-test` or `docker-setup-e2e` check names.
 - Every push to `master` and every manual `workflow_dispatch` of the full-validation workflow
   runs the complete full checkpoint automatically.
 
@@ -110,15 +111,21 @@ The separate full-path `pytest --collect-only` pass is intentionally omitted bec
 performs normal pytest collection before execution; the fast PR path keeps collect-only as its
 cheap import/collection contract.
 
-The fast and full PR workflows share the same concurrency group. A newer PR synchronization
-therefore cancels a superseded in-progress full checkpoint; a requested full checkpoint can
-also supersede an older fast run for the same PR.
+The fast and full PR workflows share the same concurrency group with asymmetric cancellation.
+A requested full checkpoint does not cancel an in-progress `fast-checks` run for the same head;
+it waits for that required feedback to finish. A later PR synchronization starts a new
+`fast-checks` run with cancellation enabled, so an obsolete in-progress full checkpoint is still
+cancelled when a newer commit makes it irrelevant.
 
 `astral-sh/setup-uv` dependency caching remains enabled. `.mypy_cache` is additionally cached
-as disposable performance state using runner/Python/dependency/configuration inputs plus a PR
-or branch scope. Cache restoration never skips mypy, and a miss or eviction changes only CI
-speed. Ruff and pytest result caches are not persisted. The clean-room Docker gate currently
-uses no persisted layer cache so its isolated semantics remain unchanged.
+as disposable performance state. Its primary key includes runner/Python/dependency/configuration
+inputs, a PR-or-branch scope, and the current commit. Each new commit can therefore restore the
+most recent compatible scoped cache and, after mypy runs, publish a fresh immutable snapshot;
+an exact rerun of the same commit can reuse the primary key directly. Restore keys deliberately
+omit the commit suffix so incremental reuse survives source edits. Cache restoration never
+skips mypy, and a miss or eviction changes only CI speed. Ruff and pytest result caches are not
+persisted. The clean-room Docker gate currently uses no persisted layer cache so its isolated
+semantics remain unchanged.
 
 `master` currently has no repository-enforced required status checks, so merge readiness is
 also governed by the PR workflow in `AGENTS.md`. If branch protection is enabled later, use
