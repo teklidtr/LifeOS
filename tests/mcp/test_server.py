@@ -772,7 +772,8 @@ def test_error_payload_does_not_leak_absolute_paths(caplog) -> None:
 
 
 def test_mcp_outputs_have_explicit_structured_schemas() -> None:
-    # Ensure they are returning TypedDicts instead of plain dicts
+    # Ensure they are returning TypedDicts instead of plain dicts. Registry renames are an
+    # additive optional extension so existing no-rename payloads keep their historical shape.
     from lifeos.mcp.models import ReadMarkdownMCPResult, RegistryRefreshMCPResult
 
     assert ReadMarkdownMCPResult.__annotations__ == {
@@ -781,13 +782,17 @@ def test_mcp_outputs_have_explicit_structured_schemas() -> None:
         "source_tags": list[str],
         "source_topics": list[str],
     }
-    assert RegistryRefreshMCPResult.__annotations__ == {
+    annotations = RegistryRefreshMCPResult.__annotations__
+    required = {
         "new": list[str],
         "modified": list[str],
         "unchanged": list[str],
         "deleted": list[str],
         "proposals_indexed": int,
     }
+    assert {key: annotations[key] for key in required} == required
+    assert set(RegistryRefreshMCPResult.__required_keys__) == set(required)
+    assert RegistryRefreshMCPResult.__optional_keys__ == frozenset({"renamed"})
 
 
 def test_mcp_apply_returns_sanitized_recovery_required_error(
