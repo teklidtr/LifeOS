@@ -1,7 +1,7 @@
 """Set-wise stable-identity reconciliation for registry scans.
 
 This module layers the LIFEOS-1643 coherence semantics over the historical file-tracking
-helpers.  It deliberately keeps the existing ``_hash_file`` seam so streaming, fault-injection,
+helpers. It deliberately keeps the existing ``_hash_file`` seam so streaming, fault-injection,
 and change-during-read behavior remain covered by the older registry tests.
 """
 
@@ -120,9 +120,9 @@ def _park_row(conn: Any, *, row_id: int, now_expr: str) -> None:
 def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]) -> _base.ScanResult:
     """Register a complete scan while reconciling stable identities as one transaction.
 
-    All identity relocations are reserved before any final path is assigned.  That makes swaps
+    All identity relocations are reserved before any final path is assigned. That makes swaps
     and longer cycles safe: each surviving stable identity keeps the same ``files.id`` and thus
-    retains every foreign-keyed provenance/source-version relationship.  A confirmed-deleted
+    retains every foreign-keyed provenance/source-version relationship. A confirmed-deleted
     path may be reused by a different identity because the historical row is moved into the
     disposable tombstone namespace instead of being rewritten into the new note.
     """
@@ -154,48 +154,47 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
 
             now_expr = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
 
-            # Resolve every durable identity against the pre-scan registry state first.
             current_targets = {
                 facts.stable_id: path
                 for path, facts in prepared.items()
                 if facts.stable_id is not None
             }
-            identity_rows: dict[str, Any] = {}
             relocations: dict[str, tuple[int, str, str | None, int]] = {}
-            for stable_id, target_path in sorted(current_targets.items()):
+            for durable_id, target_path in sorted(current_targets.items()):
                 row = conn.execute(
                     """
                     SELECT id, vault_path, stable_id, content_hash, is_deleted
                     FROM files WHERE stable_id = ?
                     """,
-                    (stable_id,),
+                    (durable_id,),
                 ).fetchone()
                 if row is None:
                     continue
-                identity_rows[stable_id] = row
                 old_path = str(row["vault_path"])
                 if old_path != target_path:
-                    relocations[stable_id] = (
+                    relocations[durable_id] = (
                         int(row["id"]),
                         old_path,
                         str(row["content_hash"]) if row["content_hash"] is not None else None,
                         int(row["is_deleted"]),
                     )
 
-            # Reserve all moving identities before assigning any destination.  This is the
-            # critical step for A<->B swaps and N-way cycles.
             for row_id, _old_path, _old_hash, _was_deleted in relocations.values():
                 _park_row(conn, row_id=row_id, now_expr=now_expr)
 
             for entry in entries:
                 path_str = entry.path.as_posix()
                 facts = prepared[path_str]
-                stable_id = facts.stable_id
+                entry_stable_id = facts.stable_id
                 content_hash = facts.content_hash
                 mtime_ns = facts.mtime_ns
                 size_bytes = facts.size_bytes
 
-                relocation = relocations.get(stable_id) if stable_id is not None else None
+                relocation = (
+                    relocations.get(entry_stable_id)
+                    if entry_stable_id is not None
+                    else None
+                )
                 if relocation is not None:
                     moving_id, old_path, previous_hash, was_deleted = relocation
                     occupant = conn.execute(
@@ -227,7 +226,7 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         (
                             path_str,
                             entry.file_type,
-                            stable_id,
+                            entry_stable_id,
                             content_hash,
                             size_bytes,
                             mtime_ns,
@@ -251,11 +250,9 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                     old_stable_id = row["stable_id"]
                     if (
                         old_stable_id is not None
-                        and stable_id != str(old_stable_id)
+                        and entry_stable_id != str(old_stable_id)
                         and _participates_in_stable_note_identity(entry)
                     ):
-                        # The previous scan already proved the old identity absent, so this is a
-                        # new note reusing a historical path rather than an in-place mutation.
                         _park_row(conn, row_id=int(row["id"]), now_expr=now_expr)
                         row = None
 
@@ -269,7 +266,7 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         """,
                         (
                             path_str,
-                            stable_id,
+                            entry_stable_id,
                             entry.file_type,
                             content_hash,
                             size_bytes,
@@ -283,12 +280,12 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                 if (
                     int(row["is_deleted"]) == 0
                     and existing_stable_id is not None
-                    and stable_id != str(existing_stable_id)
+                    and entry_stable_id != str(existing_stable_id)
                     and _participates_in_stable_note_identity(entry)
                 ):
                     raise _base.FileTrackingError(
                         f"Stable note identity changed in place at {path_str}: "
-                        f"{existing_stable_id!r} -> {stable_id!r}."
+                        f"{existing_stable_id!r} -> {entry_stable_id!r}."
                     )
 
                 db_hash = row["content_hash"]
@@ -302,7 +299,7 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         WHERE id = ?
                         """,
                         (
-                            stable_id,
+                            entry_stable_id,
                             entry.file_type,
                             content_hash,
                             size_bytes,
@@ -320,7 +317,7 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         WHERE id = ?
                         """,
                         (
-                            stable_id,
+                            entry_stable_id,
                             entry.file_type,
                             size_bytes,
                             mtime_ns,
