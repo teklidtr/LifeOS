@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
+import lifeos.coherence_scoped as coherence_scoped
 from lifeos.mcp.runtime_server import create_mcp_server
 
 
@@ -49,6 +50,41 @@ def test_mcp_note_identity_fails_closed_for_duplicate_id(tmp_path: Path) -> None
     server = _server(vault)
     with pytest.raises(ToolError, match="Invalid LifeOS tool arguments"):
         server._tool_manager.get_tool("vault_note_identity").fn(vault_path="wiki/one.md")
+
+
+def test_public_mcp_identity_does_not_read_or_leak_protected_duplicate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    public = vault / "wiki" / "public.md"
+    protected = vault / "private" / "hidden.md"
+    public.parent.mkdir(parents=True)
+    protected.parent.mkdir(parents=True)
+    public.write_text(
+        "---\nid: shared-id\ntype: concept\ntitle: Public\n---\nPublic body\n",
+        encoding="utf-8",
+    )
+    protected.write_text(
+        "---\nid: shared-id\ntype: concept\ntitle: Hidden\n---\nProtected body\n",
+        encoding="utf-8",
+    )
+
+    real_parser = coherence_scoped.parse_markdown_note
+
+    def reject_protected_read(note_path: Path, *, content: str | None = None):
+        assert "private" not in note_path.parts
+        return real_parser(note_path, content=content)
+
+    monkeypatch.setattr(coherence_scoped, "parse_markdown_note", reject_protected_read)
+    server = _server(vault)
+    result = server._tool_manager.get_tool("vault_note_identity").fn(
+        vault_path="wiki/public.md"
+    )
+
+    assert result["stable_id"] == "shared-id"
+    assert result["current_path"] == "wiki/public.md"
+    assert result["relocation_safe"] is True
 
 
 def test_mcp_note_identity_tool_is_read_only_and_strict(tmp_path: Path) -> None:
