@@ -177,6 +177,7 @@ def _coherence_findings(
         )
     ]
     if topology.runtime_location == "inside-canonical-vault":
+        runtime_exclusion = topology.required_sync_exclusions[0]
         findings.append(
             DoctorFinding(
                 "vault-coherence",
@@ -186,7 +187,10 @@ def _coherence_findings(
                     "Disposable runtime state is inside the canonical vault tree and must remain "
                     "excluded from synchronization/authoritative backup semantics."
                 ),
-                "Keep .lifeos/ excluded from synchronization; prefer node-local runtime storage when practical.",
+                (
+                    f"Keep {runtime_exclusion} excluded from synchronization; prefer node-local "
+                    "runtime storage when practical."
+                ),
             )
         )
     else:
