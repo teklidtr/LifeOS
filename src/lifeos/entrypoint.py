@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 from lifeos.bootstrap import BootstrapError, initialize_vault
 from lifeos.cli import main as cli_main
 from lifeos.config import ConfigError, load_config
+from lifeos.registry import Registry
 
 
 def _run_init(argv: Sequence[str]) -> int:
@@ -70,6 +72,73 @@ def _run_doctor(argv: Sequence[str]) -> int:
     return result.exit_code
 
 
+def _run_scan(argv: Sequence[str]) -> int:
+    """Refresh disposable registry state while preserving relocation evidence in output."""
+    from lifeos.facade.errors import ToolExecutionError
+    from lifeos.facade.registry_tools import refresh_registry
+
+    parser = argparse.ArgumentParser(
+        prog="lifeos scan",
+        description="Refresh the disposable file and proposal registry.",
+    )
+    parser.add_argument(
+        "--config",
+        default=Path("lifeos.yml"),
+        type=Path,
+        help="Path to lifeos.yml (default: lifeos.yml)",
+    )
+    parser.add_argument("--json", action="store_true", help="Output result as JSON")
+    args = parser.parse_args(argv)
+
+    try:
+        config = load_config(args.config)
+        result = refresh_registry(
+            vault_root=config.vault_root,
+            registry=Registry(config.runtime_dir / "registry.db"),
+        )
+    except ConfigError as error:
+        print(f"Configuration error: {error}", file=sys.stderr)
+        return 1
+    except ToolExecutionError as error:
+        print(f"Scan error: {error}", file=sys.stderr)
+        return 1
+
+    payload = {
+        "new": list(result.new),
+        "modified": list(result.modified),
+        "unchanged": list(result.unchanged),
+        "deleted": list(result.deleted),
+        "renamed": [
+            {"from_path": old_path, "to_path": new_path}
+            for old_path, new_path in result.renamed
+        ],
+        "proposals_indexed": result.proposals_indexed,
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0
+
+    print(
+        "Registry refreshed: "
+        f"{len(result.new)} new, "
+        f"{len(result.modified)} modified, "
+        f"{len(result.unchanged)} unchanged, "
+        f"{len(result.deleted)} deleted, "
+        f"{len(result.renamed)} renamed; "
+        f"{result.proposals_indexed} proposals indexed."
+    )
+    for label, paths in (
+        ("New", result.new),
+        ("Modified", result.modified),
+        ("Deleted", result.deleted),
+    ):
+        for path in paths:
+            print(f"{label}: {path}")
+    for old_path, new_path in result.renamed:
+        print(f"Renamed: {old_path} -> {new_path}")
+    return 0
+
+
 def _run_legacy_cli(arguments: list[str]) -> int:
     """Delegate established commands while keeping first-party setup commands discoverable."""
     try:
@@ -91,6 +160,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_init(arguments[1:])
     if arguments and arguments[0] == "doctor":
         return _run_doctor(arguments[1:])
+    if arguments and arguments[0] == "scan":
+        return _run_scan(arguments[1:])
     return _run_legacy_cli(arguments)
 
 
