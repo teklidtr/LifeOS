@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from lifeos.retrieval.contracts import RetrievalError, RetrievalPolicy
+from lifeos.vault import VaultAccessError, read_vault_text
 
 _ALLOWED = {
     "schema_version",
@@ -16,16 +17,23 @@ _ALLOWED = {
     "external_allowed_prefixes",
     "max_external_characters",
 }
+_POLICY_PATH = "system/retrieval-policy.yml"
 
 
 def load_retrieval_policy(vault_root: Path) -> RetrievalPolicy:
-    path = vault_root / "system" / "retrieval-policy.yml"
-    if not path.exists():
-        return RetrievalPolicy()
     try:
-        raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise RetrievalError("invalid_policy", f"Could not read retrieval policy: {exc}") from exc
+        source = read_vault_text(vault_root, _POLICY_PATH)
+    except VaultAccessError as exc:
+        if exc.code == "not-found":
+            return RetrievalPolicy()
+        raise RetrievalError(
+            "invalid_policy",
+            "Could not read retrieval policy safely.",
+        ) from exc
+    try:
+        raw: Any = yaml.safe_load(source.content)
+    except yaml.YAMLError as exc:
+        raise RetrievalError("invalid_policy", "Could not parse retrieval policy.") from exc
     if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
         raise RetrievalError("invalid_policy", "Retrieval policy must be a YAML mapping.")
     unknown = sorted(set(raw) - _ALLOWED)
