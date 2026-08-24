@@ -107,6 +107,21 @@ def seeded(tmp_path: Path):
     return api, item
 
 
+def _seed_experiment_history(tmp_path: Path, count: int):
+    api = ExperimentArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
+    created = [
+        api.create(
+            title=f"Experiment {index}",
+            description="",
+            category="study",
+            protocol=protocol(),
+            now=NOW + timedelta(seconds=index),
+        )
+        for index in range(count)
+    ]
+    return api, created
+
+
 def test_analysis_preserves_missingness_raw_ids_and_noncausal_limitations(tmp_path: Path) -> None:
     api, item = seeded(tmp_path)
     analysis = analyze_experiment(item, now=NOW)
@@ -154,41 +169,51 @@ def test_insufficient_analysis_and_visual_fallback(tmp_path: Path) -> None:
     assert "canonical experiment note" in visual["render_fallback"]
 
 
-def test_rebuild_handles_rename_runtime_deletion_duplicates_interrupt_and_large_history(
-    tmp_path: Path,
-) -> None:
+def test_large_history_rebuild_interrupts_and_completes(tmp_path: Path) -> None:
     runtime = tmp_path / ".lifeos"
-    api = ExperimentArtifactService(vault_root=tmp_path, runtime_dir=runtime)
-    created = []
-    for index in range(105):
-        created.append(
-            api.create(
-                title=f"Experiment {index}",
-                description="",
-                category="study",
-                protocol=protocol(),
-                now=NOW + timedelta(seconds=index),
-            )
-        )
+    _api, _created = _seed_experiment_history(tmp_path, 105)
+
     interrupted = rebuild_experiment_index(
         vault_root=tmp_path, runtime_dir=runtime, batch_size=10, interrupt_after=20
     )
     assert interrupted.state == "interrupted"
     assert Path(interrupted.checkpoint_path).exists()
+
     report = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime, batch_size=25)
-    assert report.state == "ready" and len(report.entries) == 105
+    assert report.state == "ready"
+    assert len(report.entries) == 105
+
+
+def test_runtime_deletion_marks_experiment_index_missing(tmp_path: Path) -> None:
+    runtime = tmp_path / ".lifeos"
+    _api, _created = _seed_experiment_history(tmp_path, 2)
+    report = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime)
+    assert report.state == "ready"
+
     shutil.rmtree(runtime / "experiments")
     assert load_experiment_index(runtime_dir=runtime).state == "missing-index"
-    first = created[0]
-    old = tmp_path / first.path
+
+
+def test_rebuild_tracks_renamed_experiment_artifact(tmp_path: Path) -> None:
+    runtime = tmp_path / ".lifeos"
+    _api, created = _seed_experiment_history(tmp_path, 2)
+    old = tmp_path / created[0].path
     renamed = old.with_name("renamed-experiment.md")
     old.rename(renamed)
+
     rebuilt = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime)
     assert any(entry.path.endswith("renamed-experiment.md") for entry in rebuilt.entries)
-    duplicate = old
-    duplicate.write_text(renamed.read_text())
-    duplicated = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime)
-    assert any(item["code"] == "duplicate_identity" for item in duplicated.diagnostics)
+
+
+def test_rebuild_reports_duplicate_experiment_identity(tmp_path: Path) -> None:
+    runtime = tmp_path / ".lifeos"
+    _api, created = _seed_experiment_history(tmp_path, 2)
+    source = tmp_path / created[0].path
+    duplicate = source.with_name("duplicate-experiment.md")
+    duplicate.write_text(source.read_text())
+
+    rebuilt = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime)
+    assert any(item["code"] == "duplicate_identity" for item in rebuilt.diagnostics)
 
 
 def test_lineage_and_incompatible_comparison_warning(tmp_path: Path) -> None:
