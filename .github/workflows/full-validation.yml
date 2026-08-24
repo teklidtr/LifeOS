@@ -23,7 +23,7 @@ concurrency:
 jobs:
   full_test_shard:
     if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'full-validation' }}
-    name: full-test-shard-${{ matrix.group }}
+    name: ${{ github.event_name == 'pull_request' && github.event.label.name != 'full-validation' && format('full-test-shard-{0}-not-requested', matrix.group) || format('full-test-shard-{0}', matrix.group) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -99,7 +99,7 @@ jobs:
   full_test:
     if: ${{ always() && (github.event_name != 'pull_request' || github.event.label.name == 'full-validation') }}
     needs: full_test_shard
-    name: full-test
+    name: ${{ github.event_name == 'pull_request' && github.event.label.name != 'full-validation' && 'full-test-not-requested' || 'full-test' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -112,7 +112,7 @@ jobs:
 
   docker-setup-e2e:
     if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'full-validation' }}
-    name: docker-setup-e2e
+    name: ${{ github.event_name == 'pull_request' && github.event.label.name != 'full-validation' && 'docker-setup-e2e-not-requested' || 'docker-setup-e2e' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
