@@ -89,9 +89,12 @@ Pull requests targeting `master` use two validation levels:
 
 - `fast-checks` runs on ordinary PR open, reopen, and synchronize events. It keeps the
   documentation-impact gate, manual-link validation, Ruff, mypy, compileall, pytest
-  collection, and the project contract smoke tests. A Markdown-only diff skips dependency
-  installation and Python application checks, but still runs both documentation checks with
-  the runner's standard Python.
+  collection, and the project contract smoke tests. A documentation-only diff confined to
+  allowlisted Markdown under `docs/` or the task lifecycle, plus `README.md`/`AGENTS.md`, can
+  skip dependency installation and Python application checks. Implementation-owned Markdown
+  such as `prompts/`, `packages/`, workflow files, and either endpoint of a code-to-doc rename
+  remains on the full fast-check path. Documentation checks always run with the runner's
+  standard Python.
 - A full checkpoint is requested by adding the `full-validation` label to the PR. That event
   runs the complete pytest suite across four stateless `full-test-shard-*` runners plus the
   clean-room `docker-setup-e2e` gate. The aggregate `full-test` check succeeds only when every
