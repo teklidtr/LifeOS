@@ -6,8 +6,15 @@ from pathlib import Path
 import pytest
 
 from lifeos.coherence import collect_identity_snapshot
+from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import CreateGeneratedFileV2, PatchDocumentV2, PatchHumanFile
-from lifeos.proposals.schema import ProposalMetadata, ProposalRisk, ProposalStatus
+from lifeos.proposals.schema import (
+    ProposalMetadata,
+    ProposalRisk,
+    ProposalStatus,
+    serialize_metadata,
+    validate_metadata,
+)
 from lifeos.proposals.target_identity import (
     ProposalTargetIdentityError,
     assess_proposal_target_identities,
@@ -85,6 +92,33 @@ def test_replacement_operation_retains_review_bound_stable_identity(tmp_path: Pa
     assert targets[0].stable_id == "wiki-example"
     assert targets[0].reviewed_path == "wiki/target.md"
     assert targets[0].reviewed_base_hash == _hash(content)
+
+
+def test_binding_thaws_existing_nested_extensions_before_yaml_serialization(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    (vault / "wiki").mkdir(parents=True)
+    content = _note("wiki-example")
+    (vault / "wiki" / "target.md").write_text(content, encoding="utf-8")
+    patch = PatchDocumentV2(
+        schema_version=2,
+        proposal_id=PROPOSAL_ID,
+        operations=(
+            PatchHumanFile(
+                id="op-update",
+                target_path="wiki/target.md",
+                base_hash=_hash(content),
+                unified_diff="@@ -1 +1 @@\n-old\n+new\n",
+            ),
+        ),
+    )
+    frozen = validate_metadata(serialize_metadata(_metadata()))
+
+    bound = with_target_identity_extension(frozen, patch, collect_identity_snapshot(vault))
+    serialized = serialize_proposal_markdown(bound, "# Proposal\n")
+
+    assert b"lifeos_target_identity:" in serialized
+    assert b"existing:" in serialized
+    assert b"kept: true" in serialized
 
 
 def test_create_operations_remain_path_oriented(tmp_path: Path) -> None:
