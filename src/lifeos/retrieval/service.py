@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.retrieval.chunking import chunk_markdown_file, reidentify_note
 from lifeos.retrieval.contracts import (
     CancellationToken,
@@ -62,8 +64,6 @@ class IndexHealth:
         return asdict(self)
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class IndexRecoveryPlan:
     state: IndexState
@@ -75,6 +75,7 @@ class IndexRecoveryPlan:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
 
 @dataclass(frozen=True, slots=True)
 class IndexResult:
@@ -392,7 +393,6 @@ class RetrievalIndexService:
         finally:
             index.close()
 
-
     def recovery_plan(self) -> IndexRecoveryPlan:
         health = self.health()
         if health.state == "healthy":
@@ -434,14 +434,30 @@ class RetrievalIndexService:
     def _allowed_sources(self) -> tuple[VaultMarkdownFile, ...]:
         try:
             sources = iter_vault_markdown(self.vault_root)
+            runtime_prefix = runtime_exclusion_prefix(
+                self.vault_root,
+                runtime_dir=self.runtime_dir,
+            )
         except VaultAccessError as exc:
             raise RetrievalError("vault_unavailable", str(exc)) from exc
+        except CoherenceError as exc:
+            raise RetrievalError("invalid_runtime_scope", str(exc)) from exc
         scope = RetrievalScope()
         return tuple(
-            item for item in sources
-            if scope_decision(item.relative_path, scope=scope, policy=self.policy, mode="local").allowed
+            item
+            for item in sources
+            if scope_decision(
+                item.relative_path,
+                scope=scope,
+                policy=self.policy,
+                mode="local",
+            ).allowed
             and not item.relative_path.startswith("conversations/")
             and not item.relative_path.startswith("proposals/")
+            and (
+                runtime_prefix is None
+                or not item.relative_path.startswith(runtime_prefix)
+            )
         )
 
     def _sync_progress(self, sink: ProgressSink | None, processed: int, total: int, path: str, diagnostics: Sequence[str]) -> None:
