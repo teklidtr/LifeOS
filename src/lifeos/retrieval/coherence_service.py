@@ -116,22 +116,40 @@ def _parked_path(document_id: str, prior_path: str) -> str:
 def _identity_relocations(
     index: RetrievalIndex,
     expected: dict[str, str],
-) -> tuple[tuple[str, str], ...]:
+) -> tuple[tuple[str, str, str], ...]:
     documents = index.documents()
     by_id = {
         document.document_id: document
         for document in documents
         if document.document_id.startswith("id:")
     }
-    moves: list[tuple[str, str]] = []
+    moves: list[tuple[str, str, str]] = []
     for target_path, expected_id in sorted(expected.items()):
         if not expected_id.startswith("id:"):
             continue
         current = by_id.get(expected_id)
         if current is None or current.path == target_path:
             continue
-        moves.append((expected_id, current.path))
+        moves.append((expected_id, current.path, target_path))
     return tuple(moves)
+
+
+def _relocation_reservations(
+    index: RetrievalIndex,
+    moves: tuple[tuple[str, str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    """Reserve moving IDs plus every current occupant of their destination paths."""
+    documents = index.documents()
+    by_path = {document.path: document for document in documents}
+    reservations: dict[str, str] = {
+        document_id: old_path for document_id, old_path, _target_path in moves
+    }
+    for document_id, _old_path, target_path in moves:
+        occupant = by_path.get(target_path)
+        if occupant is None or occupant.document_id == document_id:
+            continue
+        reservations.setdefault(occupant.document_id, occupant.path)
+    return tuple(sorted(reservations.items(), key=lambda item: (item[1], item[0])))
 
 
 def _stage_index_snapshot(index: RetrievalIndex, destination: Path) -> None:
@@ -151,13 +169,13 @@ def _stage_index_snapshot(index: RetrievalIndex, destination: Path) -> None:
 
 def _park_identity_relocations(
     index: RetrievalIndex,
-    moves: tuple[tuple[str, str], ...],
+    reservations: tuple[tuple[str, str], ...],
 ) -> None:
-    """Reserve durable-ID moves inside a disposable staged index."""
-    if not moves:
+    """Reserve a complete relocation destination set inside the staged index."""
+    if not reservations:
         return
     with index.transaction():
-        for document_id, old_path in moves:
+        for document_id, old_path in reservations:
             parked = _parked_path(document_id, old_path)
             index.connection.execute(
                 "UPDATE documents SET path = ? WHERE document_id = ?",
@@ -204,8 +222,9 @@ class RetrievalIndexService(_service.RetrievalIndexService):
     unique among policy-visible indexed notes. Duplicate identities use path-derived keys so the
     SQLite primary key cannot hide a canonical note. Source discovery applies runtime exclusion
     and retrieval policy to safe path metadata before Markdown content is opened. Incremental
-    stable-ID moves are reserved as a set inside a disposable SQLite staging snapshot and are
-    published atomically only after synchronization completes without parked internal paths.
+    stable-ID moves are reserved as a set inside a disposable SQLite staging snapshot, including
+    every current destination occupant, and are published atomically only after synchronization
+    completes without parked internal paths.
     """
 
     _coherence_sources: tuple[VaultMarkdownFile, ...] | None = None
@@ -282,7 +301,8 @@ class RetrievalIndexService(_service.RetrievalIndexService):
         identity_refresh: set[str] = set()
         original_active_path = self.active_path
         relocation_stage = self.root / _RELOCATION_STAGE_NAME
-        relocations: tuple[tuple[str, str], ...] = ()
+        relocations: tuple[tuple[str, str, str], ...] = ()
+        reservations: tuple[tuple[str, str], ...] = ()
         staged = False
 
         try:
@@ -295,13 +315,14 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                             identity_refresh.add(canonical_path)
                     relocations = _identity_relocations(index, expected)
                     if relocations:
+                        reservations = _relocation_reservations(index, relocations)
                         _stage_index_snapshot(index, relocation_stage)
                         staged = True
 
             if staged:
                 self.active_path = relocation_stage
                 with RetrievalIndex(self.active_path, create=False) as staged_index:
-                    _park_identity_relocations(staged_index, relocations)
+                    _park_identity_relocations(staged_index, reservations)
 
             token = _EXPECTED_DOCUMENT_IDS.set(expected)
             self._coherence_sources = sources
