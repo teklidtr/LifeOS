@@ -760,11 +760,19 @@ def create_mcp_server(
 
     def proposal_apply_tool(proposal_id: str) -> ApplyProposalMCPResult:
         def op() -> ApplyProposalMCPResult:
-            res = apply_proposal_tool(
-                vault_root=vault_root,
-                authorizer=authorizer,
-                request=ApplyProposalRequest(proposal_id=proposal_id),
-            )
+            if runtime_dir is None:
+                res = apply_proposal_tool(
+                    vault_root=vault_root,
+                    authorizer=authorizer,
+                    request=ApplyProposalRequest(proposal_id=proposal_id),
+                )
+            else:
+                res = apply_proposal_tool(
+                    vault_root=vault_root,
+                    authorizer=authorizer,
+                    request=ApplyProposalRequest(proposal_id=proposal_id),
+                    identity_runtime_dir=runtime_dir,
+                )
             activity.append(
                 tool="proposal_apply", proposal_id=res.proposal_id,
                 changed_paths=list(res.changed_paths),

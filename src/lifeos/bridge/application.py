@@ -216,7 +216,11 @@ class BridgeApplication:
         self.study_sessions = StudySessionService(
             vault_root=vault_root, runtime_dir=runtime_dir, actor_id=self.actor_id
         )
-        self.proposals = DesktopProposalService(vault_root=vault_root, actor_id=self.actor_id)
+        self.proposals = DesktopProposalService(
+            vault_root=vault_root,
+            actor_id=self.actor_id,
+            identity_runtime_dir=runtime_dir,
+        )
         self.planning_sessions = PlanningSessionService(
             vault_root=vault_root, runtime_dir=runtime_dir
         )
@@ -927,9 +931,7 @@ class BridgeApplication:
                     "redact_terms",
                 ):
                     value = data.get(key, [])
-                    if not isinstance(value, list) or not all(
-                        isinstance(item, str) for item in value
-                    ):
+                    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
                         raise ProtocolError("invalid_params", f"{key} must be a list of strings.")
                     data[key] = tuple(value)
                 for key in ("external_processing_intent", "allow_sensitive_capture"):
@@ -1293,7 +1295,8 @@ class BridgeApplication:
                     isinstance(key, str) and isinstance(value, str) for key, value in hashes.items()
                 ):
                     raise ProtocolError(
-                        "invalid_params", "expected_source_hashes must map paths to hashes."
+                        "invalid_params",
+                        "expected_source_hashes must map paths to hashes."
                     )
                 return apply_experiment_migration(
                     vault_root=self.daily.vault_root,
