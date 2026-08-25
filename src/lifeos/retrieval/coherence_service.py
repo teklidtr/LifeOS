@@ -7,19 +7,28 @@ from contextvars import ContextVar
 from dataclasses import replace
 from datetime import datetime
 
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.retrieval import service as _service
 from lifeos.retrieval.chunking import chunk_markdown_file as _base_chunk_markdown_file
 from lifeos.retrieval.chunking import reidentify_note
-from lifeos.retrieval.contracts import CancellationToken
+from lifeos.retrieval.contracts import (
+    CancellationToken,
+    RetrievalError,
+    RetrievalScope,
+    scope_decision,
+)
 from lifeos.retrieval.index import RetrievalIndex
 from lifeos.retrieval.models import ChunkedNote
-from lifeos.vault import VaultMarkdownFile
+from lifeos.scanner import ScannerError, scan_vault
+from lifeos.vault import VaultAccessError, VaultMarkdownFile, read_vault_markdown
 
 _EXPECTED_DOCUMENT_IDS: ContextVar[dict[str, str] | None] = ContextVar(
     "lifeos_expected_retrieval_document_ids",
     default=None,
 )
+_RELOCATION_PARK_PREFIX = ".lifeos/retrieval-relocations/"
 
 
 def _path_document_id(path: str) -> str:
@@ -81,14 +90,76 @@ def _coherent_chunk_markdown_file(
     return note
 
 
+def _canonical_path_from_parked(path: str) -> str:
+    if not path.startswith(_RELOCATION_PARK_PREFIX):
+        return path
+    remainder = path[len(_RELOCATION_PARK_PREFIX) :]
+    _reservation, separator, canonical_path = remainder.partition("/")
+    return canonical_path if separator and canonical_path else path
+
+
+def _parked_path(document_id: str, prior_path: str) -> str:
+    canonical_path = _canonical_path_from_parked(prior_path)
+    reservation = hashlib.sha256(document_id.encode("utf-8")).hexdigest()[:16]
+    return f"{_RELOCATION_PARK_PREFIX}{reservation}/{canonical_path}"
+
+
+def _park_identity_relocations(index: RetrievalIndex, expected: dict[str, str]) -> bool:
+    """Reserve all durable-ID moves before assigning any final path.
+
+    The base incremental synchronizer handles one rename at a time. Parking every moving stable
+    identity first removes path-uniqueness cycles such as A<->B while keeping the derived index
+    recoverable if synchronization is interrupted. Synthetic paths encode the last canonical
+    address so public rename reporting can restore it after the base sync completes.
+    """
+    documents = index.documents()
+    by_id = {
+        document.document_id: document
+        for document in documents
+        if document.document_id.startswith("id:")
+    }
+    moves: list[tuple[str, str]] = []
+    for target_path, expected_id in sorted(expected.items()):
+        if not expected_id.startswith("id:"):
+            continue
+        current = by_id.get(expected_id)
+        if current is None or current.path == target_path:
+            continue
+        moves.append((expected_id, current.path))
+    if not moves:
+        return False
+
+    with index.transaction():
+        for document_id, old_path in moves:
+            parked = _parked_path(document_id, old_path)
+            index.connection.execute(
+                "UPDATE documents SET path = ? WHERE document_id = ?",
+                (parked, document_id),
+            )
+            index.connection.execute(
+                "UPDATE chunks SET path = ? WHERE document_id = ?",
+                (parked, document_id),
+            )
+    return True
+
+
+def _restore_public_paths(result: _service.IndexResult) -> _service.IndexResult:
+    renamed = tuple(
+        (_canonical_path_from_parked(old_path), new_path)
+        for old_path, new_path in result.renamed
+    )
+    deleted = tuple(_canonical_path_from_parked(path) for path in result.deleted)
+    return replace(result, renamed=renamed, deleted=deleted)
+
+
 class RetrievalIndexService(_service.RetrievalIndexService):
-    """Base retrieval service plus deterministic duplicate-ID handling.
+    """Base retrieval service plus deterministic stable-identity coherence.
 
     A normalized durable ``id:<stable-id>`` document key is used only while that identity is
-    unique among policy-visible indexed notes. If the identity is duplicated, every colliding
-    note gets a path-derived document key so the SQLite primary key cannot silently hide one of
-    them. The expected key map is applied during rebuild and reconciled during incremental sync,
-    including when canonical content bytes did not change.
+    unique among policy-visible indexed notes. Duplicate identities use path-derived keys so the
+    SQLite primary key cannot hide a canonical note. Source discovery applies runtime exclusion
+    and retrieval policy to safe path metadata before Markdown content is opened. Incremental
+    stable-ID moves are reserved as a set before the base synchronizer assigns final paths.
     """
 
     _coherence_sources: tuple[VaultMarkdownFile, ...] | None = None
@@ -96,7 +167,37 @@ class RetrievalIndexService(_service.RetrievalIndexService):
     def _allowed_sources(self) -> tuple[VaultMarkdownFile, ...]:
         if self._coherence_sources is not None:
             return self._coherence_sources
-        return super()._allowed_sources()
+        try:
+            runtime_prefix = runtime_exclusion_prefix(
+                self.vault_root,
+                runtime_dir=self.runtime_dir,
+            )
+            entries = scan_vault(self.vault_root)
+        except (CoherenceError, ScannerError) as exc:
+            raise RetrievalError("source_unavailable", str(exc)) from exc
+
+        sources: list[VaultMarkdownFile] = []
+        for entry in entries:
+            if entry.file_type != ".md":
+                continue
+            path = entry.path.as_posix()
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                continue
+            if runtime_prefix is not None and path.startswith(runtime_prefix):
+                continue
+            decision = scope_decision(
+                path,
+                scope=RetrievalScope(),
+                policy=self.policy,
+                mode="local",
+            )
+            if not decision.allowed:
+                continue
+            try:
+                sources.append(read_vault_markdown(self.vault_root, path))
+            except VaultAccessError as exc:
+                raise RetrievalError("source_unavailable", str(exc)) from exc
+        return tuple(sources)
 
     def rebuild(
         self,
@@ -107,7 +208,7 @@ class RetrievalIndexService(_service.RetrievalIndexService):
         resume: bool = True,
         stop_after: int | None = None,
     ) -> _service.IndexResult:
-        sources = super()._allowed_sources()
+        sources = self._allowed_sources()
         _ambiguous, expected = _identity_plan(sources)
         token = _EXPECTED_DOCUMENT_IDS.set(expected)
         self._coherence_sources = sources
@@ -129,16 +230,19 @@ class RetrievalIndexService(_service.RetrievalIndexService):
         cancellation: CancellationToken | None = None,
         progress: _service.ProgressSink | None = None,
     ) -> _service.IndexResult:
-        sources = super()._allowed_sources()
+        sources = self._allowed_sources()
         _ambiguous, expected = _identity_plan(sources)
         source_by_path = {source.relative_path: source for source in sources}
         identity_refresh: set[str] = set()
+        parked = False
         if self.active_path.exists():
             with RetrievalIndex(self.active_path, create=False) as index:
                 for document in index.documents():
-                    expected_id = expected.get(document.path)
+                    canonical_path = _canonical_path_from_parked(document.path)
+                    expected_id = expected.get(canonical_path)
                     if expected_id is not None and document.document_id != expected_id:
-                        identity_refresh.add(document.path)
+                        identity_refresh.add(canonical_path)
+                parked = _park_identity_relocations(index, expected)
 
         token = _EXPECTED_DOCUMENT_IDS.set(expected)
         self._coherence_sources = sources
@@ -147,6 +251,8 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                 cancellation=cancellation,
                 progress=progress,
             )
+            if parked:
+                result = _restore_public_paths(result)
             if result.status != "complete" or not self.active_path.exists():
                 return result
 
