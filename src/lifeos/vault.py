@@ -38,6 +38,11 @@ class VaultMarkdownFile:
     content_bytes: bytes
 
 
+def is_markdown_path(relative_path: str) -> bool:
+    """Return whether a vault path uses the scanner-supported Markdown extension contract."""
+    return isinstance(relative_path, str) and relative_path.casefold().endswith(".md")
+
+
 def _safe_relative_path(relative_path: str) -> tuple[str, ...]:
     if type(relative_path) is not str or not relative_path:
         raise VaultAccessError("invalid-path", "", "Vault path must be a non-empty string")
@@ -187,7 +192,7 @@ def read_vault_text(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
 
 def read_vault_markdown(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
     """Read one Markdown file without following any path-component symlink."""
-    if not relative_path.endswith(".md"):
+    if not is_markdown_path(relative_path):
         raise VaultAccessError("invalid-extension", relative_path, "Vault file must have a .md extension")
     return read_vault_text(vault_root, relative_path)
 
@@ -241,7 +246,10 @@ def _walk_directory(
             finally:
                 os.close(child_fd)
             continue
-        if stat.S_ISREG(entry_stat.st_mode) and any(name.endswith(suffix) for suffix in suffixes):
+        folded_name = name.casefold()
+        if stat.S_ISREG(entry_stat.st_mode) and any(
+            folded_name.endswith(suffix.casefold()) for suffix in suffixes
+        ):
             yield _read_file_at(directory_fd, name, relative, vault_root)
 
 
