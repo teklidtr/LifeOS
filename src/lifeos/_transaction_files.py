@@ -40,6 +40,9 @@ class TargetIdentity:
     content_hash: str
 
 
+DirectoryBinding = tuple[tuple[int, int, str, int, int], ...]
+
+
 @dataclass(frozen=True)
 class StagingFile:
     name: str
@@ -47,6 +50,7 @@ class StagingFile:
     candidate_hash: str
     size: int
     intended_mode: int
+    parent_binding: DirectoryBinding
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,73 @@ class BackupFile:
     parent: ParentDescriptor
     original_identity: TargetIdentity
     sync_result: DirectorySyncResult
+
+
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
+
+
+def _directory_entry_name(parent_fd: int, child_stat: os.stat_result) -> str:
+    try:
+        with os.scandir(parent_fd) as entries:
+            for entry in entries:
+                try:
+                    observed = os.stat(entry.name, dir_fd=parent_fd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if (observed.st_dev, observed.st_ino) == (
+                    child_stat.st_dev,
+                    child_stat.st_ino,
+                ):
+                    return entry.name
+    except OSError as error:
+        raise TransactionError("Failed to inspect canonical parent binding") from error
+    raise TransactionError("Canonical parent directory is detached from its live path")
+
+
+def capture_directory_binding(fd: int) -> DirectoryBinding:
+    """Capture the live ancestry of an opened directory descriptor."""
+    current_fd = os.dup(fd)
+    binding: list[tuple[int, int, str, int, int]] = []
+    try:
+        while True:
+            child_stat = os.fstat(current_fd)
+            try:
+                parent_fd = os.open("..", _DIRECTORY_FLAGS, dir_fd=current_fd)
+            except OSError as error:
+                raise TransactionError("Failed to inspect canonical parent binding") from error
+            parent_stat = os.fstat(parent_fd)
+            if (parent_stat.st_dev, parent_stat.st_ino) == (
+                child_stat.st_dev,
+                child_stat.st_ino,
+            ):
+                os.close(parent_fd)
+                break
+            name = _directory_entry_name(parent_fd, child_stat)
+            binding.append(
+                (
+                    parent_stat.st_dev,
+                    parent_stat.st_ino,
+                    name,
+                    child_stat.st_dev,
+                    child_stat.st_ino,
+                )
+            )
+            os.close(current_fd)
+            current_fd = parent_fd
+        return tuple(binding)
+    finally:
+        os.close(current_fd)
+
+
+def require_directory_binding(fd: int, expected: DirectoryBinding) -> None:
+    """Fail closed when an opened canonical parent no longer has its reviewed ancestry."""
+    if capture_directory_binding(fd) != expected:
+        raise TransactionError("Canonical parent directory moved before mutation")
 
 
 def _hash_fd(fd: int) -> str:
@@ -131,11 +202,13 @@ def fsync_directory(fd: int) -> DirectorySyncResult:
 def create_staging_file(
     target_name: str, content: bytes, parent: ParentDescriptor, intended_mode: int
 ) -> StagingFile:
+    parent_binding = capture_directory_binding(parent.fd)
     random_hex = secrets.token_hex(8)
     staging_name = f".{target_name}.{random_hex}.staged"
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
     try:
+        require_directory_binding(parent.fd, parent_binding)
         fd = os.open(staging_name, flags, 0o600, dir_fd=parent.fd)
     except OSError as e:
         raise TransactionError(f"Failed to create staging file {staging_name}: {e}") from e
@@ -182,6 +255,7 @@ def create_staging_file(
                 f"Staging file hash verification failed. Unlink failed: {unlink_e}"
             )
         raise TransactionError("Staging file hash verification failed")
+    require_directory_binding(parent.fd, parent_binding)
 
     return StagingFile(
         name=staging_name,
@@ -189,6 +263,7 @@ def create_staging_file(
         candidate_hash=candidate_hash,
         size=len(content),
         intended_mode=intended_mode,
+        parent_binding=parent_binding,
     )
 
 
@@ -240,6 +315,7 @@ def create_hardlink_backup(
 
 
 def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncResult:
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
     try:
         os.stat(target_name, dir_fd=staging.parent.fd, follow_symlinks=False)
         raise TransactionError("Target already exists during creation publication")
@@ -251,6 +327,7 @@ def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncRes
     current_staging_hash = _hash_file_secure(staging.name, staging.parent.fd)
     if current_staging_hash != staging.candidate_hash:
         raise TransactionError("Staging hash mutated before publication")
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
         os.link(
@@ -274,6 +351,7 @@ def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncRes
 def publish_replacement(
     target_name: str, staging: StagingFile, original_identity: TargetIdentity
 ) -> DirectorySyncResult:
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
     current_target = get_target_identity(target_name, staging.parent)
     if current_target is None:
         raise TransactionError("Target identity mutated (absent) before replacement")
@@ -289,6 +367,7 @@ def publish_replacement(
     st = os.stat(staging.name, dir_fd=staging.parent.fd, follow_symlinks=False)
     if stat.S_IMODE(st.st_mode) != stat.S_IMODE(staging.intended_mode):
         raise TransactionError("Staging mode mutated before publication")
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
         os.replace(
@@ -301,6 +380,7 @@ def publish_replacement(
 
 
 def rollback_creation(target_name: str, staging: StagingFile) -> DirectorySyncResult:
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
     try:
         os.stat(target_name, dir_fd=staging.parent.fd, follow_symlinks=False)
     except FileNotFoundError:
@@ -311,6 +391,7 @@ def rollback_creation(target_name: str, staging: StagingFile) -> DirectorySyncRe
     current_hash = _hash_file_secure(target_name, staging.parent.fd)
     if current_hash != staging.candidate_hash:
         raise TransactionError("Canonical file mutated externally, rollback refused")
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
         os.unlink(target_name, dir_fd=staging.parent.fd)
@@ -323,6 +404,7 @@ def rollback_creation(target_name: str, staging: StagingFile) -> DirectorySyncRe
 def rollback_replacement(
     target_name: str, staging: StagingFile, backup: BackupFile
 ) -> DirectorySyncResult:
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
     try:
         os.stat(target_name, dir_fd=staging.parent.fd, follow_symlinks=False)
     except OSError as e:
@@ -342,7 +424,8 @@ def rollback_replacement(
 
     bk_hash = _hash_file_secure(backup.name, backup.parent.fd)
     if bk_hash != backup.original_identity.content_hash:
-        raise TransactionError("Backup content hash mutated")
+        raise TransactionError("Backup identity mutated")
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
         os.replace(
