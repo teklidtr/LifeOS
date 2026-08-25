@@ -1062,6 +1062,22 @@ def apply_proposal(
         )
 
     runtime_dir = identity_runtime_dir or (vault_root / ".lifeos")
+    try:
+        resolved_runtime = runtime_dir.resolve(strict=False)
+        resolved_vault = vault_root.resolve(strict=False)
+    except (OSError, RuntimeError) as error:
+        raise ApplicationError(
+            "Could not validate runtime directory boundary",
+            outcome,
+            code=ApplicationErrorCode.VALIDATION_ERROR,
+        ) from error
+    if resolved_runtime == resolved_vault:
+        raise ApplicationError(
+            "Runtime directory must not be the canonical vault root",
+            outcome,
+            code=ApplicationErrorCode.VALIDATION_ERROR,
+        )
+
     recovery_root = runtime_dir / "recovery"
     try:
         with acquire_recovery_lock(runtime_dir=runtime_dir):
