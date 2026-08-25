@@ -22,7 +22,7 @@ PathPredicate = Callable[[str], bool]
 _IDENTITY_IGNORED_ROOTS = frozenset({"proposals"})
 
 
-def _runtime_exclusion_prefix(
+def runtime_exclusion_prefix(
     vault_root: Path,
     *,
     runtime_dir: Path | None,
@@ -57,6 +57,11 @@ def _runtime_exclusion_prefix(
     return relative.rstrip("/") + "/"
 
 
+# Compatibility alias for tests or internal callers that used the helper before it became the
+# shared runtime-scope primitive for coherence-aware traversals.
+_runtime_exclusion_prefix = runtime_exclusion_prefix
+
+
 def collect_scoped_identity_snapshot(
     vault_root: Path,
     *,
@@ -72,7 +77,7 @@ def collect_scoped_identity_snapshot(
     descriptor-based vault reader, which rejects symlink traversal and returns one byte snapshot
     used for both durable identity and content hashing.
     """
-    runtime_prefix = _runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
+    runtime_prefix = runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
     try:
         entries = scan_vault(vault_root)
     except ScannerError as exc:
