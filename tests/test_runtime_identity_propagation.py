@@ -8,6 +8,7 @@ from lifeos.desktop.proposals import DesktopProposalService
 from lifeos.facade.authorization import ConsequentialAction
 from lifeos.facade.consequential_tools import ApplyProposalRequest
 from lifeos.mcp.runtime_server import create_mcp_server
+from lifeos.proposals import application as proposal_application
 
 
 def test_mcp_apply_threads_custom_runtime_into_identity_preflight(tmp_path: Path) -> None:
@@ -91,3 +92,47 @@ def test_bridge_threads_runtime_into_desktop_proposals(tmp_path: Path) -> None:
     )
 
     assert application.proposals.identity_runtime_dir == runtime_dir
+
+
+def test_apply_uses_custom_runtime_for_lock_recovery_and_transaction_state(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    runtime_dir = tmp_path / "node-runtime"
+    proposal = MagicMock()
+    proposal.metadata.id = "prop-runtime"
+    proposal.metadata.status = "approved"
+    proposal.proposal_source_hash = "sha256:" + "0" * 64
+    proposal.patch_document.operations = ()
+    expected = MagicMock()
+    recovery_lock = MagicMock()
+
+    with (
+        patch.object(
+            proposal_application,
+            "acquire_recovery_lock",
+            return_value=recovery_lock,
+        ) as acquire_lock,
+        patch.object(
+            proposal_application,
+            "_recover_interrupted_applications_locked",
+        ) as recover,
+        patch.object(
+            proposal_application,
+            "_apply_proposal_locked",
+            return_value=expected,
+        ) as apply_locked,
+    ):
+        result = proposal_application.apply_proposal(
+            proposal,
+            vault_root=vault,
+            applied_by="desktop-user",
+            applied_at="2026-08-25T10:00:00Z",
+            identity_runtime_dir=runtime_dir,
+        )
+
+    assert result is expected
+    acquire_lock.assert_called_once_with(runtime_dir=runtime_dir)
+    recover.assert_called_once_with(vault_root=vault, runtime_dir=runtime_dir)
+    assert apply_locked.call_args.kwargs["runtime_dir"] == runtime_dir
+    assert apply_locked.call_args.kwargs["recovery_root"] == runtime_dir / "recovery"
