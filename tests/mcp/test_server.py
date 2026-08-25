@@ -414,6 +414,7 @@ def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock, tmp_pa
                 ),
             ),
         ),
+        runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
         "proposal_id": "prop1",
@@ -477,6 +478,7 @@ def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock, tmp
                 ),
             ),
         ),
+        runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
         "proposal_id": "prop-study", "proposal_path": "proposals/prop-study",
@@ -581,6 +583,7 @@ def test_update_wiki_section_proposal_delegates_to_facade(mock_facade, tmp_path:
             heading="Selected",
             body="Replacement",
         ),
+        runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
         "proposal_id": "prop1",
@@ -629,6 +632,7 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path)
             update_heading="Equipment notes",
             update_body="See [[detail]].",
         ),
+        runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
         "proposal_id": "prop1",
