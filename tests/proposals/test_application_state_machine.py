@@ -1,6 +1,7 @@
 import ast
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -130,17 +131,10 @@ def test_application_transaction_uses_extracted_state_machine_steps() -> None:
     assert function.end_lineno - function.lineno + 1 < 700
 
 
-def test_recovery_phase_transitions_are_sequential_and_byte_compatible(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_recovery_phase_transitions_are_sequential_and_byte_compatible() -> None:
     written: list[RecoveryJournal] = []
-
-    def capture_write(*, recovery_root: Path, journal: RecoveryJournal) -> None:
-        assert recovery_root == tmp_path
-        written.append(journal)
-
-    monkeypatch.setattr(application_module, "write_recovery_journal", capture_write)
+    store = MagicMock()
+    store.write_journal.side_effect = written.append
 
     journal = _journal()
     sequence = (
@@ -154,7 +148,7 @@ def test_recovery_phase_transitions_are_sequential_and_byte_compatible(
         result = application_module._advance_recovery_phase(
             journal=journal,
             next_phase=phase,
-            recovery_root=tmp_path,
+            recovery_store=store,
         )
         assert result.phase is phase
         assert result.journal == expected
@@ -164,26 +158,17 @@ def test_recovery_phase_transitions_are_sequential_and_byte_compatible(
     assert tuple(item.phase for item in written) == sequence
 
 
-def test_illegal_recovery_phase_transition_is_rejected_before_write(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    wrote = False
-
-    def capture_write(*, recovery_root: Path, journal: RecoveryJournal) -> None:
-        nonlocal wrote
-        wrote = True
-
-    monkeypatch.setattr(application_module, "write_recovery_journal", capture_write)
+def test_illegal_recovery_phase_transition_is_rejected_before_write() -> None:
+    store = MagicMock()
 
     with pytest.raises(RecoveryCorruptStateError, match="Illegal recovery phase transition"):
         application_module._advance_recovery_phase(
             journal=_journal(),
             next_phase=RecoveryPhase.COMPLETE,
-            recovery_root=tmp_path,
+            recovery_store=store,
         )
 
-    assert not wrote
+    store.write_journal.assert_not_called()
 
 
 @pytest.mark.parametrize("phase", tuple(RecoveryPhase))
