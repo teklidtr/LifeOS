@@ -47,7 +47,7 @@ def test_scoped_registry_rejects_symlink_replacement_after_scan(tmp_path: Path) 
     except OSError as exc:
         pytest.skip(f"symlink creation is unavailable on this platform: {exc}")
 
-    with pytest.raises(FileTrackingError, match="safely open scoped registry file"):
+    with pytest.raises(FileTrackingError, match="safely hash scoped registry file"):
         register_scan(
             registry,
             vault,
