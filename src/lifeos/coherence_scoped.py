@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -28,7 +29,12 @@ def runtime_exclusion_prefix(
     *,
     runtime_dir: Path | None,
 ) -> str | None:
-    """Return the configured in-vault runtime prefix without opening runtime content."""
+    """Return the configured in-vault runtime prefix without opening runtime content.
+
+    The lexical in-vault prefix is authoritative for exclusion even when the current runtime
+    entry is a symlink resolving elsewhere. Filesystem consumers must validate runtime traversal
+    separately; policy must not forget the configured vault path merely because topology changes.
+    """
     root = vault_root.resolve(strict=False)
     candidate = runtime_dir
     if candidate is None:
@@ -42,6 +48,19 @@ def runtime_exclusion_prefix(
             candidate = root / ".lifeos"
     elif not candidate.is_absolute():
         candidate = root / candidate
+
+    lexical_candidate = Path(os.path.abspath(candidate))
+    try:
+        lexical_relative = lexical_candidate.relative_to(root).as_posix()
+    except ValueError:
+        lexical_relative = None
+
+    if lexical_relative in {"", "."}:
+        raise CoherenceError(
+            "Runtime directory overlaps the canonical vault root; identity traversal is unsafe"
+        )
+    if lexical_relative is not None:
+        return lexical_relative.rstrip("/") + "/"
 
     try:
         resolved = candidate.resolve(strict=False)
