@@ -49,11 +49,13 @@ _HELD_RUNTIME_IDS: set[tuple[int, int]] = set()
 
 @dataclass(frozen=True, slots=True)
 class PinnedRecoveryStore:
-    """Recovery namespace anchored to open runtime/recovery descriptors."""
+    """Recovery namespace anchored to one runtime and one canonical-vault authority."""
 
     runtime_path: Path
     runtime_fd: int
     recovery_fd: int
+    authority_path: Path
+    authority_fd: int
 
     @property
     def recovery_root(self) -> Path:
@@ -62,30 +64,37 @@ class PinnedRecoveryStore:
 
     def require_current_runtime_path(self) -> None:
         """Fail if the configured runtime path no longer names the pinned directory."""
-        current_fd: int | None = None
+        _require_current_directory_path(
+            self.runtime_path,
+            self.runtime_fd,
+            "Configured runtime path no longer identifies the pinned runtime",
+        )
+
+    def require_current_authority_path(self) -> None:
+        """Fail if the canonical vault path no longer names the locked vault directory."""
+        _require_current_directory_path(
+            self.authority_path,
+            self.authority_fd,
+            "Canonical vault path no longer identifies the locked mutation authority",
+        )
+
+    def open_authority_root(self) -> int:
+        """Duplicate the locked canonical-vault descriptor after path identity revalidation."""
+        self.require_current_authority_path()
         try:
-            current_fd = _open_runtime_chain(self.runtime_path, create_missing=False)
-            pinned = os.fstat(self.runtime_fd)
-            current = os.fstat(current_fd)
-        except (OSError, RecoveryLockUnavailableError) as exc:
-            raise RecoveryUnavailableError(
-                "Configured runtime path no longer identifies the pinned runtime"
-            ) from exc
-        finally:
-            if current_fd is not None:
-                os.close(current_fd)
-        if (pinned.st_dev, pinned.st_ino) != (current.st_dev, current.st_ino):
-            raise RecoveryUnavailableError(
-                "Configured runtime path no longer identifies the pinned runtime"
-            )
+            return os.dup(self.authority_fd)
+        except OSError as exc:
+            raise RecoveryUnavailableError("Failed to duplicate canonical vault authority") from exc
 
     def open_transaction(self, transaction_id: RecoveryTransactionId) -> int:
         self.require_current_runtime_path()
+        self.require_current_authority_path()
         validate_recovery_transaction_id(transaction_id)
         return _open_dir_at(self.recovery_fd, str(transaction_id), "recovery transaction")
 
     def discover(self) -> RecoveryDiscoveryResult:
         self.require_current_runtime_path()
+        self.require_current_authority_path()
         try:
             names = sorted(os.listdir(self.recovery_fd))
         except OSError as exc:
@@ -144,6 +153,7 @@ class PinnedRecoveryStore:
 
     def initialize_transaction(self, journal: RecoveryJournal) -> Path:
         self.require_current_runtime_path()
+        self.require_current_authority_path()
         validate_recovery_transaction_id(journal.transaction_id)
         if journal.phase is not RecoveryPhase.PREPARED:
             raise RecoveryValidationError("Initial journal must be prepared")
@@ -206,6 +216,7 @@ class PinnedRecoveryStore:
 
     def _remove(self, transaction_id: RecoveryTransactionId) -> None:
         self.require_current_runtime_path()
+        self.require_current_authority_path()
         _remove_tree_at(self.recovery_fd, str(transaction_id))
         try:
             os.fsync(self.recovery_fd)
@@ -262,7 +273,13 @@ def acquire_pinned_recovery_store(
             raise RecoveryLockUnavailableError("Failed to acquire recovery lock") from exc
 
         recovery_fd = _open_or_create_dir_at(runtime_fd, "recovery")
-        yield PinnedRecoveryStore(runtime_path, runtime_fd, recovery_fd)
+        yield PinnedRecoveryStore(
+            runtime_path=runtime_path,
+            runtime_fd=runtime_fd,
+            recovery_fd=recovery_fd,
+            authority_path=authority_path,
+            authority_fd=authority_fd,
+        )
     finally:
         if runtime_id is not None:
             with _LOCKS_GUARD:
@@ -291,6 +308,21 @@ def acquire_pinned_recovery_store(
                 os.close(authority_fd)
             except OSError:
                 pass
+
+
+def _require_current_directory_path(path: Path, pinned_fd: int, message: str) -> None:
+    current_fd: int | None = None
+    try:
+        current_fd = _open_runtime_chain(path, create_missing=False)
+        pinned = os.fstat(pinned_fd)
+        current = os.fstat(current_fd)
+    except (OSError, RecoveryLockUnavailableError) as exc:
+        raise RecoveryUnavailableError(message) from exc
+    finally:
+        if current_fd is not None:
+            os.close(current_fd)
+    if (pinned.st_dev, pinned.st_ino) != (current.st_dev, current.st_ino):
+        raise RecoveryUnavailableError(message)
 
 
 def _open_runtime_chain(path: Path, *, create_missing: bool = True) -> int:
