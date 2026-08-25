@@ -115,7 +115,7 @@ def _recover_interrupted_applications_locked(
     runtime_dir: Path | None = None,
     recovery_store: PinnedRecoveryStore | None = None,
 ) -> RecoveryRunResult:
-    """Recover all transactions through one descriptor-pinned runtime authority."""
+    """Recover all transactions through one descriptor-pinned vault/runtime authority."""
     if recovery_store is None:
         resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
         if runtime_overlaps_reserved_canonical(vault_root, resolved_runtime_dir):
@@ -132,24 +132,32 @@ def _recover_interrupted_applications_locked(
                 recovery_store=owned_store,
             )
 
-    discovery = recovery_store.discover()
-    if discovery.findings:
-        raise RecoveryCorruptStateError("Recovery state contains unresolved findings")
+    recovery_store.require_current_authority_path()
+    root_fd = recovery_store.open_authority_root()
+    try:
+        discovery = recovery_store.discover()
+        if discovery.findings:
+            raise RecoveryCorruptStateError("Recovery state contains unresolved findings")
 
-    results: list[RecoveryTransactionResult] = []
-    for journal in discovery.journals:
-        results.append(
-            _recover_transaction(
-                vault_root=vault_root,
-                recovery_store=recovery_store,
-                journal=journal,
+        results: list[RecoveryTransactionResult] = []
+        for journal in discovery.journals:
+            recovery_store.require_current_authority_path()
+            results.append(
+                _recover_transaction(
+                    root_fd=root_fd,
+                    vault_root=vault_root,
+                    recovery_store=recovery_store,
+                    journal=journal,
+                )
             )
-        )
-    return RecoveryRunResult(transactions=tuple(results))
+        return RecoveryRunResult(transactions=tuple(results))
+    finally:
+        os.close(root_fd)
 
 
 def _recover_transaction(
     *,
+    root_fd: int,
     vault_root: Path,
     recovery_store: PinnedRecoveryStore,
     journal: RecoveryJournal,
@@ -157,9 +165,6 @@ def _recover_transaction(
     transaction_dir = recovery_store.recovery_root / str(journal.transaction_id)
 
     if journal.phase is RecoveryPhase.COMPLETE:
-        # COMPLETE is a terminal commit record, not an unresolved recovery
-        # phase. Canonical files may legitimately change after the application
-        # commits and before this retained journal is cleaned by the next run.
         recovery_store.remove_completed(journal.transaction_id)
         return RecoveryTransactionResult(
             transaction_id=str(journal.transaction_id),
@@ -169,7 +174,7 @@ def _recover_transaction(
         )
 
     if journal.phase is RecoveryPhase.PROPOSAL_COMMITTED:
-        _verify_all_staged(vault_root=vault_root, journal=journal)
+        _verify_all_staged(root_fd=root_fd, journal=journal)
         _complete_transaction(recovery_store=recovery_store, journal=journal)
         return RecoveryTransactionResult(
             transaction_id=str(journal.transaction_id),
@@ -179,7 +184,7 @@ def _recover_transaction(
         )
 
     proposal_state = _classify_path(
-        vault_root=vault_root,
+        root_fd=root_fd,
         target_path=f"proposals/{journal.proposal_id}/proposal.md",
         expectation=_expectation(journal.proposal_state),
     )
@@ -190,7 +195,7 @@ def _recover_transaction(
         journal.phase is RecoveryPhase.OWNERSHIP_INSTALLED
         and proposal_state is _CanonicalState.STAGED
     ):
-        _verify_all_staged(vault_root=vault_root, journal=journal)
+        _verify_all_staged(root_fd=root_fd, journal=journal)
         _complete_transaction(recovery_store=recovery_store, journal=journal)
         return RecoveryTransactionResult(
             transaction_id=str(journal.transaction_id),
@@ -205,22 +210,25 @@ def _recover_transaction(
     transaction_fd = recovery_store.open_transaction(journal.transaction_id)
     try:
         for operation in reversed(journal.operations):
+            recovery_store.require_current_authority_path()
             _rollback_operation(
-                vault_root=vault_root,
+                root_fd=root_fd,
                 transaction_dir=transaction_dir,
                 transaction_fd=transaction_fd,
                 operation=operation,
             )
 
+        recovery_store.require_current_authority_path()
         _rollback_state_file(
-            vault_root=vault_root,
+            root_fd=root_fd,
             transaction_dir=transaction_dir,
             transaction_fd=transaction_fd,
             target_path="system/generated-ownership.json",
             state=journal.ownership_state,
         )
+        recovery_store.require_current_authority_path()
         _rollback_state_file(
-            vault_root=vault_root,
+            root_fd=root_fd,
             transaction_dir=transaction_dir,
             transaction_fd=transaction_fd,
             target_path=f"proposals/{journal.proposal_id}/proposal.md",
@@ -229,7 +237,8 @@ def _recover_transaction(
     finally:
         os.close(transaction_fd)
 
-    _verify_all_pre(vault_root=vault_root, journal=journal)
+    recovery_store.require_current_authority_path()
+    _verify_all_pre(root_fd=root_fd, journal=journal)
     recovery_store.remove_rolled_back(journal.transaction_id)
     return RecoveryTransactionResult(
         transaction_id=str(journal.transaction_id),
@@ -274,9 +283,9 @@ def _matches(identity: TargetIdentity, *, expected_hash: str, expected_mode: int
 
 
 def _classify_path(
-    *, vault_root: Path, target_path: str, expectation: _FileExpectation
+    *, root_fd: int, target_path: str, expectation: _FileExpectation
 ) -> _CanonicalState:
-    parent, target_name = _open_target_parent(vault_root=vault_root, target_path=target_path)
+    parent, target_name = _open_target_parent(root_fd=root_fd, target_path=target_path)
     try:
         identity = get_target_identity(target_name, parent)
     except TransactionError as error:
@@ -315,13 +324,13 @@ def _classify_path(
 
 def _rollback_operation(
     *,
-    vault_root: Path,
+    root_fd: int,
     transaction_dir: Path,
     transaction_fd: int,
     operation: RecoveryOperation,
 ) -> None:
     _rollback_entry(
-        vault_root=vault_root,
+        root_fd=root_fd,
         transaction_dir=transaction_dir,
         transaction_fd=transaction_fd,
         target_path=operation.target_path,
@@ -331,14 +340,14 @@ def _rollback_operation(
 
 def _rollback_state_file(
     *,
-    vault_root: Path,
+    root_fd: int,
     transaction_dir: Path,
     transaction_fd: int,
     target_path: str,
     state: RecoveryStateFiles,
 ) -> None:
     _rollback_entry(
-        vault_root=vault_root,
+        root_fd=root_fd,
         transaction_dir=transaction_dir,
         transaction_fd=transaction_fd,
         target_path=target_path,
@@ -348,14 +357,14 @@ def _rollback_state_file(
 
 def _rollback_entry(
     *,
-    vault_root: Path,
+    root_fd: int,
     transaction_dir: Path,
     transaction_fd: int,
     target_path: str,
     expectation: _FileExpectation,
 ) -> None:
     current = _classify_path(
-        vault_root=vault_root,
+        root_fd=root_fd,
         target_path=target_path,
         expectation=expectation,
     )
@@ -364,7 +373,7 @@ def _rollback_entry(
     if current is _CanonicalState.OTHER:
         raise RecoveryConflictError("Canonical target changed outside recovery")
 
-    parent, target_name = _open_target_parent(vault_root=vault_root, target_path=target_path)
+    parent, target_name = _open_target_parent(root_fd=root_fd, target_path=target_path)
     try:
         if expectation.expected_pre_state is RecoveryExpectedState.ABSENT:
             remove_installed_creation(
@@ -408,32 +417,32 @@ def _rollback_entry(
         os.close(parent.fd)
 
 
-def _verify_all_pre(*, vault_root: Path, journal: RecoveryJournal) -> None:
+def _verify_all_pre(*, root_fd: int, journal: RecoveryJournal) -> None:
     for operation in journal.operations:
         _require_state(
-            vault_root=vault_root,
+            root_fd=root_fd,
             target_path=operation.target_path,
             expectation=_expectation(operation),
             required=_CanonicalState.PRE,
         )
     _require_state(
-        vault_root=vault_root,
+        root_fd=root_fd,
         target_path="system/generated-ownership.json",
         expectation=_expectation(journal.ownership_state),
         required=_CanonicalState.PRE,
     )
     _require_state(
-        vault_root=vault_root,
+        root_fd=root_fd,
         target_path=f"proposals/{journal.proposal_id}/proposal.md",
         expectation=_expectation(journal.proposal_state),
         required=_CanonicalState.PRE,
     )
 
 
-def _verify_all_staged(*, vault_root: Path, journal: RecoveryJournal) -> None:
+def _verify_all_staged(*, root_fd: int, journal: RecoveryJournal) -> None:
     for operation in journal.operations:
         _require_state(
-            vault_root=vault_root,
+            root_fd=root_fd,
             target_path=operation.target_path,
             expectation=_expectation(operation),
             required=_CanonicalState.STAGED,
@@ -444,13 +453,13 @@ def _verify_all_staged(*, vault_root: Path, journal: RecoveryJournal) -> None:
         else _CanonicalState.PRE
     )
     _require_state(
-        vault_root=vault_root,
+        root_fd=root_fd,
         target_path="system/generated-ownership.json",
         expectation=_expectation(journal.ownership_state),
         required=ownership_required,
     )
     _require_state(
-        vault_root=vault_root,
+        root_fd=root_fd,
         target_path=f"proposals/{journal.proposal_id}/proposal.md",
         expectation=_expectation(journal.proposal_state),
         required=_CanonicalState.STAGED,
@@ -459,13 +468,13 @@ def _verify_all_staged(*, vault_root: Path, journal: RecoveryJournal) -> None:
 
 def _require_state(
     *,
-    vault_root: Path,
+    root_fd: int,
     target_path: str,
     expectation: _FileExpectation,
     required: _CanonicalState,
 ) -> None:
     actual = _classify_path(
-        vault_root=vault_root,
+        root_fd=root_fd,
         target_path=target_path,
         expectation=expectation,
     )
@@ -500,7 +509,7 @@ def _journal_changes_ownership(journal: RecoveryJournal) -> bool:
     )
 
 
-def _open_target_parent(*, vault_root: Path, target_path: str) -> tuple[ParentDescriptor, str]:
+def _open_target_parent(*, root_fd: int, target_path: str) -> tuple[ParentDescriptor, str]:
     path = Path(target_path)
     if path.is_absolute() or not path.name or any(part in ("", ".", "..") for part in path.parts):
         raise RecoveryCorruptStateError("Recovery target path is invalid")
@@ -512,13 +521,9 @@ def _open_target_parent(*, vault_root: Path, target_path: str) -> tuple[ParentDe
         | getattr(os, "O_CLOEXEC", 0)
     )
     try:
-        current_fd = os.open(vault_root, flags)
+        current_fd = os.dup(root_fd)
     except OSError as error:
-        if error.errno in (errno.ELOOP, errno.ENOTDIR):
-            raise RecoveryCorruptStateError(
-                "Vault root is a symlink or non-directory"
-            ) from error
-        raise RecoveryUnavailableError("Failed to open vault root") from error
+        raise RecoveryUnavailableError("Failed to duplicate canonical vault authority") from error
 
     try:
         for component in path.parent.parts:
