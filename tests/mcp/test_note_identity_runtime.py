@@ -77,6 +77,7 @@ def test_custom_runtime_is_excluded_from_all_composed_mcp_exploration(
     canonical = wiki / "canonical.md"
     target = wiki / "target.md"
     derived = runtime_dir / "derived.md"
+    derived_probe = "derivedruntimeuniquetoken"
     derived.parent.mkdir(parents=True)
     canonical.write_text(
         _note("canonical-id", "Canonical", "The canonical-visible-marker is allowed."),
@@ -87,7 +88,7 @@ def test_custom_runtime_is_excluded_from_all_composed_mcp_exploration(
         _note(
             "derived-id",
             "Derived",
-            "The derived-runtime-only-marker must never escape. [[wiki/target]]",
+            f"The {derived_probe} must never escape. [[wiki/target]]",
         ),
         encoding="utf-8",
     )
@@ -99,19 +100,13 @@ def test_custom_runtime_is_excluded_from_all_composed_mcp_exploration(
         for entry in listing["entries"]
     )
 
-    search = server._tool_manager.get_tool("vault_search").fn(
-        query="derived-runtime-only-marker"
-    )
+    search = server._tool_manager.get_tool("vault_search").fn(query=derived_probe)
     assert search["hits"] == []
 
-    wiki_search = server._tool_manager.get_tool("wiki_search").fn(
-        query="derived-runtime-only-marker"
-    )
+    wiki_search = server._tool_manager.get_tool("wiki_search").fn(query=derived_probe)
     assert wiki_search["hits"] == []
 
-    context = server._tool_manager.get_tool("vault_context").fn(
-        question="derived-runtime-only-marker"
-    )
+    context = server._tool_manager.get_tool("vault_context").fn(question=derived_probe)
     assert all(
         not source["path"].startswith("wiki/runtime-node")
         for source in context["sources"]
