@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePosixPath
 from threading import Event
@@ -11,6 +12,11 @@ from typing import Literal, Protocol, runtime_checkable
 RetrievalMode = Literal["local", "external"]
 ProviderKind = Literal["embedding", "reranker", "generation"]
 SupportKind = Literal["direct", "synthesis", "inference"]
+
+_NODE_LOCAL_EXCLUDED_PREFIXES: ContextVar[tuple[str, ...]] = ContextVar(
+    "lifeos_node_local_retrieval_excluded_prefixes",
+    default=(),
+)
 
 
 class RetrievalError(ValueError):
@@ -258,6 +264,21 @@ class ProviderDisclosure:
         return asdict(self)
 
 
+def push_node_local_excluded_prefixes(
+    prefixes: Sequence[str],
+) -> Token[tuple[str, ...]]:
+    """Temporarily add node-local vault prefixes to every retrieval decision in this context."""
+    normalized = tuple(_safe_relative(prefix, allow_folder=True) for prefix in prefixes)
+    current = _NODE_LOCAL_EXCLUDED_PREFIXES.get()
+    merged = tuple(dict.fromkeys((*current, *normalized)))
+    return _NODE_LOCAL_EXCLUDED_PREFIXES.set(merged)
+
+
+def reset_node_local_excluded_prefixes(token: Token[tuple[str, ...]]) -> None:
+    """Restore the prior node-local retrieval exclusion context."""
+    _NODE_LOCAL_EXCLUDED_PREFIXES.reset(token)
+
+
 def scope_decision(
     path: str,
     *,
@@ -268,6 +289,8 @@ def scope_decision(
     normalized = _safe_relative(path)
     if _matches_prefix(normalized, policy.excluded_prefixes):
         return ScopeDecision(normalized, False, False, "excluded-by-policy")
+    if _matches_prefix(normalized, _NODE_LOCAL_EXCLUDED_PREFIXES.get()):
+        return ScopeDecision(normalized, False, False, "excluded-node-local-runtime")
     if _matches_prefix(normalized, scope.excluded_paths):
         return ScopeDecision(normalized, False, False, "excluded-by-request")
     protected = _matches_prefix(normalized, policy.protected_prefixes)
