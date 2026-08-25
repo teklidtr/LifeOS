@@ -245,7 +245,15 @@ def test_registry_refresh_delegates_to_facade(mock_facade: MagicMock, tmp_path: 
 
     result = server._tool_manager.get_tool("registry_refresh").fn()
 
-    mock_facade.assert_called_once_with(vault_root=tmp_path / "vault", registry=registry)
+    mock_facade.assert_called_once()
+    kwargs = mock_facade.call_args.kwargs
+    assert kwargs["vault_root"] == tmp_path / "vault"
+    assert kwargs["registry"] is registry
+    allow_path = kwargs["identity_allow_path"]
+    assert callable(allow_path)
+    assert allow_path("wiki/public.md") is True
+    assert allow_path("private/hidden.md") is False
+    assert allow_path("proposals/prop-1/proposal.md") is False
     assert result == {
         "new": ["study/new.md"],
         "modified": [],
