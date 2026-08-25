@@ -160,21 +160,15 @@ def _park_row(conn: Any, *, row_id: int, prior_path: str, now_expr: str) -> None
     )
 
 
-def _drop_unobserved_identity_metadata(
-    conn: Any,
+def _row_allowed_for_identity(
+    row: Any,
     *,
     identity_allow_path: IdentityPathPredicate | None,
-) -> None:
-    """Prevent out-of-scope disposable IDs from influencing a scoped refresh."""
+) -> bool:
     if identity_allow_path is None:
-        return
-    rows = conn.execute(
-        "SELECT id, vault_path FROM files WHERE stable_id IS NOT NULL"
-    ).fetchall()
-    for row in rows:
-        canonical_path = _canonical_path_from_storage(str(row["vault_path"]))
-        if not identity_allow_path(canonical_path):
-            conn.execute("UPDATE files SET stable_id = NULL WHERE id = ?", (int(row["id"]),))
+        return True
+    canonical_path = _canonical_path_from_storage(str(row["vault_path"]))
+    return identity_allow_path(canonical_path)
 
 
 def register_scan(
@@ -188,9 +182,9 @@ def register_scan(
 
     With no scope predicate, canonical files are hashed and stable Markdown IDs are interpreted
     exactly as in the local registry contract. A scoped external caller can deny a path before
-    content access: the registry still records that the filesystem entry exists, but it neither
-    hashes nor parses those bytes and out-of-scope stable-ID metadata cannot influence visible
-    relocation/ambiguity decisions.
+    content access: the registry still records filesystem presence, but it neither hashes nor
+    parses those bytes. Previously known local identity facts for denied paths are retained for a
+    later trusted refresh while being excluded from every scoped ambiguity/relocation decision.
     """
     seen: set[str] = set()
     for entry in entries:
@@ -223,10 +217,6 @@ def register_scan(
                 conn.execute("INSERT INTO seen_paths (vault_path) VALUES (?)", (path_str,))
 
             now_expr = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
-            _drop_unobserved_identity_metadata(
-                conn,
-                identity_allow_path=identity_allow_path,
-            )
 
             current_targets = {
                 facts.stable_id: path
@@ -235,17 +225,31 @@ def register_scan(
             }
             relocations: dict[str, tuple[int, str, str | None, int]] = {}
             for durable_id, target_path in sorted(current_targets.items()):
-                row = conn.execute(
+                rows = conn.execute(
                     """
                     SELECT id, vault_path, stable_id, content_hash, is_deleted
                     FROM files WHERE stable_id = ?
+                    ORDER BY id
                     """,
                     (durable_id,),
-                ).fetchone()
-                if row is None:
+                ).fetchall()
+                scoped_rows = [
+                    row
+                    for row in rows
+                    if _row_allowed_for_identity(
+                        row,
+                        identity_allow_path=identity_allow_path,
+                    )
+                ]
+                if len(scoped_rows) > 1:
+                    raise _base.FileTrackingError(
+                        f"Stable note id {durable_id!r} is ambiguous in scoped registry state."
+                    )
+                if not scoped_rows:
                     continue
+                row = scoped_rows[0]
                 stored_path = str(row["vault_path"])
-                if stored_path != target_path:
+                if _canonical_path_from_storage(stored_path) != target_path:
                     relocations[durable_id] = (
                         int(row["id"]),
                         _canonical_path_from_storage(stored_path),
@@ -279,7 +283,7 @@ def register_scan(
                     moving_id, old_path, previous_hash, was_deleted = relocation
                     occupant = conn.execute(
                         """
-                        SELECT id, stable_id, is_deleted
+                        SELECT id, vault_path, stable_id, is_deleted
                         FROM files WHERE vault_path = ?
                         """,
                         (path_str,),
@@ -289,6 +293,10 @@ def register_scan(
                         if (
                             occupant_stable_id is not None
                             and str(occupant_stable_id) in current_targets
+                            and _row_allowed_for_identity(
+                                occupant,
+                                identity_allow_path=identity_allow_path,
+                            )
                         ):
                             raise _base.FileTrackingError(
                                 "Registry relocation reservation failed for a surviving stable "
@@ -326,7 +334,7 @@ def register_scan(
 
                 row = conn.execute(
                     """
-                    SELECT id, stable_id, content_hash, is_deleted
+                    SELECT id, vault_path, stable_id, content_hash, is_deleted
                     FROM files WHERE vault_path = ?
                     """,
                     (path_str,),
@@ -348,8 +356,7 @@ def register_scan(
                         conn.execute(
                             f"""
                             UPDATE files
-                            SET stable_id = NULL, file_kind = ?, size_bytes = ?,
-                                last_seen_at = {now_expr}, is_deleted = 0
+                            SET file_kind = ?, size_bytes = ?, last_seen_at = {now_expr}, is_deleted = 0
                             WHERE id = ?
                             """,
                             (entry.file_type, size_bytes, int(row["id"])),
@@ -359,8 +366,7 @@ def register_scan(
                         conn.execute(
                             f"""
                             UPDATE files
-                            SET stable_id = NULL, file_kind = ?, size_bytes = ?,
-                                last_seen_at = {now_expr}
+                            SET file_kind = ?, size_bytes = ?, last_seen_at = {now_expr}
                             WHERE id = ?
                             """,
                             (entry.file_type, size_bytes, int(row["id"])),
@@ -484,7 +490,8 @@ def register_scan(
             conn.execute("DROP TABLE temp.seen_paths")
             conn.commit()
         except Exception:
-            conn.rollback()
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
             raise
 
     return _base.ScanResult(
