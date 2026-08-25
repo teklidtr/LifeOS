@@ -272,8 +272,8 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
         DoctorFinding(
             "application",
             "healthy",
-            "lifeos-installed",
-            f"LifeOS {__version__} is importable.",
+            "lifeos-version",
+            f"LifeOS {__version__} is installed.",
         ),
         _python_finding(),
         _git_finding(),
@@ -283,7 +283,7 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
     )
     blocked = (
         any(finding.state == "blocked" for finding in findings)
-        or vault_status.overall_state == "blocked"
+        or vault_status.exit_code != 0
     )
     return DoctorResult(
         lifeos_version=__version__,
@@ -302,9 +302,11 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
 
 
 def format_doctor_text(result: DoctorResult) -> str:
-    """Render a human-readable readiness report."""
+    """Format a concise human-readable readiness report."""
     lines = [
-        f"LifeOS doctor {result.lifeos_version}",
+        "LifeOS doctor",
+        f"Ready: {'yes' if result.ready else 'no'}",
+        f"LifeOS: {result.lifeos_version}",
         f"Config: {result.config_path}",
         f"Vault: {result.vault_root}",
         "",
@@ -319,35 +321,39 @@ def format_doctor_text(result: DoctorResult) -> str:
         "Readiness checks",
     ]
     for finding in result.findings:
-        lines.append(f"  [{finding.state}] {finding.subsystem}: {finding.detail}")
+        lines.append(
+            f"  {finding.subsystem}: {finding.state} "
+            f"[{finding.code}] - {finding.detail}"
+        )
         if finding.next_action:
             lines.append(f"    next: {finding.next_action}")
-    lines.extend(
-        [
-            "",
-            f"Vault status: {result.vault_status.overall_state}",
-            f"Ready: {'yes' if result.ready else 'no'}",
-        ]
-    )
-    if result.mcp_command:
-        lines.extend(
-            [
-                "",
-                "MCP command:",
-                "  " + " ".join(result.mcp_command),
-            ]
+
+    lines.extend(["", f"Vault health: {result.vault_status.overall_state}"])
+    for check in result.vault_status.checks:
+        lines.append(
+            f"  {check.subsystem}: {check.state} [{check.code}] - {check.detail}"
         )
-    return "\n".join(lines) + "\n"
+        if check.next_action:
+            lines.append(f"    next: {check.next_action}")
+
+    if result.mcp_command:
+        lines.extend(["", "MCP server command template", f"  {' '.join(result.mcp_command)}"])
+        lines.append(
+            "  Replace <actor-id> and configure this command explicitly in your MCP client."
+        )
+    return "\n".join(lines)
 
 
 def serialize_doctor_json(result: DoctorResult) -> str:
-    """Render a stable JSON readiness report."""
+    """Serialize the stable doctor result shape."""
     data = {
-        "lifeos_version": result.lifeos_version,
-        "config_path": result.config_path,
-        "vault_root": result.vault_root,
         "ready": result.ready,
         "exit_code": result.exit_code,
+        "application": {
+            "lifeos_version": result.lifeos_version,
+            "config_path": result.config_path,
+            "vault_root": result.vault_root,
+        },
         "findings": [asdict(finding) for finding in result.findings],
         "vault": json.loads(serialize_status_json(result.vault_status)),
         "coherence": {
