@@ -3,15 +3,12 @@
 This module layers the LIFEOS-1643 coherence semantics over the historical file-tracking
 helpers. It deliberately keeps the existing ``_hash_file`` seam for unscoped local scans so
 streaming, fault-injection, and change-during-read behavior remain covered by the older registry
-tests. Both local and externally scoped observations now use no-follow descriptor-pinned reads;
-the scoped path additionally supports presence-only observations for denied content.
+tests. Externally scoped observations reuse the common vault descriptor boundary and may retain
+presence-only facts for denied content.
 """
 
 from __future__ import annotations
 
-import hashlib
-import os
-import stat
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,21 +18,12 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.registry import file_tracking as _base
 from lifeos.registry._registry import Registry
 from lifeos.scanner import VaultFile
+from lifeos.vault import VaultAccessError, observe_vault_file
 
 _TOMBSTONE_PREFIX = ".lifeos/registry-tombstones/"
+_IDENTITY_PREFIX_LIMIT = 1024 * 1024
+_UTF8_BOM = b"\xef\xbb\xbf"
 IdentityPathPredicate = Callable[[str], bool]
-_DIRECTORY_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_DIRECTORY", 0)
-    | getattr(os, "O_NOFOLLOW", 0)
-    | getattr(os, "O_CLOEXEC", 0)
-)
-_FILE_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_NOFOLLOW", 0)
-    | getattr(os, "O_CLOEXEC", 0)
-    | getattr(os, "O_NONBLOCK", 0)
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +37,26 @@ class _PreparedScanEntry:
 
 
 class _DiscardingChunks:
-    """List-shaped sink used to retain hash metadata without retaining attachment bytes."""
+    """List-shaped sink used to hash content without retaining attachment bytes."""
 
     def append(self, _chunk: bytes) -> None:
         return None
+
+
+class _PrefixChunks:
+    """List-shaped sink that retains at most the bounded Markdown identity prefix."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self._buffer = bytearray()
+
+    def append(self, chunk: bytes) -> None:
+        remaining = self.limit - len(self._buffer)
+        if remaining > 0:
+            self._buffer.extend(chunk[:remaining])
+
+    def snapshot(self) -> bytes:
+        return bytes(self._buffer)
 
 
 def _participates_in_stable_note_identity(entry: VaultFile) -> bool:
@@ -65,149 +69,64 @@ def _participates_in_stable_note_identity(entry: VaultFile) -> bool:
     )
 
 
-def _capture_for(entry: VaultFile) -> _base._HashCapture:
-    if _participates_in_stable_note_identity(entry):
-        return _base._HashCapture()
+def _capture_for(entry: VaultFile) -> tuple[_base._HashCapture, _PrefixChunks | None]:
     capture = _base._HashCapture()
+    if _participates_in_stable_note_identity(entry):
+        prefix = _PrefixChunks(_IDENTITY_PREFIX_LIMIT)
+        capture.chunks = cast(Any, prefix)
+        return capture, prefix
     capture.chunks = cast(Any, _DiscardingChunks())
-    return capture
+    return capture, None
 
 
-def _descriptor_identity(fd: int) -> tuple[int, int]:
-    observed = os.fstat(fd)
-    return observed.st_dev, observed.st_ino
-
-
-def _revalidate_scoped_path(
-    vault_root: Path,
-    parts: tuple[str, ...],
+def _frontmatter_bytes(
+    prefix: bytes,
     *,
-    expected_chain: tuple[tuple[int, int], ...],
-) -> None:
-    """Rewalk a scoped path and prove it still names the descriptor chain that was read."""
-    opened_fds: list[int] = []
-    try:
-        current_fd = os.open(vault_root, _DIRECTORY_FLAGS)
-        opened_fds.append(current_fd)
-        observed_chain = [_descriptor_identity(current_fd)]
+    capture_complete: bool,
+    full_path: Path,
+) -> bytes | None:
+    """Return a complete bounded frontmatter snapshot, or ``None`` when none is present."""
+    lines = prefix.splitlines(keepends=True)
+    if not lines:
+        return None
+    first = lines[0].rstrip(b"\r\n")
+    if first.startswith(_UTF8_BOM):
+        first = first[len(_UTF8_BOM) :]
+    if first != b"---":
+        return None
 
-        for part in parts[:-1]:
-            current_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
-            opened_fds.append(current_fd)
-            observed_chain.append(_descriptor_identity(current_fd))
+    for index, line in enumerate(lines[1:], start=1):
+        if line.rstrip(b"\r\n") == b"---":
+            return b"".join(lines[: index + 1])
 
-        current_fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=current_fd)
-        opened_fds.append(current_fd)
-        final_stat = os.fstat(current_fd)
-        if not stat.S_ISREG(final_stat.st_mode):
-            raise OSError("scoped registry path no longer names a regular file")
-        observed_chain.append((final_stat.st_dev, final_stat.st_ino))
-    except OSError as exc:
+    if not capture_complete:
         raise _base.FileTrackingError(
-            f"File {vault_root / Path(*parts)} changed during scoped hashing."
-        ) from exc
-    finally:
-        for fd in reversed(opened_fds):
-            os.close(fd)
-
-    if tuple(observed_chain) != expected_chain:
-        raise _base.FileTrackingError(
-            f"File {vault_root / Path(*parts)} changed during scoped hashing."
+            f"Markdown frontmatter exceeds {_IDENTITY_PREFIX_LIMIT} bytes at {full_path}."
         )
+    return prefix
 
 
-def _safe_scoped_hash_file(
-    vault_root: Path,
-    entry: VaultFile,
+def _stable_id_from_prefix(
+    prefix: bytes,
     *,
-    capture: _base._HashCapture,
-) -> str:
-    """Hash one scoped file from a vault-root descriptor without following symlinks."""
-    parts = entry.path.parts
-    if not parts or any(part in {"", ".", ".."} for part in parts):
-        raise _base.FileTrackingError(
-            f"Could not safely hash scoped registry path {entry.path.as_posix()!r}."
-        )
-
+    capture_complete: bool,
+    full_path: Path,
+) -> str | None:
+    frontmatter = _frontmatter_bytes(
+        prefix,
+        capture_complete=capture_complete,
+        full_path=full_path,
+    )
+    if frontmatter is None:
+        return None
     try:
-        root_fd = os.open(vault_root, _DIRECTORY_FLAGS)
-    except OSError as exc:
+        text = frontmatter.decode("utf-8")
+    except UnicodeError as exc:
         raise _base.FileTrackingError(
-            f"Could not safely open registry vault root {vault_root}: {exc}"
+            f"Could not inspect Markdown identity for {full_path}: {exc}"
         ) from exc
-
-    current_fd = root_fd
-    file_fd: int | None = None
-    identity_chain = [_descriptor_identity(root_fd)]
-    try:
-        for part in parts[:-1]:
-            try:
-                next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
-            except OSError as exc:
-                raise _base.FileTrackingError(
-                    "Could not safely traverse scoped registry path "
-                    f"{entry.path.as_posix()!r}: {exc}"
-                ) from exc
-            identity_chain.append(_descriptor_identity(next_fd))
-            if current_fd != root_fd:
-                os.close(current_fd)
-            current_fd = next_fd
-
-        try:
-            file_fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=current_fd)
-            before = os.fstat(file_fd)
-        except OSError as exc:
-            raise _base.FileTrackingError(
-                f"Could not safely open scoped registry file {entry.path.as_posix()!r}: {exc}"
-            ) from exc
-        if not stat.S_ISREG(before.st_mode):
-            raise _base.FileTrackingError(
-                f"Scoped registry entry is not a regular file: {entry.path.as_posix()}"
-            )
-        identity_chain.append((before.st_dev, before.st_ino))
-
-        hasher = hashlib.sha256()
-        total_bytes = 0
-        try:
-            while True:
-                chunk = os.read(file_fd, 65536)
-                if not chunk:
-                    break
-                total_bytes += len(chunk)
-                hasher.update(chunk)
-                capture.chunks.append(chunk)
-            after = os.fstat(file_fd)
-        except OSError as exc:
-            raise _base.FileTrackingError(
-                f"Could not safely read scoped registry file {entry.path.as_posix()!r}: {exc}"
-            ) from exc
-
-        if (
-            before.st_dev != after.st_dev
-            or before.st_ino != after.st_ino
-            or before.st_mtime_ns != after.st_mtime_ns
-            or before.st_ctime_ns != after.st_ctime_ns
-            or before.st_size != after.st_size
-            or total_bytes != after.st_size
-        ):
-            raise _base.FileTrackingError(
-                f"File {vault_root / entry.path} changed during scoped hashing."
-            )
-
-        _revalidate_scoped_path(
-            vault_root,
-            parts,
-            expected_chain=tuple(identity_chain),
-        )
-        capture.size_bytes = after.st_size
-        capture.mtime_ns = after.st_mtime_ns
-        return hasher.hexdigest()
-    finally:
-        if file_fd is not None:
-            os.close(file_fd)
-        if current_fd != root_fd:
-            os.close(current_fd)
-        os.close(root_fd)
+    parsed_id = parse_markdown_note(full_path, content=text).durable_fields.id
+    return parsed_id.strip() or None if parsed_id is not None else None
 
 
 def _prepare_scan_entry(
@@ -231,37 +150,57 @@ def _prepare_scan_entry(
 
     full_path = vault_root / entry.path
     identity_observed = _participates_in_stable_note_identity(entry)
-    capture = _capture_for(entry)
-    if descriptor_safe:
-        content_hash = _safe_scoped_hash_file(vault_root, entry, capture=capture)
-    else:
-        content_hash = _base._hash_file(full_path, capture=capture)
-    if capture.size_bytes is None or capture.mtime_ns is None:
-        raise _base.FileTrackingError(f"Could not capture registry metadata for {full_path}.")
+    prefix = b""
+    capture_complete = True
 
-    stable_id: str | None = None
-    if identity_observed:
-        content = b"".join(capture.chunks)
-        if len(content) != capture.size_bytes:
-            raise _base.FileTrackingError(f"File {full_path} changed during hashing.")
+    if descriptor_safe:
         try:
-            text = content.decode("utf-8")
-        except UnicodeError as exc:
+            observation = observe_vault_file(
+                vault_root,
+                entry.path.as_posix(),
+                capture_limit=_IDENTITY_PREFIX_LIMIT if identity_observed else 0,
+            )
+        except VaultAccessError as exc:
+            if exc.code == "concurrent-change":
+                raise _base.FileTrackingError(
+                    f"File {full_path} changed during scoped hashing."
+                ) from exc
             raise _base.FileTrackingError(
-                f"Could not inspect Markdown identity for {full_path}: {exc}"
+                f"Could not safely hash scoped registry file {entry.path.as_posix()!r}: {exc}"
             ) from exc
-        parsed = parse_markdown_note(full_path, content=text)
-        parsed_id = parsed.durable_fields.id
-        if parsed_id is not None:
-            stable_id = parsed_id.strip() or None
+        content_hash = observation.content_hash
+        size_bytes = observation.size_bytes
+        mtime_ns = observation.mtime_ns
+        prefix = observation.captured_bytes
+        capture_complete = observation.capture_complete
+    else:
+        capture, prefix_capture = _capture_for(entry)
+        content_hash = _base._hash_file(full_path, capture=capture)
+        if capture.size_bytes is None or capture.mtime_ns is None:
+            raise _base.FileTrackingError(f"Could not capture registry metadata for {full_path}.")
+        size_bytes = capture.size_bytes
+        mtime_ns = capture.mtime_ns
+        if prefix_capture is not None:
+            prefix = prefix_capture.snapshot()
+            capture_complete = size_bytes <= _IDENTITY_PREFIX_LIMIT
+
+    stable_id = (
+        _stable_id_from_prefix(
+            prefix,
+            capture_complete=capture_complete,
+            full_path=full_path,
+        )
+        if identity_observed
+        else None
+    )
 
     return _PreparedScanEntry(
         stable_id=stable_id,
         identity_observed=identity_observed,
         content_observed=True,
         content_hash=content_hash,
-        size_bytes=capture.size_bytes,
-        mtime_ns=capture.mtime_ns,
+        size_bytes=size_bytes,
+        mtime_ns=mtime_ns,
     )
 
 
@@ -350,7 +289,7 @@ def register_scan(
     content access: the registry still records filesystem presence, but it neither hashes nor
     parses those bytes. Previously known local identity facts for denied paths are retained for a
     later trusted refresh while being excluded from every scoped ambiguity/relocation decision.
-    Authorized scoped paths are opened through vault-root descriptors with no-follow semantics.
+    Authorized scoped paths reuse the common stable vault descriptor observation boundary.
     """
     seen: set[str] = set()
     for entry in entries:
