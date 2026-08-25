@@ -323,19 +323,6 @@ def create_mcp_server(
         runtime_root = runtime_prefix.rstrip("/")
         return normalized == runtime_root or normalized.startswith(runtime_prefix)
 
-    def _reject_runtime_paths(*paths: str | None) -> None:
-        denied = sorted(
-            {
-                path
-                for path in paths
-                if path is not None and _path_inside_runtime(path)
-            }
-        )
-        if denied:
-            raise ToolValidationError(
-                "Configured node-local runtime paths are unavailable to MCP ingestion"
-            )
-
     def _external_registry_identity_allow_path() -> Callable[[str], bool]:
         try:
             policy = load_retrieval_policy(vault_root)
@@ -359,6 +346,20 @@ def create_mcp_server(
                 raise ToolExecutionError("Retrieval policy is invalid") from error
 
         return allowed
+
+    def _reject_runtime_paths(*paths: str | None) -> None:
+        allow_path = _external_registry_identity_allow_path()
+        denied = sorted(
+            {
+                path
+                for path in paths
+                if path is not None and not allow_path(path)
+            }
+        )
+        if denied:
+            raise ToolValidationError(
+                "MCP ingestion paths are unavailable under the external retrieval policy"
+            )
 
     def _visible_registry_paths(
         paths: tuple[str, ...],
