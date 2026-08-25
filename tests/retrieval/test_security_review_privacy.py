@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-import lifeos.retrieval.search as base_search
 from lifeos.retrieval import HybridRetriever, RetrievalIndexService, RetrievalRequest
 from lifeos.retrieval.contracts import (
     CancellationToken,
     ProviderCapabilities,
     RerankCandidate,
     RerankResult,
+    RetrievalScope,
 )
 
 
@@ -129,7 +129,7 @@ def test_move_after_query_health_snapshot_never_reaches_reranker(
     assert reranker.seen == []
 
 
-def test_move_after_health_is_removed_before_cross_document_scoring(
+def test_moved_protected_row_cannot_contribute_cross_document_link_score(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -139,9 +139,14 @@ def test_move_after_health_is_removed_before_cross_document_scoring(
     wiki = vault / "wiki"
     wiki.mkdir()
     safe = wiki / "safe.md"
+    boosted = wiki / "boosted.md"
     risky = wiki / "risky.md"
-    safe.write_text("# Safe\n\nrank-race-marker\n", encoding="utf-8")
-    risky.write_text("# Risky\n\n[[Safe]]\nprivate-derived-link\n", encoding="utf-8")
+    safe.write_text("# Safe\n", encoding="utf-8")
+    boosted.write_text("# Boosted\n\nrank-race-marker\n", encoding="utf-8")
+    risky.write_text(
+        "# Risky\n\n[[Safe]] [[Boosted]]\nprivate-derived-link\n",
+        encoding="utf-8",
+    )
     RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
 
     retriever = HybridRetriever(vault_root=vault, runtime_dir=runtime)
@@ -154,17 +159,16 @@ def test_move_after_health_is_removed_before_cross_document_scoring(
         risky.rename(private / "risky.md")
         return health
 
-    observed_paths: list[tuple[str, ...]] = []
-    original_link_scores = base_search._link_scores
-
-    def recording_link_scores(chunks, selected):
-        observed_paths.append(tuple(chunk.path for chunk in chunks))
-        return original_link_scores(chunks, selected)
-
     monkeypatch.setattr(retriever.index_service, "health", move_after_health)
-    monkeypatch.setattr(base_search, "_link_scores", recording_link_scores)
+    reranker = _RecordingReranker()
+    response = retriever.search(
+        RetrievalRequest(
+            "rank-race-marker",
+            scope=RetrievalScope(pinned_paths=("wiki/safe.md",)),
+        ),
+        reranker=reranker,
+    )
 
-    response = retriever.search(RetrievalRequest("rank-race-marker"))
-
-    assert observed_paths == [("wiki/safe.md",)]
-    assert tuple(item.path for item in response.results) == ("wiki/safe.md",)
+    boosted_result = next(item for item in response.results if item.path == "wiki/boosted.md")
+    assert boosted_result.ranking.link == 0.0
+    assert all("private-derived-link" not in item.text for batch in reranker.seen for item in batch)
