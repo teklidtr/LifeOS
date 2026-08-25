@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from lifeos.proposals.recovery import RecoveryLockUnavailableError
+from lifeos.proposals.recovery import RecoveryLockUnavailableError, RecoveryUnavailableError
 from lifeos.proposals.recovery_store import acquire_pinned_recovery_store
 
 
-def test_pinned_recovery_store_survives_runtime_path_swap(tmp_path: Path) -> None:
+def test_pinned_recovery_store_rejects_runtime_path_swap(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     redirected = tmp_path / "redirected"
@@ -25,6 +25,8 @@ def test_pinned_recovery_store_survives_runtime_path_swap(tmp_path: Path) -> Non
 
         assert (parked / "recovery" / "marker").is_dir()
         assert not (redirected / "recovery" / "marker").exists()
+        with pytest.raises(RecoveryUnavailableError, match="no longer identifies"):
+            store.require_current_runtime_path()
 
 
 def test_pinned_recovery_store_rejects_runtime_symlink_component(tmp_path: Path) -> None:

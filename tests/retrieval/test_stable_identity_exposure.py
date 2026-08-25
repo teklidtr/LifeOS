@@ -233,6 +233,4 @@ def test_retrieval_does_not_attach_old_index_identity_to_changed_canonical_path(
         RetrievalRequest("cobalt-marker")
     )
 
-    assert response.results
-    assert response.results[0].path == "wiki/note.md"
-    assert response.results[0].stable_id is None
+    assert response.results == ()

@@ -49,3 +49,63 @@ def test_protected_update_target_is_rejected_before_registry_or_target_read(
 
     assert refresh_calls == []
     assert target_reads == []
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "routing", "kwargs"),
+    [
+        (
+            "ingestion_create_wiki_proposal",
+            {"page_kind": "concept", "slug": "denied-target"},
+            {"title": "Denied", "body": "Denied body"},
+        ),
+        (
+            "ingestion_create_wiki_and_update_section_proposal",
+            {"create_page_kind": "concept", "create_slug": "denied-target"},
+            {
+                "create_title": "Denied",
+                "create_body": "Denied body",
+                "update_target_path": "wiki/public.md",
+                "update_heading": "Summary",
+                "update_body": "Replacement",
+            },
+        ),
+    ],
+)
+def test_typed_create_target_is_authorized_before_registry_refresh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    routing: dict[str, str],
+    kwargs: dict[str, str],
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    policy = vault / "system" / "retrieval-policy.yml"
+    policy.parent.mkdir()
+    policy.write_text(
+        "schema_version: 1\nprotected_prefixes: [wiki/concepts]\nexternal_allowed_prefixes: []\n",
+        encoding="utf-8",
+    )
+    server = mcp_server.create_mcp_server(
+        vault_root=vault,
+        registry=MagicMock(),
+        authorizer=MagicMock(),
+        runtime_dir=vault / ".lifeos",
+    )
+    refresh_calls: list[bool] = []
+
+    def fail_refresh(*args: object, **kwargs: object) -> object:
+        refresh_calls.append(True)
+        pytest.fail("derived protected target reached registry refresh")
+
+    monkeypatch.setattr(mcp_server, "refresh_registry", fail_refresh)
+
+    with pytest.raises(ToolError, match="Invalid LifeOS tool arguments"):
+        server._tool_manager.get_tool(tool_name).fn(
+            source_path="raw/source.md",
+            **routing,
+            **kwargs,
+        )
+
+    assert refresh_calls == []

@@ -10,7 +10,6 @@ from pathlib import Path
 
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
-from lifeos.markdown.parser import parse_markdown_note
 from lifeos.retrieval.contracts import (
     CancellationToken,
     EmbeddingProvider,
@@ -21,8 +20,10 @@ from lifeos.retrieval.contracts import (
     scope_decision,
 )
 from lifeos.retrieval.models import IndexedChunk, IndexedDocument
+from lifeos.retrieval.service import IndexHealth
 from lifeos.retrieval.search import (
     HybridRetriever as _BaseHybridRetriever,
+    RankingComponents,
     RetrievalEvidence,
     RetrievalResponse,
 )
@@ -32,9 +33,13 @@ _IDENTITY_CAPTURE: ContextVar[dict[str, str | None] | None] = ContextVar(
     "lifeos_retrieval_identity_capture",
     default=None,
 )
-_ORPHANED_PATHS: ContextVar[frozenset[str]] = ContextVar(
-    "lifeos_retrieval_orphaned_paths",
+_STALE_QUERY_PATHS: ContextVar[frozenset[str]] = ContextVar(
+    "lifeos_retrieval_stale_query_paths",
     default=frozenset(),
+)
+_QUERY_HEALTH: ContextVar[IndexHealth | None] = ContextVar(
+    "lifeos_retrieval_query_health",
+    default=None,
 )
 
 
@@ -85,11 +90,11 @@ class HybridRetriever(_BaseHybridRetriever):
         graph_hints: Mapping[str, float] | None = None,
         cancellation: CancellationToken | None = None,
     ) -> RetrievalResponse:
-        # A stale index remains queryable for unchanged current paths, but an orphaned indexed
-        # path no longer has a current canonical authorization decision. Suppress those rows before
-        # base ranking, embedding, or reranking can disclose stale text to a provider.
-        health = self.index_service.health(embedding_provider=embedding_provider)
-        orphaned_token = _ORPHANED_PATHS.set(frozenset(health.orphaned_paths))
+        # The base search obtains the one health snapshot that governs both index usability and
+        # stale-row filtering. Current-path hash verification below closes the remaining move or
+        # path-reuse window before indexed text can reach a provider.
+        stale_token = _STALE_QUERY_PATHS.set(frozenset())
+        health_token = _QUERY_HEALTH.set(None)
         captured: dict[str, str | None] = {}
         capture_token = _IDENTITY_CAPTURE.set(captured)
         try:
@@ -102,7 +107,8 @@ class HybridRetriever(_BaseHybridRetriever):
             )
         finally:
             _IDENTITY_CAPTURE.reset(capture_token)
-            _ORPHANED_PATHS.reset(orphaned_token)
+            _QUERY_HEALTH.reset(health_token)
+            _STALE_QUERY_PATHS.reset(stale_token)
 
         if not response.results:
             return response
@@ -125,6 +131,18 @@ class HybridRetriever(_BaseHybridRetriever):
         )
         return replace(response, results=enriched)
 
+    def _index_health(
+        self,
+        *,
+        embedding_provider: EmbeddingProvider | None = None,
+    ) -> IndexHealth:
+        health = super()._index_health(
+            embedding_provider=embedding_provider,
+        )
+        _QUERY_HEALTH.set(health)
+        _STALE_QUERY_PATHS.set(frozenset((*health.orphaned_paths, *health.stale_paths)))
+        return health
+
     def _in_scope(
         self,
         chunk: IndexedChunk,
@@ -133,18 +151,38 @@ class HybridRetriever(_BaseHybridRetriever):
     ) -> bool:
         # An orphaned row is authorized only by its stale indexed path. It must not become local
         # or external evidence until synchronization re-establishes a current canonical path.
-        if chunk.path in _ORPHANED_PATHS.get():
+        if chunk.path in _STALE_QUERY_PATHS.get():
             return False
         # Build-time filtering is not sufficient for an existing disposable index created by an
         # older LifeOS version. A stale index remains text-queryable by design, so suppress any
         # configured-runtime row again at the query boundary before its chunks can become evidence.
         if self._runtime_prefix is not None and chunk.path.startswith(self._runtime_prefix):
             return False
-        allowed = super()._in_scope(chunk, document, request)
+        return super()._in_scope(chunk, document, request)
+
+    def _authorize_candidates(
+        self,
+        candidates: list[
+            tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]
+        ],
+        request: RetrievalRequest,
+    ) -> list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]]:
+        del request
+        authorized = []
         captured = _IDENTITY_CAPTURE.get()
-        if allowed and captured is not None:
-            captured[document.path] = _stable_id(document.document_id)
-        return allowed
+        for candidate in candidates:
+            _, document, _, _ = candidate
+            try:
+                source = read_vault_markdown(self.vault_root, document.path)
+            except VaultAccessError:
+                continue
+            current_hash = "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
+            if current_hash != document.content_hash:
+                continue
+            if captured is not None:
+                captured[document.path] = _stable_id(document.document_id)
+            authorized.append(candidate)
+        return authorized
 
     def _verified_current_stable_id(
         self,
@@ -172,17 +210,7 @@ class HybridRetriever(_BaseHybridRetriever):
         )
         if not decision.allowed:
             return None
-        try:
-            source = read_vault_markdown(self.vault_root, item.path)
-        except VaultAccessError:
-            return None
-        if "sha256:" + hashlib.sha256(source.content_bytes).hexdigest() != item.source_hash:
-            return None
-        parsed = parse_markdown_note(source.path, content=source.content)
-        current_id = parsed.durable_fields.id
-        if current_id is None:
-            return None
-        return candidate if current_id.strip() == candidate else None
+        return candidate
 
 
 def _with_stable_id(item: RetrievalEvidence, stable_id: str | None) -> StableRetrievalEvidence:

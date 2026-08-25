@@ -27,7 +27,7 @@ from lifeos.retrieval.contracts import (
 from lifeos.retrieval.index import RetrievalIndex
 from lifeos.retrieval.models import IndexedChunk, IndexedDocument
 from lifeos.retrieval.policy import load_retrieval_policy
-from lifeos.retrieval.service import RetrievalIndexService
+from lifeos.retrieval.service import IndexHealth, RetrievalIndexService
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +141,25 @@ class HybridRetriever:
             vault_root=vault_root, runtime_dir=runtime_dir, policy=self.policy
         )
 
+    def _index_health(
+        self,
+        *,
+        embedding_provider: EmbeddingProvider | None = None,
+    ) -> IndexHealth:
+        """Return the health snapshot that governs this query."""
+        return self.index_service.health(embedding_provider=embedding_provider)
+
+    def _authorize_candidates(
+        self,
+        candidates: list[
+            tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]
+        ],
+        request: RetrievalRequest,
+    ) -> list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]]:
+        """Apply final local authorization before candidate text can reach a provider."""
+        del request
+        return candidates
+
     def search(
         self,
         request: RetrievalRequest,
@@ -151,7 +170,7 @@ class HybridRetriever:
         cancellation: CancellationToken | None = None,
     ) -> RetrievalResponse:
         token = cancellation or CancellationToken()
-        health = self.index_service.health(embedding_provider=embedding_provider)
+        health = self._index_health(embedding_provider=embedding_provider)
         if not health.active_usable:
             disclosure = build_provider_disclosure(
                 evidence=(), capabilities=None, scope=request.scope, policy=self.policy
@@ -243,6 +262,7 @@ class HybridRetriever:
                     item[0].chunk_id,
                 )
             )
+            candidates = self._authorize_candidates(candidates, request)
 
             rerank_state = "not-requested"
             disclosure_capabilities = embedding_provider.capabilities if embedding_provider else None

@@ -53,6 +53,7 @@ from lifeos.facade.proposal_tools import (
     create_wiki_proposal,
     evolve_wiki_proposal,
     evolve_study_learning_proposal,
+    resolve_create_wiki_target,
     update_wiki_section_proposal,
 )
 from lifeos.facade.read_only import (
@@ -667,7 +668,12 @@ def create_mcp_server(
                 page_kind=page_kind,
                 slug=slug,
             )
-            _reject_runtime_paths(request.source_path, request.target_path)
+            resolved_target = resolve_create_wiki_target(
+                target_path=request.target_path,
+                page_kind=request.page_kind,
+                slug=request.slug,
+            )
+            _reject_runtime_paths(request.source_path, resolved_target)
             _refresh_for_ingestion(source_path)
             res = create_wiki_proposal(
                 vault_root=vault_root,
@@ -752,9 +758,14 @@ def create_mcp_server(
                 create_page_kind=create_page_kind,
                 create_slug=create_slug,
             )
+            resolved_create_target = resolve_create_wiki_target(
+                target_path=request.create_target_path,
+                page_kind=request.create_page_kind,
+                slug=request.create_slug,
+            )
             _reject_runtime_paths(
                 request.source_path,
-                request.create_target_path,
+                resolved_create_target,
                 request.update_target_path,
             )
             _refresh_for_ingestion(source_path)

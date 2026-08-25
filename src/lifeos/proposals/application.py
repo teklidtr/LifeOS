@@ -1135,6 +1135,21 @@ def _apply_proposal_locked(
     )
 
 
+def _require_current_recovery_authority(
+    *,
+    recovery_store: PinnedRecoveryStore,
+    outcome: ProposalApplicationResult,
+) -> None:
+    try:
+        recovery_store.require_current_runtime_path()
+    except RecoveryError as error:
+        raise ApplicationError(
+            "Configured runtime path changed during proposal application",
+            outcome,
+            code=ApplicationErrorCode.RECOVERY_REQUIRED,
+        ) from error
+
+
 def _execute_application_transaction(
     context: _ApplicationContext,
 ) -> ProposalApplicationResult:
@@ -1655,6 +1670,7 @@ def _execute_application_transaction(
         assert prop_fd is not None
         assert vault_lock is not None
         assert proposal_lock is not None
+        _require_current_recovery_authority(recovery_store=recovery_store, outcome=outcome)
         _validate_precommit_state(
             vault_root=vault_root,
             root_fd=root_fd,

@@ -497,14 +497,14 @@ def test_create_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path) -
     server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     tool = server._tool_manager.get_tool("ingestion_create_wiki_proposal")
-    res = tool.fn(source_path="s", target_path="t", title="title", body="b")
+    res = tool.fn(source_path="s", target_path="wiki/t.md", title="title", body="b")
 
     mock_facade.assert_called_once_with(
         vault_root=tmp_path / "vault",
         registry=registry,
         request=CreateWikiProposalRequest(
             source_path="s",
-            target_path="t",
+            target_path="wiki/t.md",
             title="title",
             body="b",
         ),

@@ -546,6 +546,20 @@ def _resolve_create_wiki_target(
         raise ToolValidationError("Invalid wiki target path or typed routing") from error
 
 
+def resolve_create_wiki_target(
+    *,
+    target_path: str | None,
+    page_kind: WikiPageKind | None,
+    slug: str | None,
+) -> str:
+    """Resolve the exact create target before any caller performs path authorization."""
+    return _resolve_create_wiki_target(
+        target_path=target_path,
+        page_kind=page_kind,
+        slug=slug,
+    )
+
+
 def create_wiki_proposal(
     *,
     vault_root: Path,

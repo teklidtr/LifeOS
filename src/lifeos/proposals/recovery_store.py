@@ -60,6 +60,25 @@ class PinnedRecoveryStore:
         """Compatibility/display path. Security-sensitive I/O uses ``recovery_fd``."""
         return self.runtime_path / "recovery"
 
+    def require_current_runtime_path(self) -> None:
+        """Fail if the configured runtime path no longer names the pinned directory."""
+        current_fd: int | None = None
+        try:
+            current_fd = _open_runtime_chain(self.runtime_path, create_missing=False)
+            pinned = os.fstat(self.runtime_fd)
+            current = os.fstat(current_fd)
+        except (OSError, RecoveryLockUnavailableError) as exc:
+            raise RecoveryUnavailableError(
+                "Configured runtime path no longer identifies the pinned runtime"
+            ) from exc
+        finally:
+            if current_fd is not None:
+                os.close(current_fd)
+        if (pinned.st_dev, pinned.st_ino) != (current.st_dev, current.st_ino):
+            raise RecoveryUnavailableError(
+                "Configured runtime path no longer identifies the pinned runtime"
+            )
+
     def open_transaction(self, transaction_id: RecoveryTransactionId) -> int:
         validate_recovery_transaction_id(transaction_id)
         return _open_dir_at(self.recovery_fd, str(transaction_id), "recovery transaction")
@@ -249,7 +268,7 @@ def acquire_pinned_recovery_store(*, runtime_dir: Path) -> Iterator[PinnedRecove
                     pass
 
 
-def _open_runtime_chain(path: Path) -> int:
+def _open_runtime_chain(path: Path, *, create_missing: bool = True) -> int:
     absolute = Path(os.path.abspath(path))
     try:
         current_fd = os.open(absolute.anchor, _DIR_FLAGS)
@@ -260,6 +279,8 @@ def _open_runtime_chain(path: Path) -> int:
             try:
                 next_fd = os.open(component, _DIR_FLAGS, dir_fd=current_fd)
             except FileNotFoundError:
+                if not create_missing:
+                    raise RecoveryLockUnavailableError("Runtime directory path changed")
                 try:
                     os.mkdir(component, 0o700, dir_fd=current_fd)
                 except FileExistsError:
