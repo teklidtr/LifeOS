@@ -44,6 +44,17 @@ tests or modifies that runtime contract. Filename alone does not grant authority
 
 Do not opportunistically implement neighboring subsystems.
 
+### Complexity budget and scope control
+
+Correctness and security do not justify unbounded implementation growth. Keep the smallest coherent solution that satisfies the task and its invariants.
+
+1. Treat production code size, changed-file count, new abstractions, and new subsystem dependencies as a complexity budget. If review fixes materially expand that budget, stop and reassess the design before adding more code.
+2. When multiple findings are variants of the same invariant, do not keep adding call-site guards. Centralize the invariant once, remove duplicate enforcement where practical, and prefer a net-neutral or net-negative production diff during hardening/consolidation.
+3. A review finding is not automatically a requirement to expand the current PR. Fix findings that violate acceptance criteria, documented contracts, correctness, privacy, security, or compatibility. Record independently useful hardening or cleanup that is not blocking the task as follow-up work instead of widening the PR.
+4. A zero-finding review is not the completion criterion. Completion is based on the task contract, resolved blocking findings, required validation, and required review classes. Do not keep changing correct code merely to make successive reviewers run out of suggestions.
+5. If repeated review rounds keep increasing code size or exposing sibling variants of the same issue, pause the review loop and perform a consolidation/scope audit. If the resulting solution is still disproportionately broad, split independently mergeable work into follow-up tasks or PRs.
+6. After a consolidation pass has restored a coherent boundary and broad validation is green, use re-review to validate that boundary rather than restart open-ended hardening. New non-blocking edge-case improvements belong in follow-up work unless they expose a core correctness or security defect.
+
 ## Architectural boundaries
 
 - Markdown vault files are canonical human-readable state.
@@ -147,6 +158,7 @@ Before a pull request is considered ready to merge:
 7. Do not mechanically repeat review/fix cycles indefinitely.
    - If consecutive reviews keep finding variants of the same cross-cutting invariant, stop requesting Codex review and perform a repository-wide invariant audit or centralize the enforcement boundary before trying again.
    - If the PR has grown so broad that review findings repeatedly expose unrelated subsystem interactions, consider splitting remaining independently mergeable work into separate tasks/PRs rather than using repeated Codex reviews to discover the architecture incrementally.
+   - Do not use "no findings" as the stopping condition. Once task requirements, blocking correctness/security findings, required validation, and required review classes are satisfied, move non-blocking hardening ideas to follow-up work.
    - Resume Codex review only after the implementation and invariant boundary are stable enough that a new review is expected to validate the solution rather than continue discovering its shape.
 8. For a security-sensitive pull request, request `@codex security review` only after the normal review cycle has stabilized.
 9. Address valid security findings and re-run affected validation. Batch security fixes. Request another security review only if those fixes materially change a security or trust boundary.
