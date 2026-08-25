@@ -58,8 +58,11 @@ They can gain a stable ID through an explicit migration. Once the registry has o
 ID for a note at a path, removing or replacing that ID in place is treated as an identity change
 and fails closed while that registry row represents an active note.
 
-Duplicate stable IDs are never guessed through. Registry refresh aborts before mutation and
-`lifeos doctor` reports a blocked `stable-id-ambiguous` finding until the collision is repaired.
+Duplicate stable IDs are never guessed through within the scope where LifeOS is allowed to
+resolve identity. An unscoped local refresh or `lifeos doctor` blocks a canonical collision with
+`stable-id-ambiguous`. A policy-scoped external refresh first excludes denied paths from identity
+resolution, without opening their content, so an unrelated protected note cannot make a public
+identity result disclose or depend on protected content merely because it carries the same ID.
 
 ## Registry reconciliation
 
@@ -78,6 +81,13 @@ A path that belonged to a note which was already confirmed deleted may later be 
 stable identity. The deleted historical row remains a disposable tombstone while the new note gets
 a new registry row. This is distinct from changing the stable ID of an active note in place, which
 still fails closed.
+
+The registry indexes `stable_id` for lookup but does not impose global SQLite uniqueness on that
+column. This is deliberate: a policy-scoped refresh may preserve previously observed hidden
+lineage while recording a visible note without allowing the hidden row to influence the scoped
+identity decision. Uniqueness is therefore proved at the caller-authorized canonical resolution
+boundary, where more than one matching visible note fails closed. The disposable database is not
+used as a shortcut around retrieval policy or as proof that canonical IDs are globally valid.
 
 Non-Markdown attachments continue to hash through streamed reads without retaining their complete
 bytes merely for stable-ID extraction. Markdown participating in stable identity derives ID, hash,
