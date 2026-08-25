@@ -90,9 +90,16 @@ class OneUseUiAuthorizer(ConsequentialAuthorizer):
 
 
 class DesktopProposalService:
-    def __init__(self, *, vault_root: Path, actor_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        vault_root: Path,
+        actor_id: str,
+        identity_runtime_dir: Path | None = None,
+    ) -> None:
         self.vault_root = vault_root
         self.actor_id = actor_id
+        self.identity_runtime_dir = identity_runtime_dir
         self.authorizer = OneUseUiAuthorizer(actor_id)
 
     def list(self) -> tuple[ProposalInspection, ...]:
@@ -220,13 +227,27 @@ class DesktopProposalService:
         self.authorizer.activate(token)
         try:
             if action == "accept":
-                return asdict(accept_proposal_tool(vault_root=self.vault_root, request=AcceptProposalRequest(proposal_id), authorizer=self.authorizer))
+                return asdict(
+                    accept_proposal_tool(
+                        vault_root=self.vault_root,
+                        request=AcceptProposalRequest(proposal_id),
+                        authorizer=self.authorizer,
+                        identity_runtime_dir=self.identity_runtime_dir,
+                    )
+                )
             if action == "submit":
                 return asdict(submit_proposal_tool(vault_root=self.vault_root, request=SubmitProposalRequest(proposal_id), authorizer=self.authorizer))
             if action == "approve":
                 return asdict(approve_proposal_tool(vault_root=self.vault_root, request=ApproveProposalRequest(proposal_id), authorizer=self.authorizer))
             if action == "apply":
-                return asdict(apply_proposal_tool(vault_root=self.vault_root, request=ApplyProposalRequest(proposal_id), authorizer=self.authorizer))
+                return asdict(
+                    apply_proposal_tool(
+                        vault_root=self.vault_root,
+                        request=ApplyProposalRequest(proposal_id),
+                        authorizer=self.authorizer,
+                        identity_runtime_dir=self.identity_runtime_dir,
+                    )
+                )
             if action == "reject":
                 inspection = self.inspect(proposal_id)
                 request = ConsequentialAuthorizationRequest(ConsequentialAction.APPROVE, proposal_id, inspection.review_digest)
