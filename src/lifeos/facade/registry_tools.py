@@ -47,9 +47,12 @@ def refresh_registry(
 ) -> RegistryRefreshResult:
     """Rebuild disposable registry facts without changing canonical vault files.
 
-    ``identity_allow_path`` scopes only stable-ID parsing/reconciliation. File hashes and path
-    presence still refresh globally, allowing externally scoped callers to preserve complete
-    disposable file tracking without reading protected Markdown identity content.
+    An unscoped local refresh rebuilds both file facts and the Git-tracked proposal index.
+    Supplying ``identity_allow_path`` marks an externally scoped refresh: path metadata may be
+    reconciled without opening denied file content, and proposal artifacts are deliberately not
+    indexed because that namespace is outside the external retrieval scope. Existing proposal
+    index rows remain disposable local state and are not exposed as proof that excluded proposal
+    content was inspected by the external call.
     """
     try:
         registry.initialize()
@@ -59,9 +62,12 @@ def refresh_registry(
             scan_vault(vault_root),
             identity_allow_path=identity_allow_path,
         )
-        register_proposals_scan(registry, vault_root=vault_root)
-        with registry.connect_read_only() as connection:
-            proposals_indexed = sum(count_proposals_by_status(connection).values())
+        if identity_allow_path is None:
+            register_proposals_scan(registry, vault_root=vault_root)
+            with registry.connect_read_only() as connection:
+                proposals_indexed = sum(count_proposals_by_status(connection).values())
+        else:
+            proposals_indexed = 0
     except (ScannerError, FileTrackingError, ProposalScanError, RegistryError) as error:
         raise ToolExecutionError("Could not refresh the disposable registry") from error
 
