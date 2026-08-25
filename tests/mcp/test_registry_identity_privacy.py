@@ -51,7 +51,7 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
 
     public.write_text(_note("shared-id", "Public"), encoding="utf-8")
     real_parser = coherent_tracking.parse_markdown_note
-    real_hash = coherent_tracking._base._hash_file
+    real_hash = coherent_tracking._safe_scoped_hash_file
     parsed_paths: list[Path] = []
     hashed_paths: list[Path] = []
 
@@ -61,14 +61,15 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
         assert "proposals" not in note_path.parts
         return real_parser(note_path, content=content)
 
-    def recording_hash(path: Path, *args, **kwargs):
+    def recording_hash(root: Path, entry, *, capture):
+        path = root / entry.path
         hashed_paths.append(path)
         assert "private" not in path.parts
         assert "proposals" not in path.parts
-        return real_hash(path, *args, **kwargs)
+        return real_hash(root, entry, capture=capture)
 
     monkeypatch.setattr(coherent_tracking, "parse_markdown_note", recording_parser)
-    monkeypatch.setattr(coherent_tracking._base, "_hash_file", recording_hash)
+    monkeypatch.setattr(coherent_tracking, "_safe_scoped_hash_file", recording_hash)
     server = create_mcp_server(
         vault_root=vault,
         registry=registry,
