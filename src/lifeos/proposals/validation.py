@@ -399,7 +399,7 @@ def _evaluate_operation(
                         operation_id=op.id,
                         target_path=target_path,
                         field_path=None,
-                        message="Ownership target was restored after review",
+                        message="Ownership target is present; release is no longer safe",
                     ),
                 ),
             )
