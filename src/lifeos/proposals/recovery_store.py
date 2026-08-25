@@ -80,10 +80,12 @@ class PinnedRecoveryStore:
             )
 
     def open_transaction(self, transaction_id: RecoveryTransactionId) -> int:
+        self.require_current_runtime_path()
         validate_recovery_transaction_id(transaction_id)
         return _open_dir_at(self.recovery_fd, str(transaction_id), "recovery transaction")
 
     def discover(self) -> RecoveryDiscoveryResult:
+        self.require_current_runtime_path()
         try:
             names = sorted(os.listdir(self.recovery_fd))
         except OSError as exc:
@@ -141,6 +143,7 @@ class PinnedRecoveryStore:
         return RecoveryDiscoveryResult(tuple(journals), tuple(findings))
 
     def initialize_transaction(self, journal: RecoveryJournal) -> Path:
+        self.require_current_runtime_path()
         validate_recovery_transaction_id(journal.transaction_id)
         if journal.phase is not RecoveryPhase.PREPARED:
             raise RecoveryValidationError("Initial journal must be prepared")
@@ -202,6 +205,7 @@ class PinnedRecoveryStore:
         self._remove(transaction_id)
 
     def _remove(self, transaction_id: RecoveryTransactionId) -> None:
+        self.require_current_runtime_path()
         _remove_tree_at(self.recovery_fd, str(transaction_id))
         try:
             os.fsync(self.recovery_fd)
@@ -210,17 +214,29 @@ class PinnedRecoveryStore:
 
 
 @contextmanager
-def acquire_pinned_recovery_store(*, runtime_dir: Path) -> Iterator[PinnedRecoveryStore]:
-    """Pin runtime once and keep recovery lock/tree below that descriptor authority."""
+def acquire_pinned_recovery_store(
+    *,
+    runtime_dir: Path,
+    authority_root: Path | None = None,
+) -> Iterator[PinnedRecoveryStore]:
+    """Pin runtime and hold one stable mutation authority for the whole store lifetime."""
     if not hasattr(os, "O_NOFOLLOW") or os.open not in getattr(os, "supports_dir_fd", set()):
         raise RecoveryLockUnavailableError("Descriptor-safe runtime traversal is unavailable")
 
     runtime_path = Path(os.path.abspath(runtime_dir))
+    authority_path = Path(os.path.abspath(authority_root or runtime_path.parent))
+    authority_fd: int | None = None
     runtime_fd: int | None = None
     recovery_fd: int | None = None
     lock_fd: int | None = None
     runtime_id: tuple[int, int] | None = None
     try:
+        try:
+            authority_fd = _open_runtime_chain(authority_path, create_missing=False)
+            fcntl.flock(authority_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, RecoveryLockUnavailableError) as exc:
+            raise RecoveryLockUnavailableError("Failed to acquire mutation authority") from exc
+
         runtime_fd = _open_runtime_chain(runtime_path)
         runtime_state = os.fstat(runtime_fd)
         runtime_id = (runtime_state.st_dev, runtime_state.st_ino)
@@ -266,6 +282,15 @@ def acquire_pinned_recovery_store(*, runtime_dir: Path) -> Iterator[PinnedRecove
                     os.close(fd)
                 except OSError:
                     pass
+        if authority_fd is not None:
+            try:
+                fcntl.flock(authority_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(authority_fd)
+            except OSError:
+                pass
 
 
 def _open_runtime_chain(path: Path, *, create_missing: bool = True) -> int:
