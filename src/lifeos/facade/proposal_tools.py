@@ -710,6 +710,7 @@ def update_wiki_section_proposal(
         persisted_path = persist_wiki_section_update_proposal(
             proposals_root=vault_root / "proposals",
             documents=documents,
+            runtime_dir=registry.database_path.parent,
         )
     except ProposalAlreadyExistsError as e:
         raise ToolConflictError("Draft proposal already exists") from e
@@ -835,6 +836,7 @@ def create_wiki_and_update_section_proposal(
         persisted_path = persist_compound_wiki_proposal(
             proposals_root=vault_root / "proposals",
             documents=documents,
+            runtime_dir=registry.database_path.parent,
         )
     except WikiTargetExistsError as e:
         raise ToolConflictError("Wiki create target already exists") from e
@@ -976,6 +978,7 @@ def evolve_wiki_proposal(
         persisted_path = persist_compounding_wiki_proposal(
             proposals_root=vault_root / "proposals",
             documents=documents,
+            runtime_dir=registry.database_path.parent,
         )
     except WikiTargetExistsError as error:
         raise ToolConflictError("A proposed wiki create target already exists") from error
@@ -1131,7 +1134,9 @@ def evolve_study_learning_proposal(
 
     try:
         persisted_path = persist_study_learning_proposal(
-            proposals_root=vault_root / "proposals", documents=documents
+            proposals_root=vault_root / "proposals",
+            documents=documents,
+            runtime_dir=registry.database_path.parent,
         )
     except WikiTargetExistsError as error:
         raise ToolConflictError("A proposed study learning create target already exists") from error
