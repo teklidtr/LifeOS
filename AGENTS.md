@@ -78,6 +78,22 @@ Treat documentation as part of the implementation, not follow-up polish:
 
 A completed task file is historical evidence; it does not replace updating the documents that describe LifeOS's current behavior.
 
+## Local validation before CI
+
+CI is an independent verification layer and safety net, not the primary mechanism for discovering deterministic implementation regressions. Agents must make a serious local attempt to catch test failures before pushing a change and before using CI or Codex review as feedback.
+
+For every implementation change:
+
+1. Run the directly relevant regression tests locally before pushing.
+2. Run the tests for the affected module or subsystem, including sibling entry points when the changed behavior is shared.
+3. When a change touches shared infrastructure, a public facade, multiple subsystems, a trust/privacy boundary, persistence or relocation semantics, or another cross-cutting invariant, run the broadest practical local pytest suite before pushing. Default to the full local pytest suite when the change can plausibly cause failures across multiple test shards or otherwise has a wide compatibility surface.
+4. Treat lint, formatting, type checking, compilation, collection, smoke checks, test selection, and cached/incremental test tools as useful accelerators, not substitutes for the behavioral pytest coverage required by the risk of the change. A green fast-check pipeline does not prove behavioral compatibility.
+5. Push only after locally reproducible deterministic failures have been fixed. CI should confirm the implementation in an independent environment, not be the first place an ordinary deterministic regression is discovered.
+6. If CI finds a deterministic regression that appropriate local validation should have caught, fix the regression, add or strengthen regression coverage when useful, and expand the local validation performed for that class of change before continuing the review cycle.
+7. If a required check genuinely cannot run locally, record the limitation and reason in the task or PR, run the closest practical local substitute, and leave the unavailable check to CI explicitly rather than silently treating CI as the default test runner.
+
+Clean-room, container, platform-specific, or other checks whose value specifically depends on the CI environment may remain CI checkpoints. This exception does not remove the obligation to run the relevant local behavioral tests first.
+
 ## Code Review Rules
 
 Use these rules to catch LifeOS-specific invariant violations that may not be obvious from the diff alone. Keep mechanical checks in tests and CI.
