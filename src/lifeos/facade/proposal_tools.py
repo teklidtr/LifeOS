@@ -116,7 +116,6 @@ STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR = ToolDescriptor(
 
 GENERATOR_ID = "lifeos.facade.external_agent"
 GENERATOR_VERSION = "1"
-# REQUEST_SCHEMA_VERSION versions the external-agent supplied content request contract.
 REQUEST_SCHEMA_VERSION = "4"
 
 
@@ -138,18 +137,13 @@ class CreateWikiProposalRequest:
             raise ValueError("title cannot be empty or whitespace-only")
         if self.title != self.title.strip():
             raise ValueError("title cannot have surrounding whitespace")
-
         if not isinstance(self.body, str):
             raise TypeError("body must be a string")
         if not self.body or self.body.isspace():
             raise ValueError("body cannot be empty or whitespace-only")
         try:
             object.__setattr__(self, "tags", validate_proposed_tags(self.tags))
-            object.__setattr__(
-                self,
-                "tag_rationale",
-                validate_tag_rationale(self.tag_rationale),
-            )
+            object.__setattr__(self, "tag_rationale", validate_tag_rationale(self.tag_rationale))
             if (self.page_kind is None) != (self.slug is None):
                 raise WikiLayoutError("page_kind and slug must be supplied together")
             if self.page_kind is not None and self.slug is not None:
@@ -188,7 +182,6 @@ class UpdateWikiSectionProposalRequest:
             raise ValueError("heading must be one line")
         if self.heading.startswith("#"):
             raise ValueError("heading must not include Markdown # markers")
-
         if not isinstance(self.body, str):
             raise TypeError("body must be a string")
         if not self.body or self.body.isspace():
@@ -196,11 +189,7 @@ class UpdateWikiSectionProposalRequest:
         try:
             if self.tags is not None:
                 object.__setattr__(self, "tags", validate_proposed_tags(self.tags))
-            object.__setattr__(
-                self,
-                "tag_rationale",
-                validate_tag_rationale(self.tag_rationale),
-            )
+            object.__setattr__(self, "tag_rationale", validate_tag_rationale(self.tag_rationale))
         except TagValidationError as error:
             raise ValueError(str(error)) from error
         if self.tags is None and self.tag_rationale is not None:
@@ -247,21 +236,12 @@ class CompoundWikiProposalRequest:
             heading=self.update_heading,
             body=self.update_body,
         )
-        if (
-            self.create_target_path is not None
-            and self.create_target_path == self.update_target_path
-        ):
+        if self.create_target_path is not None and self.create_target_path == self.update_target_path:
             raise ValueError("create and update targets must be different")
         try:
+            object.__setattr__(self, "create_tags", validate_proposed_tags(self.create_tags))
             object.__setattr__(
-                self,
-                "create_tags",
-                validate_proposed_tags(self.create_tags),
-            )
-            object.__setattr__(
-                self,
-                "create_tag_rationale",
-                validate_tag_rationale(self.create_tag_rationale),
+                self, "create_tag_rationale", validate_tag_rationale(self.create_tag_rationale)
             )
         except TagValidationError as error:
             raise ValueError(str(error)) from error
@@ -568,34 +548,24 @@ def create_wiki_proposal(
     clock_fn: Callable[[], datetime] = _utc_now,
     random_suffix_fn: Callable[[], str] = _random_suffix,
 ) -> CreateWikiProposalResult:
-    # 1. Load and verify source
     verified = _load_verified_source(
         vault_root=vault_root,
         registry=registry,
         source_path=request.source_path,
     )
-
     target_path = _resolve_create_wiki_target(
         target_path=request.target_path,
         page_kind=request.page_kind,
         slug=request.slug,
     )
     ownership = _load_generated_ownership(vault_root=vault_root)
-    _check_create_target_ownership(
-        vault_root=vault_root,
-        target_path=target_path,
-        ownership=ownership,
-    )
-
-    # 2. Construct LifeOS-owned generator
+    _check_create_target_ownership(vault_root=vault_root, target_path=target_path, ownership=ownership)
     generator = ProvenanceGenerator(
         id=GENERATOR_ID,
         version=GENERATOR_VERSION,
         prompt_schema_version=REQUEST_SCHEMA_VERSION,
         model_id=None,
     )
-
-    # 3. Construct bounded proposal content from the external agent fields.
     content = WikiProposalContent(
         title=request.title,
         body=request.body,
@@ -603,20 +573,9 @@ def create_wiki_proposal(
         tags=request.tags,
         tag_rationale=request.tag_rationale,
     )
-
-    # 4. Call clock exactly once
     now = clock_fn()
-
-    # 5. Generate proposal ID
-    proposal_id = generate_proposal_id(
-        clock_fn=lambda: now,
-        random_suffix_fn=random_suffix_fn,
-    )
-
-    # 6. Derive canonical created_at
+    proposal_id = generate_proposal_id(clock_fn=lambda: now, random_suffix_fn=random_suffix_fn)
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # 7. Build wiki proposal
     try:
         documents = build_wiki_proposal(
             content=content,
@@ -627,12 +586,9 @@ def create_wiki_proposal(
         )
     except InvalidWikiTargetError as e:
         raise ToolValidationError("Invalid wiki target path") from e
-
-    # 8. Persist wiki proposal
-    proposals_root = vault_root / "proposals"
     try:
         persisted_path = persist_wiki_proposal(
-            proposals_root=proposals_root,
+            proposals_root=vault_root / "proposals",
             documents=documents,
         )
     except WikiTargetExistsError as e:
@@ -641,13 +597,9 @@ def create_wiki_proposal(
         raise ToolConflictError("Draft proposal already exists") from e
     except ProposalPublicationError as e:
         raise ToolExecutionError("Could not publish draft proposal") from e
-
-    # 9. Return vault-relative result
-    proposal_path = persisted_path.relative_to(vault_root).as_posix()
-
     return CreateWikiProposalResult(
         proposal_id=proposal_id,
-        proposal_path=proposal_path,
+        proposal_path=persisted_path.relative_to(vault_root).as_posix(),
         target_path=documents.target_path,
         status="draft",
     )
@@ -658,23 +610,19 @@ def update_wiki_section_proposal(
     vault_root: Path,
     registry: Registry,
     request: UpdateWikiSectionProposalRequest,
+    runtime_dir: Path | None = None,
     clock_fn: Callable[[], datetime] = _utc_now,
     random_suffix_fn: Callable[[], str] = _random_suffix,
 ) -> UpdateWikiSectionProposalResult:
     verified = _load_verified_source(
-        vault_root=vault_root,
-        registry=registry,
-        source_path=request.source_path,
+        vault_root=vault_root, registry=registry, source_path=request.source_path
     )
-
     try:
         target_path = validate_wiki_target_path(request.target_path)
     except (FileTrackingError, InvalidWikiTargetError) as e:
         raise ToolValidationError("Invalid wiki target path") from e
-
     ownership = _load_generated_ownership(vault_root=vault_root)
     ownership_entry = ownership.entries.get(target_path)
-
     try:
         target = read_vault_markdown(vault_root, target_path)
     except VaultAccessError as e:
@@ -688,7 +636,6 @@ def update_wiki_section_proposal(
         if e.code in {"invalid-path", "invalid-extension"}:
             raise ToolValidationError("Invalid wiki target path") from e
         raise ToolExecutionError("Could not read wiki target") from e
-
     ownership_entry = _classify_update_target_ownership(
         target_path=target_path,
         target_content=target.content_bytes,
@@ -696,14 +643,12 @@ def update_wiki_section_proposal(
     )
     if request.tags is not None and ownership_entry is None:
         raise ToolValidationError("Ingestion cannot change tags on a human-owned wiki target")
-    if (
-        ownership_entry is None
-        and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
-    ):
+    if ownership_entry is None and parse_markdown_note(
+        Path(target_path), content=target.content
+    ).managed_blocks:
         raise ToolValidationError(
             "Wiki update target contains managed blocks and cannot use a human patch"
         )
-
     generator = ProvenanceGenerator(
         id=GENERATOR_ID,
         version=GENERATOR_VERSION,
@@ -711,13 +656,9 @@ def update_wiki_section_proposal(
         model_id=None,
     )
     now = clock_fn()
-    proposal_id = generate_proposal_id(
-        clock_fn=lambda: now,
-        random_suffix_fn=random_suffix_fn,
-    )
+    proposal_id = generate_proposal_id(clock_fn=lambda: now, random_suffix_fn=random_suffix_fn)
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     target_hash = f"sha256:{hash_file_content(target.content_bytes)}"
-
     try:
         documents = build_wiki_section_update_proposal(
             source=verified.source,
@@ -739,18 +680,16 @@ def update_wiki_section_proposal(
         raise ToolValidationError("Invalid or ambiguous wiki section") from e
     except WikiSectionUnchangedError as e:
         raise ToolConflictError("Wiki section already has the proposed content") from e
-
     try:
         persisted_path = persist_wiki_section_update_proposal(
             proposals_root=vault_root / "proposals",
             documents=documents,
-            runtime_dir=registry.database_path.parent,
+            runtime_dir=runtime_dir,
         )
     except ProposalAlreadyExistsError as e:
         raise ToolConflictError("Draft proposal already exists") from e
     except ProposalPublicationError as e:
         raise ToolExecutionError("Could not publish draft proposal") from e
-
     return UpdateWikiSectionProposalResult(
         proposal_id=proposal_id,
         proposal_path=persisted_path.relative_to(vault_root).as_posix(),
@@ -765,15 +704,13 @@ def create_wiki_and_update_section_proposal(
     vault_root: Path,
     registry: Registry,
     request: CompoundWikiProposalRequest,
+    runtime_dir: Path | None = None,
     clock_fn: Callable[[], datetime] = _utc_now,
     random_suffix_fn: Callable[[], str] = _random_suffix,
 ) -> CompoundWikiProposalResult:
     verified = _load_verified_source(
-        vault_root=vault_root,
-        registry=registry,
-        source_path=request.source_path,
+        vault_root=vault_root, registry=registry, source_path=request.source_path
     )
-
     create_target_path = _resolve_create_wiki_target(
         target_path=request.create_target_path,
         page_kind=request.create_page_kind,
@@ -785,15 +722,11 @@ def create_wiki_and_update_section_proposal(
         raise ToolValidationError("Invalid wiki target path") from e
     if create_target_path == update_target_path:
         raise ToolValidationError("Create and update targets must be different")
-
     ownership = _load_generated_ownership(vault_root=vault_root)
     _check_create_target_ownership(
-        vault_root=vault_root,
-        target_path=create_target_path,
-        ownership=ownership,
+        vault_root=vault_root, target_path=create_target_path, ownership=ownership
     )
     update_ownership_entry = ownership.entries.get(update_target_path)
-
     try:
         update_target = read_vault_markdown(vault_root, update_target_path)
     except VaultAccessError as e:
@@ -812,16 +745,12 @@ def create_wiki_and_update_section_proposal(
         target_content=update_target.content_bytes,
         ownership=ownership,
     )
-    if (
-        update_ownership_entry is None
-        and parse_markdown_note(
-            Path(update_target_path), content=update_target.content
-        ).managed_blocks
-    ):
+    if update_ownership_entry is None and parse_markdown_note(
+        Path(update_target_path), content=update_target.content
+    ).managed_blocks:
         raise ToolValidationError(
             "Wiki update target contains managed blocks and cannot use a human patch"
         )
-
     generator = ProvenanceGenerator(
         id=GENERATOR_ID,
         version=GENERATOR_VERSION,
@@ -836,13 +765,9 @@ def create_wiki_and_update_section_proposal(
         tag_rationale=request.create_tag_rationale,
     )
     now = clock_fn()
-    proposal_id = generate_proposal_id(
-        clock_fn=lambda: now,
-        random_suffix_fn=random_suffix_fn,
-    )
+    proposal_id = generate_proposal_id(clock_fn=lambda: now, random_suffix_fn=random_suffix_fn)
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     update_target_hash = f"sha256:{hash_file_content(update_target.content_bytes)}"
-
     try:
         documents = build_compound_wiki_proposal(
             content=content,
@@ -865,12 +790,11 @@ def create_wiki_and_update_section_proposal(
         raise ToolValidationError("Invalid wiki target path") from e
     except WikiSectionUnchangedError as e:
         raise ToolConflictError("Wiki section already has the proposed content") from e
-
     try:
         persisted_path = persist_compound_wiki_proposal(
             proposals_root=vault_root / "proposals",
             documents=documents,
-            runtime_dir=registry.database_path.parent,
+            runtime_dir=runtime_dir,
         )
     except WikiTargetExistsError as e:
         raise ToolConflictError("Wiki create target already exists") from e
@@ -878,7 +802,6 @@ def create_wiki_and_update_section_proposal(
         raise ToolConflictError("Draft proposal already exists") from e
     except ProposalPublicationError as e:
         raise ToolExecutionError("Could not publish draft proposal") from e
-
     return CompoundWikiProposalResult(
         proposal_id=proposal_id,
         proposal_path=persisted_path.relative_to(vault_root).as_posix(),
@@ -894,14 +817,12 @@ def evolve_wiki_proposal(
     vault_root: Path,
     registry: Registry,
     request: EvolveWikiProposalRequest,
+    runtime_dir: Path | None = None,
     clock_fn: Callable[[], datetime] = _utc_now,
     random_suffix_fn: Callable[[], str] = _random_suffix,
 ) -> EvolveWikiProposalResult:
-    """Create one reviewed draft for a bounded set of agent-selected wiki changes."""
     verified = _load_verified_source(
-        vault_root=vault_root,
-        registry=registry,
-        source_path=request.source_path,
+        vault_root=vault_root, registry=registry, source_path=request.source_path
     )
     ownership = _load_generated_ownership(vault_root=vault_root)
     generator = ProvenanceGenerator(
@@ -910,20 +831,15 @@ def evolve_wiki_proposal(
         prompt_schema_version=REQUEST_SCHEMA_VERSION,
         model_id=None,
     )
-
     prepared: list[PreparedWikiCreateMutation | PreparedWikiSectionUpdateMutation] = []
     for create_item in request.creates:
         target_path = _resolve_create_wiki_target(
-            target_path=create_item.target_path,
-            page_kind=None,
-            slug=None,
+            target_path=create_item.target_path, page_kind=None, slug=None
         )
         if not target_path.endswith(".md"):
             raise ToolValidationError("Wiki create target must be a Markdown file")
         _check_create_target_ownership(
-            vault_root=vault_root,
-            target_path=target_path,
-            ownership=ownership,
+            vault_root=vault_root, target_path=target_path, ownership=ownership
         )
         prepared.append(
             PreparedWikiCreateMutation(
@@ -938,7 +854,6 @@ def evolve_wiki_proposal(
                 rationale=create_item.rationale,
             )
         )
-
     for update_item in request.updates:
         try:
             target_path = validate_wiki_target_path(update_item.target_path)
@@ -967,10 +882,9 @@ def evolve_wiki_proposal(
         )
         if update_item.tags is not None and ownership_entry is None:
             raise ToolValidationError("Ingestion cannot change tags on a human-owned wiki target")
-        if (
-            ownership_entry is None
-            and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
-        ):
+        if ownership_entry is None and parse_markdown_note(
+            Path(target_path), content=target.content
+        ).managed_blocks:
             raise ToolValidationError(
                 "Wiki update target contains managed blocks and cannot use a human patch"
             )
@@ -988,12 +902,8 @@ def evolve_wiki_proposal(
                 proposed_tags=update_item.tags,
             )
         )
-
     now = clock_fn()
-    proposal_id = generate_proposal_id(
-        clock_fn=lambda: now,
-        random_suffix_fn=random_suffix_fn,
-    )
+    proposal_id = generate_proposal_id(clock_fn=lambda: now, random_suffix_fn=random_suffix_fn)
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         documents = build_compounding_wiki_proposal(
@@ -1007,12 +917,11 @@ def evolve_wiki_proposal(
         raise ToolValidationError(str(error)) from error
     except WikiSectionUnchangedError as error:
         raise ToolConflictError("Wiki section already has the proposed content") from error
-
     try:
         persisted_path = persist_compounding_wiki_proposal(
             proposals_root=vault_root / "proposals",
             documents=documents,
-            runtime_dir=registry.database_path.parent,
+            runtime_dir=runtime_dir,
         )
     except WikiTargetExistsError as error:
         raise ToolConflictError("A proposed wiki create target already exists") from error
@@ -1020,7 +929,6 @@ def evolve_wiki_proposal(
         raise ToolConflictError("Draft proposal already exists") from error
     except ProposalPublicationError as error:
         raise ToolExecutionError("Could not publish draft proposal") from error
-
     return EvolveWikiProposalResult(
         proposal_id=proposal_id,
         proposal_path=persisted_path.relative_to(vault_root).as_posix(),
@@ -1035,10 +943,10 @@ def evolve_study_learning_proposal(
     vault_root: Path,
     registry: Registry,
     request: EvolveStudyLearningProposalRequest,
+    runtime_dir: Path | None = None,
     clock_fn: Callable[[], datetime] = _utc_now,
     random_suffix_fn: Callable[[], str] = _random_suffix,
 ) -> EvolveStudyLearningProposalResult:
-    """Create one reviewed study draft spanning wiki knowledge and selected flashcards."""
     verified = _load_verified_source(
         vault_root=vault_root, registry=registry, source_path=request.source_path
     )
@@ -1046,7 +954,6 @@ def evolve_study_learning_proposal(
         raise ToolValidationError(
             "Context-aware flashcard evolution requires a registered source under study/"
         )
-
     ownership = _load_generated_ownership(vault_root=vault_root)
     generator = ProvenanceGenerator(
         id=GENERATOR_ID,
@@ -1055,7 +962,6 @@ def evolve_study_learning_proposal(
         model_id=None,
     )
     prepared_wiki: list[PreparedWikiCreateMutation | PreparedWikiSectionUpdateMutation] = []
-
     for create_item in request.wiki_creates:
         target_path = _resolve_create_wiki_target(
             target_path=create_item.target_path, page_kind=None, slug=None
@@ -1076,7 +982,6 @@ def evolve_study_learning_proposal(
                 rationale=create_item.rationale,
             )
         )
-
     for update_item in request.wiki_updates:
         try:
             target_path = validate_wiki_target_path(update_item.target_path)
@@ -1102,10 +1007,9 @@ def evolve_study_learning_proposal(
             raise ToolValidationError(
                 "Study ingestion cannot change tags on a human-owned wiki target"
             )
-        if (
-            ownership_entry is None
-            and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
-        ):
+        if ownership_entry is None and parse_markdown_note(
+            Path(target_path), content=target.content
+        ).managed_blocks:
             raise ToolValidationError(
                 "Wiki update target contains managed blocks and cannot use a human patch"
             )
@@ -1123,7 +1027,6 @@ def evolve_study_learning_proposal(
                 proposed_tags=update_item.tags,
             )
         )
-
     prepared_cards: list[PreparedFlashcardCreateMutation] = []
     for card_item in request.flashcards:
         try:
@@ -1148,7 +1051,6 @@ def evolve_study_learning_proposal(
                 estimated_seconds=card_item.estimated_seconds,
             )
         )
-
     now = clock_fn()
     proposal_id = generate_proposal_id(clock_fn=lambda: now, random_suffix_fn=random_suffix_fn)
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1165,12 +1067,11 @@ def evolve_study_learning_proposal(
         raise ToolValidationError(str(error)) from error
     except WikiSectionUnchangedError as error:
         raise ToolConflictError("Wiki section already has the proposed content") from error
-
     try:
         persisted_path = persist_study_learning_proposal(
             proposals_root=vault_root / "proposals",
             documents=documents,
-            runtime_dir=registry.database_path.parent,
+            runtime_dir=runtime_dir,
         )
     except WikiTargetExistsError as error:
         raise ToolConflictError("A proposed study learning create target already exists") from error
@@ -1178,7 +1079,6 @@ def evolve_study_learning_proposal(
         raise ToolConflictError("Draft proposal already exists") from error
     except ProposalPublicationError as error:
         raise ToolExecutionError("Could not publish study learning draft") from error
-
     return EvolveStudyLearningProposalResult(
         proposal_id=proposal_id,
         proposal_path=persisted_path.relative_to(vault_root).as_posix(),
