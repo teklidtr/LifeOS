@@ -10,11 +10,18 @@ from pathlib import Path
 
 import yaml
 
-__all__ = ["ConfigError", "FeatureFlags", "LifeOSConfig", "load_config"]
+__all__ = [
+    "ConfigError",
+    "FeatureFlags",
+    "LifeOSConfig",
+    "load_config",
+    "runtime_overlaps_reserved_canonical",
+]
 
 _ALLOWED_ROOT_KEYS = frozenset({"vault_root", "runtime_dir", "features"})
 _ALLOWED_FEATURE_KEYS = frozenset({"graphify", "exports"})
 _DEFAULT_RUNTIME_DIR = ".lifeos"
+_RESERVED_CANONICAL_RUNTIME_ROOTS = frozenset({"proposals", "system"})
 
 
 class ConfigError(ValueError):
@@ -31,7 +38,7 @@ class FeatureFlags:
 
 @dataclass(frozen=True, slots=True)
 class LifeOSConfig:
-    """Resolved paths and feature flags used by deterministic LifeOS modules."""
+    """Resolved vault path, lexical runtime path, and deterministic feature flags."""
 
     vault_root: Path
     runtime_dir: Path
@@ -71,17 +78,32 @@ def load_config(config_path: str | Path) -> LifeOSConfig:
 
     runtime_value = data.get("runtime_dir", _DEFAULT_RUNTIME_DIR)
     runtime_path = _parse_path(runtime_value, field_name="runtime_dir")
-    runtime_candidate = _lexical_absolute_path(runtime_path, base=vault_root)
-    _reject_runtime_symlink_components(runtime_candidate)
-    runtime_dir = _normalize_path(
-        runtime_candidate,
-        base=vault_root,
-        field_name="runtime_dir",
-    )
+    runtime_dir = _lexical_absolute_path(runtime_path, base=vault_root)
+    # Runtime exclusion policy must retain the configured lexical vault address. Resolving this
+    # path would let a component swap redirect configuration outside the vault and erase the
+    # in-vault prefix that readers must continue to exclude. Runtime I/O performs its own
+    # descriptor/no-follow validation when the directory is actually opened.
+    _reject_runtime_symlink_components(runtime_dir)
     _validate_runtime_dir(runtime_dir)
+    if runtime_overlaps_reserved_canonical(vault_root, runtime_dir):
+        raise ConfigError(
+            "Configuration field 'runtime_dir' overlaps a reserved canonical subtree "
+            "('proposals' or 'system')."
+        )
 
     features = _parse_features(data.get("features", {}))
     return LifeOSConfig(vault_root=vault_root, runtime_dir=runtime_dir, features=features)
+
+
+def runtime_overlaps_reserved_canonical(vault_root: Path, runtime_dir: Path) -> bool:
+    """Return whether lexical runtime placement falls under reserved canonical authority."""
+    root = _lexical_absolute_path(vault_root, base=Path.cwd())
+    candidate = _lexical_absolute_path(runtime_dir, base=root)
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return False
+    return bool(relative.parts) and relative.parts[0] in _RESERVED_CANONICAL_RUNTIME_ROOTS
 
 
 def _read_yaml(source_path: Path) -> object:
@@ -114,7 +136,7 @@ def _lexical_absolute_path(path: Path, *, base: Path) -> Path:
 
 
 def _reject_runtime_symlink_components(runtime_dir: Path) -> None:
-    """Reject existing symlink components before runtime resolution loses lexical topology."""
+    """Reject existing symlink components without resolving away lexical runtime topology."""
     current = Path(runtime_dir.anchor)
     parts = runtime_dir.parts[1:] if runtime_dir.anchor else runtime_dir.parts
     for part in parts:
@@ -176,17 +198,10 @@ def _parse_bool(data: Mapping[object, object], key: str) -> bool:
 
 
 def _reject_unknown_keys(
-    data: Mapping[object, object],
-    allowed: frozenset[str],
-    *,
-    location: str,
+    data: Mapping[object, object], allowed: frozenset[str], *, location: str
 ) -> None:
-    unknown = sorted(
-        (key for key in data if not isinstance(key, str) or key not in allowed),
-        key=repr,
-    )
-    if not unknown:
-        return
-
-    keys = ", ".join(repr(key) for key in unknown)
-    raise ConfigError(f"Unknown configuration key(s) in {location}: {keys}.")
+    unknown = sorted(str(key) for key in data if key not in allowed)
+    if unknown:
+        raise ConfigError(
+            f"Unknown configuration key(s) in {location}: {', '.join(unknown)}."
+        )
