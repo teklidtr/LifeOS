@@ -283,7 +283,7 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
     )
     blocked = (
         any(finding.state == "blocked" for finding in findings)
-        or vault_status.overall == "blocked"
+        or vault_status.overall_state == "blocked"
     )
     return DoctorResult(
         lifeos_version=__version__,
@@ -325,7 +325,7 @@ def format_doctor_text(result: DoctorResult) -> str:
     lines.extend(
         [
             "",
-            f"Vault status: {result.vault_status.overall}",
+            f"Vault status: {result.vault_status.overall_state}",
             f"Ready: {'yes' if result.ready else 'no'}",
         ]
     )
