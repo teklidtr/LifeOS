@@ -22,6 +22,12 @@ _ALLOWED_ROOT_KEYS = frozenset({"vault_root", "runtime_dir", "features"})
 _ALLOWED_FEATURE_KEYS = frozenset({"graphify", "exports"})
 _DEFAULT_RUNTIME_DIR = ".lifeos"
 _RESERVED_CANONICAL_RUNTIME_ROOTS = frozenset({"proposals", "system"})
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
 
 
 class ConfigError(ValueError):
@@ -95,15 +101,48 @@ def load_config(config_path: str | Path) -> LifeOSConfig:
     return LifeOSConfig(vault_root=vault_root, runtime_dir=runtime_dir, features=features)
 
 
+def _filesystem_selected_component(root: Path, requested: str) -> str | None:
+    """Return the directory-entry spelling selected by the filesystem for one child."""
+    root_fd: int | None = None
+    child_fd: int | None = None
+    try:
+        root_fd = os.open(root, _DIRECTORY_FLAGS)
+        try:
+            child_fd = os.open(requested, _DIRECTORY_FLAGS, dir_fd=root_fd)
+        except OSError:
+            return None
+        child = os.fstat(child_fd)
+        with os.scandir(root_fd) as entries:
+            for entry in entries:
+                try:
+                    observed = os.stat(entry.name, dir_fd=root_fd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if (observed.st_dev, observed.st_ino) == (child.st_dev, child.st_ino):
+                    return entry.name
+        return requested
+    except OSError as exc:
+        raise ConfigError("Could not inspect runtime directory authority") from exc
+    finally:
+        if child_fd is not None:
+            os.close(child_fd)
+        if root_fd is not None:
+            os.close(root_fd)
+
+
 def runtime_overlaps_reserved_canonical(vault_root: Path, runtime_dir: Path) -> bool:
-    """Return whether lexical runtime placement falls under reserved canonical authority."""
+    """Return whether runtime placement falls under reserved canonical authority."""
     root = _lexical_absolute_path(vault_root, base=Path.cwd())
     candidate = _lexical_absolute_path(runtime_dir, base=root)
     try:
         relative = candidate.relative_to(root)
     except ValueError:
         return False
-    return bool(relative.parts) and relative.parts[0] in _RESERVED_CANONICAL_RUNTIME_ROOTS
+    if not relative.parts:
+        return False
+    lexical_root = relative.parts[0]
+    selected_root = _filesystem_selected_component(root, lexical_root) or lexical_root
+    return selected_root in _RESERVED_CANONICAL_RUNTIME_ROOTS
 
 
 def _read_yaml(source_path: Path) -> object:
