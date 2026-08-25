@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import stat
 from collections.abc import Callable
 from pathlib import Path
 
@@ -59,11 +58,7 @@ def _existing_runtime_spelling(root: Path, relative: Path) -> str | None:
         for requested in relative.parts:
             try:
                 child_fd = os.open(requested, _DIRECTORY_FLAGS, dir_fd=current_fd)
-            except FileNotFoundError:
-                return None
-            except OSError as exc:
-                if exc.errno in (getattr(os, "ELOOP", 40),):
-                    return None
+            except OSError:
                 return None
             actual_parts.append(_opened_component_spelling(current_fd, child_fd, requested))
             if current_fd != root_fd:
