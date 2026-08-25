@@ -84,6 +84,8 @@ from lifeos.mcp.models import (
     RuntimeActivityMCPResult,
 )
 from lifeos.registry import Registry
+from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime import ActivityStore
 from lifeos.wiki.layout import WikiPageKind
 
@@ -303,44 +305,100 @@ def create_mcp_server(
 ) -> FastMCP:
     activity = ActivityStore(runtime_dir or (vault_root / ".lifeos"))
 
+    def _external_registry_identity_allow_path() -> Callable[[str], bool]:
+        try:
+            policy = load_retrieval_policy(vault_root)
+        except RetrievalError as error:
+            raise ToolExecutionError("Retrieval policy is invalid") from error
+        scope = RetrievalScope()
+
+        def allowed(path: str) -> bool:
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
+            try:
+                return scope_decision(
+                    path,
+                    scope=scope,
+                    policy=policy,
+                    mode="external",
+                ).allowed
+            except RetrievalError as error:
+                raise ToolExecutionError("Retrieval policy is invalid") from error
+
+        return allowed
+
+    def _visible_registry_paths(
+        paths: tuple[str, ...],
+        *,
+        allow_path: Callable[[str], bool],
+    ) -> list[str]:
+        return [path for path in paths if allow_path(path)]
+
+    def _visible_registry_renames(
+        renames: tuple[tuple[str, str], ...],
+        *,
+        allow_path: Callable[[str], bool],
+    ) -> list[tuple[str, str]]:
+        return [
+            (old_path, new_path)
+            for old_path, new_path in renames
+            if allow_path(old_path) and allow_path(new_path)
+        ]
+
     def _refresh_for_ingestion(source_path: str) -> None:
-        result = refresh_registry(vault_root=vault_root, registry=registry)
-        relocated_paths = [path for pair in result.renamed for path in pair]
+        allow_identity = _external_registry_identity_allow_path()
+        result = refresh_registry(
+            vault_root=vault_root,
+            registry=registry,
+            identity_allow_path=allow_identity,
+        )
+        visible_renamed = _visible_registry_renames(result.renamed, allow_path=allow_identity)
+        relocated_paths = [path for pair in visible_renamed for path in pair]
         activity.append(
             tool="ingestion_registry_preflight",
             source_paths=[source_path],
             changed_paths=[
-                *result.new,
-                *result.modified,
-                *result.deleted,
+                *_visible_registry_paths(result.new, allow_path=allow_identity),
+                *_visible_registry_paths(result.modified, allow_path=allow_identity),
+                *_visible_registry_paths(result.deleted, allow_path=allow_identity),
                 *relocated_paths,
             ],
         )
 
     def registry_refresh_tool() -> RegistryRefreshMCPResult:
         def op() -> RegistryRefreshMCPResult:
-            result = refresh_registry(vault_root=vault_root, registry=registry)
-            relocated_paths = [path for pair in result.renamed for path in pair]
+            allow_identity = _external_registry_identity_allow_path()
+            result = refresh_registry(
+                vault_root=vault_root,
+                registry=registry,
+                identity_allow_path=allow_identity,
+            )
+            visible_new = _visible_registry_paths(result.new, allow_path=allow_identity)
+            visible_modified = _visible_registry_paths(result.modified, allow_path=allow_identity)
+            visible_unchanged = _visible_registry_paths(result.unchanged, allow_path=allow_identity)
+            visible_deleted = _visible_registry_paths(result.deleted, allow_path=allow_identity)
+            visible_renamed = _visible_registry_renames(result.renamed, allow_path=allow_identity)
+            relocated_paths = [path for pair in visible_renamed for path in pair]
             activity.append(
                 tool="registry_refresh",
                 changed_paths=[
-                    *result.new,
-                    *result.modified,
-                    *result.deleted,
+                    *visible_new,
+                    *visible_modified,
+                    *visible_deleted,
                     *relocated_paths,
                 ],
             )
             payload: RegistryRefreshMCPResult = {
-                "new": list(result.new),
-                "modified": list(result.modified),
-                "unchanged": list(result.unchanged),
-                "deleted": list(result.deleted),
+                "new": visible_new,
+                "modified": visible_modified,
+                "unchanged": visible_unchanged,
+                "deleted": visible_deleted,
                 "proposals_indexed": result.proposals_indexed,
             }
-            if result.renamed:
+            if visible_renamed:
                 payload["renamed"] = [
                     {"from_path": old_path, "to_path": new_path}
-                    for old_path, new_path in result.renamed
+                    for old_path, new_path in visible_renamed
                 ]
             return payload
 
