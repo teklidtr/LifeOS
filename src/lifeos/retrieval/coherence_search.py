@@ -6,11 +6,16 @@ import hashlib
 from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
+from pathlib import Path
 
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.retrieval.contracts import (
     CancellationToken,
     EmbeddingProvider,
+    RetrievalError,
+    RetrievalPolicy,
     RetrievalRequest,
     RerankingProvider,
     scope_decision,
@@ -38,6 +43,34 @@ class StableRetrievalEvidence(RetrievalEvidence):
 
 class HybridRetriever(_BaseHybridRetriever):
     """Hybrid retrieval with conservatively verified relocation-safe identity."""
+
+    def __init__(
+        self,
+        *,
+        vault_root: Path,
+        runtime_dir: Path,
+        policy: RetrievalPolicy | None = None,
+    ) -> None:
+        super().__init__(vault_root=vault_root, runtime_dir=runtime_dir, policy=policy)
+        # Do not depend on package import-time monkeypatch ordering. The coherent retriever owns a
+        # coherent index service explicitly, so health checks and synchronization discover sources
+        # through the same configured-runtime exclusion used by rebuilds.
+        from lifeos.retrieval.coherence_service import (
+            RetrievalIndexService as CoherentRetrievalIndexService,
+        )
+
+        self.index_service = CoherentRetrievalIndexService(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            policy=self.policy,
+        )
+        try:
+            self._runtime_prefix = runtime_exclusion_prefix(
+                vault_root,
+                runtime_dir=runtime_dir,
+            )
+        except CoherenceError as exc:
+            raise RetrievalError("invalid_runtime_scope", str(exc)) from exc
 
     def search(
         self,
@@ -88,6 +121,11 @@ class HybridRetriever(_BaseHybridRetriever):
         document: IndexedDocument,
         request: RetrievalRequest,
     ) -> bool:
+        # Build-time filtering is not sufficient for an existing disposable index created by an
+        # older LifeOS version. A stale index remains text-queryable by design, so suppress any
+        # configured-runtime row again at the query boundary before its chunks can become evidence.
+        if self._runtime_prefix is not None and chunk.path.startswith(self._runtime_prefix):
+            return False
         allowed = super()._in_scope(chunk, document, request)
         captured = _IDENTITY_CAPTURE.get()
         if allowed and captured is not None:

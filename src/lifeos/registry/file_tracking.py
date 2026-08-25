@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import stat
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -25,6 +27,19 @@ __all__ = [
     "register_scan",
     "resolve_registered_stable_id",
 ]
+
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
+_FILE_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+)
 
 
 class FileTrackingError(RuntimeError):
@@ -99,40 +114,97 @@ def hash_file_content(content: bytes) -> str:
 
 
 def _hash_file(path: Path, *, capture: _HashCapture | None = None) -> str:
-    """Stream-hash one stable file observation and optionally retain those exact bytes."""
+    """Stream-hash one stable no-follow file observation and retain those exact bytes."""
     try:
-        stat_before = path.stat()
+        path_stat_before = path.stat(follow_symlinks=False)
     except OSError as exc:
         raise FileTrackingError(f"Could not read metadata for {path}: {exc}") from exc
 
-    hasher = hashlib.sha256()
-    try:
-        with open(path, "rb") as f:
-            while True:
-                chunk = f.read(65536)
-                if not chunk:
-                    break
-                hasher.update(chunk)
-                if capture is not None:
-                    capture.chunks.append(chunk)
-    except OSError as exc:
-        raise FileTrackingError(f"Could not read {path}: {exc}") from exc
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    parts = absolute.parts
+    if not parts or len(parts) < 2:
+        raise FileTrackingError(f"Could not safely hash registry path {path}.")
 
     try:
-        stat_after = path.stat()
+        root_fd = os.open(absolute.anchor or os.sep, _DIRECTORY_FLAGS)
     except OSError as exc:
-        raise FileTrackingError(f"Could not read metadata for {path}: {exc}") from exc
+        raise FileTrackingError(f"Could not safely open registry path root for {path}: {exc}") from exc
 
-    if (
-        stat_before.st_mtime_ns != stat_after.st_mtime_ns
-        or stat_before.st_size != stat_after.st_size
-    ):
-        raise FileTrackingError(f"File {path} changed during hashing.")
+    current_fd = root_fd
+    file_fd: int | None = None
+    try:
+        for part in parts[1:-1]:
+            try:
+                next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            except OSError as exc:
+                raise FileTrackingError(
+                    f"Could not safely traverse registry path {path}: {exc}"
+                ) from exc
+            if current_fd != root_fd:
+                os.close(current_fd)
+            current_fd = next_fd
 
-    if capture is not None:
-        capture.size_bytes = stat_after.st_size
-        capture.mtime_ns = stat_after.st_mtime_ns
-    return hasher.hexdigest()
+        try:
+            file_fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=current_fd)
+            stat_before = os.fstat(file_fd)
+        except OSError as exc:
+            raise FileTrackingError(f"Could not safely open registry file {path}: {exc}") from exc
+        if not stat.S_ISREG(stat_before.st_mode):
+            raise FileTrackingError(f"Registry path is not a regular file: {path}")
+
+        hasher = hashlib.sha256()
+        total_bytes = 0
+        try:
+            stream = open(file_fd, "rb")
+            stream_fd = file_fd
+            file_fd = None
+            with stream as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    hasher.update(chunk)
+                    if capture is not None:
+                        capture.chunks.append(chunk)
+                stat_after = os.fstat(stream_fd)
+        except OSError as exc:
+            raise FileTrackingError(f"Could not read {path}: {exc}") from exc
+
+        try:
+            path_stat_after = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise FileTrackingError(f"Could not read metadata for {path}: {exc}") from exc
+
+        path_replaced = False
+        after_dev = getattr(path_stat_after, "st_dev", None)
+        after_ino = getattr(path_stat_after, "st_ino", None)
+        if after_dev is not None and after_ino is not None:
+            path_replaced = (after_dev, after_ino) != (stat_after.st_dev, stat_after.st_ino)
+
+        if (
+            stat_before.st_dev != stat_after.st_dev
+            or stat_before.st_ino != stat_after.st_ino
+            or stat_before.st_mtime_ns != stat_after.st_mtime_ns
+            or stat_before.st_ctime_ns != stat_after.st_ctime_ns
+            or stat_before.st_size != stat_after.st_size
+            or total_bytes != stat_after.st_size
+            or path_stat_before.st_mtime_ns != path_stat_after.st_mtime_ns
+            or path_stat_before.st_size != path_stat_after.st_size
+            or path_replaced
+        ):
+            raise FileTrackingError(f"File {path} changed during hashing.")
+
+        if capture is not None:
+            capture.size_bytes = stat_after.st_size
+            capture.mtime_ns = stat_after.st_mtime_ns
+        return hasher.hexdigest()
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        if current_fd != root_fd:
+            os.close(current_fd)
+        os.close(root_fd)
 
 
 def _participates_in_stable_note_identity(entry: VaultFile) -> bool:

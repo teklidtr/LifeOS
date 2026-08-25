@@ -3,7 +3,8 @@
 This module layers the LIFEOS-1643 coherence semantics over the historical file-tracking
 helpers. It deliberately keeps the existing ``_hash_file`` seam for unscoped local scans so
 streaming, fault-injection, and change-during-read behavior remain covered by the older registry
-tests. Externally scoped reads use a vault-root descriptor and no-follow semantics instead.
+tests. Both local and externally scoped observations now use no-follow descriptor-pinned reads;
+the scoped path additionally supports presence-only observations for denied content.
 """
 
 from __future__ import annotations
@@ -134,6 +135,7 @@ def _safe_scoped_hash_file(
             before.st_dev != after.st_dev
             or before.st_ino != after.st_ino
             or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns
             or before.st_size != after.st_size
             or total_bytes != after.st_size
         ):
