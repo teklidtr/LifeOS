@@ -220,7 +220,7 @@ def _with_stable_id(item: RetrievalEvidence, stable_id: str | None) -> StableRet
         context_truncated=item.context_truncated,
         source_hash=item.source_hash,
         chunk_hash=item.chunk_hash,
-        note_type=document.note_type if False else item.note_type,
+        note_type=item.note_type,
         source=item.source,
         note_date=item.note_date,
         tags=item.tags,
