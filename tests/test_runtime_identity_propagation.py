@@ -37,6 +37,48 @@ def test_mcp_apply_threads_custom_runtime_into_identity_preflight(tmp_path: Path
     }
 
 
+def test_mcp_update_proposal_threads_configured_runtime_to_publication(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime_dir = vault / "runtime" / "node-a"
+    authorizer = MagicMock()
+    registry = MagicMock()
+    refresh_result = MagicMock(
+        new=(),
+        modified=(),
+        unchanged=(),
+        deleted=(),
+        renamed=(),
+    )
+
+    with (
+        patch("lifeos.mcp.server.refresh_registry", return_value=refresh_result),
+        patch("lifeos.mcp.server.update_wiki_section_proposal") as proposal_tool,
+    ):
+        proposal_tool.return_value = MagicMock(
+            proposal_id="prop-runtime",
+            proposal_path="proposals/prop-runtime/proposal.md",
+            target_path="wiki/target.md",
+            heading="Target",
+        )
+        server = create_mcp_server(
+            vault_root=vault,
+            registry=registry,
+            authorizer=authorizer,
+            runtime_dir=runtime_dir,
+        )
+        server._tool_manager.get_tool("ingestion_update_wiki_section_proposal").fn(
+            source_path="inbox/source.md",
+            target_path="wiki/target.md",
+            heading="Target",
+            body="Replacement",
+        )
+
+    assert proposal_tool.call_args.kwargs["runtime_dir"] == runtime_dir
+
+
 def test_desktop_apply_threads_custom_runtime_into_identity_preflight(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     runtime_dir = vault / "runtime" / "node-a"
