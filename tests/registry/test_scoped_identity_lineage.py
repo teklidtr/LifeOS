@@ -29,7 +29,9 @@ def test_scoped_refresh_preserves_hidden_identity_for_later_trusted_relocation(
         ).fetchone()
     assert original is not None
 
-    deny_private = lambda path: not path.startswith("private/")
+    def deny_private(path: str) -> bool:
+        return not path.startswith("private/")
+
     register_scan(
         registry,
         vault,
