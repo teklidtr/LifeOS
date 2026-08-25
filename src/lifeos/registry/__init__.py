@@ -1,5 +1,6 @@
 """Public SQLite registry interface for deterministic LifeOS state."""
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -97,8 +98,12 @@ def register_scan(
     predicate is supplied, denied paths remain presence-only registry rows: their bytes are not
     opened, and any content-derived metadata left by an earlier broader refresh is scrubbed.
     """
-    root = Path(vault_root).resolve(strict=False)
-    runtime_dir = registry.database_path.parent.resolve(strict=False)
+    # Config loading and Registry construction already normalize their paths. Use a lexical
+    # absolute conversion here instead of Path.resolve(): the latter performs filesystem stat
+    # calls and would consume the historical change-during-hash observation seam before
+    # `_hash_file` gets to inspect the canonical file itself.
+    root = Path(os.path.abspath(os.fspath(vault_root)))
+    runtime_dir = registry.database_path.parent
     try:
         relative_runtime = runtime_dir.relative_to(root)
     except ValueError:
