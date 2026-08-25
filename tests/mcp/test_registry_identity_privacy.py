@@ -26,14 +26,22 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
     protected.write_text(_note("shared-id", "Hidden"), encoding="utf-8")
 
     real_parser = coherent_tracking.parse_markdown_note
+    real_hash = coherent_tracking._base._hash_file
     parsed_paths: list[Path] = []
+    hashed_paths: list[Path] = []
 
     def recording_parser(note_path: Path, *, content: str | None = None):
         parsed_paths.append(note_path)
         assert "private" not in note_path.parts
         return real_parser(note_path, content=content)
 
+    def recording_hash(path: Path, *args, **kwargs):
+        hashed_paths.append(path)
+        assert "private" not in path.parts
+        return real_hash(path, *args, **kwargs)
+
     monkeypatch.setattr(coherent_tracking, "parse_markdown_note", recording_parser)
+    monkeypatch.setattr(coherent_tracking._base, "_hash_file", recording_hash)
     runtime = vault / ".lifeos"
     registry = Registry(runtime / "registry.db")
     server = create_mcp_server(
@@ -48,15 +56,18 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
     assert payload["new"] == ["wiki/public.md"]
     assert "private/hidden.md" not in payload["new"]
     assert parsed_paths == [public]
+    assert hashed_paths == [public]
     with registry.connect_read_only() as connection:
         rows = {
-            row["vault_path"]: row["stable_id"]
+            row["vault_path"]: (row["stable_id"], row["content_hash"])
             for row in connection.execute(
-                "SELECT vault_path, stable_id FROM files WHERE is_deleted = 0 ORDER BY vault_path"
+                "SELECT vault_path, stable_id, content_hash "
+                "FROM files WHERE is_deleted = 0 ORDER BY vault_path"
             ).fetchall()
         }
-    assert rows["wiki/public.md"] == "shared-id"
-    assert rows["private/hidden.md"] is None
+    assert rows["wiki/public.md"][0] == "shared-id"
+    assert rows["wiki/public.md"][1] is not None
+    assert rows["private/hidden.md"] == (None, None)
 
     activity = server._tool_manager.get_tool("runtime_activity").fn(limit=10)
     refresh = [record for record in activity["records"] if record["tool"] == "registry_refresh"][-1]
