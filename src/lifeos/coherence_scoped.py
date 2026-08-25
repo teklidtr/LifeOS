@@ -20,6 +20,7 @@ from lifeos.vault import VaultAccessError, read_vault_markdown
 
 PathPredicate = Callable[[str], bool]
 _IDENTITY_IGNORED_ROOTS = frozenset({"proposals"})
+_IDENTITY_IGNORED_PATHS = frozenset({"AGENTS.md"})
 
 
 def runtime_exclusion_prefix(
@@ -73,9 +74,11 @@ def collect_scoped_identity_snapshot(
     ``scan_vault`` discovers path/type metadata without opening file content. The caller's
     predicate therefore runs before any Markdown bytes are read. The configured runtime
     directory is also excluded before content access so disposable exports or indexes cannot
-    participate in canonical identity. Authorized paths are then read through the
-    descriptor-based vault reader, which rejects symlink traversal and returns one byte snapshot
-    used for both durable identity and content hashing.
+    participate in canonical identity. Vault bootstrap instructions such as root ``AGENTS.md``
+    are control metadata rather than user notes and do not participate in note identity.
+    Authorized paths are then read through the descriptor-based vault reader, which rejects
+    symlink traversal and returns one byte snapshot used for both durable identity and content
+    hashing.
     """
     runtime_prefix = runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
     try:
@@ -93,6 +96,8 @@ def collect_scoped_identity_snapshot(
         relative_path = entry.path.as_posix()
         first_root = relative_path.split("/", 1)[0]
         if first_root in _IDENTITY_IGNORED_ROOTS:
+            continue
+        if relative_path in _IDENTITY_IGNORED_PATHS:
             continue
         if runtime_prefix is not None and relative_path.startswith(runtime_prefix):
             continue
