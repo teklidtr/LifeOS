@@ -28,6 +28,7 @@ def preflight_proposal(
     *,
     vault_root: Path,
     max_inspection_bytes: int = 5 * 1024 * 1024,
+    runtime_dir: Path | None = None,
 ) -> ProposalPreflightResult:
     """Run ordinary path/hash checks plus review-bound stable identity checks.
 
@@ -40,7 +41,9 @@ def preflight_proposal(
     Identity discovery is policy-scoped before Markdown is opened. An explicitly reviewed
     target may authorize protected-scope intent for that exact path only; unrelated protected
     or excluded notes cannot be read or influence the proposal result merely because they share
-    the same frontmatter id.
+    the same frontmatter id. Config-aware callers pass ``runtime_dir`` explicitly so disposable
+    custom-runtime Markdown stays outside canonical identity even when the config file itself
+    lives outside the vault.
     """
     base = _base_preflight_proposal(
         proposal,
@@ -72,6 +75,7 @@ def preflight_proposal(
         snapshot = collect_scoped_identity_snapshot(
             vault_root,
             allow_path=allow_identity_path,
+            runtime_dir=runtime_dir,
         )
         resolutions = assess_proposal_target_identities(
             proposal.metadata,
