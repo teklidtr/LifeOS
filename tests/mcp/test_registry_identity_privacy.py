@@ -42,6 +42,13 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
     assert seeded["content_hash"] is not None
     assert seeded["mtime_ns"] is not None
 
+    # Proposal artifacts are categorically outside the externally scoped registry refresh. A
+    # malformed proposal created after the trusted seed must therefore remain unopened rather
+    # than changing the external call into a proposal-indexing failure.
+    malformed_proposal = vault / "proposals" / "broken" / "proposal.md"
+    malformed_proposal.parent.mkdir(parents=True)
+    malformed_proposal.write_text("---\nid: [not-valid-yaml\n---\n", encoding="utf-8")
+
     public.write_text(_note("shared-id", "Public"), encoding="utf-8")
     real_parser = coherent_tracking.parse_markdown_note
     real_hash = coherent_tracking._base._hash_file
@@ -51,11 +58,13 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
     def recording_parser(note_path: Path, *, content: str | None = None):
         parsed_paths.append(note_path)
         assert "private" not in note_path.parts
+        assert "proposals" not in note_path.parts
         return real_parser(note_path, content=content)
 
     def recording_hash(path: Path, *args, **kwargs):
         hashed_paths.append(path)
         assert "private" not in path.parts
+        assert "proposals" not in path.parts
         return real_hash(path, *args, **kwargs)
 
     monkeypatch.setattr(coherent_tracking, "parse_markdown_note", recording_parser)
@@ -93,3 +102,4 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
     activity = server._tool_manager.get_tool("runtime_activity").fn(limit=10)
     refresh = [record for record in activity["records"] if record["tool"] == "registry_refresh"][-1]
     assert "private/hidden.md" not in refresh["changed_paths"]
+    assert "proposals/broken/proposal.md" not in refresh["changed_paths"]
