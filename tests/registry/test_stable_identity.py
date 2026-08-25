@@ -199,7 +199,7 @@ def test_new_identity_can_reuse_path_after_old_identity_was_confirmed_deleted(
 
 
 def test_binary_scan_capture_discards_attachment_bytes() -> None:
-    capture = coherent_tracking._capture_for(
+    capture, _prefix = coherent_tracking._capture_for(
         VaultFile(path=Path("captures/large.pdf"), file_type=".pdf", size_bytes=10_000_000)
     )
 
