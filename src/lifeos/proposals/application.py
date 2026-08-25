@@ -530,6 +530,52 @@ def _open_or_create_target_parent(
     )
 
 
+def _prepare_canonical_parent_descriptors(
+    *,
+    proposal: LoadedProposal,
+    vault_root: Path,
+    root_fd: int,
+    parent_descriptors: Dict[str, ParentDescriptor],
+    created_parent_paths: list[str],
+    require_authority: Callable[[], None],
+    outcome: ProposalApplicationResult,
+) -> None:
+    try:
+        system_fd = _open_directory_chain(root_fd, "system")
+    except SecureIOError:
+        system_fd = None
+    if system_fd is not None:
+        system_stat = os.fstat(system_fd)
+        parent_descriptors["system"] = ParentDescriptor(
+            fd=system_fd,
+            dev=system_stat.st_dev,
+            ino=system_stat.st_ino,
+            path="system",
+        )
+
+    for operation in proposal.patch_document.operations:
+        if operation.op == "release_generated_ownership":
+            continue
+        parent_relative = str(Path(operation.target_path).parent)
+        if parent_relative in parent_descriptors:
+            continue
+        try:
+            parent_descriptors[parent_relative] = _open_or_create_target_parent(
+                vault_root=vault_root,
+                root_fd=root_fd,
+                parent_relative=parent_relative,
+                operation=operation,
+                created_parent_paths=created_parent_paths,
+                require_authority=require_authority,
+            )
+        except SecureIOError as error:
+            raise ApplicationError(
+                "Missing target parent directory",
+                outcome,
+                code=ApplicationErrorCode.TARGET_CONFLICT,
+            ) from error
+
+
 def _candidate_for_operation(
     *,
     index: int,
@@ -1352,40 +1398,15 @@ def _execute_application_transaction(
         )
         require_authority()
 
-        try:
-            system_fd = _open_directory_chain(root_fd, "system")
-        except SecureIOError:
-            system_fd = None
-        if system_fd is not None:
-            system_stat = os.fstat(system_fd)
-            parent_descriptors["system"] = ParentDescriptor(
-                fd=system_fd,
-                dev=system_stat.st_dev,
-                ino=system_stat.st_ino,
-                path="system",
-            )
-
-        for op in proposal.patch_document.operations:
-            if op.op == "release_generated_ownership":
-                continue
-            target_path = op.target_path
-            parent_relative = str(Path(target_path).parent)
-            if parent_relative not in parent_descriptors:
-                try:
-                    parent_descriptors[parent_relative] = _open_or_create_target_parent(
-                        vault_root=vault_root,
-                        root_fd=root_fd,
-                        parent_relative=parent_relative,
-                        operation=op,
-                        created_parent_paths=created_parent_paths,
-                        require_authority=require_authority,
-                    )
-                except SecureIOError as error:
-                    raise ApplicationError(
-                        "Missing target parent directory",
-                        outcome,
-                        code=ApplicationErrorCode.TARGET_CONFLICT,
-                    ) from error
+        _prepare_canonical_parent_descriptors(
+            proposal=proposal,
+            vault_root=vault_root,
+            root_fd=root_fd,
+            parent_descriptors=parent_descriptors,
+            created_parent_paths=created_parent_paths,
+            require_authority=require_authority,
+            outcome=outcome,
+        )
 
         manifest_bytes: Optional[bytes] = None
         if "system" in parent_descriptors:
