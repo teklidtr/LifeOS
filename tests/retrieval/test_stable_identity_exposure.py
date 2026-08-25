@@ -175,7 +175,7 @@ def test_retrieval_normalizes_durable_id_during_rebuild_and_incremental_sync(
     assert refreshed == {"wiki/spaced-id.md": "id:durable-id"}
 
 
-def test_retrieval_identity_verification_reads_only_returned_stable_candidates(
+def test_retrieval_identity_verification_reads_only_query_influencing_candidates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -208,7 +208,9 @@ def test_retrieval_identity_verification_reads_only_returned_stable_candidates(
     )
 
     assert response.results[0].stable_id == "target-id"
-    assert reads == ["wiki/target.md"]
+    # One read authorizes the row before scoring and one closes the race before evidence/provider
+    # exposure. Unrelated indexed notes are never opened by this lexical query.
+    assert reads == ["wiki/target.md", "wiki/target.md"]
 
 
 def test_retrieval_does_not_attach_old_index_identity_to_changed_canonical_path(
