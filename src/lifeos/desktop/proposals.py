@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import posixpath
 import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.facade.authorization import AuthorizedPrincipal, ConsequentialAction, ConsequentialAuthorizationRequest, ConsequentialAuthorizer, AuthorizationDeniedError
 from lifeos.facade.consequential_tools import AcceptProposalRequest, ApplyProposalRequest, ApproveProposalRequest, SubmitProposalRequest, accept_proposal_tool, apply_proposal_tool, approve_proposal_tool, submit_proposal_tool
 from lifeos.facade.errors import ToolFacadeError
@@ -173,6 +176,22 @@ class DesktopProposalService:
             findings=tuple(findings),
         )
 
+    def _legacy_preview_runtime_error(self, target_path: str) -> str | None:
+        try:
+            runtime_prefix = runtime_exclusion_prefix(
+                self.vault_root,
+                runtime_dir=self.identity_runtime_dir,
+            )
+        except CoherenceError:
+            return "Diff preview unavailable: configured runtime scope could not be resolved"
+        if runtime_prefix is None:
+            return None
+        normalized = posixpath.normpath(target_path)
+        runtime_root = runtime_prefix.rstrip("/")
+        if normalized == runtime_root or normalized.startswith(runtime_prefix):
+            return "Diff preview unavailable: target is inside configured runtime state"
+        return None
+
     def _inspect_operation(
         self,
         operation: Any,
@@ -186,6 +205,16 @@ class DesktopProposalService:
                 target_path=target_path,
                 unified_diff=snapshot_operation.unified_diff,
                 preview_source="snapshot",
+            )
+        runtime_error = self._legacy_preview_runtime_error(target_path)
+        if runtime_error is not None:
+            return ProposalOperationInspection(
+                operation_id=operation.id,
+                operation_type=operation.op,
+                target_path=target_path,
+                unified_diff="",
+                preview_error=runtime_error,
+                preview_source="legacy_live",
             )
         try:
             unified_diff = operation_unified_diff(self.vault_root, operation)

@@ -101,7 +101,7 @@ def _open_root(vault_root: Path) -> int:
     return fd
 
 
-def _read_file_at(parent_fd: int, name: str, relative_path: str, vault_root: Path) -> VaultMarkdownFile:
+def _read_bytes_at(parent_fd: int, name: str, relative_path: str) -> bytes:
     try:
         fd = os.open(name, _FILE_FLAGS, dir_fd=parent_fd)
     except OSError as exc:
@@ -133,6 +133,8 @@ def _read_file_at(parent_fd: int, name: str, relative_path: str, vault_root: Pat
         if (
             before.st_dev != after.st_dev
             or before.st_ino != after.st_ino
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns
             or before.st_size != after.st_size
             or len(content_bytes) != after.st_size
         ):
@@ -141,8 +143,17 @@ def _read_file_at(parent_fd: int, name: str, relative_path: str, vault_root: Pat
                 relative_path,
                 f"Vault file changed while it was being read: {relative_path}",
             )
+        return content_bytes
     finally:
         os.close(fd)
+
+
+def _decode_snapshot(
+    *,
+    vault_root: Path,
+    relative_path: str,
+    content_bytes: bytes,
+) -> VaultMarkdownFile:
     try:
         content = content_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -154,8 +165,16 @@ def _read_file_at(parent_fd: int, name: str, relative_path: str, vault_root: Pat
     return VaultMarkdownFile(relative_path, vault_root / relative_path, content, content_bytes)
 
 
-def read_vault_text(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
-    """Read one UTF-8 vault file without following any path-component symlink."""
+def _read_file_at(parent_fd: int, name: str, relative_path: str, vault_root: Path) -> VaultMarkdownFile:
+    return _decode_snapshot(
+        vault_root=vault_root,
+        relative_path=relative_path,
+        content_bytes=_read_bytes_at(parent_fd, name, relative_path),
+    )
+
+
+def read_vault_bytes(vault_root: Path, relative_path: str) -> bytes:
+    """Read one vault file as bytes without following any path-component symlink."""
     parts = _safe_relative_path(relative_path)
     root_fd = _open_root(vault_root)
     current_fd = root_fd
@@ -183,11 +202,20 @@ def read_vault_text(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
             if current_fd != root_fd:
                 os.close(current_fd)
             current_fd = next_fd
-        return _read_file_at(current_fd, parts[-1], relative_path, vault_root)
+        return _read_bytes_at(current_fd, parts[-1], relative_path)
     finally:
         if current_fd != root_fd:
             os.close(current_fd)
         os.close(root_fd)
+
+
+def read_vault_text(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
+    """Read one UTF-8 vault file without following any path-component symlink."""
+    return _decode_snapshot(
+        vault_root=vault_root,
+        relative_path=relative_path,
+        content_bytes=read_vault_bytes(vault_root, relative_path),
+    )
 
 
 def read_vault_markdown(vault_root: Path, relative_path: str) -> VaultMarkdownFile:

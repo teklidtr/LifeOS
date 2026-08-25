@@ -215,6 +215,40 @@ def _restore_public_paths(result: _service.IndexResult) -> _service.IndexResult:
     return replace(result, renamed=renamed, deleted=deleted)
 
 
+def _suppress_unproven_relocations(
+    result: _service.IndexResult,
+    *,
+    prior_document_ids: dict[str, str],
+    expected: dict[str, str],
+) -> _service.IndexResult:
+    """Expose rename evidence only when the same durable ID proves path continuity."""
+    retained: list[tuple[str, str]] = []
+    demoted_old: set[str] = set()
+    demoted_new: set[str] = set()
+    for old_path, new_path in result.renamed:
+        prior_id = prior_document_ids.get(old_path)
+        expected_id = expected.get(new_path)
+        if (
+            prior_id is not None
+            and prior_id.startswith("id:")
+            and expected_id == prior_id
+        ):
+            retained.append((old_path, new_path))
+            continue
+        demoted_old.add(old_path)
+        demoted_new.add(new_path)
+
+    if not demoted_old and not demoted_new:
+        return result
+    return replace(
+        result,
+        created=tuple(sorted(set(result.created) | demoted_new)),
+        updated=tuple(path for path in result.updated if path not in demoted_new),
+        renamed=tuple(retained),
+        deleted=tuple(sorted(set(result.deleted) | demoted_old)),
+    )
+
+
 class RetrievalIndexService(_service.RetrievalIndexService):
     """Base retrieval service plus deterministic stable-identity coherence.
 
@@ -303,6 +337,7 @@ class RetrievalIndexService(_service.RetrievalIndexService):
         relocation_stage = self.root / _RELOCATION_STAGE_NAME
         relocations: tuple[tuple[str, str, str], ...] = ()
         reservations: tuple[tuple[str, str], ...] = ()
+        prior_document_ids: dict[str, str] = {}
         staged = False
 
         try:
@@ -310,6 +345,7 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                 with RetrievalIndex(original_active_path, create=False) as index:
                     for document in index.documents():
                         canonical_path = _canonical_path_from_parked(document.path)
+                        prior_document_ids[canonical_path] = document.document_id
                         expected_id = expected.get(canonical_path)
                         if expected_id is not None and document.document_id != expected_id:
                             identity_refresh.add(canonical_path)
@@ -343,7 +379,11 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                             deleted=(),
                             index_path=str(original_active_path),
                         )
-                    return result
+                    return _suppress_unproven_relocations(
+                        result,
+                        prior_document_ids=prior_document_ids,
+                        expected=expected,
+                    )
 
                 # Duplicate introduction/resolution and normalized durable IDs can require
                 # re-identifying an unchanged note even when canonical content did not change.
@@ -364,6 +404,12 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                         result,
                         updated=tuple(sorted(set(result.updated) | identity_refresh)),
                     )
+
+                result = _suppress_unproven_relocations(
+                    result,
+                    prior_document_ids=prior_document_ids,
+                    expected=expected,
+                )
 
                 if staged:
                     with RetrievalIndex(self.active_path, create=False) as staged_index:
