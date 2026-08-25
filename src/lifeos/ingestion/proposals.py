@@ -149,13 +149,20 @@ def _replacement_target_paths(patch: Any) -> frozenset[str]:
     )
 
 
-def _bind_existing_target_identities(*, proposals_root: Path, documents: Any) -> Any:
+def _bind_existing_target_identities(
+    *,
+    proposals_root: Path,
+    documents: Any,
+    runtime_dir: Path | None = None,
+) -> Any:
     """Bind stable IDs before a draft and its review snapshot become durable proposal state.
 
     Identity discovery applies path policy before unrelated Markdown is opened. Only exact
     replacement targets carried by the reviewed patch may opt into protected local scope; an
     unrelated protected or excluded note cannot affect publication merely because it shares an
-    ID with a public target.
+    ID with a public target. ``runtime_dir`` is threaded explicitly when the caller has resolved
+    configuration outside the vault so disposable custom-runtime exports never become identity
+    candidates through the in-vault config fallback.
     """
     try:
         proposal_text = documents.proposal_markdown.decode("utf-8")
@@ -182,6 +189,7 @@ def _bind_existing_target_identities(*, proposals_root: Path, documents: Any) ->
         snapshot = collect_scoped_identity_snapshot(
             vault_root,
             allow_path=allow_identity_path,
+            runtime_dir=runtime_dir,
         )
         bound = with_target_identity_extension(metadata, patch, snapshot)
     except (
@@ -219,19 +227,20 @@ _original_persist_study_learning_proposal = _core.persist_study_learning_proposa
 
 
 def persist_wiki_section_update_proposal(  # type: ignore[no-redef]
-    *, proposals_root: Path, documents: Any
+    *, proposals_root: Path, documents: Any, runtime_dir: Path | None = None
 ) -> Path:
     return _original_persist_wiki_section_update_proposal(
         proposals_root=proposals_root,
         documents=_bind_existing_target_identities(
             proposals_root=proposals_root,
             documents=documents,
+            runtime_dir=runtime_dir,
         ),
     )
 
 
 def persist_compound_wiki_proposal(  # type: ignore[no-redef]
-    *, proposals_root: Path, documents: Any
+    *, proposals_root: Path, documents: Any, runtime_dir: Path | None = None
 ) -> Path:
     _raise_existing_create_target(
         proposals_root=proposals_root,
@@ -242,12 +251,13 @@ def persist_compound_wiki_proposal(  # type: ignore[no-redef]
         documents=_bind_existing_target_identities(
             proposals_root=proposals_root,
             documents=documents,
+            runtime_dir=runtime_dir,
         ),
     )
 
 
 def persist_compounding_wiki_proposal(  # type: ignore[no-redef]
-    *, proposals_root: Path, documents: Any
+    *, proposals_root: Path, documents: Any, runtime_dir: Path | None = None
 ) -> Path:
     _raise_existing_create_target(
         proposals_root=proposals_root,
@@ -258,12 +268,13 @@ def persist_compounding_wiki_proposal(  # type: ignore[no-redef]
         documents=_bind_existing_target_identities(
             proposals_root=proposals_root,
             documents=documents,
+            runtime_dir=runtime_dir,
         ),
     )
 
 
 def persist_study_learning_proposal(  # type: ignore[no-redef]
-    *, proposals_root: Path, documents: Any
+    *, proposals_root: Path, documents: Any, runtime_dir: Path | None = None
 ) -> Path:
     _raise_existing_create_target(
         proposals_root=proposals_root,
@@ -274,6 +285,7 @@ def persist_study_learning_proposal(  # type: ignore[no-redef]
         documents=_bind_existing_target_identities(
             proposals_root=proposals_root,
             documents=documents,
+            runtime_dir=runtime_dir,
         ),
     )
 
