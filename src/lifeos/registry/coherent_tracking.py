@@ -25,9 +25,10 @@ IdentityPathPredicate = Callable[[str], bool]
 class _PreparedScanEntry:
     stable_id: str | None
     identity_observed: bool
-    content_hash: str
+    content_observed: bool
+    content_hash: str | None
     size_bytes: int
-    mtime_ns: int
+    mtime_ns: int | None
 
 
 class _DiscardingChunks:
@@ -42,12 +43,8 @@ def _participates_in_stable_note_identity(entry: VaultFile) -> bool:
     return entry.file_type == ".md" and first_root != "proposals"
 
 
-def _capture_for(
-    entry: VaultFile,
-    *,
-    inspect_identity: bool = True,
-) -> _base._HashCapture:
-    if _participates_in_stable_note_identity(entry) and inspect_identity:
+def _capture_for(entry: VaultFile) -> _base._HashCapture:
+    if _participates_in_stable_note_identity(entry):
         return _base._HashCapture()
     capture = _base._HashCapture()
     capture.chunks = cast(Any, _DiscardingChunks())
@@ -58,11 +55,23 @@ def _prepare_scan_entry(
     vault_root: Path,
     entry: VaultFile,
     *,
-    inspect_identity: bool = True,
+    observe_content: bool = True,
 ) -> _PreparedScanEntry:
+    # Scoped external callers may know a path exists from directory metadata without being
+    # authorized to open its content. Preserve that presence fact without hashing or parsing it.
+    if not observe_content:
+        return _PreparedScanEntry(
+            stable_id=None,
+            identity_observed=False,
+            content_observed=False,
+            content_hash=None,
+            size_bytes=entry.size_bytes,
+            mtime_ns=None,
+        )
+
     full_path = vault_root / entry.path
-    identity_observed = _participates_in_stable_note_identity(entry) and inspect_identity
-    capture = _capture_for(entry, inspect_identity=identity_observed)
+    identity_observed = _participates_in_stable_note_identity(entry)
+    capture = _capture_for(entry)
     content_hash = _base._hash_file(full_path, capture=capture)
     if capture.size_bytes is None or capture.mtime_ns is None:
         raise _base.FileTrackingError(f"Could not capture registry metadata for {full_path}.")
@@ -86,6 +95,7 @@ def _prepare_scan_entry(
     return _PreparedScanEntry(
         stable_id=stable_id,
         identity_observed=identity_observed,
+        content_observed=True,
         content_hash=content_hash,
         size_bytes=capture.size_bytes,
         mtime_ns=capture.mtime_ns,
@@ -102,11 +112,11 @@ def _prepare_scan_entries(
     id_paths: dict[str, list[str]] = {}
     for entry in entries:
         path_str = entry.path.as_posix()
-        inspect_identity = identity_allow_path is None or identity_allow_path(path_str)
+        observe_content = identity_allow_path is None or identity_allow_path(path_str)
         facts = _prepare_scan_entry(
             vault_root,
             entry,
-            inspect_identity=inspect_identity,
+            observe_content=observe_content,
         )
         prepared[path_str] = facts
         if facts.identity_observed and facts.stable_id is not None:
@@ -155,12 +165,7 @@ def _drop_unobserved_identity_metadata(
     *,
     identity_allow_path: IdentityPathPredicate | None,
 ) -> None:
-    """Prevent out-of-scope disposable IDs from influencing a scoped refresh.
-
-    File/hash tracking remains global. Only stable-ID metadata is forgotten for paths whose
-    identity is outside the caller's scope. A later broader local refresh can deterministically
-    restore those IDs from canonical Markdown.
-    """
+    """Prevent out-of-scope disposable IDs from influencing a scoped refresh."""
     if identity_allow_path is None:
         return
     rows = conn.execute(
@@ -181,12 +186,11 @@ def register_scan(
 ) -> _base.ScanResult:
     """Register a complete scan while reconciling stable identities as one transaction.
 
-    All files remain visible to ordinary hash/path tracking. Stable-ID parsing can optionally be
-    scoped by path metadata before Markdown bytes are interpreted, so an externally callable
-    refresh cannot read or be influenced by protected identity content. All identity relocations
-    are reserved before any final path is assigned. That makes swaps and longer cycles safe while
-    preserving each surviving registry row and its foreign-keyed provenance/source-version
-    relationships.
+    With no scope predicate, canonical files are hashed and stable Markdown IDs are interpreted
+    exactly as in the local registry contract. A scoped external caller can deny a path before
+    content access: the registry still records that the filesystem entry exists, but it neither
+    hashes nor parses those bytes and out-of-scope stable-ID metadata cannot influence visible
+    relocation/ambiguity decisions.
     """
     seen: set[str] = set()
     for entry in entries:
@@ -327,6 +331,42 @@ def register_scan(
                     """,
                     (path_str,),
                 ).fetchone()
+
+                if not facts.content_observed:
+                    if row is None:
+                        conn.execute(
+                            f"""
+                            INSERT INTO files (
+                                vault_path, stable_id, file_kind, content_hash, size_bytes,
+                                mtime_ns, first_seen_at, last_seen_at, is_deleted
+                            ) VALUES (?, NULL, ?, NULL, ?, NULL, {now_expr}, {now_expr}, 0)
+                            """,
+                            (path_str, entry.file_type, size_bytes),
+                        )
+                        new_paths.append(path_str)
+                    elif int(row["is_deleted"]) == 1:
+                        conn.execute(
+                            f"""
+                            UPDATE files
+                            SET stable_id = NULL, file_kind = ?, size_bytes = ?,
+                                last_seen_at = {now_expr}, is_deleted = 0
+                            WHERE id = ?
+                            """,
+                            (entry.file_type, size_bytes, int(row["id"])),
+                        )
+                        modified_paths.append(path_str)
+                    else:
+                        conn.execute(
+                            f"""
+                            UPDATE files
+                            SET stable_id = NULL, file_kind = ?, size_bytes = ?,
+                                last_seen_at = {now_expr}
+                            WHERE id = ?
+                            """,
+                            (entry.file_type, size_bytes, int(row["id"])),
+                        )
+                        unchanged_paths.append(path_str)
+                    continue
 
                 if row is not None and int(row["is_deleted"]) == 1:
                     old_stable_id = row["stable_id"]
