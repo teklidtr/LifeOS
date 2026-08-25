@@ -118,3 +118,44 @@ def test_publication_does_not_read_or_leak_unrelated_protected_duplicate(
     assert len(targets) == 1
     assert targets[0].stable_id == "stable-wiki-target"
     assert targets[0].reviewed_path == "wiki/target.md"
+
+
+def test_publication_excludes_explicit_custom_runtime_from_identity_candidates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    proposals = vault / "proposals"
+    proposals.mkdir(parents=True)
+    documents = _documents(vault)
+    runtime = vault / "runtime" / "node-a"
+    derived = runtime / "exports" / "public-wiki" / "wiki" / "target.md"
+    derived.parent.mkdir(parents=True)
+    derived.write_text(
+        "---\nid: stable-wiki-target\ntype: concept\ntitle: Derived copy\n---\n# Facts\nOld\n",
+        encoding="utf-8",
+    )
+
+    real_parser = coherence_scoped.parse_markdown_note
+    parsed_paths: list[Path] = []
+
+    def reject_runtime_read(note_path: Path, *, content: str | None = None):
+        parsed_paths.append(note_path)
+        assert "runtime" not in note_path.parts
+        return real_parser(note_path, content=content)
+
+    monkeypatch.setattr(coherence_scoped, "parse_markdown_note", reject_runtime_read)
+
+    proposal_dir = persist_wiki_section_update_proposal(
+        proposals_root=proposals,
+        documents=documents,
+        runtime_dir=runtime,
+    )
+    loaded = load_proposal_directory(proposal_dir, proposals_root=proposals).proposal
+
+    assert loaded is not None
+    targets = parse_target_identities(loaded.metadata, loaded.patch_document)
+    assert len(targets) == 1
+    assert targets[0].stable_id == "stable-wiki-target"
+    assert targets[0].reviewed_path == "wiki/target.md"
+    assert parsed_paths == [vault / "wiki" / "target.md"]
