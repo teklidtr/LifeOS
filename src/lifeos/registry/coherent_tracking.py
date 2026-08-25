@@ -332,6 +332,7 @@ def register_scan(
                 if facts.identity_observed and facts.stable_id is not None
             }
             relocations: dict[str, tuple[int, str, str | None, int]] = {}
+            deferred_stable_ids: set[str] = set()
             for durable_id, target_path in sorted(current_targets.items()):
                 rows = conn.execute(
                     """
@@ -354,13 +355,24 @@ def register_scan(
                     for row in scoped_rows
                     if _canonical_path_from_storage(str(row["vault_path"])) == target_path
                 ]
-                if exact_rows:
+                if identity_allow_path is None and len(rows) > 1:
+                    # An unrestricted refresh is the trusted consolidation boundary. Prefer the
+                    # oldest durable row so provenance attached before a scoped visibility change
+                    # follows the identity, then park any provisional exact-path occupant below.
+                    row = rows[0]
+                elif exact_rows:
                     row = exact_rows[0]
                 elif len(scoped_rows) > 1:
                     raise _base.FileTrackingError(
                         f"Stable note id {durable_id!r} is ambiguous in scoped registry state."
                     )
                 elif not scoped_rows:
+                    if identity_allow_path is not None and rows:
+                        # A previously trusted row exists only outside this caller's scope. Do not
+                        # retarget or expose that hidden lineage here. Record the visible path as a
+                        # provisional path/hash observation without duplicating the durable ID;
+                        # the next unrestricted refresh can consolidate it onto the original row.
+                        deferred_stable_ids.add(durable_id)
                     continue
                 else:
                     row = scoped_rows[0]
@@ -389,6 +401,13 @@ def register_scan(
                 content_hash = facts.content_hash
                 mtime_ns = facts.mtime_ns
                 size_bytes = facts.size_bytes
+                stored_entry_stable_id = (
+                    None
+                    if identity_allow_path is not None
+                    and entry_stable_id is not None
+                    and entry_stable_id in deferred_stable_ids
+                    else entry_stable_id
+                )
 
                 relocation = (
                     relocations.get(entry_stable_id)
@@ -515,7 +534,7 @@ def register_scan(
                         """,
                         (
                             path_str,
-                            entry_stable_id if identity_observed else None,
+                            stored_entry_stable_id if identity_observed else None,
                             entry.file_type,
                             content_hash,
                             size_bytes,
@@ -538,7 +557,7 @@ def register_scan(
                     )
 
                 effective_stable_id = (
-                    entry_stable_id
+                    stored_entry_stable_id
                     if identity_observed
                     else (str(existing_stable_id) if existing_stable_id is not None else None)
                 )
