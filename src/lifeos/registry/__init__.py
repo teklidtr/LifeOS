@@ -49,40 +49,6 @@ from lifeos.registry.provenance import (
 )
 
 
-def _scrub_out_of_scope_content_metadata(
-    registry: Registry,
-    *,
-    allow_path: Callable[[str], bool],
-) -> None:
-    """Forget stale content-derived facts that a scoped refresh may no longer inspect."""
-    with registry.connect() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, vault_path
-            FROM files
-            WHERE stable_id IS NOT NULL OR content_hash IS NOT NULL OR mtime_ns IS NOT NULL
-            """
-        ).fetchall()
-        for row in rows:
-            path = str(row["vault_path"])
-            if path.startswith(".lifeos/registry-tombstones/"):
-                remainder = path[len(".lifeos/registry-tombstones/") :]
-                _row_id, separator, prior_path = remainder.partition("/")
-                if separator and prior_path:
-                    path = prior_path
-            if allow_path(path):
-                continue
-            connection.execute(
-                """
-                UPDATE files
-                SET stable_id = NULL, content_hash = NULL, mtime_ns = NULL
-                WHERE id = ?
-                """,
-                (int(row["id"]),),
-            )
-        connection.commit()
-
-
 def register_scan(
     registry: Registry,
     vault_root: Path,
@@ -95,8 +61,9 @@ def register_scan(
     A custom in-vault runtime directory is disposable node-local state just like the default
     ``.lifeos`` directory. ``scan_vault`` already ignores the default name, while this boundary
     removes any configured custom runtime subtree before content access. When an identity scope
-    predicate is supplied, denied paths remain presence-only registry rows: their bytes are not
-    opened, and any content-derived metadata left by an earlier broader refresh is scrubbed.
+    predicate is supplied, denied paths remain presence-only observations for that refresh: their
+    bytes are not opened and their previously known local identity/hash facts are preserved rather
+    than exposed to or destructively rewritten by the scoped caller.
     """
     # Config loading and Registry construction already normalize their paths. Use a lexical
     # absolute conversion here instead of Path.resolve(): the latter performs filesystem stat
@@ -119,18 +86,12 @@ def register_scan(
             for entry in entries
             if entry.path.parts[: len(prefix)] != prefix
         ]
-    result = _coherent_register_scan(
+    return _coherent_register_scan(
         registry,
         root,
         canonical_entries,
         identity_allow_path=identity_allow_path,
     )
-    if identity_allow_path is not None:
-        _scrub_out_of_scope_content_metadata(
-            registry,
-            allow_path=identity_allow_path,
-        )
-    return result
 
 
 # Keep direct ``lifeos.registry.file_tracking.register_scan`` imports aligned with the public API.
