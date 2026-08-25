@@ -65,6 +65,8 @@ def _existing_runtime_spelling(root: Path, relative: Path) -> str | None:
                 os.close(current_fd)
             current_fd = child_fd
         return Path(*actual_parts).as_posix()
+    except FileNotFoundError:
+        return None
     except OSError as exc:
         raise CoherenceError("Could not inspect configured runtime directory") from exc
     finally:
