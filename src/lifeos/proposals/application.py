@@ -55,13 +55,10 @@ from .recovery import (
     RecoveryPhase,
     RecoveryStateFiles,
     RecoveryTransactionId,
-    acquire_recovery_lock,
     generate_recovery_transaction_id,
-    initialize_recovery_transaction,
-    remove_rolled_back_recovery_transaction,
-    write_recovery_journal,
 )
 from .recovery_service import _recover_interrupted_applications_locked
+from .recovery_store import PinnedRecoveryStore, acquire_pinned_recovery_store
 from .schema import ProposalStatus
 from .unified_diff import apply_diff
 from .validation import preflight_proposal
@@ -170,6 +167,7 @@ class _ApplicationContext:
     applied_at: str
     runtime_dir: Path
     recovery_root: Path
+    recovery_store: PinnedRecoveryStore
     outcome: ProposalApplicationResult
 
 
@@ -334,7 +332,7 @@ def _advance_recovery_phase(
     *,
     journal: RecoveryJournal,
     next_phase: RecoveryPhase,
-    recovery_root: Path,
+    recovery_store: PinnedRecoveryStore,
 ) -> _PhaseResult:
     expected = _LEGAL_PHASE_TRANSITIONS.get(journal.phase)
     if expected is not next_phase:
@@ -342,7 +340,7 @@ def _advance_recovery_phase(
             f"Illegal recovery phase transition: {journal.phase.value} -> {next_phase.value}"
         )
     updated = replace(journal, phase=next_phase)
-    write_recovery_journal(recovery_root=recovery_root, journal=updated)
+    recovery_store.write_journal(updated)
     return _PhaseResult(journal=updated, phase=next_phase)
 
 
@@ -872,7 +870,7 @@ def _rollback_application(
     manifest_backup: Optional[BackupFile],
     transaction_initialized: bool,
     transaction_id: Optional[RecoveryTransactionId],
-    recovery_root: Path,
+    recovery_store: PinnedRecoveryStore,
     durability: str,
     recovery_artifacts_retained: bool,
     update_op_state: Callable[[int, OperationState, Optional[str]], None],
@@ -938,10 +936,7 @@ def _rollback_application(
     if transaction_initialized and rollback_succeeded:
         assert transaction_id is not None
         try:
-            remove_rolled_back_recovery_transaction(
-                recovery_root=recovery_root,
-                transaction_id=transaction_id,
-            )
+            recovery_store.remove_rolled_back(transaction_id)
             transaction_initialized = False
         except RecoveryError:
             rollback_succeeded = False
@@ -1078,13 +1073,13 @@ def apply_proposal(
             code=ApplicationErrorCode.VALIDATION_ERROR,
         )
 
-    recovery_root = runtime_dir / "recovery"
     try:
-        with acquire_recovery_lock(runtime_dir=runtime_dir):
+        with acquire_pinned_recovery_store(runtime_dir=runtime_dir) as recovery_store:
             try:
                 _recover_interrupted_applications_locked(
                     vault_root=vault_root,
                     runtime_dir=runtime_dir,
+                    recovery_store=recovery_store,
                 )
             except RecoveryCorruptStateError as error:
                 raise ApplicationError(
@@ -1104,7 +1099,7 @@ def apply_proposal(
                 applied_by=applied_by,
                 applied_at=applied_at,
                 runtime_dir=runtime_dir,
-                recovery_root=recovery_root,
+                recovery_store=recovery_store,
                 outcome=outcome,
             )
     except RecoveryLockUnavailableError as error:
@@ -1122,7 +1117,7 @@ def _apply_proposal_locked(
     applied_by: str,
     applied_at: str,
     runtime_dir: Path,
-    recovery_root: Path,
+    recovery_store: PinnedRecoveryStore,
     outcome: ProposalApplicationResult,
 ) -> ProposalApplicationResult:
     """Orchestrate one locked application through the explicit state machine."""
@@ -1133,7 +1128,8 @@ def _apply_proposal_locked(
             applied_by=applied_by,
             applied_at=applied_at,
             runtime_dir=runtime_dir,
-            recovery_root=recovery_root,
+            recovery_root=recovery_store.recovery_root,
+            recovery_store=recovery_store,
             outcome=outcome,
         )
     )
@@ -1148,6 +1144,7 @@ def _execute_application_transaction(
     applied_at = context.applied_at
     runtime_dir = context.runtime_dir
     recovery_root = context.recovery_root
+    recovery_store = context.recovery_store
     outcome = context.outcome
     canonical_proposals_root = vault_root / "proposals"
     proposal_dir_path = canonical_proposals_root / proposal.proposal_dir
@@ -1194,12 +1191,12 @@ def _execute_application_transaction(
 
     try:
         try:
-            lifeos_fd = open_directory_secure(runtime_dir)
+            lifeos_fd = os.dup(recovery_store.runtime_fd)
             try:
-                locks_fd = open_directory_secure(runtime_dir / "locks", dir_fd=lifeos_fd)
+                locks_fd = open_directory_secure(Path("locks"), dir_fd=lifeos_fd)
             except SecureIOError:
                 os.mkdir("locks", 0o700, dir_fd=lifeos_fd)
-                locks_fd = open_directory_secure(runtime_dir / "locks", dir_fd=lifeos_fd)
+                locks_fd = open_directory_secure(Path("locks"), dir_fd=lifeos_fd)
         except (OSError, SecureIOError) as error:
             raise ApplicationError(
                 "Failed to setup transaction",
@@ -1584,64 +1581,79 @@ def _execute_application_transaction(
             ownership_state=ownership_state,
             proposal_state=proposal_state,
         )
-        transaction_dir = initialize_recovery_transaction(
-            recovery_root=recovery_root, journal=recovery_journal
-        )
+        transaction_dir = recovery_store.initialize_transaction(recovery_journal)
         transaction_initialized = True
-
-        for prepared, recovery_operation in zip(prepared_ops, recovery_operations, strict=True):
-            write_recovery_artifact(
-                transaction_dir=transaction_dir,
-                artifact=RecoveryArtifact(
-                    relative_path=recovery_operation.staged_path,
-                    content_hash=recovery_operation.staged_hash,
-                    size=recovery_operation.staged_size,
-                    mode=recovery_operation.staged_mode,
-                ),
-                content=prepared.candidate.candidate_content,
-            )
-            if recovery_operation.backup_path is not None:
-                assert prepared.candidate.original_content is not None
-                assert recovery_operation.backup_hash is not None
-                assert recovery_operation.backup_size is not None
+        transaction_fd = recovery_store.open_transaction(transaction_id)
+        try:
+            for prepared, recovery_operation in zip(
+                prepared_ops, recovery_operations, strict=True
+            ):
                 write_recovery_artifact(
                     transaction_dir=transaction_dir,
+                    transaction_fd=transaction_fd,
                     artifact=RecoveryArtifact(
-                        relative_path=recovery_operation.backup_path,
-                        content_hash=recovery_operation.backup_hash,
-                        size=recovery_operation.backup_size,
-                        mode=recovery_operation.expected_pre_mode or 0,
+                        relative_path=recovery_operation.staged_path,
+                        content_hash=recovery_operation.staged_hash,
+                        size=recovery_operation.staged_size,
+                        mode=recovery_operation.staged_mode,
                     ),
-                    content=prepared.candidate.original_content,
+                    content=prepared.candidate.candidate_content,
                 )
+                if recovery_operation.backup_path is not None:
+                    assert prepared.candidate.original_content is not None
+                    assert recovery_operation.backup_hash is not None
+                    assert recovery_operation.backup_size is not None
+                    write_recovery_artifact(
+                        transaction_dir=transaction_dir,
+                        transaction_fd=transaction_fd,
+                        artifact=RecoveryArtifact(
+                            relative_path=recovery_operation.backup_path,
+                            content_hash=recovery_operation.backup_hash,
+                            size=recovery_operation.backup_size,
+                            mode=recovery_operation.expected_pre_mode or 0,
+                        ),
+                        content=prepared.candidate.original_content,
+                    )
 
-        write_recovery_artifact(
-            transaction_dir=transaction_dir,
-            artifact=_artifact(ownership_state.staged_path, manifest_candidate, manifest_mode),
-            content=manifest_candidate,
-        )
-        if manifest_bytes is not None:
-            assert ownership_state.backup_path is not None
             write_recovery_artifact(
                 transaction_dir=transaction_dir,
-                artifact=_artifact(ownership_state.backup_path, manifest_bytes, manifest_mode),
-                content=manifest_bytes,
+                transaction_fd=transaction_fd,
+                artifact=_artifact(
+                    ownership_state.staged_path, manifest_candidate, manifest_mode
+                ),
+                content=manifest_candidate,
             )
-        write_recovery_artifact(
-            transaction_dir=transaction_dir,
-            artifact=_artifact(proposal_state.staged_path, proposal_candidate, proposal_mode),
-            content=proposal_candidate,
-        )
-        write_recovery_artifact(
-            transaction_dir=transaction_dir,
-            artifact=_artifact(
-                proposal_state.backup_path or "backups/proposal",
-                proposal_original,
-                proposal_mode,
-            ),
-            content=proposal_original,
-        )
-        write_recovery_journal(recovery_root=recovery_root, journal=recovery_journal)
+            if manifest_bytes is not None:
+                assert ownership_state.backup_path is not None
+                write_recovery_artifact(
+                    transaction_dir=transaction_dir,
+                    transaction_fd=transaction_fd,
+                    artifact=_artifact(
+                        ownership_state.backup_path, manifest_bytes, manifest_mode
+                    ),
+                    content=manifest_bytes,
+                )
+            write_recovery_artifact(
+                transaction_dir=transaction_dir,
+                transaction_fd=transaction_fd,
+                artifact=_artifact(
+                    proposal_state.staged_path, proposal_candidate, proposal_mode
+                ),
+                content=proposal_candidate,
+            )
+            write_recovery_artifact(
+                transaction_dir=transaction_dir,
+                transaction_fd=transaction_fd,
+                artifact=_artifact(
+                    proposal_state.backup_path or "backups/proposal",
+                    proposal_original,
+                    proposal_mode,
+                ),
+                content=proposal_original,
+            )
+        finally:
+            os.close(transaction_fd)
+        recovery_store.write_journal(recovery_journal)
         _application_checkpoint("after_prepared_journal")
 
         assert root_fd is not None
@@ -1673,7 +1685,7 @@ def _execute_application_transaction(
         recovery_journal = _advance_recovery_phase(
             journal=recovery_journal,
             next_phase=RecoveryPhase.TARGETS_INSTALLED,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
         ).journal
         _application_checkpoint("after_all_targets")
 
@@ -1693,7 +1705,7 @@ def _execute_application_transaction(
         recovery_journal = _advance_recovery_phase(
             journal=recovery_journal,
             next_phase=RecoveryPhase.OWNERSHIP_INSTALLED,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
         ).journal
         _application_checkpoint("before_proposal_commit")
 
@@ -1711,12 +1723,12 @@ def _execute_application_transaction(
         recovery_journal = _advance_recovery_phase(
             journal=recovery_journal,
             next_phase=RecoveryPhase.PROPOSAL_COMMITTED,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
         ).journal
         recovery_journal = _advance_recovery_phase(
             journal=recovery_journal,
             next_phase=RecoveryPhase.COMPLETE,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
         ).journal
 
         outcome = replace(
@@ -1746,7 +1758,7 @@ def _execute_application_transaction(
             manifest_backup=manifest_backup,
             transaction_initialized=transaction_initialized,
             transaction_id=transaction_id,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
             durability=durability,
             recovery_artifacts_retained=recovery_artifacts_retained,
             update_op_state=update_op_state,
