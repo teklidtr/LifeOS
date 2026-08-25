@@ -122,7 +122,7 @@ def test_fresh_database_initializes_current_schema(tmp_path: Path) -> None:
     assert registry.database_path == database_path.resolve()
     assert database_path.is_file()
     assert set(runtime_dir.iterdir()) == {database_path}
-    assert registry.schema_version == CURRENT_SCHEMA_VERSION == 3
+    assert registry.schema_version == CURRENT_SCHEMA_VERSION == 4
 
 
 def test_all_required_tables_exist(tmp_path: Path) -> None:
@@ -202,12 +202,20 @@ def test_required_columns_indexes_and_foreign_key_exist(tmp_path: Path) -> None:
             assert proposals_info[column][3] == 1
 
         assert {("name",)} <= _unique_indexes(connection, "schema_migrations")
-        assert {("vault_path",), ("stable_id",)} <= _unique_indexes(connection, "files")
+        assert {("vault_path",)} <= _unique_indexes(connection, "files")
+        assert ("stable_id",) not in _unique_indexes(connection, "files")
         assert {("source_id", "version_hash")} <= _unique_indexes(connection, "source_versions")
         assert {("output_id",), ("target_path",)} <= _unique_indexes(
             connection, "generated_outputs"
         )
         assert {("id",)} <= _unique_indexes(connection, "proposals")
+
+        stable_id_indexes = {
+            str(row[1]): int(row[2])
+            for row in connection.execute('PRAGMA index_list("files")')
+            if str(row[1]) == "idx_files_stable_id"
+        }
+        assert stable_id_indexes == {"idx_files_stable_id": 0}
 
         explicit_indexes = {
             str(row[0])
@@ -326,6 +334,7 @@ def test_schema_version_and_migration_metadata_are_recorded(tmp_path: Path) -> N
         (1, "initial_registry_schema"),
         (2, "proposals_schema"),
         (3, "provenance_schema"),
+        (4, "scoped_stable_identity_schema"),
     ]
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", rows[0][2])
 
@@ -416,7 +425,7 @@ def test_migrations_are_applied_in_version_order(
             for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
         ]
     assert positions == [998, 999]
-    assert versions == [1, 2, 3, 998, 999]
+    assert versions == [1, 2, 3, 4, 998, 999]
 
 
 def test_failed_migration_rolls_back_without_partial_application(
@@ -450,8 +459,8 @@ def test_failed_migration_rolls_back_without_partial_application(
             for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
         ]
     assert probe is None
-    assert versions == [1, 2, 3]
-    assert registry.schema_version == 3
+    assert versions == [1, 2, 3, 4]
+    assert registry.schema_version == 4
 
 
 def test_unsupported_future_schema_version_fails_without_changes(tmp_path: Path) -> None:
@@ -473,7 +482,7 @@ def test_unsupported_future_schema_version_fails_without_changes(tmp_path: Path)
             row[0]
             for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
         ]
-    assert versions == [1, 2, 3, 4]
+    assert versions == [1, 2, 3, 4, 5]
 
 
 def test_inconsistent_migration_history_fails_clearly(tmp_path: Path) -> None:
@@ -504,7 +513,7 @@ def test_schema_inspection_is_version_aware(
         (*_migrations.MIGRATIONS, future_migration),
     )
 
-    assert registry.schema_version == 3
+    assert registry.schema_version == 4
     with pytest.raises(RegistryHistoryError, match="call initialize"):
         with registry.connect():
             pass
@@ -568,12 +577,13 @@ def test_database_open_failures_are_wrapped_clearly(tmp_path: Path, failure_kind
         Registry(database_path).initialize()
 
 
-def test_version_1_upgrades_to_version_2_correctly(tmp_path: Path) -> None:
+def test_version_1_upgrades_to_current_schema_correctly(tmp_path: Path) -> None:
     database_path = tmp_path / "upgrade_test.sqlite"
 
-    # Construct a genuine version 1 database using the first migration
+    # Construct a genuine version 1 database using the first migration.
     with closing(sqlite3.connect(database_path)) as connection:
         connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("BEGIN IMMEDIATE")
         for stmt in _migrations.MIGRATIONS[0].statements:
             connection.execute(stmt)
@@ -585,21 +595,28 @@ def test_version_1_upgrades_to_version_2_correctly(tmp_path: Path) -> None:
             (_migrations.MIGRATIONS[0].version, _migrations.MIGRATIONS[0].name),
         )
         file_id = _insert_file(connection, vault_path="notes/v1_file.md")
+        connection.execute(
+            """
+            INSERT INTO source_versions (source_id, version_hash, original_file_id)
+            VALUES (?, ?, ?)
+            """,
+            ("source-v1", "sha256:v1", file_id),
+        )
         connection.execute("COMMIT")
 
     registry = Registry(database_path)
-    # Ensure proposals doesn't exist yet
+    # Ensure proposals doesn't exist yet.
     with closing(sqlite3.connect(database_path)) as connection:
         probe = connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'proposals'"
         ).fetchone()
         assert probe is None
 
-    # Run initialization to trigger upgrade
+    # Run initialization to trigger every migration through v4.
     registry.initialize()
 
     with registry.connect() as connection:
-        assert registry.schema_version == 3
+        assert registry.schema_version == CURRENT_SCHEMA_VERSION == 4
 
         probe = connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'proposals'"
@@ -611,11 +628,19 @@ def test_version_1_upgrades_to_version_2_correctly(tmp_path: Path) -> None:
         ).fetchone()
         assert idx_probe is not None
 
-        # Verify V1 data is intact
+        # Verify v1 file identity and source-version lineage survive the v4 table rebuild.
         row = connection.execute("SELECT vault_path FROM files WHERE id = ?", (file_id,)).fetchone()
         assert row["vault_path"] == "notes/v1_file.md"
+        source_row = connection.execute(
+            "SELECT original_file_id FROM source_versions WHERE source_id = ?",
+            ("source-v1",),
+        ).fetchone()
+        assert source_row is not None
+        assert source_row["original_file_id"] == file_id
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("DELETE FROM files WHERE id = ?", (file_id,))
 
-    # Idempotent
+    # Idempotent.
     Registry(database_path).initialize()
 
 
