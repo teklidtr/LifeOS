@@ -368,11 +368,19 @@ def register_scan(
                     )
                 elif not scoped_rows:
                     if identity_allow_path is not None and rows:
-                        # A previously trusted row exists only outside this caller's scope. Do not
-                        # retarget or expose that hidden lineage here. Record the visible path as a
-                        # provisional path/hash observation without duplicating the durable ID;
-                        # the next unrestricted refresh can consolidate it onto the original row.
-                        deferred_stable_ids.add(durable_id)
+                        hidden_path_still_present = any(
+                            _canonical_path_from_storage(str(candidate["vault_path"])) in seen
+                            for candidate in rows
+                        )
+                        if not hidden_path_still_present:
+                            # The trusted identity's previous path disappeared while exactly one
+                            # caller-visible note now claims the ID. That may be a cross-scope
+                            # relocation, so preserve the trusted row and keep the visible
+                            # observation provisional until an unrestricted refresh can prove it.
+                            deferred_stable_ids.add(durable_id)
+                        # If a denied prior path is still present, this is a separate hidden note,
+                        # not evidence that it relocated. It must not influence the caller-visible
+                        # identity decision, so the visible row may retain the same scoped ID.
                     continue
                 else:
                     row = scoped_rows[0]
