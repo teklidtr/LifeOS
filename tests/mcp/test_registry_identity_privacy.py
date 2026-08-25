@@ -25,20 +25,22 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
     (vault / "proposals").mkdir()
     protected.write_text(_note("shared-id", "Hidden"), encoding="utf-8")
 
-    # Seed a broader local registry observation first. The later external refresh must forget
-    # these content-derived protected facts without opening the protected file again.
+    # Seed a broader local registry observation first. The later external refresh must neither
+    # open nor disclose those protected facts, but it also must not destroy local lineage that a
+    # later trusted refresh may need to recognize a protected-note relocation.
     runtime = vault / ".lifeos"
     registry = Registry(runtime / "registry.db")
     registry.initialize()
     register_scan(registry, vault, scan_vault(vault))
     with registry.connect_read_only() as connection:
         seeded = connection.execute(
-            "SELECT stable_id, content_hash FROM files WHERE vault_path = ?",
+            "SELECT stable_id, content_hash, mtime_ns FROM files WHERE vault_path = ?",
             ("private/hidden.md",),
         ).fetchone()
     assert seeded is not None
     assert seeded["stable_id"] == "shared-id"
     assert seeded["content_hash"] is not None
+    assert seeded["mtime_ns"] is not None
 
     public.write_text(_note("shared-id", "Public"), encoding="utf-8")
     real_parser = coherent_tracking.parse_markdown_note
@@ -69,6 +71,7 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
 
     assert payload["new"] == ["wiki/public.md"]
     assert "private/hidden.md" not in payload["new"]
+    assert payload["proposals_indexed"] == 0
     assert parsed_paths == [public]
     assert hashed_paths == [public]
     with registry.connect_read_only() as connection:
@@ -81,7 +84,11 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
         }
     assert rows["wiki/public.md"][0] == "shared-id"
     assert rows["wiki/public.md"][1] is not None
-    assert rows["private/hidden.md"] == (None, None, None)
+    assert rows["private/hidden.md"] == (
+        "shared-id",
+        seeded["content_hash"],
+        seeded["mtime_ns"],
+    )
 
     activity = server._tool_manager.get_tool("runtime_activity").fn(limit=10)
     refresh = [record for record in activity["records"] if record["tool"] == "registry_refresh"][-1]
