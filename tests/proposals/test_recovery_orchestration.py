@@ -25,6 +25,7 @@ from lifeos.proposals.recovery_service import (
     RecoveryAction,
     recover_interrupted_applications,
 )
+from lifeos.proposals.recovery_store import PinnedRecoveryStore
 from tests.proposals.test_application import _make_meta, _setup_proposal
 
 
@@ -181,14 +182,14 @@ def test_recovery_after_proposal_commit_finishes_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     meta, vault_root, proposal = _load_two_target_application(tmp_path)
-    original_writer = application_module.write_recovery_journal
+    original_writer = PinnedRecoveryStore.write_journal
 
-    def interrupt_complete(*, recovery_root: Path, journal) -> None:
+    def interrupt_complete(self: PinnedRecoveryStore, journal) -> None:
         if journal.phase is RecoveryPhase.COMPLETE:
             raise _InjectedInterruption("before complete journal")
-        original_writer(recovery_root=recovery_root, journal=journal)
+        original_writer(self, journal)
 
-    monkeypatch.setattr(application_module, "write_recovery_journal", interrupt_complete)
+    monkeypatch.setattr(PinnedRecoveryStore, "write_journal", interrupt_complete)
     with pytest.raises(_InjectedInterruption):
         apply_proposal(
             proposal,
@@ -213,18 +214,14 @@ def test_recovery_rolls_forward_when_proposal_publish_precedes_phase_update(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     meta, vault_root, proposal = _load_two_target_application(tmp_path)
-    original_writer = application_module.write_recovery_journal
+    original_writer = PinnedRecoveryStore.write_journal
 
-    def interrupt_phase_update(*, recovery_root: Path, journal) -> None:
+    def interrupt_phase_update(self: PinnedRecoveryStore, journal) -> None:
         if journal.phase is RecoveryPhase.PROPOSAL_COMMITTED:
             raise _InjectedInterruption("after proposal publish")
-        original_writer(recovery_root=recovery_root, journal=journal)
+        original_writer(self, journal)
 
-    monkeypatch.setattr(
-        application_module,
-        "write_recovery_journal",
-        interrupt_phase_update,
-    )
+    monkeypatch.setattr(PinnedRecoveryStore, "write_journal", interrupt_phase_update)
     with pytest.raises(_InjectedInterruption):
         apply_proposal(
             proposal,
