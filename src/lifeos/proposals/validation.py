@@ -72,7 +72,11 @@ def preflight_proposal(
     *,
     vault_root: Path,
     max_inspection_bytes: int = 5 * 1024 * 1024,
+    runtime_dir: Path | None = None,
 ) -> ProposalPreflightResult:
+    # ``runtime_dir`` is part of the compatibility seam used when this base callable is
+    # replaced by the coherence-aware preflight wrapper. The base validator has no derived
+    # runtime traversal of its own, so it intentionally does not consume the value.
     if type(max_inspection_bytes) is not int or max_inspection_bytes <= 0:
         return ProposalPreflightResult(
             proposal_id=proposal.metadata.id,
@@ -395,7 +399,7 @@ def _evaluate_operation(
                         operation_id=op.id,
                         target_path=target_path,
                         field_path=None,
-                        message="Ownership target is present; release is no longer safe",
+                        message="Ownership target was restored after review",
                     ),
                 ),
             )
