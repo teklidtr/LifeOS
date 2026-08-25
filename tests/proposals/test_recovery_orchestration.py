@@ -201,6 +201,7 @@ def test_recovery_after_proposal_commit_finishes_cleanup(
     journal = _single_journal(vault_root)
     assert journal.phase is RecoveryPhase.PROPOSAL_COMMITTED
 
+    monkeypatch.setattr(PinnedRecoveryStore, "write_journal", original_writer)
     result = recover_interrupted_applications(vault_root=vault_root)
     assert result.transactions[0].action is RecoveryAction.COMPLETED
     assert not (vault_root / ".lifeos" / "recovery" / str(journal.transaction_id)).exists()
