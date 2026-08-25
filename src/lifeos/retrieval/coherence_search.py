@@ -11,6 +11,7 @@ from pathlib import Path
 import lifeos.retrieval.search as _base_search
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
+from lifeos.context.search import lexical_terms
 from lifeos.retrieval.contracts import (
     CancellationToken,
     EmbeddingProvider,
@@ -20,6 +21,7 @@ from lifeos.retrieval.contracts import (
     RerankingProvider,
     scope_decision,
 )
+from lifeos.retrieval.index import RetrievalIndex
 from lifeos.retrieval.models import IndexedChunk, IndexedDocument
 from lifeos.retrieval.service import IndexHealth
 from lifeos.retrieval.search import (
@@ -42,6 +44,9 @@ _QUERY_HEALTH: ContextVar[IndexHealth | None] = ContextVar(
 _SCOPED_QUERY_CHUNKS: ContextVar[
     dict[str, tuple[IndexedChunk, IndexedDocument]] | None
 ] = ContextVar("lifeos_retrieval_scoped_query_chunks", default=None)
+_PREAUTHORIZED_PATHS: ContextVar[frozenset[str] | None] = ContextVar(
+    "lifeos_retrieval_preauthorized_paths", default=None
+)
 _ROW_AUTHORIZATION: ContextVar[dict[str, bool] | None] = ContextVar(
     "lifeos_retrieval_row_authorization", default=None
 )
@@ -95,6 +100,7 @@ class HybridRetriever(_BaseHybridRetriever):
         health_token = _QUERY_HEALTH.set(None)
         scoped_chunks: dict[str, tuple[IndexedChunk, IndexedDocument]] = {}
         scoped_token = _SCOPED_QUERY_CHUNKS.set(scoped_chunks)
+        preauthorized_token = _PREAUTHORIZED_PATHS.set(None)
         row_authorization: dict[str, bool] = {}
         row_authorization_token = _ROW_AUTHORIZATION.set(row_authorization)
         authorized_semantic_ids: set[str] = set()
@@ -102,6 +108,17 @@ class HybridRetriever(_BaseHybridRetriever):
         captured: dict[str, str | None] = {}
         capture_token = _IDENTITY_CAPTURE.set(captured)
         try:
+            health = self._index_health(embedding_provider=embedding_provider)
+            preauthorized = (
+                self._preauthorization_paths(
+                    request=request,
+                    embedding_provider=embedding_provider,
+                    graph_hints=graph_hints,
+                )
+                if health.active_usable
+                else frozenset()
+            )
+            _PREAUTHORIZED_PATHS.set(preauthorized)
             response = super().search(
                 request,
                 embedding_provider=embedding_provider,
@@ -113,6 +130,7 @@ class HybridRetriever(_BaseHybridRetriever):
             _IDENTITY_CAPTURE.reset(capture_token)
             _AUTHORIZED_SEMANTIC_IDS.reset(semantic_token)
             _ROW_AUTHORIZATION.reset(row_authorization_token)
+            _PREAUTHORIZED_PATHS.reset(preauthorized_token)
             _SCOPED_QUERY_CHUNKS.reset(scoped_token)
             _QUERY_HEALTH.reset(health_token)
             _STALE_QUERY_PATHS.reset(stale_token)
@@ -142,10 +160,74 @@ class HybridRetriever(_BaseHybridRetriever):
     def _index_health(
         self, *, embedding_provider: EmbeddingProvider | None = None
     ) -> IndexHealth:
+        existing = _QUERY_HEALTH.get()
+        if existing is not None:
+            return existing
         health = super()._index_health(embedding_provider=embedding_provider)
         _QUERY_HEALTH.set(health)
         _STALE_QUERY_PATHS.set(frozenset((*health.orphaned_paths, *health.stale_paths)))
         return health
+
+    def _preauthorization_paths(
+        self,
+        *,
+        request: RetrievalRequest,
+        embedding_provider: EmbeddingProvider | None,
+        graph_hints: Mapping[str, float] | None,
+    ) -> frozenset[str]:
+        """Find rows that can affect this query before any cross-document scoring.
+
+        Indexed metadata may choose which current canonical paths need verification, but only
+        descriptor-verified rows are later admitted to semantic/link/ranking computation. This
+        keeps the security boundary ahead of cross-document influence without turning every local
+        lexical query into an O(vault-size) canonical file read.
+        """
+        index = RetrievalIndex(self.index_service.active_path, create=False)
+        try:
+            documents = {item.path: item for item in index.documents()}
+            eligible: list[IndexedChunk] = []
+            for chunk in index.chunks():
+                document = documents[chunk.path]
+                if chunk.path in _STALE_QUERY_PATHS.get():
+                    continue
+                if self._runtime_prefix is not None and chunk.path.startswith(self._runtime_prefix):
+                    continue
+                if not _BaseHybridRetriever._in_scope(self, chunk, document, request):
+                    continue
+                eligible.append(chunk)
+
+            selected = set(request.scope.paths) | set(request.scope.pinned_paths)
+            provisional_links = _base_search._link_scores(eligible, selected)
+            semantic_chunk_ids: set[str] = set()
+            if embedding_provider is not None:
+                semantic_chunk_ids = {
+                    item.chunk_id
+                    for item in index.embeddings(embedding_provider.capabilities)
+                }
+
+            terms = lexical_terms(request.query)
+            query_text = request.query.casefold().strip()
+            graph = graph_hints or {}
+            paths = set(selected)
+            paths.update(provisional_links)
+            for chunk in eligible:
+                document = documents[chunk.path]
+                exact, lexical, _matched = _base_search._lexical_scores(
+                    query_text, terms, chunk=chunk, document=document
+                )
+                metadata = _base_search._metadata_score(terms, chunk, document, request)
+                graph_score = max(0.0, min(1.0, float(graph.get(chunk.path, 0.0))))
+                if (
+                    exact > 0
+                    or lexical > 0
+                    or metadata > 0
+                    or graph_score > 0
+                    or chunk.chunk_id in semantic_chunk_ids
+                ):
+                    paths.add(chunk.path)
+            return frozenset(paths)
+        finally:
+            index.close()
 
     def _in_scope(
         self,
@@ -158,6 +240,10 @@ class HybridRetriever(_BaseHybridRetriever):
         if self._runtime_prefix is not None and chunk.path.startswith(self._runtime_prefix):
             return False
         if not super()._in_scope(chunk, document, request):
+            return False
+
+        preauthorized = _PREAUTHORIZED_PATHS.get()
+        if preauthorized is not None and document.path not in preauthorized:
             return False
 
         row_authorization = _ROW_AUTHORIZATION.get()
