@@ -1155,13 +1155,19 @@ def persist_wiki_proposal(
 
 
 def persist_wiki_section_update_proposal(
-    *, proposals_root: Path, documents: WikiProposalDocuments
+    *,
+    proposals_root: Path,
+    documents: WikiProposalDocuments,
+    runtime_dir: Path | None = None,
 ) -> Path:
     return _persist_proposal_documents(proposals_root=proposals_root, documents=documents)
 
 
 def persist_compound_wiki_proposal(
-    *, proposals_root: Path, documents: CompoundWikiProposalDocuments
+    *,
+    proposals_root: Path,
+    documents: CompoundWikiProposalDocuments,
+    runtime_dir: Path | None = None,
 ) -> Path:
     vault_root = proposals_root.parent
     if (vault_root / documents.create_target_path).exists():
@@ -1170,7 +1176,10 @@ def persist_compound_wiki_proposal(
 
 
 def persist_compounding_wiki_proposal(
-    *, proposals_root: Path, documents: CompoundingWikiProposalDocuments
+    *,
+    proposals_root: Path,
+    documents: CompoundingWikiProposalDocuments,
+    runtime_dir: Path | None = None,
 ) -> Path:
     vault_root = proposals_root.parent
     for target_path in documents.create_target_paths:
@@ -1180,7 +1189,10 @@ def persist_compounding_wiki_proposal(
 
 
 def persist_study_learning_proposal(
-    *, proposals_root: Path, documents: StudyLearningProposalDocuments
+    *,
+    proposals_root: Path,
+    documents: StudyLearningProposalDocuments,
+    runtime_dir: Path | None = None,
 ) -> Path:
     vault_root = proposals_root.parent
     for target_path in documents.create_target_paths:
