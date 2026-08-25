@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Callable
 
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.registry import Registry
 from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
 from lifeos.facade.models import (
@@ -433,27 +435,47 @@ def _random_suffix() -> str:
     return secrets.token_hex(4)
 
 
-def _load_verified_source(
-    *, vault_root: Path, registry: Registry, source_path: str
-) -> VerifiedRegisteredSource:
+def _require_external_read_access(
+    *,
+    vault_root: Path,
+    registry: Registry,
+    path: str,
+    kind: str,
+) -> None:
     try:
-        validate_vault_path(source_path)
+        validate_vault_path(path)
     except FileTrackingError as e:
-        raise ToolValidationError("Invalid source path") from e
+        raise ToolValidationError(f"Invalid {kind.lower()} path") from e
 
     try:
+        runtime_prefix = runtime_exclusion_prefix(
+            vault_root,
+            runtime_dir=registry.database_path.parent,
+        )
+        if runtime_prefix is not None and path.startswith(runtime_prefix):
+            raise ToolValidationError(f"{kind} is not available to external ingestion")
         policy = load_retrieval_policy(vault_root)
         allowed = scope_decision(
-            source_path,
+            path,
             scope=RetrievalScope(),
             policy=policy,
             mode="external",
         ).allowed
-    except RetrievalError as e:
-        raise ToolExecutionError("Retrieval policy is invalid") from e
+    except (CoherenceError, RetrievalError) as e:
+        raise ToolExecutionError("Could not resolve external ingestion access policy") from e
     if not allowed:
-        raise ToolValidationError("Source is not available to external ingestion")
+        raise ToolValidationError(f"{kind} is not available to external ingestion")
 
+
+def _load_verified_source(
+    *, vault_root: Path, registry: Registry, source_path: str
+) -> VerifiedRegisteredSource:
+    _require_external_read_access(
+        vault_root=vault_root,
+        registry=registry,
+        path=source_path,
+        kind="Source",
+    )
     try:
         return load_registered_source(
             registry=registry,
@@ -657,6 +679,12 @@ def update_wiki_section_proposal(
         target_path = validate_wiki_target_path(request.target_path)
     except (FileTrackingError, InvalidWikiTargetError) as e:
         raise ToolValidationError("Invalid wiki target path") from e
+    _require_external_read_access(
+        vault_root=vault_root,
+        registry=registry,
+        path=target_path,
+        kind="Wiki update target",
+    )
 
     ownership = _load_generated_ownership(vault_root=vault_root)
     ownership_entry = ownership.entries.get(target_path)
@@ -769,6 +797,12 @@ def create_wiki_and_update_section_proposal(
         update_target_path = validate_wiki_target_path(request.update_target_path)
     except (FileTrackingError, InvalidWikiTargetError) as e:
         raise ToolValidationError("Invalid wiki target path") from e
+    _require_external_read_access(
+        vault_root=vault_root,
+        registry=registry,
+        path=update_target_path,
+        kind="Wiki update target",
+    )
     if create_target_path == update_target_path:
         raise ToolValidationError("Create and update targets must be different")
 
@@ -932,6 +966,12 @@ def evolve_wiki_proposal(
             raise ToolValidationError("Invalid wiki update target path") from error
         if not target_path.endswith(".md"):
             raise ToolValidationError("Wiki update target must be a Markdown file")
+        _require_external_read_access(
+            vault_root=vault_root,
+            registry=registry,
+            path=target_path,
+            kind="Wiki update target",
+        )
         ownership_entry = ownership.entries.get(target_path)
         try:
             target = read_vault_markdown(vault_root, target_path)
@@ -1068,6 +1108,12 @@ def evolve_study_learning_proposal(
             target_path = validate_wiki_target_path(update_item.target_path)
         except (FileTrackingError, InvalidWikiTargetError) as error:
             raise ToolValidationError("Invalid wiki update target path") from error
+        _require_external_read_access(
+            vault_root=vault_root,
+            registry=registry,
+            path=target_path,
+            kind="Wiki update target",
+        )
         ownership_entry = ownership.entries.get(target_path)
         try:
             target = read_vault_markdown(vault_root, target_path)

@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from lifeos.coherence import CoherenceError
-from lifeos.coherence_scoped import collect_scoped_identity_snapshot
+from lifeos.coherence_scoped import collect_scoped_identity_snapshot, runtime_exclusion_prefix
 from lifeos.proposals.loader import LoadedProposal
 from lifeos.proposals.target_identity import (
     ProposalTargetIdentityError,
@@ -50,6 +50,28 @@ def preflight_proposal(
         vault_root=vault_root,
         max_inspection_bytes=max_inspection_bytes,
     )
+    try:
+        runtime_prefix = runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
+    except CoherenceError as error:
+        return _invalidate(base, code="runtime_scope_unresolvable", message=str(error))
+    if runtime_prefix is not None:
+        runtime_targets = sorted(
+            {
+                operation.target_path
+                for operation in base.operations
+                if operation.target_path.startswith(runtime_prefix)
+            }
+        )
+        if runtime_targets:
+            return _invalidate(
+                base,
+                code="target_inside_runtime",
+                message=(
+                    "Proposal targets configured node-local runtime state rather than canonical "
+                    "vault content: " + ", ".join(runtime_targets)
+                ),
+            )
+
     try:
         targets = parse_target_identities(proposal.metadata, proposal.patch_document)
     except ProposalTargetIdentityError as error:
