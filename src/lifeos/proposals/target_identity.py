@@ -52,7 +52,11 @@ def with_target_identity_extension(
         if reviewed_hash is None:
             continue
         note = snapshot.by_path(operation.target_path)
-        if note is None or note.stable_id is None:
+        if note is None:
+            raise ProposalTargetIdentityError(
+                f"Operation {operation.id!r} reviewed target disappeared during identity binding"
+            )
+        if note.stable_id is None:
             continue
         matches = snapshot.by_stable_id(note.stable_id)
         if len(matches) != 1:
