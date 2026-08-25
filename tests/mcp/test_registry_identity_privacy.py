@@ -5,7 +5,8 @@ from unittest.mock import MagicMock
 
 import lifeos.registry.coherent_tracking as coherent_tracking
 from lifeos.mcp.server import create_mcp_server
-from lifeos.registry import Registry
+from lifeos.registry import Registry, register_scan
+from lifeos.scanner import scan_vault
 
 
 def _note(stable_id: str, title: str) -> str:
@@ -22,9 +23,24 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
     public.parent.mkdir(parents=True)
     protected.parent.mkdir(parents=True)
     (vault / "proposals").mkdir()
-    public.write_text(_note("shared-id", "Public"), encoding="utf-8")
     protected.write_text(_note("shared-id", "Hidden"), encoding="utf-8")
 
+    # Seed a broader local registry observation first. The later external refresh must forget
+    # these content-derived protected facts without opening the protected file again.
+    runtime = vault / ".lifeos"
+    registry = Registry(runtime / "registry.db")
+    registry.initialize()
+    register_scan(registry, vault, scan_vault(vault))
+    with registry.connect_read_only() as connection:
+        seeded = connection.execute(
+            "SELECT stable_id, content_hash FROM files WHERE vault_path = ?",
+            ("private/hidden.md",),
+        ).fetchone()
+    assert seeded is not None
+    assert seeded["stable_id"] == "shared-id"
+    assert seeded["content_hash"] is not None
+
+    public.write_text(_note("shared-id", "Public"), encoding="utf-8")
     real_parser = coherent_tracking.parse_markdown_note
     real_hash = coherent_tracking._base._hash_file
     parsed_paths: list[Path] = []
@@ -42,8 +58,6 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
 
     monkeypatch.setattr(coherent_tracking, "parse_markdown_note", recording_parser)
     monkeypatch.setattr(coherent_tracking._base, "_hash_file", recording_hash)
-    runtime = vault / ".lifeos"
-    registry = Registry(runtime / "registry.db")
     server = create_mcp_server(
         vault_root=vault,
         registry=registry,
@@ -59,15 +73,15 @@ def test_mcp_registry_refresh_does_not_parse_or_disclose_protected_identity(
     assert hashed_paths == [public]
     with registry.connect_read_only() as connection:
         rows = {
-            row["vault_path"]: (row["stable_id"], row["content_hash"])
+            row["vault_path"]: (row["stable_id"], row["content_hash"], row["mtime_ns"])
             for row in connection.execute(
-                "SELECT vault_path, stable_id, content_hash "
+                "SELECT vault_path, stable_id, content_hash, mtime_ns "
                 "FROM files WHERE is_deleted = 0 ORDER BY vault_path"
             ).fetchall()
         }
     assert rows["wiki/public.md"][0] == "shared-id"
     assert rows["wiki/public.md"][1] is not None
-    assert rows["private/hidden.md"] == (None, None)
+    assert rows["private/hidden.md"] == (None, None, None)
 
     activity = server._tool_manager.get_tool("runtime_activity").fn(limit=10)
     refresh = [record for record in activity["records"] if record["tool"] == "registry_refresh"][-1]
