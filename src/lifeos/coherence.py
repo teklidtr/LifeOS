@@ -27,6 +27,7 @@ TargetResolutionState = Literal[
 WRITER_MODEL: WriterModel = "single-active-lifeos-writer"
 STABLE_ID_REQUIRED_ROOTS = frozenset({"wiki"})
 _IDENTITY_IGNORED_ROOTS = frozenset({"proposals"})
+_IDENTITY_IGNORED_PATHS = frozenset({"AGENTS.md"})
 
 
 class CoherenceError(RuntimeError):
@@ -159,7 +160,8 @@ def collect_identity_snapshot(vault_root: Path) -> IdentitySnapshot:
     Frontmatter ``id`` is relocation-safe identity. Notes without an ID remain usable via
     their path but cannot be automatically followed across a rename. Wiki notes without an
     ID therefore produce a migration warning rather than silently treating the path as a
-    permanent identity.
+    permanent identity. Root ``AGENTS.md`` is bootstrap control metadata and never enters the
+    canonical note-identity namespace.
     """
     notes: list[StableNoteIdentity] = []
     diagnostics: list[IdentityDiagnostic] = []
@@ -173,6 +175,8 @@ def collect_identity_snapshot(vault_root: Path) -> IdentitySnapshot:
     for source in sources:
         first_root = source.relative_path.split("/", 1)[0]
         if first_root in _IDENTITY_IGNORED_ROOTS:
+            continue
+        if source.relative_path in _IDENTITY_IGNORED_PATHS:
             continue
         parsed = parse_markdown_note(source.path, content=source.content)
         stable_id = parsed.durable_fields.id
