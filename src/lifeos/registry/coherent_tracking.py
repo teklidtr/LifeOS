@@ -241,13 +241,21 @@ def register_scan(
                         identity_allow_path=identity_allow_path,
                     )
                 ]
-                if len(scoped_rows) > 1:
+                exact_rows = [
+                    row
+                    for row in scoped_rows
+                    if _canonical_path_from_storage(str(row["vault_path"])) == target_path
+                ]
+                if exact_rows:
+                    row = exact_rows[0]
+                elif len(scoped_rows) > 1:
                     raise _base.FileTrackingError(
                         f"Stable note id {durable_id!r} is ambiguous in scoped registry state."
                     )
-                if not scoped_rows:
+                elif not scoped_rows:
                     continue
-                row = scoped_rows[0]
+                else:
+                    row = scoped_rows[0]
                 stored_path = str(row["vault_path"])
                 if _canonical_path_from_storage(stored_path) != target_path:
                     relocations[durable_id] = (
