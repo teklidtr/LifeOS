@@ -61,7 +61,8 @@ def test_retrieval_does_not_expose_ambiguous_stable_id_hidden_by_index_key(
         encoding="utf-8",
     )
     runtime = vault / ".lifeos"
-    RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
+    service = RetrievalIndexService(vault_root=vault, runtime_dir=runtime)
+    service.rebuild()
 
     response = HybridRetriever(vault_root=vault, runtime_dir=runtime).search(
         RetrievalRequest("saffron-marker")
@@ -70,7 +71,7 @@ def test_retrieval_does_not_expose_ambiguous_stable_id_hidden_by_index_key(
     assert response.results
     assert response.results[0].path == "wiki/b.md"
     assert response.results[0].stable_id is None
-    with RetrievalIndex(runtime / "retrieval" / "active.sqlite", create=False) as index:
+    with RetrievalIndex(service.active_path, create=False) as index:
         documents = {document.path: document.document_id for document in index.documents()}
     assert set(documents) == {"wiki/a.md", "wiki/b.md"}
     assert all(document_id.startswith("path:") for document_id in documents.values())
