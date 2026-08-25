@@ -168,6 +168,7 @@ class _ApplicationContext:
     vault_root: Path
     applied_by: str
     applied_at: str
+    runtime_dir: Path
     recovery_root: Path
     outcome: ProposalApplicationResult
 
@@ -350,7 +351,7 @@ def _validate_application_proposal(
     *,
     vault_root: Path,
     outcome: ProposalApplicationResult,
-    identity_runtime_dir: Path | None = None,
+    runtime_dir: Path | None = None,
 ) -> None:
     if proposal.patch_document.schema_version == 1:
         for operation in proposal.patch_document.operations:
@@ -361,13 +362,13 @@ def _validate_application_proposal(
                     code=ApplicationErrorCode.VALIDATION_ERROR,
                 )
 
-    if identity_runtime_dir is None:
+    if runtime_dir is None:
         preflight_result = preflight_proposal(proposal, vault_root=vault_root)
     else:
         preflight_result = preflight_proposal(
             proposal,
             vault_root=vault_root,
-            runtime_dir=identity_runtime_dir,
+            runtime_dir=runtime_dir,
         )
     if preflight_result.state == "valid":
         return
@@ -494,8 +495,6 @@ def _open_or_create_target_parent(
                                 f"{sync_result.errno_name}"
                             ),
                         )
-                    # O_NOFOLLOW in open_directory_secure keeps an existing or
-                    # raced symlink from becoming a traversal path.
                     child_fd = open_directory_secure(Path(segment), dir_fd=current_fd)
                 os.close(current_fd)
                 current_fd = child_fd
@@ -655,8 +654,8 @@ def _validate_precommit_state(
     outcome: ProposalApplicationResult,
 ) -> None:
     vault_lock_stat = os.stat(
-        ".lifeos/locks/vault-mutation.lock",
-        dir_fd=root_fd,
+        vault_lock.filename,
+        dir_fd=vault_lock.dir_fd,
         follow_symlinks=False,
     )
     assert vault_lock.lock_fd is not None
@@ -1062,12 +1061,15 @@ def apply_proposal(
             code=ApplicationErrorCode.VALIDATION_ERROR,
         )
 
-    runtime_dir = vault_root / ".lifeos"
+    runtime_dir = identity_runtime_dir or (vault_root / ".lifeos")
     recovery_root = runtime_dir / "recovery"
     try:
         with acquire_recovery_lock(runtime_dir=runtime_dir):
             try:
-                _recover_interrupted_applications_locked(vault_root=vault_root)
+                _recover_interrupted_applications_locked(
+                    vault_root=vault_root,
+                    runtime_dir=runtime_dir,
+                )
             except RecoveryCorruptStateError as error:
                 raise ApplicationError(
                     "Recovery state is ambiguous",
@@ -1085,9 +1087,9 @@ def apply_proposal(
                 vault_root=vault_root,
                 applied_by=applied_by,
                 applied_at=applied_at,
+                runtime_dir=runtime_dir,
                 recovery_root=recovery_root,
                 outcome=outcome,
-                identity_runtime_dir=identity_runtime_dir,
             )
     except RecoveryLockUnavailableError as error:
         raise ApplicationError(
@@ -1103,9 +1105,9 @@ def _apply_proposal_locked(
     vault_root: Path,
     applied_by: str,
     applied_at: str,
+    runtime_dir: Path,
     recovery_root: Path,
     outcome: ProposalApplicationResult,
-    identity_runtime_dir: Path | None = None,
 ) -> ProposalApplicationResult:
     """Orchestrate one locked application through the explicit state machine."""
     return _execute_application_transaction(
@@ -1114,22 +1116,21 @@ def _apply_proposal_locked(
             vault_root=vault_root,
             applied_by=applied_by,
             applied_at=applied_at,
+            runtime_dir=runtime_dir,
             recovery_root=recovery_root,
             outcome=outcome,
-        ),
-        identity_runtime_dir=identity_runtime_dir,
+        )
     )
 
 
 def _execute_application_transaction(
     context: _ApplicationContext,
-    *,
-    identity_runtime_dir: Path | None = None,
 ) -> ProposalApplicationResult:
     proposal = context.proposal
     vault_root = context.vault_root
     applied_by = context.applied_by
     applied_at = context.applied_at
+    runtime_dir = context.runtime_dir
     recovery_root = context.recovery_root
     outcome = context.outcome
     canonical_proposals_root = vault_root / "proposals"
@@ -1177,12 +1178,12 @@ def _execute_application_transaction(
 
     try:
         try:
-            lifeos_fd = open_directory_secure(vault_root / ".lifeos")
+            lifeos_fd = open_directory_secure(runtime_dir)
             try:
-                locks_fd = open_directory_secure(vault_root / ".lifeos" / "locks", dir_fd=lifeos_fd)
+                locks_fd = open_directory_secure(runtime_dir / "locks", dir_fd=lifeos_fd)
             except SecureIOError:
                 os.mkdir("locks", 0o700, dir_fd=lifeos_fd)
-                locks_fd = open_directory_secure(vault_root / ".lifeos" / "locks", dir_fd=lifeos_fd)
+                locks_fd = open_directory_secure(runtime_dir / "locks", dir_fd=lifeos_fd)
         except (OSError, SecureIOError) as error:
             raise ApplicationError(
                 "Failed to setup transaction",
@@ -1230,7 +1231,7 @@ def _execute_application_transaction(
             proposal,
             vault_root=vault_root,
             outcome=outcome,
-            identity_runtime_dir=identity_runtime_dir,
+            runtime_dir=runtime_dir,
         )
 
         try:
@@ -1765,9 +1766,6 @@ def _execute_application_transaction(
         proposal_lock_released = cleanup_result.proposal_lock_released
 
         if application_error is not None or unexpected_error is not None:
-            # Parent folders are implicit support for reviewed generated creates,
-            # not independent durable output. Remove newly created empty folders
-            # after a failed application; non-empty or raced paths are left alone.
             for relative_path in reversed(created_parent_paths):
                 try:
                     (vault_root / relative_path).rmdir()
