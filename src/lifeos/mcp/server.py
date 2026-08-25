@@ -1,6 +1,7 @@
 """LifeOS MCP Server definition and tools."""
 
 import logging
+import posixpath
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar, cast
@@ -11,6 +12,8 @@ from pydantic import BaseModel, ConfigDict
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.facade.consequential_tools import (
     APPLY_PROPOSAL_DESCRIPTOR,
     APPROVE_PROPOSAL_DESCRIPTOR,
@@ -303,7 +306,35 @@ def create_mcp_server(
     authorizer: ConsequentialAuthorizer,
     runtime_dir: Path | None = None,
 ) -> FastMCP:
-    activity = ActivityStore(runtime_dir or (vault_root / ".lifeos"))
+    resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
+    activity = ActivityStore(resolved_runtime_dir)
+    try:
+        runtime_prefix = runtime_exclusion_prefix(
+            vault_root,
+            runtime_dir=resolved_runtime_dir,
+        )
+    except CoherenceError as error:
+        raise ValueError("Could not resolve configured runtime directory") from error
+
+    def _path_inside_runtime(path: str) -> bool:
+        if runtime_prefix is None:
+            return False
+        normalized = posixpath.normpath(path)
+        runtime_root = runtime_prefix.rstrip("/")
+        return normalized == runtime_root or normalized.startswith(runtime_prefix)
+
+    def _reject_runtime_paths(*paths: str | None) -> None:
+        denied = sorted(
+            {
+                path
+                for path in paths
+                if path is not None and _path_inside_runtime(path)
+            }
+        )
+        if denied:
+            raise ToolValidationError(
+                "Configured node-local runtime paths are unavailable to MCP ingestion"
+            )
 
     def _external_registry_identity_allow_path() -> Callable[[str], bool]:
         try:
@@ -314,6 +345,8 @@ def create_mcp_server(
 
         def allowed(path: str) -> bool:
             if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
+            if _path_inside_runtime(path):
                 return False
             try:
                 return scope_decision(
@@ -523,6 +556,11 @@ def create_mcp_server(
                     for item in updates or []
                 ),
             )
+            _reject_runtime_paths(
+                request.source_path,
+                *(item.target_path for item in request.creates),
+                *(item.target_path for item in request.updates),
+            )
             _refresh_for_ingestion(source_path)
             result = evolve_wiki_proposal(
                 vault_root=vault_root,
@@ -581,6 +619,13 @@ def create_mcp_server(
                     for item in flashcards or []
                 ),
             )
+            _reject_runtime_paths(
+                request.source_path,
+                *(item.target_path for item in request.wiki_creates),
+                *(item.target_path for item in request.wiki_updates),
+                *(item.target_path for item in request.flashcards),
+                *(ref for item in request.flashcards for ref in item.knowledge_refs),
+            )
             _refresh_for_ingestion(source_path)
             result = evolve_study_learning_proposal(
                 vault_root=vault_root,
@@ -621,6 +666,7 @@ def create_mcp_server(
                 page_kind=page_kind,
                 slug=slug,
             )
+            _reject_runtime_paths(request.source_path, request.target_path)
             _refresh_for_ingestion(source_path)
             res = create_wiki_proposal(
                 vault_root=vault_root,
@@ -657,6 +703,7 @@ def create_mcp_server(
                 tags=None if tags is None else tuple(tags),
                 tag_rationale=tag_rationale,
             )
+            _reject_runtime_paths(request.source_path, request.target_path)
             _refresh_for_ingestion(source_path)
             res = update_wiki_section_proposal(
                 vault_root=vault_root,
@@ -703,6 +750,11 @@ def create_mcp_server(
                 create_tag_rationale=create_tag_rationale,
                 create_page_kind=create_page_kind,
                 create_slug=create_slug,
+            )
+            _reject_runtime_paths(
+                request.source_path,
+                request.create_target_path,
+                request.update_target_path,
             )
             _refresh_for_ingestion(source_path)
             res = create_wiki_and_update_section_proposal(
