@@ -114,6 +114,7 @@ def runtime_exclusion_prefix(
             "Runtime directory overlaps the canonical vault root; identity traversal is unsafe"
         )
     if lexical_relative_path is not None:
+        assert lexical_relative is not None
         actual_relative = _existing_runtime_spelling(root, lexical_relative_path)
         effective = actual_relative or lexical_relative
         return effective.rstrip("/") + "/"
