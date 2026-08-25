@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,8 +71,10 @@ def load_config(config_path: str | Path) -> LifeOSConfig:
 
     runtime_value = data.get("runtime_dir", _DEFAULT_RUNTIME_DIR)
     runtime_path = _parse_path(runtime_value, field_name="runtime_dir")
+    runtime_candidate = _lexical_absolute_path(runtime_path, base=vault_root)
+    _reject_runtime_symlink_components(runtime_candidate)
     runtime_dir = _normalize_path(
-        runtime_path,
+        runtime_candidate,
         base=vault_root,
         field_name="runtime_dir",
     )
@@ -102,6 +106,31 @@ def _parse_path(value: object, *, field_name: str) -> Path:
     if "\x00" in value:
         raise ConfigError(f"Configuration field '{field_name}' contains an invalid null byte.")
     return Path(value)
+
+
+def _lexical_absolute_path(path: Path, *, base: Path) -> Path:
+    candidate = path if path.is_absolute() else base / path
+    return Path(os.path.abspath(candidate))
+
+
+def _reject_runtime_symlink_components(runtime_dir: Path) -> None:
+    """Reject existing symlink components before runtime resolution loses lexical topology."""
+    current = Path(runtime_dir.anchor)
+    parts = runtime_dir.parts[1:] if runtime_dir.anchor else runtime_dir.parts
+    for part in parts:
+        current = current / part
+        try:
+            state = os.lstat(current)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise ConfigError(
+                f"Could not inspect configuration field 'runtime_dir': {exc}"
+            ) from exc
+        if stat.S_ISLNK(state.st_mode):
+            raise ConfigError(
+                f"Configuration field 'runtime_dir' contains a symlink component: {current}"
+            )
 
 
 def _normalize_path(path: Path, *, base: Path, field_name: str) -> Path:
