@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal, Callable
 
 from lifeos.registry import Registry
-from lifeos.registry.file_tracking import FileTrackingError
+from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
 from lifeos.facade.models import (
     ToolDescriptor,
     ToolEffect,
@@ -64,6 +64,8 @@ from lifeos.ingestion.taxonomy import (
 )
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.registry.file_tracking import hash_file_content
+from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.ownership import (
     DEFAULT_OWNERSHIP_MANIFEST_PATH,
@@ -434,6 +436,24 @@ def _random_suffix() -> str:
 def _load_verified_source(
     *, vault_root: Path, registry: Registry, source_path: str
 ) -> VerifiedRegisteredSource:
+    try:
+        validate_vault_path(source_path)
+    except FileTrackingError as e:
+        raise ToolValidationError("Invalid source path") from e
+
+    try:
+        policy = load_retrieval_policy(vault_root)
+        allowed = scope_decision(
+            source_path,
+            scope=RetrievalScope(),
+            policy=policy,
+            mode="external",
+        ).allowed
+    except RetrievalError as e:
+        raise ToolExecutionError("Retrieval policy is invalid") from e
+    if not allowed:
+        raise ToolValidationError("Source is not available to external ingestion")
+
     try:
         return load_registered_source(
             registry=registry,

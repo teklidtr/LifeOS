@@ -334,11 +334,16 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                 if staged:
                     result = _restore_public_paths(result)
                 if result.status != "complete" or not self.active_path.exists():
-                    return (
-                        replace(result, index_path=str(original_active_path))
-                        if staged
-                        else result
-                    )
+                    if staged:
+                        return replace(
+                            result,
+                            created=(),
+                            updated=(),
+                            renamed=(),
+                            deleted=(),
+                            index_path=str(original_active_path),
+                        )
+                    return result
 
                 # Duplicate introduction/resolution and normalized durable IDs can require
                 # re-identifying an unchanged note even when canonical content did not change.

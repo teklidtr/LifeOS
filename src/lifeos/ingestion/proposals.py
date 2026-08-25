@@ -16,7 +16,7 @@ import sys
 from typing import Any
 
 from lifeos.coherence import CoherenceError
-from lifeos.coherence_scoped import collect_scoped_identity_snapshot
+from lifeos.coherence_scoped import collect_scoped_identity_snapshot, runtime_exclusion_prefix
 from lifeos.ingestion import _proposals_core as _core
 from lifeos.ingestion._proposals_core import *  # noqa: F403
 from lifeos.ingestion.drafts import SourceSnapshot
@@ -174,6 +174,16 @@ def _bind_existing_target_identities(
         patch = validate_patch_document(patch_data)
         vault_root = proposals_root.parent
         reviewed_paths = _replacement_target_paths(patch)
+        runtime_prefix = runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
+        if runtime_prefix is not None:
+            runtime_targets = sorted(
+                path for path in reviewed_paths if path.startswith(runtime_prefix)
+            )
+            if runtime_targets:
+                raise ProposalTargetIdentityError(
+                    "Existing proposal target is inside configured runtime state: "
+                    + ", ".join(runtime_targets)
+                )
         policy = load_retrieval_policy(vault_root)
 
         def allow_identity_path(path: str) -> bool:
