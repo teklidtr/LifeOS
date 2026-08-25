@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,11 @@ def _registry(tmp_path: Path) -> Registry:
     return registry
 
 
+def _assert_registry_empty(registry: Registry) -> None:
+    with registry.connect_read_only() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 0
+
+
 def test_unscoped_registry_rejects_symlink_replacement_after_scan(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     wiki = vault / "wiki"
@@ -38,8 +44,7 @@ def test_unscoped_registry_rejects_symlink_replacement_after_scan(tmp_path: Path
     with pytest.raises(FileTrackingError, match="safely open registry file"):
         register_scan(registry, vault, entries)
 
-    with registry.connect_read_only() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 0
+    _assert_registry_empty(registry)
 
 
 def test_scoped_registry_rejects_ctime_only_change(
@@ -83,3 +88,80 @@ def test_scoped_registry_rejects_ctime_only_change(
             entries,
             identity_allow_path=lambda _path: True,
         )
+
+
+def test_scoped_registry_revalidates_parent_chain_after_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    wiki = vault / "wiki"
+    wiki.mkdir(parents=True)
+    target = wiki / "note.md"
+    target.write_text(_note("canonical-id"), encoding="utf-8")
+    entries = scan_vault(vault)
+    registry = _registry(tmp_path)
+
+    real_read = coherent_tracking.os.read
+    swapped = False
+
+    def swap_parent_then_read(fd: int, size: int) -> bytes:
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            old_wiki = vault / "wiki-old"
+            wiki.rename(old_wiki)
+            replacement = vault / "wiki"
+            replacement.mkdir()
+            (replacement / "note.md").write_text(_note("replacement-id"), encoding="utf-8")
+        return real_read(fd, size)
+
+    monkeypatch.setattr(coherent_tracking.os, "read", swap_parent_then_read)
+
+    with pytest.raises(FileTrackingError, match="changed during scoped hashing"):
+        register_scan(
+            registry,
+            vault,
+            entries,
+            identity_allow_path=lambda _path: True,
+        )
+
+    _assert_registry_empty(registry)
+
+
+def test_scoped_registry_uses_nonblocking_open_before_fifo_type_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    wiki = vault / "wiki"
+    wiki.mkdir(parents=True)
+    target = wiki / "note.md"
+    target.write_text(_note("canonical-id"), encoding="utf-8")
+    entries = scan_vault(vault)
+    target.unlink()
+    os.mkfifo(target)
+    registry = _registry(tmp_path)
+
+    real_open = coherent_tracking.os.open
+    final_open_checked = False
+
+    def require_nonblocking_final_open(path, flags, *args, **kwargs):
+        nonlocal final_open_checked
+        if path == "note.md" and kwargs.get("dir_fd") is not None:
+            final_open_checked = True
+            assert flags & os.O_NONBLOCK
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(coherent_tracking.os, "open", require_nonblocking_final_open)
+
+    with pytest.raises(FileTrackingError, match="not a regular file"):
+        register_scan(
+            registry,
+            vault,
+            entries,
+            identity_allow_path=lambda _path: True,
+        )
+
+    assert final_open_checked
+    _assert_registry_empty(registry)

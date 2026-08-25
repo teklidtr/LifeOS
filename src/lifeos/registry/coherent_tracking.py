@@ -30,7 +30,12 @@ _DIRECTORY_FLAGS = (
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
 )
-_FILE_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+_FILE_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +73,49 @@ def _capture_for(entry: VaultFile) -> _base._HashCapture:
     return capture
 
 
+def _descriptor_identity(fd: int) -> tuple[int, int]:
+    observed = os.fstat(fd)
+    return observed.st_dev, observed.st_ino
+
+
+def _revalidate_scoped_path(
+    vault_root: Path,
+    parts: tuple[str, ...],
+    *,
+    expected_chain: tuple[tuple[int, int], ...],
+) -> None:
+    """Rewalk a scoped path and prove it still names the descriptor chain that was read."""
+    opened_fds: list[int] = []
+    try:
+        current_fd = os.open(vault_root, _DIRECTORY_FLAGS)
+        opened_fds.append(current_fd)
+        observed_chain = [_descriptor_identity(current_fd)]
+
+        for part in parts[:-1]:
+            current_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            opened_fds.append(current_fd)
+            observed_chain.append(_descriptor_identity(current_fd))
+
+        current_fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=current_fd)
+        opened_fds.append(current_fd)
+        final_stat = os.fstat(current_fd)
+        if not stat.S_ISREG(final_stat.st_mode):
+            raise OSError("scoped registry path no longer names a regular file")
+        observed_chain.append((final_stat.st_dev, final_stat.st_ino))
+    except OSError as exc:
+        raise _base.FileTrackingError(
+            f"File {vault_root / Path(*parts)} changed during scoped hashing."
+        ) from exc
+    finally:
+        for fd in reversed(opened_fds):
+            os.close(fd)
+
+    if tuple(observed_chain) != expected_chain:
+        raise _base.FileTrackingError(
+            f"File {vault_root / Path(*parts)} changed during scoped hashing."
+        )
+
+
 def _safe_scoped_hash_file(
     vault_root: Path,
     entry: VaultFile,
@@ -90,6 +138,7 @@ def _safe_scoped_hash_file(
 
     current_fd = root_fd
     file_fd: int | None = None
+    identity_chain = [_descriptor_identity(root_fd)]
     try:
         for part in parts[:-1]:
             try:
@@ -99,6 +148,7 @@ def _safe_scoped_hash_file(
                     "Could not safely traverse scoped registry path "
                     f"{entry.path.as_posix()!r}: {exc}"
                 ) from exc
+            identity_chain.append(_descriptor_identity(next_fd))
             if current_fd != root_fd:
                 os.close(current_fd)
             current_fd = next_fd
@@ -114,6 +164,7 @@ def _safe_scoped_hash_file(
             raise _base.FileTrackingError(
                 f"Scoped registry entry is not a regular file: {entry.path.as_posix()}"
             )
+        identity_chain.append((before.st_dev, before.st_ino))
 
         hasher = hashlib.sha256()
         total_bytes = 0
@@ -143,6 +194,11 @@ def _safe_scoped_hash_file(
                 f"File {vault_root / entry.path} changed during scoped hashing."
             )
 
+        _revalidate_scoped_path(
+            vault_root,
+            parts,
+            expected_chain=tuple(identity_chain),
+        )
         capture.size_bytes = after.st_size
         capture.mtime_ns = after.st_mtime_ns
         return hasher.hexdigest()
