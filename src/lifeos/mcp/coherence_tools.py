@@ -16,6 +16,7 @@ from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime import ActivityStore
+from lifeos.vault import is_markdown_path
 
 Invoke = Callable[[Callable[[], object]], object]
 
@@ -53,7 +54,7 @@ def build_coherence_tools(
                 validate_vault_path(vault_path)
             except FileTrackingError as exc:
                 raise ToolValidationError("Invalid vault path") from exc
-            if not vault_path.endswith(".md"):
+            if not is_markdown_path(vault_path):
                 raise ToolValidationError("Only Markdown files have canonical note identity")
 
             scope = RetrievalScope(allow_protected=allow_protected)
