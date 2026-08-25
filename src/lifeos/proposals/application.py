@@ -1143,12 +1143,10 @@ def _execute_application_transaction(
     applied_by = context.applied_by
     applied_at = context.applied_at
     runtime_dir = context.runtime_dir
-    recovery_root = context.recovery_root
     recovery_store = context.recovery_store
     outcome = context.outcome
     canonical_proposals_root = vault_root / "proposals"
     proposal_dir_path = canonical_proposals_root / proposal.proposal_dir
-
     vault_lock: Optional[OwnedLock] = None
     proposal_lock: Optional[OwnedLock] = None
     vault_locked = False
@@ -1157,7 +1155,6 @@ def _execute_application_transaction(
     locks_fd: Optional[int] = None
     root_fd: Optional[int] = None
     prop_fd: Optional[int] = None
-
     parent_descriptors: Dict[str, ParentDescriptor] = {}
     created_parent_paths: list[str] = []
     prepared_ops: List[_PreparedOp] = []
@@ -1166,7 +1163,6 @@ def _execute_application_transaction(
     manifest_backup: Optional[BackupFile] = None
     lifecycle_staging: Optional[StagingFile] = None
     lifecycle_backup: Optional[BackupFile] = None
-
     manifest_committed = False
     lifecycle_committed = False
     ownership_changed = False
@@ -1182,7 +1178,6 @@ def _execute_application_transaction(
     transaction_initialized = False
     application_error: Optional[ApplicationError] = None
     unexpected_error: Optional[Exception] = None
-
     def update_op_state(index: int, state: OperationState, error: Optional[str] = None) -> None:
         nonlocal outcome
         operation_results = list(outcome.operation_results)
@@ -1792,7 +1787,6 @@ def _execute_application_transaction(
         cleanup_succeeded = cleanup_result.cleanup_succeeded
         vault_lock_released = cleanup_result.vault_lock_released
         proposal_lock_released = cleanup_result.proposal_lock_released
-
         if application_error is not None or unexpected_error is not None:
             for relative_path in reversed(created_parent_paths):
                 try:
