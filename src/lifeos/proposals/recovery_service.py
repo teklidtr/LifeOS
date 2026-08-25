@@ -22,6 +22,7 @@ from lifeos._transaction_files import (
     TransactionError,
     get_target_identity,
 )
+from lifeos.config import runtime_overlaps_reserved_canonical
 from lifeos.proposals.recovery import (
     RecoveryConflictError,
     RecoveryCorruptStateError,
@@ -93,7 +94,14 @@ def recover_interrupted_applications(
             )
     except (OSError, RuntimeError) as exc:
         raise RecoveryUnavailableError("Could not validate runtime directory boundary") from exc
-    with acquire_pinned_recovery_store(runtime_dir=resolved_runtime_dir) as recovery_store:
+    if runtime_overlaps_reserved_canonical(vault_root, resolved_runtime_dir):
+        raise RecoveryCorruptStateError(
+            "Runtime directory overlaps a reserved canonical subtree"
+        )
+    with acquire_pinned_recovery_store(
+        runtime_dir=resolved_runtime_dir,
+        authority_root=vault_root,
+    ) as recovery_store:
         return _recover_interrupted_applications_locked(
             vault_root=vault_root,
             runtime_dir=resolved_runtime_dir,
@@ -110,7 +118,14 @@ def _recover_interrupted_applications_locked(
     """Recover all transactions through one descriptor-pinned runtime authority."""
     if recovery_store is None:
         resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
-        with acquire_pinned_recovery_store(runtime_dir=resolved_runtime_dir) as owned_store:
+        if runtime_overlaps_reserved_canonical(vault_root, resolved_runtime_dir):
+            raise RecoveryCorruptStateError(
+                "Runtime directory overlaps a reserved canonical subtree"
+            )
+        with acquire_pinned_recovery_store(
+            runtime_dir=resolved_runtime_dir,
+            authority_root=vault_root,
+        ) as owned_store:
             return _recover_interrupted_applications_locked(
                 vault_root=vault_root,
                 runtime_dir=resolved_runtime_dir,
