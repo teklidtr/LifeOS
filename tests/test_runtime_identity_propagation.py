@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from lifeos.bridge.application import BridgeApplication
 from lifeos.desktop.proposals import DesktopProposalService
 from lifeos.facade.authorization import ConsequentialAction
@@ -135,7 +137,10 @@ def test_apply_uses_custom_runtime_for_pinned_recovery_and_transaction_state(
         )
 
     assert result is expected
-    acquire_store.assert_called_once_with(runtime_dir=runtime_dir)
+    acquire_store.assert_called_once_with(
+        runtime_dir=runtime_dir,
+        authority_root=vault,
+    )
     recover.assert_called_once_with(
         vault_root=vault,
         runtime_dir=runtime_dir,
@@ -175,6 +180,45 @@ def test_apply_rejects_vault_root_runtime_before_recovery(tmp_path: Path) -> Non
         else:
             raise AssertionError("vault-root runtime must be rejected")
 
+    acquire_store.assert_not_called()
+    recover.assert_not_called()
+    apply_locked.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "runtime_relative",
+    ("proposals", "proposals/node-a", "system", "system/node-a"),
+)
+def test_apply_rejects_reserved_canonical_runtime_before_recovery(
+    tmp_path: Path,
+    runtime_relative: str,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    proposal = MagicMock()
+    proposal.metadata.id = "prop-reserved-runtime"
+    proposal.metadata.status = "approved"
+    proposal.proposal_source_hash = "sha256:" + "0" * 64
+    proposal.patch_document.operations = ()
+
+    with (
+        patch.object(proposal_application, "acquire_pinned_recovery_store") as acquire_store,
+        patch.object(
+            proposal_application,
+            "_recover_interrupted_applications_locked",
+        ) as recover,
+        patch.object(proposal_application, "_apply_proposal_locked") as apply_locked,
+    ):
+        with pytest.raises(proposal_application.ApplicationError) as exc_info:
+            proposal_application.apply_proposal(
+                proposal,
+                vault_root=vault,
+                applied_by="desktop-user",
+                applied_at="2026-08-25T10:00:00Z",
+                identity_runtime_dir=vault / runtime_relative,
+            )
+
+    assert exc_info.value.code is proposal_application.ApplicationErrorCode.VALIDATION_ERROR
     acquire_store.assert_not_called()
     recover.assert_not_called()
     apply_locked.assert_not_called()
