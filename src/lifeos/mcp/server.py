@@ -160,14 +160,12 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "canonical note bodies."
 )
 
-
 REGISTRY_REFRESH_MCP_DESCRIPTION = (
     f"{REGISTRY_REFRESH_DESCRIPTOR.description} Use this explicit maintenance tool when "
     "derived indexes should be refreshed outside proposal-building ingestion; ingestion "
     "proposal tools refresh automatically. This writes only rebuildable registry data and "
     "does not change Markdown."
 )
-
 READ_MARKDOWN_MCP_DESCRIPTION = (
     f"{READ_MARKDOWN_DESCRIPTOR.description} Use this before ingestion to inspect the source "
     "and any relevant wiki notes; paths are vault-relative."
@@ -264,7 +262,6 @@ def _strict_tool(
         ),
     )
     strict_model.model_rebuild()
-
     strict_metadata = tool.fn_metadata.model_copy(update={"arg_model": strict_model})
     return tool.model_copy(
         update={
@@ -568,6 +565,7 @@ def create_mcp_server(
                 vault_root=vault_root,
                 registry=registry,
                 request=request,
+                runtime_dir=resolved_runtime_dir,
             )
             activity.append(
                 tool="ingestion_evolve_wiki_proposal", source_paths=[source_path],
@@ -633,6 +631,7 @@ def create_mcp_server(
                 vault_root=vault_root,
                 registry=registry,
                 request=request,
+                runtime_dir=resolved_runtime_dir,
             )
             activity.append(
                 tool="study_evolve_learning_proposal", source_paths=[source_path],
@@ -716,6 +715,7 @@ def create_mcp_server(
                 vault_root=vault_root,
                 registry=registry,
                 request=request,
+                runtime_dir=resolved_runtime_dir,
             )
             activity.append(
                 tool="ingestion_update_wiki_section_proposal", source_paths=[source_path],
@@ -773,6 +773,7 @@ def create_mcp_server(
                 vault_root=vault_root,
                 registry=registry,
                 request=request,
+                runtime_dir=resolved_runtime_dir,
             )
             activity.append(
                 tool="ingestion_create_wiki_and_update_section_proposal",
