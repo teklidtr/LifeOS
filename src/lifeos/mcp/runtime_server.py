@@ -62,18 +62,21 @@ def create_mcp_server(
 ) -> FastMCP:
     """Compose the stable core MCP server with policy-aware exploration primitives."""
     resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
-    runtime_prefix = runtime_exclusion_prefix(
-        vault_root,
-        runtime_dir=resolved_runtime_dir,
-    )
-    runtime_exclusions = (runtime_prefix,) if runtime_prefix is not None else ()
 
     def runtime_scoped_invoke(operation: Callable[[], object]) -> object:
-        token = push_node_local_excluded_prefixes(runtime_exclusions)
-        try:
-            return _invoke_mcp_tool(operation)
-        finally:
-            reset_node_local_excluded_prefixes(token)
+        def scoped_operation() -> object:
+            runtime_prefix = runtime_exclusion_prefix(
+                vault_root,
+                runtime_dir=resolved_runtime_dir,
+            )
+            runtime_exclusions = (runtime_prefix,) if runtime_prefix is not None else ()
+            token = push_node_local_excluded_prefixes(runtime_exclusions)
+            try:
+                return operation()
+            finally:
+                reset_node_local_excluded_prefixes(token)
+
+        return _invoke_mcp_tool(scoped_operation)
 
     core = create_core_mcp_server(
         vault_root=vault_root,
