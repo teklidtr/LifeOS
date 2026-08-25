@@ -32,6 +32,10 @@ _IDENTITY_CAPTURE: ContextVar[dict[str, str | None] | None] = ContextVar(
     "lifeos_retrieval_identity_capture",
     default=None,
 )
+_ORPHANED_PATHS: ContextVar[frozenset[str]] = ContextVar(
+    "lifeos_retrieval_orphaned_paths",
+    default=frozenset(),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +85,11 @@ class HybridRetriever(_BaseHybridRetriever):
         graph_hints: Mapping[str, float] | None = None,
         cancellation: CancellationToken | None = None,
     ) -> RetrievalResponse:
+        # A stale index remains queryable for unchanged current paths, but an orphaned indexed
+        # path no longer has a current canonical authorization decision. Suppress those rows before
+        # base ranking, embedding, or reranking can disclose stale text to a provider.
+        health = self.index_service.health(embedding_provider=embedding_provider)
+        orphaned_token = _ORPHANED_PATHS.set(frozenset(health.orphaned_paths))
         captured: dict[str, str | None] = {}
         capture_token = _IDENTITY_CAPTURE.set(captured)
         try:
@@ -93,6 +102,7 @@ class HybridRetriever(_BaseHybridRetriever):
             )
         finally:
             _IDENTITY_CAPTURE.reset(capture_token)
+            _ORPHANED_PATHS.reset(orphaned_token)
 
         if not response.results:
             return response
@@ -121,6 +131,10 @@ class HybridRetriever(_BaseHybridRetriever):
         document: IndexedDocument,
         request: RetrievalRequest,
     ) -> bool:
+        # An orphaned row is authorized only by its stale indexed path. It must not become local
+        # or external evidence until synchronization re-establishes a current canonical path.
+        if chunk.path in _ORPHANED_PATHS.get():
+            return False
         # Build-time filtering is not sufficient for an existing disposable index created by an
         # older LifeOS version. A stale index remains text-queryable by design, so suppress any
         # configured-runtime row again at the query boundary before its chunks can become evidence.
