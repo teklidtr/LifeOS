@@ -145,9 +145,16 @@ def _open_subdirectory(tx_fd: int, subdir_name: str) -> int:
     return fd
 
 
-def _open_artifact_subdirectory(transaction_dir: Path, subdir: str) -> int:
+def _open_artifact_subdirectory(
+    transaction_dir: Path,
+    subdir: str,
+    *,
+    transaction_fd: int | None = None,
+) -> int:
     if subdir not in ("staged", "backups"):
         raise RecoveryIOInvalidArtifactError("Subdirectory must be staged or backups")
+    if transaction_fd is not None:
+        return _open_subdirectory(transaction_fd, subdir)
 
     try:
         tx_path_state = os.lstat(transaction_dir)
@@ -283,6 +290,7 @@ def write_recovery_artifact(
     transaction_dir: Path,
     artifact: RecoveryArtifact,
     content: bytes,
+    transaction_fd: int | None = None,
 ) -> None:
     if not isinstance(transaction_dir, Path):
         raise RecoveryIOInvalidArtifactError("transaction_dir must be exactly Path")
@@ -292,7 +300,11 @@ def write_recovery_artifact(
     _validate_recovery_artifact(artifact)
 
     subdir, filename = artifact.relative_path.split("/")
-    sub_fd = _open_artifact_subdirectory(transaction_dir, subdir)
+    sub_fd = _open_artifact_subdirectory(
+        transaction_dir,
+        subdir,
+        transaction_fd=transaction_fd,
+    )
 
     try:
         try:
@@ -393,11 +405,16 @@ def read_verified_recovery_artifact(
     *,
     transaction_dir: Path,
     artifact: RecoveryArtifact,
+    transaction_fd: int | None = None,
 ) -> bytes:
     _validate_recovery_artifact(artifact)
 
     subdir, filename = artifact.relative_path.split("/")
-    sub_fd = _open_artifact_subdirectory(transaction_dir, subdir)
+    sub_fd = _open_artifact_subdirectory(
+        transaction_dir,
+        subdir,
+        transaction_fd=transaction_fd,
+    )
 
     try:
         try:
@@ -466,6 +483,7 @@ def prepare_canonical_staging_from_artifact(
     target_name: str,
     target_parent: ParentDescriptor,
     intended_mode: int,
+    transaction_fd: int | None = None,
 ) -> StagingFile:
     _validate_recovery_artifact(artifact)
     _validate_artifact_relative_path("staged/" + target_name)
@@ -479,6 +497,7 @@ def prepare_canonical_staging_from_artifact(
     content = read_verified_recovery_artifact(
         transaction_dir=transaction_dir,
         artifact=artifact,
+        transaction_fd=transaction_fd,
     )
 
     return create_staging_file(
@@ -553,6 +572,7 @@ def restore_canonical_from_backup(
     expected_installed_mode: int,
     expected_restored_hash: str,
     expected_restored_mode: int,
+    transaction_fd: int | None = None,
 ) -> DirectorySyncResult:
     _validate_recovery_artifact(backup)
     _validate_artifact_relative_path("staged/" + target_name)
@@ -594,6 +614,7 @@ def restore_canonical_from_backup(
         target_name=target_name,
         target_parent=target_parent,
         intended_mode=expected_restored_mode,
+        transaction_fd=transaction_fd,
     )
 
     try:
