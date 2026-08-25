@@ -64,6 +64,26 @@ def test_vault_authority_survives_runtime_leaf_replacement(tmp_path: Path) -> No
                 pytest.fail("replacement runtime must not acquire an independent vault authority")
 
 
+def test_pinned_recovery_store_rejects_vault_authority_path_swap(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    parked = tmp_path / "vault-pinned"
+
+    with acquire_pinned_recovery_store(
+        runtime_dir=runtime,
+        authority_root=vault,
+    ) as store:
+        vault.rename(parked)
+        vault.mkdir()
+
+        with pytest.raises(RecoveryUnavailableError, match="locked mutation authority"):
+            store.require_current_authority_path()
+        with pytest.raises(RecoveryUnavailableError, match="locked mutation authority"):
+            store.open_authority_root()
+
+
 def test_pinned_recovery_store_rejects_runtime_symlink_component(tmp_path: Path) -> None:
     external = tmp_path / "external"
     external.mkdir()
