@@ -424,7 +424,7 @@ def rollback_replacement(
 
     bk_hash = _hash_file_secure(backup.name, backup.parent.fd)
     if bk_hash != backup.original_identity.content_hash:
-        raise TransactionError("Backup identity mutated")
+        raise TransactionError("Backup content hash mutated")
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
