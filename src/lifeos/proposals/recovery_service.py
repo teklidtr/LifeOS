@@ -32,11 +32,10 @@ from lifeos.proposals.recovery import (
     RecoveryPhase,
     RecoveryStateFiles,
     RecoveryUnavailableError,
-    acquire_recovery_lock,
-    discover_recovery_state,
-    remove_completed_recovery_transaction,
-    remove_rolled_back_recovery_transaction,
-    write_recovery_journal,
+)
+from lifeos.proposals.recovery_store import (
+    PinnedRecoveryStore,
+    acquire_pinned_recovery_store,
 )
 
 
@@ -87,10 +86,18 @@ def recover_interrupted_applications(
     runtime_dir: Path | None = None,
 ) -> RecoveryRunResult:
     resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
-    with acquire_recovery_lock(runtime_dir=resolved_runtime_dir):
+    try:
+        if resolved_runtime_dir.resolve(strict=False) == vault_root.resolve(strict=False):
+            raise RecoveryCorruptStateError(
+                "Runtime directory overlaps the canonical vault root"
+            )
+    except (OSError, RuntimeError) as exc:
+        raise RecoveryUnavailableError("Could not validate runtime directory boundary") from exc
+    with acquire_pinned_recovery_store(runtime_dir=resolved_runtime_dir) as recovery_store:
         return _recover_interrupted_applications_locked(
             vault_root=vault_root,
             runtime_dir=resolved_runtime_dir,
+            recovery_store=recovery_store,
         )
 
 
@@ -98,10 +105,19 @@ def _recover_interrupted_applications_locked(
     *,
     vault_root: Path,
     runtime_dir: Path | None = None,
+    recovery_store: PinnedRecoveryStore | None = None,
 ) -> RecoveryRunResult:
-    """Recover all transactions while the caller holds the recovery lock."""
-    recovery_root = (runtime_dir or (vault_root / ".lifeos")) / "recovery"
-    discovery = discover_recovery_state(recovery_root=recovery_root)
+    """Recover all transactions through one descriptor-pinned runtime authority."""
+    if recovery_store is None:
+        resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
+        with acquire_pinned_recovery_store(runtime_dir=resolved_runtime_dir) as owned_store:
+            return _recover_interrupted_applications_locked(
+                vault_root=vault_root,
+                runtime_dir=resolved_runtime_dir,
+                recovery_store=owned_store,
+            )
+
+    discovery = recovery_store.discover()
     if discovery.findings:
         raise RecoveryCorruptStateError("Recovery state contains unresolved findings")
 
@@ -110,7 +126,7 @@ def _recover_interrupted_applications_locked(
         results.append(
             _recover_transaction(
                 vault_root=vault_root,
-                recovery_root=recovery_root,
+                recovery_store=recovery_store,
                 journal=journal,
             )
         )
@@ -120,22 +136,16 @@ def _recover_interrupted_applications_locked(
 def _recover_transaction(
     *,
     vault_root: Path,
-    recovery_root: Path,
+    recovery_store: PinnedRecoveryStore,
     journal: RecoveryJournal,
 ) -> RecoveryTransactionResult:
-    transaction_dir = recovery_root / str(journal.transaction_id)
+    transaction_dir = recovery_store.recovery_root / str(journal.transaction_id)
 
     if journal.phase is RecoveryPhase.COMPLETE:
         # COMPLETE is a terminal commit record, not an unresolved recovery
         # phase. Canonical files may legitimately change after the application
         # commits and before this retained journal is cleaned by the next run.
-        # Discovery and removal still validate the journal and transaction
-        # layout; canonical phase verification remains mandatory below for
-        # every incomplete transaction.
-        remove_completed_recovery_transaction(
-            recovery_root=recovery_root,
-            transaction_id=journal.transaction_id,
-        )
+        recovery_store.remove_completed(journal.transaction_id)
         return RecoveryTransactionResult(
             transaction_id=str(journal.transaction_id),
             proposal_id=journal.proposal_id,
@@ -145,7 +155,7 @@ def _recover_transaction(
 
     if journal.phase is RecoveryPhase.PROPOSAL_COMMITTED:
         _verify_all_staged(vault_root=vault_root, journal=journal)
-        _complete_transaction(recovery_root=recovery_root, journal=journal)
+        _complete_transaction(recovery_store=recovery_store, journal=journal)
         return RecoveryTransactionResult(
             transaction_id=str(journal.transaction_id),
             proposal_id=journal.proposal_id,
@@ -166,7 +176,7 @@ def _recover_transaction(
         and proposal_state is _CanonicalState.STAGED
     ):
         _verify_all_staged(vault_root=vault_root, journal=journal)
-        _complete_transaction(recovery_root=recovery_root, journal=journal)
+        _complete_transaction(recovery_store=recovery_store, journal=journal)
         return RecoveryTransactionResult(
             transaction_id=str(journal.transaction_id),
             proposal_id=journal.proposal_id,
@@ -177,31 +187,35 @@ def _recover_transaction(
     if proposal_state is not _CanonicalState.PRE:
         raise RecoveryConflictError("Proposal state is inconsistent with rollback phase")
 
-    for operation in reversed(journal.operations):
-        _rollback_operation(
+    transaction_fd = recovery_store.open_transaction(journal.transaction_id)
+    try:
+        for operation in reversed(journal.operations):
+            _rollback_operation(
+                vault_root=vault_root,
+                transaction_dir=transaction_dir,
+                transaction_fd=transaction_fd,
+                operation=operation,
+            )
+
+        _rollback_state_file(
             vault_root=vault_root,
             transaction_dir=transaction_dir,
-            operation=operation,
+            transaction_fd=transaction_fd,
+            target_path="system/generated-ownership.json",
+            state=journal.ownership_state,
         )
-
-    _rollback_state_file(
-        vault_root=vault_root,
-        transaction_dir=transaction_dir,
-        target_path="system/generated-ownership.json",
-        state=journal.ownership_state,
-    )
-    _rollback_state_file(
-        vault_root=vault_root,
-        transaction_dir=transaction_dir,
-        target_path=f"proposals/{journal.proposal_id}/proposal.md",
-        state=journal.proposal_state,
-    )
+        _rollback_state_file(
+            vault_root=vault_root,
+            transaction_dir=transaction_dir,
+            transaction_fd=transaction_fd,
+            target_path=f"proposals/{journal.proposal_id}/proposal.md",
+            state=journal.proposal_state,
+        )
+    finally:
+        os.close(transaction_fd)
 
     _verify_all_pre(vault_root=vault_root, journal=journal)
-    remove_rolled_back_recovery_transaction(
-        recovery_root=recovery_root,
-        transaction_id=journal.transaction_id,
-    )
+    recovery_store.remove_rolled_back(journal.transaction_id)
     return RecoveryTransactionResult(
         transaction_id=str(journal.transaction_id),
         proposal_id=journal.proposal_id,
@@ -210,13 +224,12 @@ def _recover_transaction(
     )
 
 
-def _complete_transaction(*, recovery_root: Path, journal: RecoveryJournal) -> None:
+def _complete_transaction(
+    *, recovery_store: PinnedRecoveryStore, journal: RecoveryJournal
+) -> None:
     completed = replace(journal, phase=RecoveryPhase.COMPLETE)
-    write_recovery_journal(recovery_root=recovery_root, journal=completed)
-    remove_completed_recovery_transaction(
-        recovery_root=recovery_root,
-        transaction_id=journal.transaction_id,
-    )
+    recovery_store.write_journal(completed)
+    recovery_store.remove_completed(journal.transaction_id)
 
 
 def _expectation(value: RecoveryOperation | RecoveryStateFiles) -> _FileExpectation:
@@ -286,11 +299,16 @@ def _classify_path(
 
 
 def _rollback_operation(
-    *, vault_root: Path, transaction_dir: Path, operation: RecoveryOperation
+    *,
+    vault_root: Path,
+    transaction_dir: Path,
+    transaction_fd: int,
+    operation: RecoveryOperation,
 ) -> None:
     _rollback_entry(
         vault_root=vault_root,
         transaction_dir=transaction_dir,
+        transaction_fd=transaction_fd,
         target_path=operation.target_path,
         expectation=_expectation(operation),
     )
@@ -300,12 +318,14 @@ def _rollback_state_file(
     *,
     vault_root: Path,
     transaction_dir: Path,
+    transaction_fd: int,
     target_path: str,
     state: RecoveryStateFiles,
 ) -> None:
     _rollback_entry(
         vault_root=vault_root,
         transaction_dir=transaction_dir,
+        transaction_fd=transaction_fd,
         target_path=target_path,
         expectation=_expectation(state),
     )
@@ -315,6 +335,7 @@ def _rollback_entry(
     *,
     vault_root: Path,
     transaction_dir: Path,
+    transaction_fd: int,
     target_path: str,
     expectation: _FileExpectation,
 ) -> None:
@@ -348,6 +369,7 @@ def _rollback_entry(
                 raise RecoveryCorruptStateError("Recovery backup metadata is incomplete")
             restore_canonical_from_backup(
                 transaction_dir=transaction_dir,
+                transaction_fd=transaction_fd,
                 backup=RecoveryArtifact(
                     relative_path=expectation.backup_path,
                     content_hash=expectation.backup_hash,
