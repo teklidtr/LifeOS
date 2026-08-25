@@ -113,6 +113,48 @@ def hash_file_content(content: bytes) -> str:
     return _hash_chunks((content,))
 
 
+def _fd_identity(fd: int) -> tuple[int, int]:
+    observed = os.fstat(fd)
+    return observed.st_dev, observed.st_ino
+
+
+def _revalidate_hash_path_chain(
+    absolute: Path,
+    *,
+    expected_chain: tuple[tuple[int, int], ...],
+    display_path: Path,
+) -> None:
+    """Prove the lexical path still names the exact chain that supplied the hashed bytes."""
+    parts = absolute.parts
+    opened: list[int] = []
+    try:
+        current_fd = os.open(absolute.anchor or os.sep, _DIRECTORY_FLAGS)
+        opened.append(current_fd)
+        observed = [_fd_identity(current_fd)]
+        for part in parts[1:-1]:
+            current_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            opened.append(current_fd)
+            observed.append(_fd_identity(current_fd))
+        file_fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=current_fd)
+        opened.append(file_fd)
+        file_state = os.fstat(file_fd)
+        if not stat.S_ISREG(file_state.st_mode):
+            raise FileTrackingError(f"Registry path is not a regular file: {display_path}")
+        observed.append((file_state.st_dev, file_state.st_ino))
+    except (OSError, FileTrackingError) as exc:
+        if isinstance(exc, FileTrackingError):
+            raise
+        raise FileTrackingError(f"File {display_path} changed during hashing.") from exc
+    finally:
+        for fd in reversed(opened):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    if tuple(observed) != expected_chain:
+        raise FileTrackingError(f"File {display_path} changed during hashing.")
+
+
 def _hash_file(path: Path, *, capture: _HashCapture | None = None) -> str:
     """Stream-hash one stable no-follow file observation and retain those exact bytes."""
     try:
@@ -132,6 +174,7 @@ def _hash_file(path: Path, *, capture: _HashCapture | None = None) -> str:
 
     current_fd = root_fd
     file_fd: int | None = None
+    expected_chain: list[tuple[int, int]] = [_fd_identity(root_fd)]
     try:
         for part in parts[1:-1]:
             try:
@@ -140,6 +183,7 @@ def _hash_file(path: Path, *, capture: _HashCapture | None = None) -> str:
                 raise FileTrackingError(
                     f"Could not safely traverse registry path {path}: {exc}"
                 ) from exc
+            expected_chain.append(_fd_identity(next_fd))
             if current_fd != root_fd:
                 os.close(current_fd)
             current_fd = next_fd
@@ -151,6 +195,7 @@ def _hash_file(path: Path, *, capture: _HashCapture | None = None) -> str:
             raise FileTrackingError(f"Could not safely open registry file {path}: {exc}") from exc
         if not stat.S_ISREG(stat_before.st_mode):
             raise FileTrackingError(f"Registry path is not a regular file: {path}")
+        expected_chain.append((stat_before.st_dev, stat_before.st_ino))
 
         hasher = hashlib.sha256()
         total_bytes = 0
@@ -195,6 +240,11 @@ def _hash_file(path: Path, *, capture: _HashCapture | None = None) -> str:
         ):
             raise FileTrackingError(f"File {path} changed during hashing.")
 
+        _revalidate_hash_path_chain(
+            absolute,
+            expected_chain=tuple(expected_chain),
+            display_path=path,
+        )
         if capture is not None:
             capture.size_bytes = stat_after.st_size
             capture.mtime_ns = stat_after.st_mtime_ns
@@ -407,7 +457,6 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
     with registry.connect() as conn:
         try:
             conn.execute("BEGIN IMMEDIATE")
-
             conn.execute(
                 """
                 CREATE TEMP TABLE seen_paths (
@@ -415,7 +464,6 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                 )
                 """
             )
-
             now_expr = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
 
             for entry in entries:
@@ -426,7 +474,6 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                 mtime_ns = facts.mtime_ns
                 size_bytes = facts.size_bytes
                 conn.execute("INSERT INTO seen_paths (vault_path) VALUES (?)", (path_str,))
-
                 row = conn.execute(
                     """
                     SELECT id, stable_id, content_hash, is_deleted
@@ -444,11 +491,7 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         (stable_id,),
                     ).fetchone()
 
-                if (
-                    stable_id is not None
-                    and identity_row is not None
-                    and identity_row["vault_path"] != path_str
-                ):
+                if stable_id is not None and identity_row is not None and identity_row["vault_path"] != path_str:
                     old_path = str(identity_row["vault_path"])
                     if row is not None and row["id"] != identity_row["id"]:
                         displaced_id = int(row["id"])
@@ -517,7 +560,6 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                     db_hash = row["content_hash"]
                     is_deleted = row["is_deleted"]
                     effective_stable_id = stable_id
-
                     if is_deleted == 1 or db_hash != content_hash:
                         conn.execute(
                             f"""
