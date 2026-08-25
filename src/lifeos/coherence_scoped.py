@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 from collections.abc import Callable
 from pathlib import Path
 
@@ -22,6 +23,60 @@ from lifeos.vault import VaultAccessError, read_vault_markdown
 PathPredicate = Callable[[str], bool]
 _IDENTITY_IGNORED_ROOTS = frozenset({"proposals"})
 _IDENTITY_IGNORED_PATHS = frozenset({"AGENTS.md"})
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
+
+
+def _opened_component_spelling(parent_fd: int, child_fd: int, requested: str) -> str:
+    """Return the directory-entry spelling for an already-opened child inode."""
+    child = os.fstat(child_fd)
+    try:
+        with os.scandir(parent_fd) as entries:
+            for entry in entries:
+                try:
+                    observed = os.stat(entry.name, dir_fd=parent_fd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if (observed.st_dev, observed.st_ino) == (child.st_dev, child.st_ino):
+                    return entry.name
+    except OSError as exc:
+        raise CoherenceError("Could not inspect runtime directory spelling") from exc
+    return requested
+
+
+def _existing_runtime_spelling(root: Path, relative: Path) -> str | None:
+    """Use filesystem-resolved component spelling without weakening case-sensitive filesystems."""
+    root_fd: int | None = None
+    current_fd: int | None = None
+    try:
+        root_fd = os.open(root, _DIRECTORY_FLAGS)
+        current_fd = root_fd
+        actual_parts: list[str] = []
+        for requested in relative.parts:
+            try:
+                child_fd = os.open(requested, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            except FileNotFoundError:
+                return None
+            except OSError as exc:
+                if exc.errno in (getattr(os, "ELOOP", 40),):
+                    return None
+                return None
+            actual_parts.append(_opened_component_spelling(current_fd, child_fd, requested))
+            if current_fd != root_fd:
+                os.close(current_fd)
+            current_fd = child_fd
+        return Path(*actual_parts).as_posix()
+    except OSError as exc:
+        raise CoherenceError("Could not inspect configured runtime directory") from exc
+    finally:
+        if current_fd is not None and current_fd != root_fd:
+            os.close(current_fd)
+        if root_fd is not None:
+            os.close(root_fd)
 
 
 def runtime_exclusion_prefix(
@@ -31,9 +86,11 @@ def runtime_exclusion_prefix(
 ) -> str | None:
     """Return the configured in-vault runtime prefix without opening runtime content.
 
-    The lexical in-vault prefix is authoritative for exclusion even when the current runtime
-    entry is a symlink resolving elsewhere. Filesystem consumers must validate runtime traversal
-    separately; policy must not forget the configured vault path merely because topology changes.
+    The lexical configured path remains authoritative when the runtime does not yet exist or is
+    unsafe to traverse. When it does exist, the returned prefix uses the directory entry spelling
+    actually selected by the filesystem. This preserves case-sensitive semantics on Linux while
+    preventing a differently-cased configured path from missing the same directory on a
+    case-insensitive filesystem.
     """
     root = vault_root.resolve(strict=False)
     candidate = runtime_dir
@@ -51,16 +108,20 @@ def runtime_exclusion_prefix(
 
     lexical_candidate = Path(os.path.abspath(candidate))
     try:
-        lexical_relative = lexical_candidate.relative_to(root).as_posix()
+        lexical_relative_path = lexical_candidate.relative_to(root)
+        lexical_relative = lexical_relative_path.as_posix()
     except ValueError:
+        lexical_relative_path = None
         lexical_relative = None
 
     if lexical_relative in {"", "."}:
         raise CoherenceError(
             "Runtime directory overlaps the canonical vault root; identity traversal is unsafe"
         )
-    if lexical_relative is not None:
-        return lexical_relative.rstrip("/") + "/"
+    if lexical_relative_path is not None:
+        actual_relative = _existing_runtime_spelling(root, lexical_relative_path)
+        effective = actual_relative or lexical_relative
+        return effective.rstrip("/") + "/"
 
     try:
         resolved = candidate.resolve(strict=False)
