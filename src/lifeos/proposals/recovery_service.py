@@ -81,15 +81,26 @@ class _FileExpectation:
     backup_size: int | None
 
 
-def recover_interrupted_applications(*, vault_root: Path) -> RecoveryRunResult:
-    runtime_dir = vault_root / ".lifeos"
-    with acquire_recovery_lock(runtime_dir=runtime_dir):
-        return _recover_interrupted_applications_locked(vault_root=vault_root)
+def recover_interrupted_applications(
+    *,
+    vault_root: Path,
+    runtime_dir: Path | None = None,
+) -> RecoveryRunResult:
+    resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
+    with acquire_recovery_lock(runtime_dir=resolved_runtime_dir):
+        return _recover_interrupted_applications_locked(
+            vault_root=vault_root,
+            runtime_dir=resolved_runtime_dir,
+        )
 
 
-def _recover_interrupted_applications_locked(*, vault_root: Path) -> RecoveryRunResult:
+def _recover_interrupted_applications_locked(
+    *,
+    vault_root: Path,
+    runtime_dir: Path | None = None,
+) -> RecoveryRunResult:
     """Recover all transactions while the caller holds the recovery lock."""
-    recovery_root = vault_root / ".lifeos" / "recovery"
+    recovery_root = (runtime_dir or (vault_root / ".lifeos")) / "recovery"
     discovery = discover_recovery_state(recovery_root=recovery_root)
     if discovery.findings:
         raise RecoveryCorruptStateError("Recovery state contains unresolved findings")
