@@ -96,19 +96,35 @@ Use these rules to catch LifeOS-specific invariant violations that may not be ob
 
 ## Pull Request Review Workflow
 
+Codex review is a paid, high-signal checkpoint, not an iterative substitute for implementation, repository-wide reasoning, or CI. Use it only after the implementation agent has made the review surface stable and has exhausted cheaper deterministic validation.
+
 Before a pull request is considered ready to merge:
 
 1. Complete the implementation, documentation impact, and relevant local validation. Ordinary PR pushes should receive a green `fast-checks` result.
-2. Once the implementation is stable, request `@codex review`.
-3. Address valid findings, add regression coverage where appropriate, and re-run the relevant validation.
+2. Before requesting Codex review, stabilize the branch:
+   - Resolve all known implementation TODOs, known review findings, and failing deterministic checks first.
+   - Run the broadest practical non-Codex validation needed to catch compatibility and regression failures before paying for another review. For changes spanning multiple subsystems, public contracts, or trust boundaries, prefer the full pytest suite and clean-room/Docker validation before another Codex review when practical.
+   - Treat this as a pre-review checkpoint, not a replacement for the required final `full-validation` checkpoint.
+   - Do not request review while material implementation work is still actively changing the branch.
+3. Perform a pre-Codex invariant audit for cross-cutting changes. When a change affects an invariant such as privacy policy, runtime exclusion, stable identity, relocation, proposal authorization, canonical mutation, or an externally callable contract, search all relevant call sites and sibling entry points before requesting review. Do not fix only the single path that exposed the issue if the same invariant can apply elsewhere.
+4. Once the implementation is stable and the pre-review audit is complete, request one `@codex review` for the current head.
+   - After requesting review, avoid material commits until that review finishes unless a newly discovered correctness or security issue requires an immediate fix.
+   - If the head materially changes while a review is in progress, treat that review as evidence about the reviewed snapshot, not as authoritative approval of the new head.
+   - Do not stack or overlap additional `@codex review` requests for newer heads while an earlier review is still processing. Let the active review finish, batch all resulting work, stabilize the new head, then request the next review only if required.
+5. Address valid findings, add regression coverage where appropriate, and re-run the relevant validation.
    - Review findings are normally implemented by the current implementation agent. Do not comment `@codex address that feedback` or otherwise delegate implementation to Codex merely because Codex found the issue.
    - Use `@codex address that feedback` only as an exceptional fallback when a finding is too complex to resolve safely within the current implementation effort. If used, review Codex's resulting diff as external implementation work, preserve repository invariants, add or update regression coverage, and run the normal validation before resolving the finding.
-4. Request another `@codex review` when review fixes materially change behavior, architecture, public interfaces, trust boundaries, or a substantial portion of the implementation. Batch related fixes before requesting the next review. Do not request another review for trivial or purely mechanical changes.
-5. Repeat the review/fix cycle only while material changes continue to be introduced.
-6. For a security-sensitive pull request, request `@codex security review` after the normal review cycle has stabilized.
-7. Address valid security findings and re-run affected validation. Request another security review only if those fixes materially change a security or trust boundary.
-8. After the final material commit and required review cycle are stable, request the GitHub full-validation checkpoint by adding the `full-validation` label to the PR. The checkpoint must produce green `full-test` and `docker-setup-e2e` checks for the current PR head. If material commits land afterward, remove and re-add the label to request a fresh checkpoint without a dummy commit.
-9. Do not merge while `fast-checks`, the latest required full-validation checkpoint, or relevant review findings are unresolved or failing.
+   - Batch all valid findings from the same review before requesting another review.
+   - If one finding reveals a cross-cutting invariant violation, audit every relevant caller, adapter, facade, CLI/MCP/API surface, derived subsystem, and alternate execution path for the same class of bug before re-reviewing.
+6. Request another `@codex review` only when the batched review fixes materially change behavior, architecture, public interfaces, trust boundaries, or a substantial portion of the implementation. Do not request another review for trivial, documentation-only, or purely mechanical fixes.
+7. Do not mechanically repeat review/fix cycles indefinitely.
+   - If consecutive reviews keep finding variants of the same cross-cutting invariant, stop requesting Codex review and perform a repository-wide invariant audit or centralize the enforcement boundary before trying again.
+   - If the PR has grown so broad that review findings repeatedly expose unrelated subsystem interactions, consider splitting remaining independently mergeable work into separate tasks/PRs rather than using repeated Codex reviews to discover the architecture incrementally.
+   - Resume Codex review only after the implementation and invariant boundary are stable enough that a new review is expected to validate the solution rather than continue discovering its shape.
+8. For a security-sensitive pull request, request `@codex security review` only after the normal review cycle has stabilized.
+9. Address valid security findings and re-run affected validation. Batch security fixes. Request another security review only if those fixes materially change a security or trust boundary.
+10. After the final material commit and required review cycle are stable, request the GitHub full-validation checkpoint by adding the `full-validation` label to the PR. The checkpoint must produce green `full-test` and `docker-setup-e2e` checks for the current PR head. If material commits land afterward, remove and re-add the label to request a fresh checkpoint without a dummy commit.
+11. Do not merge while `fast-checks`, the latest required full-validation checkpoint, or relevant review findings are unresolved or failing.
 
 ### Security-sensitive changes
 
