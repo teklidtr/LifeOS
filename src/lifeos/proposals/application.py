@@ -31,6 +31,7 @@ from .._transaction_files import (
     rollback_creation,
     rollback_replacement,
 )
+from ..config import runtime_overlaps_reserved_canonical
 from ..markdown.parser import parse_markdown_note
 from ..wiki.layout import is_emergent_generated_parent
 from ..ownership.manifest import (
@@ -458,7 +459,6 @@ def _open_or_create_target_parent(
         try:
             current_fd = open_directory_secure(vault_root / canonical_root, dir_fd=root_fd)
         except SecureIOError:
-            # Canonical generated roots are never created implicitly.
             raise open_error
 
         try:
@@ -1072,9 +1072,18 @@ def apply_proposal(
             outcome,
             code=ApplicationErrorCode.VALIDATION_ERROR,
         )
+    if runtime_overlaps_reserved_canonical(vault_root, runtime_dir):
+        raise ApplicationError(
+            "Runtime directory must not overlap reserved canonical subtrees",
+            outcome,
+            code=ApplicationErrorCode.VALIDATION_ERROR,
+        )
 
     try:
-        with acquire_pinned_recovery_store(runtime_dir=runtime_dir) as recovery_store:
+        with acquire_pinned_recovery_store(
+            runtime_dir=runtime_dir,
+            authority_root=vault_root,
+        ) as recovery_store:
             try:
                 _recover_interrupted_applications_locked(
                     vault_root=vault_root,
