@@ -350,6 +350,7 @@ def _validate_application_proposal(
     *,
     vault_root: Path,
     outcome: ProposalApplicationResult,
+    identity_runtime_dir: Path | None = None,
 ) -> None:
     if proposal.patch_document.schema_version == 1:
         for operation in proposal.patch_document.operations:
@@ -360,7 +361,14 @@ def _validate_application_proposal(
                     code=ApplicationErrorCode.VALIDATION_ERROR,
                 )
 
-    preflight_result = preflight_proposal(proposal, vault_root=vault_root)
+    if identity_runtime_dir is None:
+        preflight_result = preflight_proposal(proposal, vault_root=vault_root)
+    else:
+        preflight_result = preflight_proposal(
+            proposal,
+            vault_root=vault_root,
+            runtime_dir=identity_runtime_dir,
+        )
     if preflight_result.state == "valid":
         return
     finding_messages = [finding.message for finding in preflight_result.findings]
@@ -1038,6 +1046,7 @@ def apply_proposal(
     vault_root: Path,
     applied_by: str,
     applied_at: str,
+    identity_runtime_dir: Path | None = None,
 ) -> ProposalApplicationResult:
     outcome = _create_initial_outcome(proposal)
     if not applied_by:
@@ -1078,6 +1087,7 @@ def apply_proposal(
                 applied_at=applied_at,
                 recovery_root=recovery_root,
                 outcome=outcome,
+                identity_runtime_dir=identity_runtime_dir,
             )
     except RecoveryLockUnavailableError as error:
         raise ApplicationError(
@@ -1095,6 +1105,7 @@ def _apply_proposal_locked(
     applied_at: str,
     recovery_root: Path,
     outcome: ProposalApplicationResult,
+    identity_runtime_dir: Path | None = None,
 ) -> ProposalApplicationResult:
     """Orchestrate one locked application through the explicit state machine."""
     return _execute_application_transaction(
@@ -1105,12 +1116,15 @@ def _apply_proposal_locked(
             applied_at=applied_at,
             recovery_root=recovery_root,
             outcome=outcome,
-        )
+        ),
+        identity_runtime_dir=identity_runtime_dir,
     )
 
 
 def _execute_application_transaction(
     context: _ApplicationContext,
+    *,
+    identity_runtime_dir: Path | None = None,
 ) -> ProposalApplicationResult:
     proposal = context.proposal
     vault_root = context.vault_root
@@ -1212,7 +1226,12 @@ def _execute_application_transaction(
             vault_root=vault_root,
             outcome=outcome,
         )
-        _validate_application_proposal(proposal, vault_root=vault_root, outcome=outcome)
+        _validate_application_proposal(
+            proposal,
+            vault_root=vault_root,
+            outcome=outcome,
+            identity_runtime_dir=identity_runtime_dir,
+        )
 
         try:
             root_fd = open_directory_secure(vault_root)
