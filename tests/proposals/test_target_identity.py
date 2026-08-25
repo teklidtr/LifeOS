@@ -238,3 +238,29 @@ def test_binding_rejects_stale_base_hash(tmp_path: Path) -> None:
 
     with pytest.raises(ProposalTargetIdentityError, match="base hash"):
         with_target_identity_extension(_metadata(), patch, collect_identity_snapshot(vault))
+
+
+def test_binding_rejects_replacement_missing_from_identity_snapshot(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    (vault / "wiki").mkdir(parents=True)
+    content = _note("wiki-example")
+    stale_snapshot = collect_identity_snapshot(vault)
+    (vault / "wiki" / "target.md").write_text(content, encoding="utf-8")
+    patch = PatchDocumentV2(
+        schema_version=2,
+        proposal_id=PROPOSAL_ID,
+        operations=(
+            PatchHumanFile(
+                id="op-update",
+                target_path="wiki/target.md",
+                base_hash=_hash(content),
+                unified_diff="@@ -1 +1 @@\n-old\n+new\n",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ProposalTargetIdentityError,
+        match="reviewed target disappeared during identity binding",
+    ):
+        with_target_identity_extension(_metadata(), patch, stale_snapshot)
