@@ -30,16 +30,16 @@ from lifeos.retrieval.search import (
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
 _IDENTITY_CAPTURE: ContextVar[dict[str, str | None] | None] = ContextVar(
-    "lifeos_retrieval_identity_capture",
-    default=None,
+    "lifeos_retrieval_identity_capture", default=None
 )
 _STALE_QUERY_PATHS: ContextVar[frozenset[str]] = ContextVar(
-    "lifeos_retrieval_stale_query_paths",
-    default=frozenset(),
+    "lifeos_retrieval_stale_query_paths", default=frozenset()
 )
 _QUERY_HEALTH: ContextVar[IndexHealth | None] = ContextVar(
-    "lifeos_retrieval_query_health",
-    default=None,
+    "lifeos_retrieval_query_health", default=None
+)
+_PRE_SCORING_AUTHORIZATION: ContextVar[dict[str, bool] | None] = ContextVar(
+    "lifeos_retrieval_pre_scoring_authorization", default=None
 )
 
 
@@ -61,22 +61,16 @@ class HybridRetriever(_BaseHybridRetriever):
         policy: RetrievalPolicy | None = None,
     ) -> None:
         super().__init__(vault_root=vault_root, runtime_dir=runtime_dir, policy=policy)
-        # Do not depend on package import-time monkeypatch ordering. The coherent retriever owns a
-        # coherent index service explicitly, so health checks and synchronization discover sources
-        # through the same configured-runtime exclusion used by rebuilds.
         from lifeos.retrieval.coherence_service import (
             RetrievalIndexService as CoherentRetrievalIndexService,
         )
 
         self.index_service = CoherentRetrievalIndexService(
-            vault_root=vault_root,
-            runtime_dir=runtime_dir,
-            policy=self.policy,
+            vault_root=vault_root, runtime_dir=runtime_dir, policy=self.policy
         )
         try:
             self._runtime_prefix = runtime_exclusion_prefix(
-                vault_root,
-                runtime_dir=runtime_dir,
+                vault_root, runtime_dir=runtime_dir
             )
         except CoherenceError as exc:
             raise RetrievalError("invalid_runtime_scope", str(exc)) from exc
@@ -90,11 +84,9 @@ class HybridRetriever(_BaseHybridRetriever):
         graph_hints: Mapping[str, float] | None = None,
         cancellation: CancellationToken | None = None,
     ) -> RetrievalResponse:
-        # The base search obtains the one health snapshot that governs both index usability and
-        # stale-row filtering. Current-path hash verification below closes the remaining move or
-        # path-reuse window before indexed text can reach a provider.
         stale_token = _STALE_QUERY_PATHS.set(frozenset())
         health_token = _QUERY_HEALTH.set(None)
+        authorization_token = _PRE_SCORING_AUTHORIZATION.set({})
         captured: dict[str, str | None] = {}
         capture_token = _IDENTITY_CAPTURE.set(captured)
         try:
@@ -107,16 +99,13 @@ class HybridRetriever(_BaseHybridRetriever):
             )
         finally:
             _IDENTITY_CAPTURE.reset(capture_token)
+            _PRE_SCORING_AUTHORIZATION.reset(authorization_token)
             _QUERY_HEALTH.reset(health_token)
             _STALE_QUERY_PATHS.reset(stale_token)
 
         if not response.results:
             return response
 
-        # Base search already computes index health against the current policy-visible vault.
-        # A stale index can still be queried for text evidence, but its build-time uniqueness
-        # proof is no longer current. Suppress stable IDs until synchronization restores a
-        # healthy identity snapshot rather than doing a second vault-wide scan per query.
         identity_proof_current = response.index_state == "healthy"
         enriched = tuple(
             _with_stable_id(
@@ -132,13 +121,9 @@ class HybridRetriever(_BaseHybridRetriever):
         return replace(response, results=enriched)
 
     def _index_health(
-        self,
-        *,
-        embedding_provider: EmbeddingProvider | None = None,
+        self, *, embedding_provider: EmbeddingProvider | None = None
     ) -> IndexHealth:
-        health = super()._index_health(
-            embedding_provider=embedding_provider,
-        )
+        health = super()._index_health(embedding_provider=embedding_provider)
         _QUERY_HEALTH.set(health)
         _STALE_QUERY_PATHS.set(frozenset((*health.orphaned_paths, *health.stale_paths)))
         return health
@@ -149,16 +134,32 @@ class HybridRetriever(_BaseHybridRetriever):
         document: IndexedDocument,
         request: RetrievalRequest,
     ) -> bool:
-        # An orphaned row is authorized only by its stale indexed path. It must not become local
-        # or external evidence until synchronization re-establishes a current canonical path.
         if chunk.path in _STALE_QUERY_PATHS.get():
             return False
-        # Build-time filtering is not sufficient for an existing disposable index created by an
-        # older LifeOS version. A stale index remains text-queryable by design, so suppress any
-        # configured-runtime row again at the query boundary before its chunks can become evidence.
         if self._runtime_prefix is not None and chunk.path.startswith(self._runtime_prefix):
             return False
-        return super()._in_scope(chunk, document, request)
+        if not super()._in_scope(chunk, document, request):
+            return False
+
+        cache = _PRE_SCORING_AUTHORIZATION.get()
+        authorized = cache.get(document.path) if cache is not None else None
+        if authorized is None:
+            try:
+                source = read_vault_markdown(self.vault_root, document.path)
+            except VaultAccessError:
+                authorized = False
+            else:
+                current_hash = "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
+                authorized = current_hash == document.content_hash
+            if cache is not None:
+                cache[document.path] = authorized
+        if not authorized:
+            return False
+
+        captured = _IDENTITY_CAPTURE.get()
+        if captured is not None:
+            captured[document.path] = _stable_id(document.document_id)
+        return True
 
     def _authorize_candidates(
         self,
@@ -191,22 +192,12 @@ class HybridRetriever(_BaseHybridRetriever):
         item: RetrievalEvidence,
         candidate: str | None,
     ) -> str | None:
-        """Verify one indexed candidate against only its returned canonical note.
-
-        Build/sync-time duplicate handling proves uniqueness only while index health is current.
-        The caller therefore supplies no candidate when the index is stale. For a healthy index,
-        search still proves that the result path contains the same candidate ID and exact indexed
-        bytes without reopening the mutable SQLite active path or doing another vault-wide scan.
-        """
         if candidate is None:
             return None
         if item.path.startswith("conversations/") or item.path.startswith("proposals/"):
             return None
         decision = scope_decision(
-            item.path,
-            scope=request.scope,
-            policy=self.policy,
-            mode="local",
+            item.path, scope=request.scope, policy=self.policy, mode="local"
         )
         if not decision.allowed:
             return None
@@ -229,7 +220,7 @@ def _with_stable_id(item: RetrievalEvidence, stable_id: str | None) -> StableRet
         context_truncated=item.context_truncated,
         source_hash=item.source_hash,
         chunk_hash=item.chunk_hash,
-        note_type=item.note_type,
+        note_type=document.note_type if False else item.note_type,
         source=item.source,
         note_date=item.note_date,
         tags=item.tags,
