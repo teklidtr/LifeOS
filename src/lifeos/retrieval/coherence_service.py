@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import sqlite3
 from contextvars import ContextVar
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
@@ -29,6 +32,7 @@ _EXPECTED_DOCUMENT_IDS: ContextVar[dict[str, str] | None] = ContextVar(
     default=None,
 )
 _RELOCATION_PARK_PREFIX = ".lifeos/retrieval-relocations/"
+_RELOCATION_STAGE_NAME = "index.sqlite3.relocation-sync"
 
 
 def _path_document_id(path: str) -> str:
@@ -36,6 +40,11 @@ def _path_document_id(path: str) -> str:
 
 
 def _durable_document_id(source: VaultMarkdownFile) -> str | None:
+    # The root bootstrap instruction file is control metadata, not a canonical note identity.
+    # It may remain searchable evidence, but any frontmatter id on it must not enter the durable
+    # note-ID namespace used for relocation semantics.
+    if source.relative_path == "AGENTS.md":
+        return None
     parsed = parse_markdown_note(source.path, content=source.content)
     stable_id = parsed.durable_fields.id
     if stable_id is None:
@@ -104,14 +113,10 @@ def _parked_path(document_id: str, prior_path: str) -> str:
     return f"{_RELOCATION_PARK_PREFIX}{reservation}/{canonical_path}"
 
 
-def _park_identity_relocations(index: RetrievalIndex, expected: dict[str, str]) -> bool:
-    """Reserve all durable-ID moves before assigning any final path.
-
-    The base incremental synchronizer handles one rename at a time. Parking every moving stable
-    identity first removes path-uniqueness cycles such as A<->B while keeping the derived index
-    recoverable if synchronization is interrupted. Synthetic paths encode the last canonical
-    address so public rename reporting can restore it after the base sync completes.
-    """
+def _identity_relocations(
+    index: RetrievalIndex,
+    expected: dict[str, str],
+) -> tuple[tuple[str, str], ...]:
     documents = index.documents()
     by_id = {
         document.document_id: document
@@ -126,9 +131,31 @@ def _park_identity_relocations(index: RetrievalIndex, expected: dict[str, str]) 
         if current is None or current.path == target_path:
             continue
         moves.append((expected_id, current.path))
-    if not moves:
-        return False
+    return tuple(moves)
 
+
+def _stage_index_snapshot(index: RetrievalIndex, destination: Path) -> None:
+    """Copy one consistent active SQLite snapshot into disposable relocation staging."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.unlink(missing_ok=True)
+    try:
+        with sqlite3.connect(destination) as staging_connection:
+            index.connection.backup(staging_connection)
+    except (OSError, sqlite3.DatabaseError) as exc:
+        destination.unlink(missing_ok=True)
+        raise RetrievalError(
+            "relocation_stage_failed",
+            f"Could not stage the retrieval index for identity relocation: {exc}",
+        ) from exc
+
+
+def _park_identity_relocations(
+    index: RetrievalIndex,
+    moves: tuple[tuple[str, str], ...],
+) -> None:
+    """Reserve durable-ID moves inside a disposable staged index."""
+    if not moves:
+        return
     with index.transaction():
         for document_id, old_path in moves:
             parked = _parked_path(document_id, old_path)
@@ -140,7 +167,25 @@ def _park_identity_relocations(index: RetrievalIndex, expected: dict[str, str]) 
                 "UPDATE chunks SET path = ? WHERE document_id = ?",
                 (parked, document_id),
             )
-    return True
+
+
+def _assert_no_parked_paths(index: RetrievalIndex) -> None:
+    leaked = {
+        document.path
+        for document in index.documents()
+        if document.path.startswith(_RELOCATION_PARK_PREFIX)
+    }
+    leaked.update(
+        chunk.path
+        for chunk in index.chunks()
+        if chunk.path.startswith(_RELOCATION_PARK_PREFIX)
+    )
+    if leaked:
+        paths = ", ".join(sorted(leaked))
+        raise RetrievalError(
+            "relocation_sync_incomplete",
+            "Retrieval identity relocation left disposable parked paths in staging: " + paths,
+        )
 
 
 def _restore_public_paths(result: _service.IndexResult) -> _service.IndexResult:
@@ -159,7 +204,8 @@ class RetrievalIndexService(_service.RetrievalIndexService):
     unique among policy-visible indexed notes. Duplicate identities use path-derived keys so the
     SQLite primary key cannot hide a canonical note. Source discovery applies runtime exclusion
     and retrieval policy to safe path metadata before Markdown content is opened. Incremental
-    stable-ID moves are reserved as a set before the base synchronizer assigns final paths.
+    stable-ID moves are reserved as a set inside a disposable SQLite staging snapshot and are
+    published atomically only after synchronization completes without parked internal paths.
     """
 
     _coherence_sources: tuple[VaultMarkdownFile, ...] | None = None
@@ -234,51 +280,84 @@ class RetrievalIndexService(_service.RetrievalIndexService):
         _ambiguous, expected = _identity_plan(sources)
         source_by_path = {source.relative_path: source for source in sources}
         identity_refresh: set[str] = set()
-        parked = False
-        if self.active_path.exists():
-            with RetrievalIndex(self.active_path, create=False) as index:
-                for document in index.documents():
-                    canonical_path = _canonical_path_from_parked(document.path)
-                    expected_id = expected.get(canonical_path)
-                    if expected_id is not None and document.document_id != expected_id:
-                        identity_refresh.add(canonical_path)
-                parked = _park_identity_relocations(index, expected)
+        original_active_path = self.active_path
+        relocation_stage = self.root / _RELOCATION_STAGE_NAME
+        relocations: tuple[tuple[str, str], ...] = ()
+        staged = False
 
-        token = _EXPECTED_DOCUMENT_IDS.set(expected)
-        self._coherence_sources = sources
         try:
-            result = super().incremental_sync(
-                cancellation=cancellation,
-                progress=progress,
-            )
-            if parked:
-                result = _restore_public_paths(result)
-            if result.status != "complete" or not self.active_path.exists():
-                return result
+            if original_active_path.exists():
+                with RetrievalIndex(original_active_path, create=False) as index:
+                    for document in index.documents():
+                        canonical_path = _canonical_path_from_parked(document.path)
+                        expected_id = expected.get(canonical_path)
+                        if expected_id is not None and document.document_id != expected_id:
+                            identity_refresh.add(canonical_path)
+                    relocations = _identity_relocations(index, expected)
+                    if relocations:
+                        _stage_index_snapshot(index, relocation_stage)
+                        staged = True
 
-            # Duplicate introduction/resolution and normalized durable IDs can require
-            # re-identifying an unchanged note even when its canonical content did not change.
-            with RetrievalIndex(self.active_path, create=False) as index:
-                current_by_path = {document.path: document for document in index.documents()}
-                for path, expected_id in expected.items():
-                    current = current_by_path.get(path)
-                    if current is not None and current.document_id != expected_id:
-                        identity_refresh.add(path)
-                for path in sorted(identity_refresh):
-                    source = source_by_path.get(path)
-                    if source is None:
-                        continue
-                    index.replace_note(_coherent_chunk_markdown_file(source))
+            if staged:
+                self.active_path = relocation_stage
+                with RetrievalIndex(self.active_path, create=False) as staged_index:
+                    _park_identity_relocations(staged_index, relocations)
 
-            if not identity_refresh:
+            token = _EXPECTED_DOCUMENT_IDS.set(expected)
+            self._coherence_sources = sources
+            try:
+                result = super().incremental_sync(
+                    cancellation=cancellation,
+                    progress=progress,
+                )
+                if staged:
+                    result = _restore_public_paths(result)
+                if result.status != "complete" or not self.active_path.exists():
+                    return (
+                        replace(result, index_path=str(original_active_path))
+                        if staged
+                        else result
+                    )
+
+                # Duplicate introduction/resolution and normalized durable IDs can require
+                # re-identifying an unchanged note even when canonical content did not change.
+                with RetrievalIndex(self.active_path, create=False) as index:
+                    current_by_path = {document.path: document for document in index.documents()}
+                    for path, expected_id in expected.items():
+                        current = current_by_path.get(path)
+                        if current is not None and current.document_id != expected_id:
+                            identity_refresh.add(path)
+                    for path in sorted(identity_refresh):
+                        source = source_by_path.get(path)
+                        if source is None:
+                            continue
+                        index.replace_note(_coherent_chunk_markdown_file(source))
+
+                if identity_refresh:
+                    result = replace(
+                        result,
+                        updated=tuple(sorted(set(result.updated) | identity_refresh)),
+                    )
+
+                if staged:
+                    with RetrievalIndex(self.active_path, create=False) as staged_index:
+                        _assert_no_parked_paths(staged_index)
+                    try:
+                        os.replace(self.active_path, original_active_path)
+                    except OSError as exc:
+                        raise RetrievalError(
+                            "relocation_publish_failed",
+                            f"Could not publish the staged retrieval relocation index: {exc}",
+                        ) from exc
+                    result = replace(result, index_path=str(original_active_path))
                 return result
-            return replace(
-                result,
-                updated=tuple(sorted(set(result.updated) | identity_refresh)),
-            )
+            finally:
+                self._coherence_sources = None
+                _EXPECTED_DOCUMENT_IDS.reset(token)
         finally:
-            self._coherence_sources = None
-            _EXPECTED_DOCUMENT_IDS.reset(token)
+            self.active_path = original_active_path
+            if staged:
+                relocation_stage.unlink(missing_ok=True)
 
 
 # Base service methods resolve this module-level name at call time, so one wrapper keeps rebuild
