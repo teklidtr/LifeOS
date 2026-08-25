@@ -42,6 +42,9 @@ _QUERY_HEALTH: ContextVar[IndexHealth | None] = ContextVar(
 _SCOPED_QUERY_CHUNKS: ContextVar[
     dict[str, tuple[IndexedChunk, IndexedDocument]] | None
 ] = ContextVar("lifeos_retrieval_scoped_query_chunks", default=None)
+_ROW_AUTHORIZATION: ContextVar[dict[str, bool] | None] = ContextVar(
+    "lifeos_retrieval_row_authorization", default=None
+)
 _AUTHORIZED_SEMANTIC_IDS: ContextVar[set[str] | None] = ContextVar(
     "lifeos_retrieval_authorized_semantic_ids", default=None
 )
@@ -92,6 +95,8 @@ class HybridRetriever(_BaseHybridRetriever):
         health_token = _QUERY_HEALTH.set(None)
         scoped_chunks: dict[str, tuple[IndexedChunk, IndexedDocument]] = {}
         scoped_token = _SCOPED_QUERY_CHUNKS.set(scoped_chunks)
+        row_authorization: dict[str, bool] = {}
+        row_authorization_token = _ROW_AUTHORIZATION.set(row_authorization)
         authorized_semantic_ids: set[str] = set()
         semantic_token = _AUTHORIZED_SEMANTIC_IDS.set(authorized_semantic_ids)
         captured: dict[str, str | None] = {}
@@ -107,6 +112,7 @@ class HybridRetriever(_BaseHybridRetriever):
         finally:
             _IDENTITY_CAPTURE.reset(capture_token)
             _AUTHORIZED_SEMANTIC_IDS.reset(semantic_token)
+            _ROW_AUTHORIZATION.reset(row_authorization_token)
             _SCOPED_QUERY_CHUNKS.reset(scoped_token)
             _QUERY_HEALTH.reset(health_token)
             _STALE_QUERY_PATHS.reset(stale_token)
@@ -153,6 +159,22 @@ class HybridRetriever(_BaseHybridRetriever):
             return False
         if not super()._in_scope(chunk, document, request):
             return False
+
+        row_authorization = _ROW_AUTHORIZATION.get()
+        if row_authorization is not None:
+            allowed = row_authorization.get(document.path)
+            if allowed is None:
+                try:
+                    source = read_vault_markdown(self.vault_root, document.path)
+                except VaultAccessError:
+                    allowed = False
+                else:
+                    current_hash = "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
+                    allowed = current_hash == document.content_hash
+                row_authorization[document.path] = allowed
+            if not allowed:
+                return False
+
         scoped = _SCOPED_QUERY_CHUNKS.get()
         if scoped is not None:
             scoped[chunk.chunk_id] = (chunk, document)
