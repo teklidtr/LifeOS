@@ -94,6 +94,17 @@ For every implementation change:
 
 Clean-room, container, platform-specific, or other checks whose value specifically depends on the CI environment may remain CI checkpoints. This exception does not remove the obligation to run the relevant local behavioral tests first.
 
+### Refactor and consolidation safety
+
+Refactors and consolidation passes are not behavior-free. When the intent is to preserve behavior while centralizing an invariant or deleting duplication:
+
+1. Before pushing, search the repository for every renamed, removed, or shape-changed helper; monkeypatch target; accessed return attribute; and exact error string changed by the diff. Tests or sibling modules that depend on an underscore-prefixed helper still represent repository compatibility evidence.
+2. Preserve existing call shapes, return shapes, patch points, and observable error wording by default when the refactor does not require changing them. If a seam must intentionally change, migrate all known callers and tests in the same change and make the reason explicit.
+3. Centralize the invariant at one enforcement boundary and remove or route old duplicate implementations through it. Do not add a new abstraction while leaving parallel security, privacy, filesystem, or identity logic alive elsewhere.
+4. When local pytest cannot run, repository-wide dependency search for changed seams is mandatory as the closest static substitute. Ruff, mypy, compilation, and collection cannot detect return-shape, monkeypatch-target, or exact-message compatibility regressions.
+5. Before full validation, compare the candidate against the previous known-good head and account for every changed line as required behavior, deliberate consolidation, or regression coverage. Remove incidental cleanup, comment churn, error-text drift, and unrelated refactors from a trust-boundary fix.
+6. If CI finds a deterministic compatibility regression after a consolidation pass, treat it as a missed pre-push audit. Restore compatibility unless the change was intentional; otherwise migrate every dependent surface together, broaden the seam search, and only then continue the review cycle.
+
 ## Code Review Rules
 
 Use these rules to catch LifeOS-specific invariant violations that may not be obvious from the diff alone. Keep mechanical checks in tests and CI.
