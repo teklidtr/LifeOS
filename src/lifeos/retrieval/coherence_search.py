@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import lifeos.retrieval.search as _base_search
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.retrieval.contracts import (
@@ -38,8 +39,11 @@ _STALE_QUERY_PATHS: ContextVar[frozenset[str]] = ContextVar(
 _QUERY_HEALTH: ContextVar[IndexHealth | None] = ContextVar(
     "lifeos_retrieval_query_health", default=None
 )
-_PRE_SCORING_AUTHORIZATION: ContextVar[dict[str, bool] | None] = ContextVar(
-    "lifeos_retrieval_pre_scoring_authorization", default=None
+_SCOPED_QUERY_CHUNKS: ContextVar[
+    dict[str, tuple[IndexedChunk, IndexedDocument]] | None
+] = ContextVar("lifeos_retrieval_scoped_query_chunks", default=None)
+_AUTHORIZED_SEMANTIC_IDS: ContextVar[set[str] | None] = ContextVar(
+    "lifeos_retrieval_authorized_semantic_ids", default=None
 )
 
 
@@ -86,7 +90,10 @@ class HybridRetriever(_BaseHybridRetriever):
     ) -> RetrievalResponse:
         stale_token = _STALE_QUERY_PATHS.set(frozenset())
         health_token = _QUERY_HEALTH.set(None)
-        authorization_token = _PRE_SCORING_AUTHORIZATION.set({})
+        scoped_chunks: dict[str, tuple[IndexedChunk, IndexedDocument]] = {}
+        scoped_token = _SCOPED_QUERY_CHUNKS.set(scoped_chunks)
+        authorized_semantic_ids: set[str] = set()
+        semantic_token = _AUTHORIZED_SEMANTIC_IDS.set(authorized_semantic_ids)
         captured: dict[str, str | None] = {}
         capture_token = _IDENTITY_CAPTURE.set(captured)
         try:
@@ -99,9 +106,15 @@ class HybridRetriever(_BaseHybridRetriever):
             )
         finally:
             _IDENTITY_CAPTURE.reset(capture_token)
-            _PRE_SCORING_AUTHORIZATION.reset(authorization_token)
+            _AUTHORIZED_SEMANTIC_IDS.reset(semantic_token)
+            _SCOPED_QUERY_CHUNKS.reset(scoped_token)
             _QUERY_HEALTH.reset(health_token)
             _STALE_QUERY_PATHS.reset(stale_token)
+
+        if embedding_provider is not None and response.semantic_state == "available":
+            semantic_state = "available" if authorized_semantic_ids else "missing-embeddings"
+            if semantic_state != response.semantic_state:
+                response = replace(response, semantic_state=semantic_state)
 
         if not response.results:
             return response
@@ -140,25 +153,9 @@ class HybridRetriever(_BaseHybridRetriever):
             return False
         if not super()._in_scope(chunk, document, request):
             return False
-
-        cache = _PRE_SCORING_AUTHORIZATION.get()
-        authorized = cache.get(document.path) if cache is not None else None
-        if authorized is None:
-            try:
-                source = read_vault_markdown(self.vault_root, document.path)
-            except VaultAccessError:
-                authorized = False
-            else:
-                current_hash = "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
-                authorized = current_hash == document.content_hash
-            if cache is not None:
-                cache[document.path] = authorized
-        if not authorized:
-            return False
-
-        captured = _IDENTITY_CAPTURE.get()
-        if captured is not None:
-            captured[document.path] = _stable_id(document.document_id)
+        scoped = _SCOPED_QUERY_CHUNKS.get()
+        if scoped is not None:
+            scoped[chunk.chunk_id] = (chunk, document)
         return True
 
     def _authorize_candidates(
@@ -168,21 +165,60 @@ class HybridRetriever(_BaseHybridRetriever):
         ],
         request: RetrievalRequest,
     ) -> list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]]:
-        del request
-        authorized = []
+        scoped = _SCOPED_QUERY_CHUNKS.get() or {}
+        scoped_items = tuple(scoped.values())
+        scoped_chunks = tuple(chunk for chunk, _document in scoped_items)
+        selected = set(request.scope.paths) | set(request.scope.pinned_paths)
+        provisional_links = _base_search._link_scores(scoped_chunks, selected)
+        support_paths = selected | set(provisional_links)
+        candidate_paths = {document.path for _chunk, document, _components, _matched in candidates}
+        paths_to_authorize = candidate_paths | support_paths
+        documents_by_path = {document.path: document for _chunk, document in scoped_items}
+
+        authorized_paths: set[str] = set()
         captured = _IDENTITY_CAPTURE.get()
-        for candidate in candidates:
-            _, document, _, _ = candidate
+        for path in sorted(paths_to_authorize):
+            document = documents_by_path.get(path)
+            if document is None:
+                continue
             try:
-                source = read_vault_markdown(self.vault_root, document.path)
+                source = read_vault_markdown(self.vault_root, path)
             except VaultAccessError:
                 continue
             current_hash = "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
             if current_hash != document.content_hash:
                 continue
+            authorized_paths.add(path)
             if captured is not None:
-                captured[document.path] = _stable_id(document.document_id)
-            authorized.append(candidate)
+                captured[path] = _stable_id(document.document_id)
+
+        authorized_support_chunks = tuple(
+            chunk for chunk, document in scoped_items if document.path in authorized_paths
+        )
+        current_links = _base_search._link_scores(authorized_support_chunks, selected)
+        semantic_ids = _AUTHORIZED_SEMANTIC_IDS.get()
+        authorized: list[
+            tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]
+        ] = []
+        for chunk, document, components, matched in candidates:
+            if document.path not in authorized_paths:
+                continue
+            updated = replace(components, link=current_links.get(chunk.path, 0.0))
+            if updated.total <= 0:
+                continue
+            if semantic_ids is not None and updated.semantic > 0:
+                semantic_ids.add(chunk.chunk_id)
+            authorized.append((chunk, document, updated, matched))
+
+        authorized.sort(
+            key=lambda item: (
+                -item[2].total,
+                item[0].path,
+                item[0].heading or "",
+                item[0].start_line,
+                item[0].chunk_id,
+            )
+        )
         return authorized
 
     def _verified_current_stable_id(
