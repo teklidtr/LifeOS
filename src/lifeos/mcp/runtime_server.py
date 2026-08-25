@@ -13,7 +13,6 @@ from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.facade.read_only import WikiSearchRequest, search_wiki
 from lifeos.mcp.coherence_tools import build_coherence_tools
 from lifeos.mcp.exploration_tools import (
-    WIKI_SEARCH_MCP_DESCRIPTION,
     _strict_tool,
     build_exploration_tools,
     build_policy_read_tools,
@@ -21,6 +20,7 @@ from lifeos.mcp.exploration_tools import (
 from lifeos.mcp.models import WikiSearchMCPResult
 from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS as CORE_MCP_INSTRUCTIONS,
+    WIKI_SEARCH_MCP_DESCRIPTION,
     _invoke_mcp_tool,
     create_mcp_server as create_core_mcp_server,
 )
