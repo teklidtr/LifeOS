@@ -108,12 +108,13 @@ def _run_scan(argv: Sequence[str]) -> int:
         "modified": list(result.modified),
         "unchanged": list(result.unchanged),
         "deleted": list(result.deleted),
-        "renamed": [
-            {"from_path": old_path, "to_path": new_path}
-            for old_path, new_path in result.renamed
-        ],
         "proposals_indexed": result.proposals_indexed,
     }
+    if result.renamed:
+        payload["renamed"] = [
+            {"from_path": old_path, "to_path": new_path}
+            for old_path, new_path in result.renamed
+        ]
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 0
