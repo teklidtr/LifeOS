@@ -253,6 +253,7 @@ def apply_proposal_tool(
     request: ApplyProposalRequest,
     authorizer: ConsequentialAuthorizer,
     clock_fn: Callable[[], datetime] = _utc_now,
+    identity_runtime_dir: Path | None = None,
 ) -> ApplyProposalResult:
     proposals_root = vault_root / "proposals"
 
@@ -325,6 +326,7 @@ def apply_proposal_tool(
             vault_root=vault_root,
             applied_by=grant.actor_id,
             applied_at=timestamp,
+            identity_runtime_dir=identity_runtime_dir,
         )
     except ApplicationError as e:
         raise _map_application_error(e) from e
@@ -343,6 +345,7 @@ def accept_proposal_tool(
     request: AcceptProposalRequest,
     authorizer: ConsequentialAuthorizer,
     clock_fn: Callable[[], datetime] = _utc_now,
+    identity_runtime_dir: Path | None = None,
 ) -> AcceptProposalResult:
     """Accept and apply one unchanged proposal with one exact UI authorization."""
 
@@ -438,6 +441,7 @@ def accept_proposal_tool(
             vault_root=vault_root,
             applied_by=grant.actor_id,
             applied_at=timestamp,
+            identity_runtime_dir=identity_runtime_dir,
         )
     except ApplicationError as exc:
         raise _map_application_error(exc) from exc
