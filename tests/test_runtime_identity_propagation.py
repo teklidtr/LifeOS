@@ -94,7 +94,7 @@ def test_bridge_threads_runtime_into_desktop_proposals(tmp_path: Path) -> None:
     assert application.proposals.identity_runtime_dir == runtime_dir
 
 
-def test_apply_uses_custom_runtime_for_lock_recovery_and_transaction_state(
+def test_apply_uses_custom_runtime_for_pinned_recovery_and_transaction_state(
     tmp_path: Path,
 ) -> None:
     vault = tmp_path / "vault"
@@ -105,14 +105,17 @@ def test_apply_uses_custom_runtime_for_lock_recovery_and_transaction_state(
     proposal.proposal_source_hash = "sha256:" + "0" * 64
     proposal.patch_document.operations = ()
     expected = MagicMock()
-    recovery_lock = MagicMock()
+    recovery_store = MagicMock()
+    recovery_store.recovery_root = runtime_dir / "recovery"
+    pinned_context = MagicMock()
+    pinned_context.__enter__.return_value = recovery_store
 
     with (
         patch.object(
             proposal_application,
-            "acquire_recovery_lock",
-            return_value=recovery_lock,
-        ) as acquire_lock,
+            "acquire_pinned_recovery_store",
+            return_value=pinned_context,
+        ) as acquire_store,
         patch.object(
             proposal_application,
             "_recover_interrupted_applications_locked",
@@ -132,10 +135,14 @@ def test_apply_uses_custom_runtime_for_lock_recovery_and_transaction_state(
         )
 
     assert result is expected
-    acquire_lock.assert_called_once_with(runtime_dir=runtime_dir)
-    recover.assert_called_once_with(vault_root=vault, runtime_dir=runtime_dir)
+    acquire_store.assert_called_once_with(runtime_dir=runtime_dir)
+    recover.assert_called_once_with(
+        vault_root=vault,
+        runtime_dir=runtime_dir,
+        recovery_store=recovery_store,
+    )
     assert apply_locked.call_args.kwargs["runtime_dir"] == runtime_dir
-    assert apply_locked.call_args.kwargs["recovery_root"] == runtime_dir / "recovery"
+    assert apply_locked.call_args.kwargs["recovery_store"] is recovery_store
 
 
 def test_apply_rejects_vault_root_runtime_before_recovery(tmp_path: Path) -> None:
@@ -148,7 +155,7 @@ def test_apply_rejects_vault_root_runtime_before_recovery(tmp_path: Path) -> Non
     proposal.patch_document.operations = ()
 
     with (
-        patch.object(proposal_application, "acquire_recovery_lock") as acquire_lock,
+        patch.object(proposal_application, "acquire_pinned_recovery_store") as acquire_store,
         patch.object(
             proposal_application,
             "_recover_interrupted_applications_locked",
@@ -168,6 +175,6 @@ def test_apply_rejects_vault_root_runtime_before_recovery(tmp_path: Path) -> Non
         else:
             raise AssertionError("vault-root runtime must be rejected")
 
-    acquire_lock.assert_not_called()
+    acquire_store.assert_not_called()
     recover.assert_not_called()
     apply_locked.assert_not_called()
