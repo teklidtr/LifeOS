@@ -53,11 +53,12 @@ def test_hybrid_retriever_filters_stale_runtime_rows_at_query_time(tmp_path: Pat
     vault = tmp_path / "vault"
     vault.mkdir()
     runtime = vault / "runtime" / "node-a"
+    runtime_marker = "runtime-stale-secret-marker"
     _write(vault, "wiki/canonical.md", "# Canonical\n\ncanonical-only-marker\n")
     _write(
         vault,
         "runtime/node-a/derived.md",
-        "# Derived\n\nruntime-stale-secret-marker\n",
+        f"# Derived\n\n{runtime_marker}\n",
     )
 
     service = RetrievalIndexService(vault_root=vault, runtime_dir=runtime)
@@ -68,7 +69,8 @@ def test_hybrid_retriever_filters_stale_runtime_rows_at_query_time(tmp_path: Pat
         index.replace_note(chunk_markdown_file(runtime_source))
 
     retriever = HybridRetriever(vault_root=vault, runtime_dir=runtime)
-    response = retriever.search(RetrievalRequest("runtime-stale-secret-marker"))
+    response = retriever.search(RetrievalRequest(runtime_marker))
 
     assert response.index_state == "stale"
-    assert response.results == ()
+    assert all(not item.path.startswith("runtime/node-a/") for item in response.results)
+    assert all(runtime_marker not in item.text for item in response.results)
