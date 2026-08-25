@@ -1,12 +1,16 @@
 """Set-wise stable-identity reconciliation for registry scans.
 
 This module layers the LIFEOS-1643 coherence semantics over the historical file-tracking
-helpers. It deliberately keeps the existing ``_hash_file`` seam so streaming, fault-injection,
-and change-during-read behavior remain covered by the older registry tests.
+helpers. It deliberately keeps the existing ``_hash_file`` seam for unscoped local scans so
+streaming, fault-injection, and change-during-read behavior remain covered by the older registry
+tests. Externally scoped reads use a vault-root descriptor and no-follow semantics instead.
 """
 
 from __future__ import annotations
 
+import hashlib
+import os
+import stat
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +23,13 @@ from lifeos.scanner import VaultFile
 
 _TOMBSTONE_PREFIX = ".lifeos/registry-tombstones/"
 IdentityPathPredicate = Callable[[str], bool]
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
+_FILE_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +51,12 @@ class _DiscardingChunks:
 
 def _participates_in_stable_note_identity(entry: VaultFile) -> bool:
     first_root = entry.path.parts[0] if entry.path.parts else ""
-    return entry.file_type == ".md" and first_root != "proposals"
+    relative_path = entry.path.as_posix()
+    return (
+        entry.file_type == ".md"
+        and first_root != "proposals"
+        and relative_path != "AGENTS.md"
+    )
 
 
 def _capture_for(entry: VaultFile) -> _base._HashCapture:
@@ -51,11 +67,97 @@ def _capture_for(entry: VaultFile) -> _base._HashCapture:
     return capture
 
 
+def _safe_scoped_hash_file(
+    vault_root: Path,
+    entry: VaultFile,
+    *,
+    capture: _base._HashCapture,
+) -> str:
+    """Hash one scoped file from a vault-root descriptor without following symlinks."""
+    parts = entry.path.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise _base.FileTrackingError(
+            f"Could not safely hash scoped registry path {entry.path.as_posix()!r}."
+        )
+
+    try:
+        root_fd = os.open(vault_root, _DIRECTORY_FLAGS)
+    except OSError as exc:
+        raise _base.FileTrackingError(
+            f"Could not safely open registry vault root {vault_root}: {exc}"
+        ) from exc
+
+    current_fd = root_fd
+    file_fd: int | None = None
+    try:
+        for part in parts[:-1]:
+            try:
+                next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            except OSError as exc:
+                raise _base.FileTrackingError(
+                    "Could not safely traverse scoped registry path "
+                    f"{entry.path.as_posix()!r}: {exc}"
+                ) from exc
+            if current_fd != root_fd:
+                os.close(current_fd)
+            current_fd = next_fd
+
+        try:
+            file_fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=current_fd)
+            before = os.fstat(file_fd)
+        except OSError as exc:
+            raise _base.FileTrackingError(
+                f"Could not safely open scoped registry file {entry.path.as_posix()!r}: {exc}"
+            ) from exc
+        if not stat.S_ISREG(before.st_mode):
+            raise _base.FileTrackingError(
+                f"Scoped registry entry is not a regular file: {entry.path.as_posix()}"
+            )
+
+        hasher = hashlib.sha256()
+        total_bytes = 0
+        try:
+            while True:
+                chunk = os.read(file_fd, 65536)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                hasher.update(chunk)
+                capture.chunks.append(chunk)
+            after = os.fstat(file_fd)
+        except OSError as exc:
+            raise _base.FileTrackingError(
+                f"Could not safely read scoped registry file {entry.path.as_posix()!r}: {exc}"
+            ) from exc
+
+        if (
+            before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_size != after.st_size
+            or total_bytes != after.st_size
+        ):
+            raise _base.FileTrackingError(
+                f"File {vault_root / entry.path} changed during scoped hashing."
+            )
+
+        capture.size_bytes = after.st_size
+        capture.mtime_ns = after.st_mtime_ns
+        return hasher.hexdigest()
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        if current_fd != root_fd:
+            os.close(current_fd)
+        os.close(root_fd)
+
+
 def _prepare_scan_entry(
     vault_root: Path,
     entry: VaultFile,
     *,
     observe_content: bool = True,
+    descriptor_safe: bool = False,
 ) -> _PreparedScanEntry:
     # Scoped external callers may know a path exists from directory metadata without being
     # authorized to open its content. Preserve that presence fact without hashing or parsing it.
@@ -72,7 +174,10 @@ def _prepare_scan_entry(
     full_path = vault_root / entry.path
     identity_observed = _participates_in_stable_note_identity(entry)
     capture = _capture_for(entry)
-    content_hash = _base._hash_file(full_path, capture=capture)
+    if descriptor_safe:
+        content_hash = _safe_scoped_hash_file(vault_root, entry, capture=capture)
+    else:
+        content_hash = _base._hash_file(full_path, capture=capture)
     if capture.size_bytes is None or capture.mtime_ns is None:
         raise _base.FileTrackingError(f"Could not capture registry metadata for {full_path}.")
 
@@ -110,6 +215,7 @@ def _prepare_scan_entries(
 ) -> dict[str, _PreparedScanEntry]:
     prepared: dict[str, _PreparedScanEntry] = {}
     id_paths: dict[str, list[str]] = {}
+    scoped = identity_allow_path is not None
     for entry in entries:
         path_str = entry.path.as_posix()
         observe_content = identity_allow_path is None or identity_allow_path(path_str)
@@ -117,6 +223,7 @@ def _prepare_scan_entries(
             vault_root,
             entry,
             observe_content=observe_content,
+            descriptor_safe=scoped and observe_content,
         )
         prepared[path_str] = facts
         if facts.identity_observed and facts.stable_id is not None:
@@ -185,6 +292,7 @@ def register_scan(
     content access: the registry still records filesystem presence, but it neither hashes nor
     parses those bytes. Previously known local identity facts for denied paths are retained for a
     later trusted refresh while being excluded from every scoped ambiguity/relocation decision.
+    Authorized scoped paths are opened through vault-root descriptors with no-follow semantics.
     """
     seen: set[str] = set()
     for entry in entries:
