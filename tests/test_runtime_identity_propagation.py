@@ -136,3 +136,38 @@ def test_apply_uses_custom_runtime_for_lock_recovery_and_transaction_state(
     recover.assert_called_once_with(vault_root=vault, runtime_dir=runtime_dir)
     assert apply_locked.call_args.kwargs["runtime_dir"] == runtime_dir
     assert apply_locked.call_args.kwargs["recovery_root"] == runtime_dir / "recovery"
+
+
+def test_apply_rejects_vault_root_runtime_before_recovery(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    proposal = MagicMock()
+    proposal.metadata.id = "prop-runtime-root"
+    proposal.metadata.status = "approved"
+    proposal.proposal_source_hash = "sha256:" + "0" * 64
+    proposal.patch_document.operations = ()
+
+    with (
+        patch.object(proposal_application, "acquire_recovery_lock") as acquire_lock,
+        patch.object(
+            proposal_application,
+            "_recover_interrupted_applications_locked",
+        ) as recover,
+        patch.object(proposal_application, "_apply_proposal_locked") as apply_locked,
+    ):
+        try:
+            proposal_application.apply_proposal(
+                proposal,
+                vault_root=vault,
+                applied_by="desktop-user",
+                applied_at="2026-08-25T10:00:00Z",
+                identity_runtime_dir=vault,
+            )
+        except proposal_application.ApplicationError as error:
+            assert error.code is proposal_application.ApplicationErrorCode.VALIDATION_ERROR
+        else:
+            raise AssertionError("vault-root runtime must be rejected")
+
+    acquire_lock.assert_not_called()
+    recover.assert_not_called()
+    apply_locked.assert_not_called()
