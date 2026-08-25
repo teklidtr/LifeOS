@@ -317,9 +317,13 @@ def format_doctor_text(result: DoctorResult) -> str:
             "  stable identities: "
             f"{result.relocation_safe_note_count}/{result.identity_note_count} Markdown notes"
         ),
-        "",
-        "Readiness checks",
+        "  required sync exclusions:",
     ]
+    lines.extend(
+        f"    - {exclusion}"
+        for exclusion in result.topology.required_sync_exclusions
+    )
+    lines.extend(["", "Readiness checks"])
     for finding in result.findings:
         lines.append(
             f"  {finding.subsystem}: {finding.state} "
