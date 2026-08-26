@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePosixPath
@@ -15,6 +15,10 @@ SupportKind = Literal["direct", "synthesis", "inference"]
 
 _NODE_LOCAL_EXCLUDED_PREFIXES: ContextVar[tuple[str, ...]] = ContextVar(
     "lifeos_node_local_retrieval_excluded_prefixes",
+    default=(),
+)
+_NODE_LOCAL_EXCLUSION_PREDICATES: ContextVar[tuple[Callable[[str], bool], ...]] = ContextVar(
+    "lifeos_node_local_retrieval_exclusion_predicates",
     default=(),
 )
 
@@ -279,6 +283,21 @@ def reset_node_local_excluded_prefixes(token: Token[tuple[str, ...]]) -> None:
     _NODE_LOCAL_EXCLUDED_PREFIXES.reset(token)
 
 
+def push_node_local_exclusion_predicates(
+    predicates: Sequence[Callable[[str], bool]],
+) -> Token[tuple[Callable[[str], bool], ...]]:
+    """Temporarily add filesystem-aware node-local exclusion predicates."""
+    current = _NODE_LOCAL_EXCLUSION_PREDICATES.get()
+    return _NODE_LOCAL_EXCLUSION_PREDICATES.set((*current, *predicates))
+
+
+def reset_node_local_exclusion_predicates(
+    token: Token[tuple[Callable[[str], bool], ...]],
+) -> None:
+    """Restore prior filesystem-aware node-local exclusion predicates."""
+    _NODE_LOCAL_EXCLUSION_PREDICATES.reset(token)
+
+
 def scope_decision(
     path: str,
     *,
@@ -290,6 +309,8 @@ def scope_decision(
     if _matches_prefix(normalized, policy.excluded_prefixes):
         return ScopeDecision(normalized, False, False, "excluded-by-policy")
     if _matches_prefix(normalized, _NODE_LOCAL_EXCLUDED_PREFIXES.get()):
+        return ScopeDecision(normalized, False, False, "excluded-node-local-runtime")
+    if any(predicate(normalized) for predicate in _NODE_LOCAL_EXCLUSION_PREDICATES.get()):
         return ScopeDecision(normalized, False, False, "excluded-node-local-runtime")
     if _matches_prefix(normalized, scope.excluded_paths):
         return ScopeDecision(normalized, False, False, "excluded-by-request")
