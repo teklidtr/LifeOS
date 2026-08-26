@@ -116,16 +116,21 @@ def runtime_path_selects_configured_directory(
 def build_runtime_exclusion_matcher(
     vault_root: Path,
     *,
-    runtime_dir: Path,
+    runtime_dir: Path | None,
     snapshot_prefix: str | None,
 ) -> Callable[[str], bool]:
     """Bind one lexical spelling while also matching the live runtime inode.
 
     The bound string keeps paths captured before a case-only rename excluded. The descriptor
-    comparison keeps paths captured after that rename excluded. The predicate therefore expands
-    the exclusion boundary instead of replacing one spelling with another during an invocation.
+    comparison keeps paths captured after that rename excluded. When a caller discovered runtime
+    configuration indirectly, ``snapshot_prefix`` also supplies the in-vault runtime address used
+    for the inode comparison. The predicate therefore expands the exclusion boundary instead of
+    replacing one display spelling with another during an invocation.
     """
     snapshot_root = snapshot_prefix.rstrip("/") if snapshot_prefix is not None else None
+    matcher_runtime_dir = runtime_dir
+    if matcher_runtime_dir is None and snapshot_root is not None:
+        matcher_runtime_dir = vault_root / snapshot_root
 
     def excluded(path: str) -> bool:
         candidate = _candidate_parts(path)
@@ -136,9 +141,11 @@ def build_runtime_exclusion_matcher(
             normalized == snapshot_root or normalized.startswith(snapshot_prefix)
         ):
             return True
+        if matcher_runtime_dir is None:
+            return False
         return runtime_path_selects_configured_directory(
             vault_root,
-            runtime_dir=runtime_dir,
+            runtime_dir=matcher_runtime_dir,
             path=normalized,
         )
 
