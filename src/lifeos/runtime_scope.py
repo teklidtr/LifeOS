@@ -83,7 +83,12 @@ def runtime_path_selects_configured_directory(
     runtime_fd: int | None = None
     candidate_fd: int | None = None
     try:
-        root_fd = os.open(root, _DIRECTORY_FLAGS)
+        try:
+            root_fd = os.open(root, _DIRECTORY_FLAGS)
+        except FileNotFoundError:
+            # With no canonical vault root there cannot be an existing in-vault runtime inode to
+            # match. Callers that need the vault itself will surface their own not-found failure.
+            return False
         try:
             runtime_fd = _open_directory_chain(root_fd, runtime_parts)
         except FileNotFoundError:
