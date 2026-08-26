@@ -599,3 +599,33 @@ pure relocation may be recognized, but pending or approved proposals are never s
 retargeted; they require renewed review at the new path. Same ID with changed content remains
 stale, and missing, changed, or ambiguous identity blocks mutation. Create operations remain
 path-oriented because an intentionally absent target has no existing note identity to resolve.
+
+## DD-091: Home-node networking is authenticated transport over the shared MCP core
+
+Local `lifeos-mcp` STDIO remains a first-class deployment. The optional long-lived
+`lifeos serve` mode exposes the same Python MCP/facade/business-rule surface through
+stateless Streamable HTTP; network deployment does not create a second semantic API or move
+agent intelligence into LifeOS. The canonical vault, proposal history, ownership/provenance,
+and active-node Git history retain the same authority in either transport.
+
+The network service fails closed by default. Direct startup binds to loopback. Any non-loopback
+bind requires an explicit Host allowlist, while operator-owned private LAN/VPN or authenticated
+TLS reverse-proxy boundaries protect traffic outside the host. Bearer credentials are deployment
+secrets supplied through an environment value or an environment-selected secret file; they are
+never canonical Markdown, normal activity data, or diagnostic response content. Health and
+readiness endpoints expose only bounded liveness/readiness status.
+
+Each service process has one explicit stable actor identity. An authenticated remote request may
+use the ordinary exploration/proposal-building surface and may explicitly submit a guarded draft.
+The initial headless contract never treats bearer possession as approval/application authority:
+remote `proposal_approve` and `proposal_apply` fail closed and trusted human/local authorization
+remains necessary before target Markdown is changed. Deterministic readiness must permit
+submission; application-time ownership, provenance, review-digest, identity/path/hash, stale-write,
+and recovery checks remain the existing core contracts rather than transport-specific rules.
+
+Stateless HTTP session data and `.lifeos/` registry/index/cache/activity state remain disposable.
+The supported OCI deployment persists the canonical vault/Git view independently from rebuildable
+runtime state and is validated for both `linux/amd64` execution and `linux/arm64` image build.
+Home Assistant OS uses only a thin App/Supervisor packaging wrapper around the same multi-arch
+image. The home node remains the single active LifeOS mutation authority required by DD-089; a
+phone/laptop MCP client is a transport consumer of that authority, not another writer.
