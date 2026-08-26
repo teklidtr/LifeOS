@@ -45,6 +45,7 @@ async def test_remote_http_client_explores_and_submits_without_local_vault(
         host="127.0.0.1",
         stateless_http=True,
         json_response=True,
+        excluded_core_tools=frozenset({"proposal_approve", "proposal_apply"}),
     )
     mcp_app = mcp.streamable_http_app()
     token = "integration-token-" + "x" * 32
@@ -67,6 +68,12 @@ async def test_remote_http_client_explores_and_submits_without_local_vault(
         ) as (read_stream, write_stream, _get_session_id):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
+
+                tools = await session.list_tools()
+                tool_names = {tool.name for tool in tools.tools}
+                assert "proposal_submit" in tool_names
+                assert "proposal_approve" not in tool_names
+                assert "proposal_apply" not in tool_names
 
                 listing = await session.call_tool("vault_list", arguments={"prefix": "raw"})
                 assert not listing.isError
@@ -95,11 +102,17 @@ async def test_remote_http_client_explores_and_submits_without_local_vault(
                 assert not submitted.isError
                 assert json.loads(submitted.content[0].text)["status"] == "pending"
 
-                denied = await session.call_tool(
-                    "proposal_approve",
-                    arguments={"proposal_id": proposal_id},
+                activity = await session.call_tool(
+                    "runtime_activity",
+                    arguments={"limit": 20},
                 )
-                assert denied.isError
+                assert not activity.isError
+                activity_data = json.loads(activity.content[0].text)
+                assert any(
+                    record["tool"] == "proposal_submit"
+                    and record["actor_id"] == "remote-integration"
+                    for record in activity_data["records"]
+                )
 
     loaded = load_proposal_directory(
         vault_root / "proposals" / proposal_id,
