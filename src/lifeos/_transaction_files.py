@@ -129,34 +129,42 @@ def require_directory_binding(fd: int, expected: DirectoryBinding) -> None:
         raise TransactionError("Canonical parent directory moved before mutation")
 
 
-def _live_relative(parent: ParentDescriptor, name: str) -> str:
-    base = parent.path
-    if base in ("", "."):
-        return name
-    return f"{base}/{name}"
+def _open_relative_directory_chain(root_fd: int, relative_path: str) -> int:
+    current_fd = os.dup(root_fd)
+    if relative_path in ("", "."):
+        return current_fd
+    try:
+        for component in relative_path.split("/"):
+            if component in ("", ".", ".."):
+                raise TransactionError("Invalid canonical parent path")
+            try:
+                next_fd = os.open(component, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            except OSError as error:
+                raise TransactionError("Canonical parent directory moved before mutation") from error
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except Exception:
+        os.close(current_fd)
+        raise
+
+
+def open_live_parent_for_mutation(parent: ParentDescriptor) -> int:
+    """Open the reviewed parent from pinned authority and prove it is the reviewed inode."""
+    if parent.authority_fd is None:
+        return os.dup(parent.fd)
+    live_fd = _open_relative_directory_chain(parent.authority_fd, parent.path)
+    live = os.fstat(live_fd)
+    if (live.st_dev, live.st_ino) != (parent.dev, parent.ino):
+        os.close(live_fd)
+        raise TransactionError("Canonical parent directory moved before mutation")
+    return live_fd
 
 
 def require_live_parent(parent: ParentDescriptor) -> None:
     """Prove the reviewed vault-relative path still selects the opened parent."""
-    if parent.authority_fd is None:
-        return
-    try:
-        live_fd = os.open(parent.path or ".", _DIRECTORY_FLAGS, dir_fd=parent.authority_fd)
-        live = os.fstat(live_fd)
-    except OSError as error:
-        raise TransactionError("Canonical parent directory moved before mutation") from error
-    finally:
-        if "live_fd" in locals():
-            os.close(live_fd)
-    if (live.st_dev, live.st_ino) != (parent.dev, parent.ino):
-        raise TransactionError("Canonical parent directory moved before mutation")
-
-
-def _mutation_destination(parent: ParentDescriptor, name: str) -> tuple[str, int]:
-    """Select canonical names through the live pinned vault in the mutation syscall."""
-    if parent.authority_fd is None:
-        return name, parent.fd
-    return _live_relative(parent, name), parent.authority_fd
+    live_fd = open_live_parent_for_mutation(parent)
+    os.close(live_fd)
 
 
 def _hash_fd(fd: int) -> str:
@@ -181,9 +189,9 @@ def _hash_file_secure(name: str, dir_fd: int) -> str:
         os.close(fd)
 
 
-def get_target_identity(name: str, parent: ParentDescriptor) -> TargetIdentity | None:
+def _target_identity_at(name: str, dir_fd: int) -> TargetIdentity | None:
     try:
-        st = os.stat(name, dir_fd=parent.fd, follow_symlinks=False)
+        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     except FileNotFoundError:
         return None
     except OSError as e:
@@ -192,8 +200,22 @@ def get_target_identity(name: str, parent: ParentDescriptor) -> TargetIdentity |
     if not stat.S_ISREG(st.st_mode):
         raise TransactionError(f"Target {name} is not a regular file")
 
-    content_hash = _hash_file_secure(name, parent.fd)
+    content_hash = _hash_file_secure(name, dir_fd)
     return TargetIdentity(dev=st.st_dev, ino=st.st_ino, mode=st.st_mode, content_hash=content_hash)
+
+
+def _identity_matches(observed: TargetIdentity | None, expected: TargetIdentity) -> bool:
+    return bool(
+        observed is not None
+        and observed.dev == expected.dev
+        and observed.ino == expected.ino
+        and observed.content_hash == expected.content_hash
+        and stat.S_IMODE(observed.mode) == stat.S_IMODE(expected.mode)
+    )
+
+
+def get_target_identity(name: str, parent: ParentDescriptor) -> TargetIdentity | None:
+    return _target_identity_at(name, parent.fd)
 
 
 def fsync_directory(fd: int) -> DirectorySyncResult:
@@ -230,6 +252,15 @@ def fsync_directory(fd: int) -> DirectorySyncResult:
             return DirectorySyncResult(state=DirectorySyncState.FAILED, errno_name=err_name)
 
 
+def _remove_created_artifact(name: str, parent_fd: int) -> None:
+    try:
+        os.unlink(name, dir_fd=parent_fd)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise TransactionError(f"Failed to clean up transaction artifact {name}: {error}") from error
+
+
 def create_staging_file(
     target_name: str, content: bytes, parent: ParentDescriptor, intended_mode: int
 ) -> StagingFile:
@@ -239,12 +270,16 @@ def create_staging_file(
     staging_name = f".{target_name}.{random_hex}.staged"
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
+    live_parent_fd: int | None = None
     try:
         require_directory_binding(parent.fd, parent_binding)
-        staging_path, staging_dir_fd = _mutation_destination(parent, staging_name)
-        fd = os.open(staging_path, flags, 0o600, dir_fd=staging_dir_fd)
-    except OSError as e:
+        live_parent_fd = open_live_parent_for_mutation(parent)
+        fd = os.open(staging_name, flags, 0o600, dir_fd=live_parent_fd)
+    except (OSError, TransactionError) as e:
         raise TransactionError(f"Failed to create staging file {staging_name}: {e}") from e
+    finally:
+        if live_parent_fd is not None:
+            os.close(live_parent_fd)
 
     try:
         written = 0
@@ -271,8 +306,8 @@ def create_staging_file(
     except Exception as e:
         os.close(fd)
         try:
-            os.unlink(staging_name, dir_fd=parent.fd)
-        except OSError as unlink_e:
+            _remove_created_artifact(staging_name, parent.fd)
+        except TransactionError as unlink_e:
             raise TransactionError(f"Failed to stage data: {e}. Unlink failed: {unlink_e}") from e
         raise TransactionError(f"Failed to stage data: {e}") from e
 
@@ -282,13 +317,24 @@ def create_staging_file(
     expected_hash = hashlib.sha256(content).hexdigest()
     if candidate_hash != expected_hash:
         try:
-            os.unlink(staging_name, dir_fd=parent.fd)
-        except OSError as unlink_e:
+            _remove_created_artifact(staging_name, parent.fd)
+        except TransactionError as unlink_e:
             raise TransactionError(
                 f"Staging file hash verification failed. Unlink failed: {unlink_e}"
-            )
+            ) from unlink_e
         raise TransactionError("Staging file hash verification failed")
-    require_directory_binding(parent.fd, parent_binding)
+
+    try:
+        require_directory_binding(parent.fd, parent_binding)
+        require_live_parent(parent)
+    except TransactionError as error:
+        try:
+            _remove_created_artifact(staging_name, parent.fd)
+        except TransactionError as cleanup_error:
+            raise TransactionError(
+                f"Canonical parent directory moved before mutation; cleanup failed: {cleanup_error}"
+            ) from error
+        raise
 
     return StagingFile(
         name=staging_name,
@@ -305,20 +351,25 @@ def create_hardlink_backup(
 ) -> BackupFile:
     random_hex = secrets.token_hex(8)
     backup_name = f".{target_name}.{random_hex}.backup"
+    live_parent_fd: int | None = None
 
     try:
-        require_live_parent(parent)
-        target_path, source_fd = _mutation_destination(parent, target_name)
-        backup_path, destination_fd = _mutation_destination(parent, backup_name)
+        live_parent_fd = open_live_parent_for_mutation(parent)
+        live_identity = _target_identity_at(target_name, live_parent_fd)
+        if not _identity_matches(live_identity, original_identity):
+            raise TransactionError("Target identity mutated before backup")
         os.link(
-            target_path,
-            backup_path,
-            src_dir_fd=source_fd,
-            dst_dir_fd=destination_fd,
+            target_name,
+            backup_name,
+            src_dir_fd=live_parent_fd,
+            dst_dir_fd=live_parent_fd,
             follow_symlinks=False,
         )
     except OSError as e:
         raise TransactionError(f"Failed to create hardlink backup: {e}") from e
+    finally:
+        if live_parent_fd is not None:
+            os.close(live_parent_fd)
 
     try:
         st = os.stat(backup_name, dir_fd=parent.fd, follow_symlinks=False)
@@ -329,14 +380,15 @@ def create_hardlink_backup(
         if backup_hash != original_identity.content_hash:
             raise TransactionError("Backup content hash mismatch")
 
+        require_live_parent(parent)
         sync_result = fsync_directory(parent.fd)
         if sync_result.state == DirectorySyncState.FAILED:
             raise TransactionError(f"Directory sync failed with errno {sync_result.errno_name}")
 
     except Exception as e:
         try:
-            os.unlink(backup_name, dir_fd=parent.fd)
-        except OSError as unlink_e:
+            _remove_created_artifact(backup_name, parent.fd)
+        except TransactionError as unlink_e:
             raise TransactionError(
                 f"Backup verification failed: {e}. Unlink failed: {unlink_e}"
             ) from e
@@ -365,26 +417,32 @@ def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncRes
         raise TransactionError("Staging hash mutated before publication")
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
+    live_parent_fd = open_live_parent_for_mutation(staging.parent)
     try:
-        target_path, target_dir_fd = _mutation_destination(staging.parent, target_name)
+        try:
+            os.stat(target_name, dir_fd=live_parent_fd, follow_symlinks=False)
+            raise TransactionError("Target already exists during creation publication")
+        except FileNotFoundError:
+            pass
         os.link(
             staging.name,
-            target_path,
+            target_name,
             src_dir_fd=staging.parent.fd,
-            dst_dir_fd=target_dir_fd,
+            dst_dir_fd=live_parent_fd,
             follow_symlinks=False,
         )
+        try:
+            require_live_parent(staging.parent)
+        except TransactionError:
+            try:
+                os.unlink(target_name, dir_fd=live_parent_fd)
+            except OSError:
+                pass
+            raise
     except OSError as e:
         raise TransactionError(f"Failed to publish creation via link: {e}") from e
-
-    try:
-        require_live_parent(staging.parent)
-    except TransactionError:
-        try:
-            os.unlink(target_path, dir_fd=target_dir_fd)
-        except OSError:
-            pass
-        raise
+    finally:
+        os.close(live_parent_fd)
 
     try:
         os.unlink(staging.name, dir_fd=staging.parent.fd)
@@ -399,11 +457,14 @@ def publish_replacement(
 ) -> DirectorySyncResult:
     require_directory_binding(staging.parent.fd, staging.parent_binding)
     current_target = get_target_identity(target_name, staging.parent)
-    if current_target is None:
-        raise TransactionError("Target identity mutated (absent) before replacement")
-    if current_target.dev != original_identity.dev or current_target.ino != original_identity.ino:
-        raise TransactionError("Target identity mutated before replacement")
-    if current_target.content_hash != original_identity.content_hash:
+    if not _identity_matches(current_target, original_identity):
+        if current_target is None:
+            raise TransactionError("Target identity mutated (absent) before replacement")
+        if (
+            current_target.dev != original_identity.dev
+            or current_target.ino != original_identity.ino
+        ):
+            raise TransactionError("Target identity mutated before replacement")
         raise TransactionError("Target content hash mutated before replacement")
 
     current_staging_hash = _hash_file_secure(staging.name, staging.parent.fd)
@@ -415,40 +476,118 @@ def publish_replacement(
         raise TransactionError("Staging mode mutated before publication")
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
+    live_parent_fd = open_live_parent_for_mutation(staging.parent)
+    guard_name = f".{target_name}.{secrets.token_hex(8)}.replace-guard"
+    guard_created = False
     try:
-        target_path, target_dir_fd = _mutation_destination(staging.parent, target_name)
-        os.replace(
-            staging.name, target_path, src_dir_fd=staging.parent.fd, dst_dir_fd=target_dir_fd
+        live_identity = _target_identity_at(target_name, live_parent_fd)
+        if not _identity_matches(live_identity, original_identity):
+            raise TransactionError("Target identity mutated before replacement")
+        os.link(
+            target_name,
+            guard_name,
+            src_dir_fd=live_parent_fd,
+            dst_dir_fd=live_parent_fd,
+            follow_symlinks=False,
         )
+        guard_created = True
+        os.replace(
+            staging.name,
+            target_name,
+            src_dir_fd=staging.parent.fd,
+            dst_dir_fd=live_parent_fd,
+        )
+        try:
+            require_live_parent(staging.parent)
+        except TransactionError as binding_error:
+            try:
+                os.replace(
+                    guard_name,
+                    target_name,
+                    src_dir_fd=live_parent_fd,
+                    dst_dir_fd=live_parent_fd,
+                )
+                guard_created = False
+            except OSError as restore_error:
+                raise TransactionError(
+                    "Canonical parent moved after replacement and original restoration failed"
+                ) from restore_error
+            raise binding_error
     except OSError as e:
         raise TransactionError(f"Failed to publish replacement: {e}") from e
-
-    require_live_parent(staging.parent)
+    finally:
+        if guard_created:
+            try:
+                os.unlink(guard_name, dir_fd=live_parent_fd)
+            except OSError:
+                pass
+        os.close(live_parent_fd)
 
     return fsync_directory(staging.parent.fd)
+
+
+def remove_verified_target(
+    target_name: str,
+    parent: ParentDescriptor,
+    expected_identity: TargetIdentity,
+) -> DirectorySyncResult:
+    """Remove one reviewed target without ever switching to a replacement parent inode."""
+    live_parent_fd = open_live_parent_for_mutation(parent)
+    guard_name = f".{target_name}.{secrets.token_hex(8)}.unlink-guard"
+    guard_created = False
+    try:
+        live_identity = _target_identity_at(target_name, live_parent_fd)
+        if not _identity_matches(live_identity, expected_identity):
+            raise TransactionError("Canonical target changed before removal")
+        os.link(
+            target_name,
+            guard_name,
+            src_dir_fd=live_parent_fd,
+            dst_dir_fd=live_parent_fd,
+            follow_symlinks=False,
+        )
+        guard_created = True
+        os.unlink(target_name, dir_fd=live_parent_fd)
+        try:
+            require_live_parent(parent)
+        except TransactionError as binding_error:
+            try:
+                os.replace(
+                    guard_name,
+                    target_name,
+                    src_dir_fd=live_parent_fd,
+                    dst_dir_fd=live_parent_fd,
+                )
+                guard_created = False
+            except OSError as restore_error:
+                raise TransactionError(
+                    "Canonical parent moved after removal and target restoration failed"
+                ) from restore_error
+            raise binding_error
+        os.unlink(guard_name, dir_fd=live_parent_fd)
+        guard_created = False
+    except OSError as e:
+        raise TransactionError(f"Failed to remove verified target: {e}") from e
+    finally:
+        if guard_created:
+            try:
+                os.unlink(guard_name, dir_fd=live_parent_fd)
+            except OSError:
+                pass
+        os.close(live_parent_fd)
+
+    return fsync_directory(parent.fd)
 
 
 def rollback_creation(target_name: str, staging: StagingFile) -> DirectorySyncResult:
     require_directory_binding(staging.parent.fd, staging.parent_binding)
-    try:
-        os.stat(target_name, dir_fd=staging.parent.fd, follow_symlinks=False)
-    except FileNotFoundError:
+    current_identity = get_target_identity(target_name, staging.parent)
+    if current_identity is None:
         return DirectorySyncResult(DirectorySyncState.CONFIRMED, None)  # already absent
-    except OSError as e:
-        raise TransactionError(f"Rollback stat failed: {e}") from e
-
-    current_hash = _hash_file_secure(target_name, staging.parent.fd)
-    if current_hash != staging.candidate_hash:
+    if current_identity.content_hash != staging.candidate_hash:
         raise TransactionError("Canonical file mutated externally, rollback refused")
     require_directory_binding(staging.parent.fd, staging.parent_binding)
-
-    try:
-        target_path, target_dir_fd = _mutation_destination(staging.parent, target_name)
-        os.unlink(target_path, dir_fd=target_dir_fd)
-    except OSError as e:
-        raise TransactionError(f"Rollback unlink failed: {e}") from e
-
-    return fsync_directory(staging.parent.fd)
+    return remove_verified_target(target_name, staging.parent, current_identity)
 
 
 def rollback_replacement(
@@ -477,11 +616,22 @@ def rollback_replacement(
         raise TransactionError("Backup content hash mutated")
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
+    live_parent_fd = open_live_parent_for_mutation(staging.parent)
     try:
-        target_path, target_dir_fd = _mutation_destination(staging.parent, target_name)
-        os.replace(backup.name, target_path, src_dir_fd=backup.parent.fd, dst_dir_fd=target_dir_fd)
+        live_target = _target_identity_at(target_name, live_parent_fd)
+        if live_target is None or live_target.content_hash != staging.candidate_hash:
+            raise TransactionError("Canonical file mutated externally, rollback refused")
+        os.replace(
+            backup.name,
+            target_name,
+            src_dir_fd=backup.parent.fd,
+            dst_dir_fd=live_parent_fd,
+        )
+        require_live_parent(staging.parent)
     except OSError as e:
         raise TransactionError(f"Rollback replace failed: {e}") from e
+    finally:
+        os.close(live_parent_fd)
 
     return fsync_directory(staging.parent.fd)
 
