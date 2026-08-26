@@ -170,19 +170,20 @@ def test_unauthenticated_request_is_rejected_before_mcp_app() -> None:
     assert (b"www-authenticate", b"Bearer") in events[0]["headers"]
 
 
-def test_health_and_readiness_do_not_require_authentication() -> None:
+def test_health_is_public_but_readiness_requires_authentication() -> None:
     async def downstream(scope, receive, send) -> None:
         raise AssertionError("probe should not reach MCP app")
 
+    token = "t" * 32
     readiness = FakeReadiness(ready=False)
     app = AuthenticatedServiceApp(
         downstream,
-        token="t" * 32,
+        token=token,
         actor_id="remote-user",
         readiness=readiness,
     )
 
-    async def run_probe(path: str) -> list[dict[str, Any]]:
+    async def run_probe(path: str, bearer: str | None = None) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
 
         async def receive() -> dict[str, Any]:
@@ -191,11 +192,12 @@ def test_health_and_readiness_do_not_require_authentication() -> None:
         async def send(event: dict[str, Any]) -> None:
             events.append(event)
 
-        await app(_http_scope(path=path), receive, send)
+        await app(_http_scope(path=path, token=bearer), receive, send)
         return events
 
     assert asyncio.run(run_probe("/healthz"))[0]["status"] == 200
-    assert asyncio.run(run_probe("/readyz"))[0]["status"] == 503
+    assert asyncio.run(run_probe("/readyz"))[0]["status"] == 401
+    assert asyncio.run(run_probe("/readyz", token))[0]["status"] == 503
 
 
 def test_readiness_blocks_authenticated_submission() -> None:
