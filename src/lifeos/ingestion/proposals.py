@@ -1,9 +1,10 @@
 """Public ingestion proposal API with cumulative provenance and stable target identity.
 
 The existing implementation lives in ``_proposals_core``. This module keeps that API
-stable while layering two cross-cutting contracts over existing builders/persistence:
-source-reference accumulation for generated-owned wiki updates, and review-bound stable
-identity for existing canonical targets. Human-owned patch semantics remain unchanged.
+stable while layering cross-cutting contracts over existing builders/persistence:
+source-reference accumulation for generated-owned wiki updates, review-bound stable
+identity for existing canonical targets, and descriptor-bound proposal publication.
+Human-owned patch semantics remain unchanged.
 """
 
 from __future__ import annotations
@@ -11,10 +12,12 @@ from __future__ import annotations
 from contextvars import ContextVar
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
 
+from lifeos._secure_io import SecureIOError, open_directory_secure
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import collect_scoped_identity_snapshot, runtime_exclusion_prefix
 from lifeos.ingestion import _proposals_core as _core
@@ -300,6 +303,79 @@ def persist_study_learning_proposal(  # type: ignore[no-redef]
     )
 
 
+def _secure_persist_proposal_documents(*, proposals_root: Path, documents: Any) -> Path:
+    """Publish proposal artifacts through one no-follow directory descriptor."""
+    proposal_id = str(documents.proposal_id)
+    if (
+        not proposal_id
+        or proposal_id in {".", ".."}
+        or "/" in proposal_id
+        or "\\" in proposal_id
+    ):
+        raise _core.ProposalPublicationError("Proposal id is not safe for publication")
+
+    proposals_fd = -1
+    proposal_fd = -1
+    proposal_created = False
+    publication_complete = False
+    proposal_dir = proposals_root / proposal_id
+
+    try:
+        try:
+            proposals_fd = open_directory_secure(proposals_root)
+        except SecureIOError as exc:
+            raise _core.ProposalPublicationError(
+                "Proposal root is not a safe directory"
+            ) from exc
+
+        try:
+            os.mkdir(proposal_id, mode=0o755, dir_fd=proposals_fd)
+            proposal_created = True
+        except FileExistsError as exc:
+            raise _core.ProposalAlreadyExistsError(
+                f"Proposal directory already exists: {proposal_dir}"
+            ) from exc
+
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= getattr(os, "O_NOFOLLOW")
+        proposal_fd = os.open(proposal_id, flags, dir_fd=proposals_fd)
+
+        _core.atomic_write_file_secure(
+            proposal_fd, "proposal.md", documents.proposal_markdown
+        )
+        _core.atomic_write_file_secure(proposal_fd, "patches.json", documents.patches_json)
+        review_json = _core.build_review_snapshot_bytes_from_patches(
+            vault_root=proposals_root.parent,
+            patches_json=documents.patches_json,
+        )
+        _core.atomic_write_file_secure(proposal_fd, "review.json", review_json)
+        publication_complete = True
+    except OSError as exc:
+        raise _core.ProposalPublicationError(f"Failed to write proposal files: {exc}") from exc
+    finally:
+        if proposal_created and not publication_complete:
+            if proposal_fd != -1:
+                for filename in ("proposal.md", "patches.json", "review.json"):
+                    try:
+                        os.unlink(filename, dir_fd=proposal_fd)
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        pass
+            if proposals_fd != -1:
+                try:
+                    os.rmdir(proposal_id, dir_fd=proposals_fd)
+                except OSError:
+                    pass
+        if proposal_fd != -1:
+            os.close(proposal_fd)
+        if proposals_fd != -1:
+            os.close(proposals_fd)
+
+    return proposal_dir
+
+
 # Core builders resolve this global at call time, so installing the wrapper here covers
 # single, compound, compounding, and study wiki updates without changing their public API.
 _core._build_wiki_section_operation = _build_wiki_section_operation
@@ -308,8 +384,11 @@ _core.build_compound_wiki_proposal = build_compound_wiki_proposal
 _core.build_compounding_wiki_proposal = build_compounding_wiki_proposal
 _core.build_study_learning_proposal = build_study_learning_proposal
 
+# Proposal artifact publication is one descriptor-bound seam for create and update routes.
+_core._persist_proposal_documents = _secure_persist_proposal_documents
+
 # Existing-target publication is the narrowest point shared by all ingestion update routes.
-# Create-only proposals stay intentionally path-oriented.
+# Create-only proposals stay intentionally path-oriented until artifact publication.
 _core.persist_wiki_section_update_proposal = persist_wiki_section_update_proposal
 _core.persist_compound_wiki_proposal = persist_compound_wiki_proposal
 _core.persist_compounding_wiki_proposal = persist_compounding_wiki_proposal
