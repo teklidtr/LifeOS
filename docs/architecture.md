@@ -62,10 +62,11 @@ Agents interpret meaning:
 Agents do not silently promote interpretations into truth.
 
 LifeOS does not embed an ingestion model client or accept provider API keys. External
-agents connect through the local STDIO MCP adapter. Universal runtime behavior is advertised
-by the MCP server; vault-specific scoped behavior is loaded only from the allowlisted
-`system/instructions.yml`. Application `AGENTS.md` governs development and is not inherited by
-an MCP client.
+agents connect through the shared MCP runtime using either the local STDIO adapter or the
+explicitly configured authenticated home-node Streamable HTTP adapter. Universal runtime
+behavior is advertised by the MCP server; vault-specific scoped behavior is loaded only from
+the allowlisted `system/instructions.yml`. Application `AGENTS.md` governs development and is
+not inherited by an MCP client.
 
 A registered canonical Markdown source may come from `raw/`, `study/`, `journal/`,
 `experiments/`, `goals/`, or another ordinary vault area. Folder location supplies semantic
@@ -410,3 +411,57 @@ and delayed edits are treated as observable filesystem state, not provider-speci
 When LifeOS cannot prove identity and version from the current canonical view it stops rather
 than guessing. See [Cross-Device Vault Coherence](cross-device-vault-coherence.md) and the
 [user workflow chapter](user-manual/16-cross-device-vault-coherence.md).
+
+## MCP deployment and always-on home node
+
+Deployment transport is an adapter around the same Python MCP/facade/business-rule surface,
+not a second LifeOS API implementation:
+
+```text
+local MCP client                  remote MCP client
+       |                                 |
+     STDIO                    authenticated Streamable HTTP
+       |                                 |
+       +---------- shared MCP runtime ---+
+                         |
+                deterministic LifeOS core
+                         |
+        canonical vault + Git + disposable runtime
+```
+
+`lifeos-mcp` remains the first-class local STDIO entry point. `lifeos serve` is the explicit
+long-lived service entry point. The network mode uses stateless Streamable HTTP so MCP session
+memory is not canonical state; each authenticated HTTP request re-establishes the configured
+actor context before invoking the shared tool surface.
+
+The service has three HTTP boundaries:
+
+- `/mcp` requires a bearer token and then passes through MCP transport Host/origin protection;
+- `/healthz` is a content-free liveness probe;
+- `/readyz` is a content-free deterministic readiness probe backed by `lifeos doctor`.
+
+The bearer secret is deployment state, never canonical Markdown or normal activity output. It
+is supplied through `LIFEOS_SERVICE_TOKEN` or an environment-selected secret file, with exactly
+one source configured. The service process has one explicit stable `--actor-id`; proposal
+submission records that principal. The initial headless authorization contract permits an
+authenticated remote client to explore, create guarded drafts, and explicitly submit a proposal,
+but denies remote approval and application even when the same bearer token is present. Trusted
+human/local authorization therefore remains necessary before target Markdown is changed.
+
+Network defaults fail closed. Direct service startup binds to loopback. Non-loopback binding
+requires an explicit Host allowlist, and the deployment guide requires a private LAN/VPN overlay
+or TLS-terminating authenticated reverse proxy rather than unauthenticated public Internet
+exposure. LifeOS does not own DNS, certificates, routers, VPN configuration, or a general sync
+transport.
+
+The generic OCI image is the supported deployment unit for Linux/NAS/Raspberry Pi-class nodes.
+The container keeps the canonical vault/Git view on a persistent writable mount while
+`.lifeos/` runtime state may live on a separate disposable/rebuildable volume. Full validation
+executes restart/runtime-rebuild checks and builds the same image for `linux/arm64`. A Home
+Assistant Yellow running Home Assistant OS uses a thin Supervisor App wrapper around this
+multi-architecture image; Home Assistant-specific packaging does not enter LifeOS core.
+
+This service topology does not change DD-089: there is still one active LifeOS mutation
+authority for a canonical synchronized view. A remote client is a transport consumer of that
+authority, not an independent writer. See DD-091 and
+[Setup & Installation](user-manual/04-setup-and-installation.md#415-run-an-always-on-home-node).
