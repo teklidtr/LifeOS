@@ -95,8 +95,9 @@ application. Every proposal-producing ingestion route stops at draft unless a se
 lifecycle transition is requested.
 
 Disposable `.lifeos/activity/` records bounded MCP routing metadata for debugging, such as tool
-names, paths, applicable instruction IDs, proposal IDs, operation counts, and changed paths. It
-is not canonical history and does not copy note bodies or flashcard answers.
+names, request actor IDs when available, paths, applicable instruction IDs, proposal IDs,
+operation counts, and changed paths. It is not canonical history and does not copy bearer
+credentials, note bodies, or flashcard answers.
 
 ### Human layer
 
@@ -414,8 +415,9 @@ than guessing. See [Cross-Device Vault Coherence](cross-device-vault-coherence.m
 
 ## MCP deployment and always-on home node
 
-Deployment transport is an adapter around the same Python MCP/facade/business-rule surface,
-not a second LifeOS API implementation:
+Deployment transport is an adapter around the same Python MCP/facade/business-rule core,
+not a second LifeOS API implementation. Network transport narrows capabilities rather than
+forking semantics:
 
 ```text
 local MCP client                  remote MCP client
@@ -432,21 +434,32 @@ local MCP client                  remote MCP client
 `lifeos-mcp` remains the first-class local STDIO entry point. `lifeos serve` is the explicit
 long-lived service entry point. The network mode uses stateless Streamable HTTP so MCP session
 memory is not canonical state; each authenticated HTTP request re-establishes the configured
-actor context before invoking the shared tool surface.
+actor context before invoking the shared tool/facade core. The home-node tool surface omits
+`proposal_approve` and `proposal_apply` before dispatch; local STDIO retains the full lifecycle
+surface.
 
 The service has three HTTP boundaries:
 
 - `/mcp` requires a bearer token and then passes through MCP transport Host/origin protection;
-- `/healthz` is a content-free liveness probe;
-- `/readyz` is a content-free deterministic readiness probe backed by `lifeos doctor`.
+- `/healthz` is a public, content-free liveness probe;
+- `/readyz` requires the bearer token and reports policy-neutral service storage readiness.
+
+`/readyz` does not traverse protected Markdown and protected note identity/content cannot change
+its 200/503 result. Detailed doctor, retrieval-policy, coherence, ownership, provenance, hash,
+stale-write, and recovery checks remain at their operation-specific boundaries. The service
+requires a writable canonical vault, a real non-symlink `proposals/` directory, and usable
+runtime storage. Proposal artifact publication revalidates the proposal root and performs
+creation/writes relative to no-follow directory descriptors, so a path swap cannot redirect a
+draft into human-owned content or outside the vault.
 
 The bearer secret is deployment state, never canonical Markdown or normal activity output. It
 is supplied through `LIFEOS_SERVICE_TOKEN` or an environment-selected secret file, with exactly
-one source configured. The service process has one explicit stable `--actor-id`; proposal
-submission records that principal. The initial headless authorization contract permits an
-authenticated remote client to explore, create guarded drafts, and explicitly submit a proposal,
-but denies remote approval and application even when the same bearer token is present. Trusted
-human/local authorization therefore remains necessary before target Markdown is changed.
+one source configured. The service process has one explicit stable `--actor-id`; authenticated
+request activity records that actor in disposable runtime metadata without recording the bearer
+secret. An authenticated remote client may explore, create guarded drafts, and explicitly submit
+a proposal. Approval and application remain trusted human/local capabilities, and forbidden
+network lifecycle tools cannot inspect proposal status or review digest because they are absent
+from the transport capability set.
 
 Network defaults fail closed. Direct service startup binds to loopback. Non-loopback binding
 requires an explicit Host allowlist, and the deployment guide requires a private LAN/VPN overlay
@@ -457,8 +470,9 @@ transport.
 The generic OCI image is the supported deployment unit for Linux/NAS/Raspberry Pi-class nodes.
 The container keeps the canonical vault/Git view on a persistent writable mount while
 `.lifeos/` runtime state may live on a separate disposable/rebuildable volume. Full validation
-executes restart/runtime-rebuild checks and builds the same image for `linux/arm64`. A Home
-Assistant Yellow running Home Assistant OS uses a thin Supervisor App wrapper around this
+deletes runtime state, invokes an authenticated MCP `registry_refresh`, verifies registry state
+is actually recreated, exercises restart behavior, and builds the same image for `linux/arm64`.
+A Home Assistant Yellow running Home Assistant OS uses a thin Supervisor App wrapper around this
 multi-architecture image; Home Assistant-specific packaging does not enter LifeOS core.
 
 This service topology does not change DD-089: there is still one active LifeOS mutation
