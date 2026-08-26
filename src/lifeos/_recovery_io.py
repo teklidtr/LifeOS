@@ -11,8 +11,8 @@ from lifeos._transaction_files import (
     StagingFile,
     cleanup_staging,
     create_staging_file,
-    fsync_directory,
     get_target_identity,
+    remove_verified_target,
     TransactionError,
     publish_replacement,
 )
@@ -532,7 +532,7 @@ def remove_installed_creation(
     expected_installed_hash: str,
     expected_installed_mode: int,
 ) -> DirectorySyncResult:
-    _validate_artifact_relative_path("staged/" + target_name) # Validates it's a valid filename
+    _validate_artifact_relative_path("staged/" + target_name)  # Validates it's a valid filename
     if type(target_parent) is not ParentDescriptor:
         raise RecoveryIOInvalidArtifactError("target_parent must be a ParentDescriptor")
     import re
@@ -570,35 +570,10 @@ def remove_installed_creation(
     ) != expected_installed_hash:
         raise RecoveryIOConflictError("Canonical target hash mutated externally")
 
-    live_name = target_name
-    live_fd = target_parent.fd
-    if target_parent.authority_fd is not None:
-        live_name = (
-            target_name
-            if target_parent.path in ("", ".")
-            else f"{target_parent.path}/{target_name}"
-        )
-        live_fd = target_parent.authority_fd
-        try:
-            live_state = os.stat(live_name, dir_fd=live_fd, follow_symlinks=False)
-        except OSError as e:
-            raise RecoveryIOUnavailableError("Failed to inspect live canonical target") from e
-        if (live_state.st_dev, live_state.st_ino) != (target_id.dev, target_id.ino):
-            raise RecoveryIOConflictError("Canonical target path changed before rollback")
     try:
-        os.unlink(live_name, dir_fd=live_fd)
-    except OSError as e:
+        return remove_verified_target(target_name, target_parent, target_id)
+    except TransactionError as e:
         raise RecoveryIOUnavailableError("Failed to unlink target") from e
-
-    try:
-        os.stat(target_name, dir_fd=target_parent.fd, follow_symlinks=False)
-        raise RecoveryIOCorruptStateError("Target still exists after unlink")
-    except FileNotFoundError:
-        pass
-    except OSError as e:
-        raise RecoveryIOUnavailableError("Failed to verify target absence") from e
-
-    return fsync_directory(target_parent.fd)
 
 
 def restore_canonical_from_backup(
