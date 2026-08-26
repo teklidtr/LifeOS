@@ -35,6 +35,10 @@ from lifeos.retrieval.contracts import (
     reset_node_local_exclusion_predicates,
 )
 from lifeos.runtime import ActivityStore
+from lifeos.runtime.activity import (
+    push_activity_runtime_dir_fd,
+    reset_activity_runtime_dir_fd,
+)
 from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
 _POLICY_READ_OVERRIDES = frozenset(
@@ -112,13 +116,18 @@ def create_mcp_server(
 
         return _invoke_mcp_tool(scoped_operation)
 
-    core = create_core_mcp_server(
-        vault_root=vault_root,
-        registry=registry,
-        authorizer=authorizer,
-        runtime_dir=resolved_runtime_dir,
-    )
-    activity = ActivityStore(resolved_runtime_dir, runtime_dir_fd=runtime_dir_fd)
+    activity_runtime_token = push_activity_runtime_dir_fd(runtime_dir_fd)
+    try:
+        core = create_core_mcp_server(
+            vault_root=vault_root,
+            registry=registry,
+            authorizer=authorizer,
+            runtime_dir=resolved_runtime_dir,
+        )
+        activity = ActivityStore(resolved_runtime_dir, runtime_dir_fd=runtime_dir_fd)
+    finally:
+        reset_activity_runtime_dir_fd(activity_runtime_token)
+
     policy_reads = build_policy_read_tools(
         vault_root=vault_root,
         activity=activity,
