@@ -12,6 +12,13 @@ from typing import Literal
 
 from lifeos import __version__
 from lifeos.bootstrap import is_recognized_vault
+from lifeos.coherence import (
+    CoherenceError,
+    IdentityDiagnostic,
+    VaultTopology,
+    describe_topology,
+)
+from lifeos.coherence_scoped import collect_scoped_identity_snapshot
 from lifeos.config import LifeOSConfig
 from lifeos.registry import Registry
 from lifeos.status import StatusResult, collect_status, serialize_status_json
@@ -41,6 +48,10 @@ class DoctorResult:
     exit_code: int
     findings: tuple[DoctorFinding, ...]
     vault_status: StatusResult
+    topology: VaultTopology
+    identity_note_count: int
+    relocation_safe_note_count: int
+    identity_diagnostics: tuple[IdentityDiagnostic, ...]
     mcp_command: tuple[str, ...] | None = None
 
 
@@ -150,11 +161,113 @@ def _mcp_findings(config_path: Path) -> tuple[tuple[DoctorFinding, ...], tuple[s
     return tuple(findings), command
 
 
+def _coherence_findings(
+    topology: VaultTopology,
+    diagnostics: tuple[IdentityDiagnostic, ...],
+) -> tuple[DoctorFinding, ...]:
+    findings: list[DoctorFinding] = [
+        DoctorFinding(
+            "vault-coherence",
+            "healthy",
+            "single-active-writer",
+            (
+                "Cross-device mutation authority is defined as one active LifeOS writer; "
+                "synchronized replicas remain human-editable clients rather than independent writers."
+            ),
+        )
+    ]
+    if topology.runtime_location == "inside-canonical-vault":
+        runtime_exclusion = topology.required_sync_exclusions[0]
+        findings.append(
+            DoctorFinding(
+                "vault-coherence",
+                "warning",
+                "runtime-state-sync-exclusion-required",
+                (
+                    "Disposable runtime state is inside the canonical vault tree and must remain "
+                    "excluded from synchronization/authoritative backup semantics."
+                ),
+                (
+                    f"Keep {runtime_exclusion} excluded from synchronization; prefer node-local "
+                    "runtime storage when practical."
+                ),
+            )
+        )
+    else:
+        findings.append(
+            DoctorFinding(
+                "vault-coherence",
+                "healthy",
+                "runtime-state-node-local",
+                "Disposable runtime state is located outside the canonical vault tree.",
+            )
+        )
+
+    for diagnostic in diagnostics:
+        if diagnostic.code == "stable-id-ambiguous":
+            findings.append(
+                DoctorFinding(
+                    "vault-identity",
+                    "blocked",
+                    diagnostic.code,
+                    diagnostic.detail,
+                    "Assign unique frontmatter ids before proposal mutation or relocation-aware workflows.",
+                )
+            )
+        elif diagnostic.code == "stable-id-missing":
+            findings.append(
+                DoctorFinding(
+                    "vault-identity",
+                    "warning",
+                    diagnostic.code,
+                    diagnostic.detail,
+                    "Add a durable frontmatter id when this wiki note next enters a reviewed migration workflow.",
+                )
+            )
+    return tuple(findings)
+
+
 def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
     """Collect readiness without repairing or mutating application, vault, or client state."""
     registry = Registry(config.runtime_dir / "registry.db")
     vault_status = collect_status(config, registry)
     mcp_findings, mcp_command = _mcp_findings(config_path)
+    topology = describe_topology(config)
+    coherence_findings: tuple[DoctorFinding, ...]
+
+    try:
+        identity_snapshot = collect_scoped_identity_snapshot(
+            config.vault_root,
+            allow_path=lambda _path: True,
+            runtime_dir=config.runtime_dir,
+        )
+    except CoherenceError as error:
+        identity_note_count = 0
+        relocation_safe_note_count = 0
+        identity_diagnostics: tuple[IdentityDiagnostic, ...] = (
+            IdentityDiagnostic(
+                severity="blocked",
+                code="identity-scan-failed",
+                detail=str(error),
+            ),
+        )
+        coherence_findings = (
+            DoctorFinding(
+                "vault-identity",
+                "blocked",
+                "identity-scan-failed",
+                str(error),
+                "Inspect vault readability and retry after the canonical filesystem view is coherent.",
+            ),
+        )
+    else:
+        identity_note_count = len(identity_snapshot.notes)
+        relocation_safe_note_count = sum(
+            1 for note in identity_snapshot.notes if note.relocation_safe
+        )
+        identity_diagnostics = identity_snapshot.diagnostics
+        coherence_findings = _coherence_findings(topology, identity_diagnostics)
+
     findings = (
         DoctorFinding(
             "application",
@@ -165,6 +278,7 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
         _python_finding(),
         _git_finding(),
         _bootstrap_finding(config),
+        *coherence_findings,
         *mcp_findings,
     )
     blocked = (
@@ -179,6 +293,10 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
         exit_code=1 if blocked else 0,
         findings=findings,
         vault_status=vault_status,
+        topology=topology,
+        identity_note_count=identity_note_count,
+        relocation_safe_note_count=relocation_safe_note_count,
+        identity_diagnostics=identity_diagnostics,
         mcp_command=mcp_command,
     )
 
@@ -192,8 +310,20 @@ def format_doctor_text(result: DoctorResult) -> str:
         f"Config: {result.config_path}",
         f"Vault: {result.vault_root}",
         "",
-        "Readiness checks",
+        "Cross-device coherence",
+        f"  writer model: {result.topology.writer_model}",
+        f"  runtime state: {result.topology.runtime_location}",
+        (
+            "  stable identities: "
+            f"{result.relocation_safe_note_count}/{result.identity_note_count} Markdown notes"
+        ),
+        "  required sync exclusions:",
     ]
+    lines.extend(
+        f"    - {exclusion}"
+        for exclusion in result.topology.required_sync_exclusions
+    )
+    lines.extend(["", "Readiness checks"])
     for finding in result.findings:
         lines.append(
             f"  {finding.subsystem}: {finding.state} "
@@ -230,6 +360,14 @@ def serialize_doctor_json(result: DoctorResult) -> str:
         },
         "findings": [asdict(finding) for finding in result.findings],
         "vault": json.loads(serialize_status_json(result.vault_status)),
+        "coherence": {
+            "topology": result.topology.to_dict(),
+            "identity_note_count": result.identity_note_count,
+            "relocation_safe_note_count": result.relocation_safe_note_count,
+            "identity_diagnostics": [
+                diagnostic.to_dict() for diagnostic in result.identity_diagnostics
+            ],
+        },
         "mcp_command": list(result.mcp_command) if result.mcp_command else None,
     }
     return json.dumps(data, indent=2)

@@ -19,7 +19,7 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.retrieval import RetrievalError, RetrievalPolicy, RetrievalScope, scope_decision
 from lifeos.retrieval.chunking import chunk_markdown_file
 from lifeos.retrieval.policy import load_retrieval_policy
-from lifeos.vault import VaultAccessError, read_vault_markdown
+from lifeos.vault import VaultAccessError, is_markdown_path, read_vault_markdown
 from lifeos.vault_paths import iter_vault_markdown_paths
 
 RetrievalMode = Literal["local", "external"]
@@ -492,14 +492,14 @@ def _typed_links(text: str) -> tuple[_ParsedLink, ...]:
     results: set[_ParsedLink] = set()
     for target, heading in _WIKILINK_RE.findall(text):
         path = target.strip().strip("/")
-        if not path.endswith(".md"):
+        if not is_markdown_path(path):
             path += ".md"
         results.add(_ParsedLink("wikilink", path, heading.strip() or None))
     for target, heading in _MARKDOWN_LINK_RE.findall(text):
         if "://" in target or target.startswith("#"):
             continue
         path = target.split("?", 1)[0]
-        if path.endswith(".md"):
+        if is_markdown_path(path):
             results.add(_ParsedLink("markdown", path, heading.strip() or None))
     return tuple(
         sorted(
@@ -599,7 +599,7 @@ def _validate_prefix(prefix: str) -> None:
 def _validate_markdown_path(path: str) -> None:
     if not isinstance(path, str) or not path.strip() or path != path.strip():
         raise ValueError("paths must be non-empty vault-relative strings")
-    if not path.endswith(".md"):
+    if not is_markdown_path(path):
         raise ValueError("only Markdown paths are supported")
     _validate_prefix(path)
 

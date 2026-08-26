@@ -176,6 +176,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "deleted": list(result.deleted),
             "proposals_indexed": result.proposals_indexed,
         }
+        if result.renamed:
+            payload["renamed"] = [
+                {"from_path": old_path, "to_path": new_path}
+                for old_path, new_path in result.renamed
+            ]
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         else:
@@ -194,6 +199,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             ):
                 for path in paths:
                     print(f"{label}: {path}")
+            for old_path, new_path in result.renamed:
+                print(f"Renamed: {old_path} -> {new_path}")
         return 0
 
     if args.command == "status":

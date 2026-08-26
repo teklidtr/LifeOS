@@ -245,7 +245,15 @@ def test_registry_refresh_delegates_to_facade(mock_facade: MagicMock, tmp_path: 
 
     result = server._tool_manager.get_tool("registry_refresh").fn()
 
-    mock_facade.assert_called_once_with(vault_root=tmp_path / "vault", registry=registry)
+    mock_facade.assert_called_once()
+    kwargs = mock_facade.call_args.kwargs
+    assert kwargs["vault_root"] == tmp_path / "vault"
+    assert kwargs["registry"] is registry
+    allow_path = kwargs["identity_allow_path"]
+    assert callable(allow_path)
+    assert allow_path("wiki/public.md") is True
+    assert allow_path("private/hidden.md") is False
+    assert allow_path("proposals/prop-1/proposal.md") is False
     assert result == {
         "new": ["study/new.md"],
         "modified": [],
@@ -406,6 +414,7 @@ def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock, tmp_pa
                 ),
             ),
         ),
+        runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
         "proposal_id": "prop1",
@@ -469,6 +478,7 @@ def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock, tmp
                 ),
             ),
         ),
+        runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
         "proposal_id": "prop-study", "proposal_path": "proposals/prop-study",
@@ -489,14 +499,14 @@ def test_create_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path) -
     server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
 
     tool = server._tool_manager.get_tool("ingestion_create_wiki_proposal")
-    res = tool.fn(source_path="s", target_path="t", title="title", body="b")
+    res = tool.fn(source_path="s", target_path="wiki/t.md", title="title", body="b")
 
     mock_facade.assert_called_once_with(
         vault_root=tmp_path / "vault",
         registry=registry,
         request=CreateWikiProposalRequest(
             source_path="s",
-            target_path="t",
+            target_path="wiki/t.md",
             title="title",
             body="b",
         ),
@@ -573,6 +583,7 @@ def test_update_wiki_section_proposal_delegates_to_facade(mock_facade, tmp_path:
             heading="Selected",
             body="Replacement",
         ),
+        runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
         "proposal_id": "prop1",
@@ -621,6 +632,7 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path)
             update_heading="Equipment notes",
             update_body="See [[detail]].",
         ),
+        runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
         "proposal_id": "prop1",
@@ -772,7 +784,8 @@ def test_error_payload_does_not_leak_absolute_paths(caplog) -> None:
 
 
 def test_mcp_outputs_have_explicit_structured_schemas() -> None:
-    # Ensure they are returning TypedDicts instead of plain dicts
+    # Ensure they are returning TypedDicts instead of plain dicts. Registry renames are an
+    # additive optional extension so existing no-rename payloads keep their historical shape.
     from lifeos.mcp.models import ReadMarkdownMCPResult, RegistryRefreshMCPResult
 
     assert ReadMarkdownMCPResult.__annotations__ == {
@@ -781,13 +794,17 @@ def test_mcp_outputs_have_explicit_structured_schemas() -> None:
         "source_tags": list[str],
         "source_topics": list[str],
     }
-    assert RegistryRefreshMCPResult.__annotations__ == {
+    annotations = RegistryRefreshMCPResult.__annotations__
+    required = {
         "new": list[str],
         "modified": list[str],
         "unchanged": list[str],
         "deleted": list[str],
         "proposals_indexed": int,
     }
+    assert {key: annotations[key] for key in required} == required
+    assert set(RegistryRefreshMCPResult.__required_keys__) == set(required)
+    assert RegistryRefreshMCPResult.__optional_keys__ == frozenset({"renamed"})
 
 
 def test_mcp_apply_returns_sanitized_recovery_required_error(

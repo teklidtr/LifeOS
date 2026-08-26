@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import stat
 from dataclasses import dataclass
@@ -16,7 +17,12 @@ _DIRECTORY_FLAGS = (
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
 )
-_FILE_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+_FILE_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+)
 
 
 class VaultAccessError(RuntimeError):
@@ -36,6 +42,22 @@ class VaultMarkdownFile:
     path: Path
     content: str
     content_bytes: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class VaultFileObservation:
+    """One descriptor-stable vault file observation with optional bounded byte capture."""
+
+    content_hash: str
+    size_bytes: int
+    mtime_ns: int
+    captured_bytes: bytes
+    capture_complete: bool
+
+
+def is_markdown_path(relative_path: str) -> bool:
+    """Return whether a vault path uses the scanner-supported Markdown extension contract."""
+    return isinstance(relative_path, str) and relative_path.casefold().endswith(".md")
 
 
 def _safe_relative_path(relative_path: str) -> tuple[str, ...]:
@@ -61,23 +83,6 @@ def _classify_open_error(exc: OSError, relative_path: str, *, kind: str) -> Vaul
     return VaultAccessError("filesystem-unavailable", relative_path, f"Vault entry could not be read: {relative_path}")
 
 
-def _read_all(fd: int, relative_path: str) -> bytes:
-    chunks: list[bytes] = []
-    try:
-        while True:
-            chunk = os.read(fd, 65536)
-            if not chunk:
-                break
-            chunks.append(chunk)
-    except OSError as exc:
-        raise VaultAccessError(
-            "filesystem-unavailable",
-            relative_path,
-            f"Vault file could not be read: {relative_path}",
-        ) from exc
-    return b"".join(chunks)
-
-
 def _open_root(vault_root: Path) -> int:
     if not isinstance(vault_root, Path):
         raise VaultAccessError("invalid-root", "", "vault_root must be a Path")
@@ -96,48 +101,188 @@ def _open_root(vault_root: Path) -> int:
     return fd
 
 
-def _read_file_at(parent_fd: int, name: str, relative_path: str, vault_root: Path) -> VaultMarkdownFile:
-    try:
-        fd = os.open(name, _FILE_FLAGS, dir_fd=parent_fd)
-    except OSError as exc:
-        raise _classify_open_error(exc, relative_path, kind="file") from exc
-    try:
+def _close_fds(fds: list[int]) -> None:
+    for fd in reversed(fds):
         try:
-            before = os.fstat(fd)
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def _descriptor_identity(fd: int) -> tuple[int, int]:
+    observed = os.fstat(fd)
+    return observed.st_dev, observed.st_ino
+
+
+def _open_file_chain(
+    vault_root: Path,
+    parts: tuple[str, ...],
+    relative_path: str,
+) -> tuple[list[int], os.stat_result, tuple[tuple[int, int], ...]]:
+    """Open root, parents, and final regular file without following symlinks."""
+    opened: list[int] = []
+    try:
+        root_fd = _open_root(vault_root)
+        opened.append(root_fd)
+        current_fd = root_fd
+        identities = [_descriptor_identity(root_fd)]
+
+        for index, part in enumerate(parts[:-1]):
+            current_relative = "/".join(parts[: index + 1])
+            try:
+                next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            except OSError as exc:
+                raise _classify_open_error(exc, current_relative, kind="directory") from exc
+            opened.append(next_fd)
+            try:
+                next_stat = os.fstat(next_fd)
+            except OSError as exc:
+                raise VaultAccessError(
+                    "filesystem-unavailable",
+                    current_relative,
+                    f"Vault directory could not be inspected: {current_relative}",
+                ) from exc
+            if not stat.S_ISDIR(next_stat.st_mode):
+                raise VaultAccessError(
+                    "unsafe-file-type",
+                    current_relative,
+                    f"Vault entry is not a directory: {current_relative}",
+                )
+            identities.append((next_stat.st_dev, next_stat.st_ino))
+            current_fd = next_fd
+
+        try:
+            file_fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=current_fd)
+        except OSError as exc:
+            raise _classify_open_error(exc, relative_path, kind="file") from exc
+        opened.append(file_fd)
+        try:
+            file_stat = os.fstat(file_fd)
         except OSError as exc:
             raise VaultAccessError(
                 "filesystem-unavailable",
                 relative_path,
                 f"Vault file could not be inspected: {relative_path}",
             ) from exc
-        if not stat.S_ISREG(before.st_mode):
+        if not stat.S_ISREG(file_stat.st_mode):
             raise VaultAccessError(
                 "unsafe-file-type",
                 relative_path,
                 f"Vault entry is not a regular file: {relative_path}",
             )
-        content_bytes = _read_all(fd, relative_path)
+        identities.append((file_stat.st_dev, file_stat.st_ino))
+        return opened, file_stat, tuple(identities)
+    except Exception:
+        _close_fds(opened)
+        raise
+
+
+def _concurrent_change(relative_path: str) -> VaultAccessError:
+    return VaultAccessError(
+        "concurrent-change",
+        relative_path,
+        f"Vault file changed while it was being read: {relative_path}",
+    )
+
+
+def _revalidate_file_chain(
+    vault_root: Path,
+    parts: tuple[str, ...],
+    relative_path: str,
+    expected_chain: tuple[tuple[int, int], ...],
+) -> None:
+    """Prove the current path still names the root/parent/final chain that supplied the bytes."""
+    opened: list[int] = []
+    try:
         try:
-            after = os.fstat(fd)
+            opened, _file_stat, observed_chain = _open_file_chain(
+                vault_root,
+                parts,
+                relative_path,
+            )
+        except VaultAccessError as exc:
+            raise _concurrent_change(relative_path) from exc
+        if observed_chain != expected_chain:
+            raise _concurrent_change(relative_path)
+    finally:
+        _close_fds(opened)
+
+
+def observe_vault_file(
+    vault_root: Path,
+    relative_path: str,
+    *,
+    capture_limit: int | None = None,
+) -> VaultFileObservation:
+    """Stream one stable vault file while hashing all bytes and optionally retaining a prefix.
+
+    ``capture_limit=None`` retains the complete file. A non-negative integer retains at most that
+    many leading bytes while the full file continues to be streamed into the SHA-256 hash. The
+    path is re-opened after the read and the complete root/parent/final descriptor identity chain
+    must still match before the observation is accepted.
+    """
+    if capture_limit is not None and (type(capture_limit) is not int or capture_limit < 0):
+        raise ValueError("capture_limit must be a non-negative integer or None")
+
+    parts = _safe_relative_path(relative_path)
+    opened, before, identity_chain = _open_file_chain(vault_root, parts, relative_path)
+    file_fd = opened[-1]
+    hasher = hashlib.sha256()
+    captured = bytearray()
+    total_bytes = 0
+    try:
+        try:
+            while True:
+                chunk = os.read(file_fd, 65536)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                hasher.update(chunk)
+                if capture_limit is None:
+                    captured.extend(chunk)
+                elif len(captured) < capture_limit:
+                    captured.extend(chunk[: capture_limit - len(captured)])
+            after = os.fstat(file_fd)
         except OSError as exc:
             raise VaultAccessError(
                 "filesystem-unavailable",
                 relative_path,
-                f"Vault file could not be inspected after reading: {relative_path}",
+                f"Vault file could not be read: {relative_path}",
             ) from exc
+
         if (
             before.st_dev != after.st_dev
             or before.st_ino != after.st_ino
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns
             or before.st_size != after.st_size
-            or len(content_bytes) != after.st_size
+            or total_bytes != after.st_size
         ):
-            raise VaultAccessError(
-                "concurrent-change",
-                relative_path,
-                f"Vault file changed while it was being read: {relative_path}",
-            )
+            raise _concurrent_change(relative_path)
+
+        _revalidate_file_chain(
+            vault_root,
+            parts,
+            relative_path,
+            identity_chain,
+        )
+        return VaultFileObservation(
+            content_hash=hasher.hexdigest(),
+            size_bytes=after.st_size,
+            mtime_ns=after.st_mtime_ns,
+            captured_bytes=bytes(captured),
+            capture_complete=capture_limit is None or total_bytes <= capture_limit,
+        )
     finally:
-        os.close(fd)
+        _close_fds(opened)
+
+
+def _decode_snapshot(
+    *,
+    vault_root: Path,
+    relative_path: str,
+    content_bytes: bytes,
+) -> VaultMarkdownFile:
     try:
         content = content_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -149,45 +294,23 @@ def _read_file_at(parent_fd: int, name: str, relative_path: str, vault_root: Pat
     return VaultMarkdownFile(relative_path, vault_root / relative_path, content, content_bytes)
 
 
+def read_vault_bytes(vault_root: Path, relative_path: str) -> bytes:
+    """Read one vault file as bytes through the stable descriptor observation boundary."""
+    return observe_vault_file(vault_root, relative_path).captured_bytes
+
+
 def read_vault_text(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
     """Read one UTF-8 vault file without following any path-component symlink."""
-    parts = _safe_relative_path(relative_path)
-    root_fd = _open_root(vault_root)
-    current_fd = root_fd
-    try:
-        for index, part in enumerate(parts[:-1]):
-            current_relative = "/".join(parts[: index + 1])
-            try:
-                next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
-            except OSError as exc:
-                raise _classify_open_error(exc, current_relative, kind="directory") from exc
-            try:
-                if not stat.S_ISDIR(os.fstat(next_fd).st_mode):
-                    raise VaultAccessError(
-                        "unsafe-file-type",
-                        current_relative,
-                        f"Vault entry is not a directory: {current_relative}",
-                    )
-            except OSError as exc:
-                os.close(next_fd)
-                raise VaultAccessError(
-                    "filesystem-unavailable",
-                    current_relative,
-                    f"Vault directory could not be inspected: {current_relative}",
-                ) from exc
-            if current_fd != root_fd:
-                os.close(current_fd)
-            current_fd = next_fd
-        return _read_file_at(current_fd, parts[-1], relative_path, vault_root)
-    finally:
-        if current_fd != root_fd:
-            os.close(current_fd)
-        os.close(root_fd)
+    return _decode_snapshot(
+        vault_root=vault_root,
+        relative_path=relative_path,
+        content_bytes=read_vault_bytes(vault_root, relative_path),
+    )
 
 
 def read_vault_markdown(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
     """Read one Markdown file without following any path-component symlink."""
-    if not relative_path.endswith(".md"):
+    if not is_markdown_path(relative_path):
         raise VaultAccessError("invalid-extension", relative_path, "Vault file must have a .md extension")
     return read_vault_text(vault_root, relative_path)
 
@@ -241,8 +364,11 @@ def _walk_directory(
             finally:
                 os.close(child_fd)
             continue
-        if stat.S_ISREG(entry_stat.st_mode) and any(name.endswith(suffix) for suffix in suffixes):
-            yield _read_file_at(directory_fd, name, relative, vault_root)
+        folded_name = name.casefold()
+        if stat.S_ISREG(entry_stat.st_mode) and any(
+            folded_name.endswith(suffix.casefold()) for suffix in suffixes
+        ):
+            yield read_vault_text(vault_root, relative)
 
 
 def iter_vault_markdown(

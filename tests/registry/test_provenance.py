@@ -23,13 +23,13 @@ def mock_git_repo(tmp_path: Path) -> Path:
 
 
 def test_fresh_schema_and_upgrade(tmp_path: Path) -> None:
-    """Test fresh version-3 registry contains both provenance tables, and upgrade from v2."""
+    """Test the current registry keeps provenance tables when upgrading from v2."""
     from unittest.mock import patch
-    from lifeos.registry import _migrations
+    from lifeos.registry import CURRENT_SCHEMA_VERSION, _migrations
 
     db_path = tmp_path / "registry.db"
 
-    # Initialize to version 2
+    # Initialize to version 2.
     v2_migrations = _migrations.MIGRATIONS[:2]
     with patch("lifeos.registry._registry._migrations.MIGRATIONS", v2_migrations):
         reg = Registry(db_path)
@@ -37,12 +37,12 @@ def test_fresh_schema_and_upgrade(tmp_path: Path) -> None:
 
     assert reg.schema_version == 2
 
-    # Initialize to version 3
+    # Initialize through the current schema, including the scoped-identity migration.
     reg = Registry(db_path)
     reg.initialize()
-    assert reg.schema_version == 3
+    assert reg.schema_version == CURRENT_SCHEMA_VERSION == 4
 
-    # Check tables exist
+    # Provenance tables introduced in v3 remain present after the v4 registry rebuild.
     with reg.connect_read_only() as conn:
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('provenance_documents', 'provenance_sources')"

@@ -204,6 +204,111 @@ MIGRATIONS: tuple[Migration, ...] = (
         required_tables=frozenset({"provenance_documents", "provenance_sources"}),
         required_indexes=frozenset({"provenance_sources_source_path_idx"}),
     ),
+    Migration(
+        version=4,
+        name="scoped_stable_identity_schema",
+        statements=(
+            """
+            CREATE TABLE files_v4 (
+                id INTEGER PRIMARY KEY,
+                vault_path TEXT NOT NULL UNIQUE,
+                stable_id TEXT,
+                file_kind TEXT NOT NULL,
+                content_hash TEXT,
+                size_bytes INTEGER,
+                mtime_ns INTEGER,
+                first_seen_at TEXT NOT NULL
+                    DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                last_seen_at TEXT NOT NULL
+                    DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                CHECK (
+                    trim(vault_path) <> ''
+                    AND substr(vault_path, 1, 1) <> '/'
+                    AND substr(vault_path, -1, 1) <> '/'
+                    AND instr(vault_path, char(92)) = 0
+                    AND vault_path NOT GLOB '[A-Za-z]:/*'
+                    AND vault_path NOT IN ('.', '..')
+                    AND vault_path NOT LIKE './%'
+                    AND vault_path NOT LIKE '../%'
+                    AND vault_path NOT LIKE '%/./%'
+                    AND vault_path NOT LIKE '%/../%'
+                    AND vault_path NOT LIKE '%/.'
+                    AND vault_path NOT LIKE '%/..'
+                    AND vault_path NOT LIKE '%//%'
+                ),
+                CHECK (stable_id IS NULL OR trim(stable_id) <> ''),
+                CHECK (trim(file_kind) <> ''),
+                CHECK (content_hash IS NULL OR trim(content_hash) <> ''),
+                CHECK (
+                    size_bytes IS NULL
+                    OR (typeof(size_bytes) = 'integer' AND size_bytes >= 0)
+                ),
+                CHECK (
+                    mtime_ns IS NULL
+                    OR (typeof(mtime_ns) = 'integer' AND mtime_ns >= 0)
+                ),
+                CHECK (is_deleted IN (0, 1)),
+                CHECK (last_seen_at >= first_seen_at)
+            )
+            """,
+            """
+            CREATE TABLE source_versions_v4 (
+                id INTEGER PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                version_hash TEXT NOT NULL,
+                original_file_id INTEGER NOT NULL,
+                observed_at TEXT NOT NULL
+                    DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                sanitization_metadata TEXT,
+                UNIQUE (source_id, version_hash),
+                CHECK (trim(source_id) <> ''),
+                CHECK (trim(version_hash) <> ''),
+                FOREIGN KEY (original_file_id) REFERENCES files_v4(id)
+                    ON UPDATE RESTRICT ON DELETE RESTRICT
+            )
+            """,
+            """
+            INSERT INTO files_v4 (
+                id, vault_path, stable_id, file_kind, content_hash, size_bytes, mtime_ns,
+                first_seen_at, last_seen_at, is_deleted
+            )
+            SELECT
+                id, vault_path, stable_id, file_kind, content_hash, size_bytes, mtime_ns,
+                first_seen_at, last_seen_at, is_deleted
+            FROM files
+            """,
+            """
+            INSERT INTO source_versions_v4 (
+                id, source_id, version_hash, original_file_id, observed_at,
+                sanitization_metadata
+            )
+            SELECT
+                id, source_id, version_hash, original_file_id, observed_at,
+                sanitization_metadata
+            FROM source_versions
+            """,
+            "DROP TABLE source_versions",
+            "DROP TABLE files",
+            "ALTER TABLE files_v4 RENAME TO files",
+            "ALTER TABLE source_versions_v4 RENAME TO source_versions",
+            """
+            CREATE INDEX idx_files_content_hash
+                ON files(content_hash)
+                WHERE content_hash IS NOT NULL
+            """,
+            """
+            CREATE INDEX idx_files_stable_id
+                ON files(stable_id)
+                WHERE stable_id IS NOT NULL
+            """,
+            """
+            CREATE INDEX idx_source_versions_original_file_id
+                ON source_versions(original_file_id)
+            """,
+        ),
+        required_indexes=frozenset({"idx_files_stable_id"}),
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version

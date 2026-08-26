@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1643
 title: Define cross-device vault topology and writer coherence
-status: backlog
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1639
@@ -211,6 +211,10 @@ uv run python scripts/validate_manual_links.py
 ./scripts/run-setup-integration-docker.sh
 ```
 
+Validated in GitHub Actions before completion: documentation impact, Ruff, mypy, Python
+compilation, manual-link validation, test collection, the full 1,596-test suite, and the
+clean-room Docker setup/MCP gate all passed.
+
 # Relevant decisions
 
 - LIFEOS-1639: agents explore through rich LifeOS read surfaces while canonical mutations
@@ -231,3 +235,7 @@ uv run python scripts/validate_manual_links.py
   identity contract without making the graph index authoritative.
 - DD-088: `lifeos init` remains non-destructive vault bootstrap and does not configure
   external clients or deployment topology.
+- DD-089: cross-device operation uses a single active LifeOS mutation authority while sync
+  transport remains external to core.
+- DD-090: stable note ID, current path, and content hash are distinct identity/location/version
+  concepts, and proposal relocation never bypasses review or stale-write protection.

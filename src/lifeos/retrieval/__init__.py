@@ -1,5 +1,10 @@
 """Semantic retrieval and evidence-grounded knowledge conversation primitives."""
 
+from . import search as _search
+from . import service as _service
+from .chunking import chunk_markdown_file, reidentify_note
+from .coherence_search import HybridRetriever, StableRetrievalEvidence
+from .coherence_service import RetrievalIndexService
 from .contracts import (
     AnswerEvidence,
     AnswerProvider,
@@ -11,24 +16,21 @@ from .contracts import (
     ProviderCapabilities,
     ProviderDisclosure,
     ProviderError,
+    RerankCandidate,
+    RerankResult,
+    RerankingProvider,
     RetrievalError,
     RetrievalPolicy,
     RetrievalRequest,
     RetrievalScope,
-    RerankCandidate,
-    RerankResult,
-    RerankingProvider,
     ScopeDecision,
     build_provider_disclosure,
     scope_decision,
 )
-from .chunking import chunk_markdown_file, reidentify_note
-from .index import INDEX_SCHEMA_VERSION, RetrievalIndex, StoredEmbedding
 from .evaluation import FixtureResult, RetrievalEvaluation, RetrievalFixture, evaluate_retrieval
+from .index import INDEX_SCHEMA_VERSION, RetrievalIndex, StoredEmbedding
 from .models import ChunkedNote, IndexedChunk, IndexedDocument
 from .policy import load_retrieval_policy
-from .search import HybridRetriever, RankingComponents, RetrievalEvidence, RetrievalResponse
-from .service import IndexHealth, IndexProgress, IndexRecoveryPlan, IndexResult, RetrievalIndexService
 from .providers import (
     DeterministicAnswerProvider,
     DeterministicEmbeddingProvider,
@@ -36,12 +38,28 @@ from .providers import (
     FailingAnswerProvider,
     UnavailableEmbeddingProvider,
 )
+from .search import RankingComponents, RetrievalEvidence, RetrievalResponse
+from .service import IndexHealth, IndexProgress, IndexRecoveryPlan, IndexResult
+
+# Keep direct module imports aligned with the package-level coherence wrappers.
+setattr(_search, "HybridRetriever", HybridRetriever)
+setattr(_service, "RetrievalIndexService", RetrievalIndexService)
 
 __all__ = [
     "AnswerEvidence",
     "AnswerProvider",
-    "ChunkedNote",
     "CancellationToken",
+    "ChunkedNote",
+    "DeterministicAnswerProvider",
+    "DeterministicEmbeddingProvider",
+    "DeterministicReranker",
+    "EmbeddingBatch",
+    "EmbeddingProvider",
+    "FailingAnswerProvider",
+    "FixtureResult",
+    "GeneratedAnswer",
+    "GeneratedParagraph",
+    "HybridRetriever",
     "INDEX_SCHEMA_VERSION",
     "IndexHealth",
     "IndexProgress",
@@ -49,20 +67,13 @@ __all__ = [
     "IndexResult",
     "IndexedChunk",
     "IndexedDocument",
-    "DeterministicAnswerProvider",
-    "DeterministicEmbeddingProvider",
-    "DeterministicReranker",
-    "FailingAnswerProvider",
-    "EmbeddingBatch",
-    "EmbeddingProvider",
-    "FixtureResult",
-    "GeneratedAnswer",
-    "GeneratedParagraph",
-    "HybridRetriever",
     "ProviderCapabilities",
     "ProviderDisclosure",
     "ProviderError",
     "RankingComponents",
+    "RerankCandidate",
+    "RerankResult",
+    "RerankingProvider",
     "RetrievalError",
     "RetrievalEvaluation",
     "RetrievalEvidence",
@@ -73,10 +84,8 @@ __all__ = [
     "RetrievalRequest",
     "RetrievalResponse",
     "RetrievalScope",
-    "RerankCandidate",
-    "RerankResult",
-    "RerankingProvider",
     "ScopeDecision",
+    "StableRetrievalEvidence",
     "StoredEmbedding",
     "UnavailableEmbeddingProvider",
     "build_provider_disclosure",

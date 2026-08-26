@@ -13,6 +13,7 @@ from lifeos.ingestion.orchestration import (
 from lifeos.registry import Registry
 from lifeos.registry.file_tracking import FileTrackingError, hash_file_content, register_scan
 from lifeos.scanner import VaultFile
+from lifeos.vault import VaultAccessError, read_vault_bytes
 
 
 @pytest.fixture
@@ -48,7 +49,8 @@ def test_registered_unchanged_source_returns_exact_bytes_and_hash(
     _register(registry, vault_root, source_path, content)
 
     with patch(
-        "lifeos.ingestion.orchestration.Path.read_bytes", wraps=target.read_bytes
+        "lifeos.ingestion.orchestration.read_vault_bytes",
+        wraps=read_vault_bytes,
     ) as read_bytes:
         verified = load_registered_source(
             registry=registry,
@@ -56,7 +58,7 @@ def test_registered_unchanged_source_returns_exact_bytes_and_hash(
             source_path=source_path,
         )
 
-    read_bytes.assert_called_once()
+    read_bytes.assert_called_once_with(vault_root, source_path)
     assert verified.content == content
     assert verified.source.path == source_path
     assert verified.source.content_hash == f"sha256:{hash_file_content(content)}"
@@ -91,7 +93,7 @@ def test_registered_source_exposes_only_tags_and_topics(
 def test_invalid_path_is_rejected_before_filesystem_access(
     registry: Registry, vault_root: Path, source_path: str
 ) -> None:
-    with patch("lifeos.ingestion.orchestration.Path.read_bytes") as read_bytes:
+    with patch("lifeos.ingestion.orchestration.read_vault_bytes") as read_bytes:
         with pytest.raises(FileTrackingError):
             load_registered_source(
                 registry=registry,
@@ -162,8 +164,12 @@ def test_read_failure_maps_to_source_read_error(
     registry: Registry, vault_root: Path
 ) -> None:
     with patch(
-        "lifeos.ingestion.orchestration.Path.read_bytes",
-        side_effect=PermissionError("denied"),
+        "lifeos.ingestion.orchestration.read_vault_bytes",
+        side_effect=VaultAccessError(
+            "filesystem-unavailable",
+            "test.md",
+            "denied",
+        ),
     ):
         with pytest.raises(SourceReadError):
             load_registered_source(
@@ -171,3 +177,31 @@ def test_read_failure_maps_to_source_read_error(
                 vault_root=vault_root,
                 source_path="test.md",
             )
+
+
+def test_registered_source_rejects_symlink_replacement_even_when_bytes_match(
+    registry: Registry,
+    vault_root: Path,
+    tmp_path: Path,
+) -> None:
+    source_path = "study/source.md"
+    content = b"same trusted bytes\n"
+    target = vault_root / source_path
+    target.parent.mkdir()
+    target.write_bytes(content)
+    _register(registry, vault_root, source_path, content)
+
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(content)
+    target.unlink()
+    try:
+        target.symlink_to(outside)
+    except OSError as error:
+        pytest.skip(f"symlinks are unavailable on this platform: {error}")
+
+    with pytest.raises(SourceReadError):
+        load_registered_source(
+            registry=registry,
+            vault_root=vault_root,
+            source_path=source_path,
+        )

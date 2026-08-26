@@ -11,11 +11,14 @@ from lifeos.registry.file_tracking import (
 from lifeos.ingestion.drafts import SourceSnapshot
 from lifeos.ingestion.taxonomy import extract_source_taxonomy
 from lifeos.markdown.parser import parse_markdown_note
+from lifeos.vault import VaultAccessError, read_vault_bytes
+
 
 @dataclass(frozen=True, slots=True)
 class VerifiedRegisteredSource:
     source: SourceSnapshot
     content: bytes
+
 
 class OrchestrationError(RuntimeError):
     pass
@@ -49,18 +52,22 @@ def load_registered_source(
     target_file = vault_root / source_path
 
     try:
-        source_bytes = target_file.read_bytes()
-    except FileNotFoundError:
-        comparison = compare_registered_file(
-            registry, source_path, working_tree_hash=None
-        )
-        if comparison.state == FileRegistrationState.REGISTERED_MISSING:
-            raise MissingSourceError(f"Source missing: {source_path}")
-        elif comparison.state == FileRegistrationState.UNREGISTERED_MISSING:
-            raise UnregisteredSourceError(f"Source missing and unregistered: {source_path}")
-        raise OrchestrationError(f"Unexpected missing state: {comparison.state}")
-    except OSError as e:
-        raise SourceReadError(f"Could not read {source_path}") from e
+        source_bytes = read_vault_bytes(vault_root, source_path)
+    except VaultAccessError as error:
+        if error.code == "not-found":
+            comparison = compare_registered_file(
+                registry, source_path, working_tree_hash=None
+            )
+            if comparison.state == FileRegistrationState.REGISTERED_MISSING:
+                raise MissingSourceError(f"Source missing: {source_path}") from error
+            if comparison.state == FileRegistrationState.UNREGISTERED_MISSING:
+                raise UnregisteredSourceError(
+                    f"Source missing and unregistered: {source_path}"
+                ) from error
+            raise OrchestrationError(
+                f"Unexpected missing state: {comparison.state}"
+            ) from error
+        raise SourceReadError(f"Could not read {source_path}") from error
 
     raw_hash = hash_file_content(source_bytes)
 
@@ -70,9 +77,9 @@ def load_registered_source(
 
     if comparison.state == FileRegistrationState.REGISTERED_MODIFIED:
         raise ModifiedSourceError(f"Source modified: {source_path}")
-    elif comparison.state == FileRegistrationState.UNREGISTERED_PRESENT:
+    if comparison.state == FileRegistrationState.UNREGISTERED_PRESENT:
         raise UnregisteredSourceError(f"Source unregistered: {source_path}")
-    elif comparison.state != FileRegistrationState.REGISTERED_UNCHANGED:
+    if comparison.state != FileRegistrationState.REGISTERED_UNCHANGED:
         raise OrchestrationError(f"Unexpected comparison state {comparison.state}")
 
     try:

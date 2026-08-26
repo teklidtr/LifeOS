@@ -29,14 +29,22 @@ def chunk_markdown_file(
     indexed_at: datetime | None = None,
     max_chunk_characters: int = 1_800,
 ) -> ChunkedNote:
-    if not source.relative_path.endswith(".md"):
+    if not source.relative_path.lower().endswith(".md"):
         raise RetrievalError("unsupported_file", "Only Markdown files can be indexed.")
     if max_chunk_characters < 256:
         raise RetrievalError("invalid_chunk_budget", "max_chunk_characters must be at least 256.")
     parsed = parse_markdown_note(source.path, content=source.content)
-    errors = tuple(f"{item.code}@{item.line}: {item.message}" for item in parsed.findings if item.severity == "error")
+    errors = tuple(
+        f"{item.code}@{item.line}: {item.message}"
+        for item in parsed.findings
+        if item.severity == "error"
+    )
     if errors:
-        raise RetrievalError("malformed_note", "The note is structurally invalid.", {"path": source.relative_path, "diagnostics": errors})
+        raise RetrievalError(
+            "malformed_note",
+            "The note is structurally invalid.",
+            {"path": source.relative_path, "diagnostics": errors},
+        )
     moment = indexed_at or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         raise RetrievalError("invalid_timestamp", "indexed_at must be timezone-aware.")
@@ -70,7 +78,11 @@ def chunk_markdown_file(
     diagnostics: list[str] = []
     structural_index = 0
     for heading_path, heading, start_line, lines in sections:
-        for part_start, part_end, text in _bounded_structural_parts(lines, start_line=start_line, maximum=max_chunk_characters):
+        for part_start, part_end, text in _bounded_structural_parts(
+            lines,
+            start_line=start_line,
+            maximum=max_chunk_characters,
+        ):
             normalized = _normalize_text(text)
             if not normalized:
                 continue
@@ -78,7 +90,9 @@ def chunk_markdown_file(
             block_id = block_match.group(1) if block_match else None
             dedupe_key = (_digest(normalized), block_id)
             if dedupe_key in seen:
-                diagnostics.append(f"duplicate-passage:{source.relative_path}:{part_start}-{part_end}")
+                diagnostics.append(
+                    f"duplicate-passage:{source.relative_path}:{part_start}-{part_end}"
+                )
                 continue
             seen.add(dedupe_key)
             structural_index += 1
@@ -130,11 +144,17 @@ def reidentify_note(note: ChunkedNote, document_id: str) -> ChunkedNote:
             separators=(",", ":"),
             ensure_ascii=False,
         )
-        chunks.append(replace(chunk, document_id=document_id, chunk_id=f"chunk:{_digest(payload)}"))
+        chunks.append(
+            replace(chunk, document_id=document_id, chunk_id=f"chunk:{_digest(payload)}")
+        )
     return ChunkedNote(document, tuple(chunks), note.diagnostics)
 
 
-def _sections(body: str, *, body_start_line: int) -> tuple[tuple[tuple[str, ...], str | None, int, tuple[str, ...]], ...]:
+def _sections(
+    body: str,
+    *,
+    body_start_line: int,
+) -> tuple[tuple[tuple[str, ...], str | None, int, tuple[str, ...]], ...]:
     lines = body.splitlines()
     sections: list[tuple[tuple[str, ...], str | None, int, tuple[str, ...]]] = []
     heading_stack: list[str] = []
@@ -228,7 +248,13 @@ def _bounded_structural_parts(
         seen_blocks.add(normalized_block)
         addition = len(block[2]) + (2 if pending else 0)
         if pending and (size + addition > maximum or has_block_id or repeated_block):
-            combined.append((pending[0][0], pending[-1][1], "\n\n".join(item[2] for item in pending)))
+            combined.append(
+                (
+                    pending[0][0],
+                    pending[-1][1],
+                    "\n\n".join(item[2] for item in pending),
+                )
+            )
             pending = []
             size = 0
         pending.append(block)
@@ -238,11 +264,19 @@ def _bounded_structural_parts(
             pending = []
             size = 0
     if pending:
-        combined.append((pending[0][0], pending[-1][1], "\n\n".join(item[2] for item in pending)))
+        combined.append(
+            (
+                pending[0][0],
+                pending[-1][1],
+                "\n\n".join(item[2] for item in pending),
+            )
+        )
     return tuple(combined)
 
 
-def _split_oversized(text: str, start: int, end: int, maximum: int) -> list[tuple[int, int, str]]:
+def _split_oversized(
+    text: str, start: int, end: int, maximum: int
+) -> list[tuple[int, int, str]]:
     if len(text) <= maximum:
         return [(start, end, text)]
     sentences = _SENTENCE_SPLIT_RE.split(text)
@@ -272,20 +306,22 @@ def _links(text: str, source_path: str) -> tuple[tuple[str, str | None], ...]:
     results: set[tuple[str, str | None]] = set()
     for target, heading in _WIKILINK_RE.findall(text):
         path = target.strip()
-        if not path.endswith(".md"):
+        if not path.lower().endswith(".md"):
             path += ".md"
         results.add((_resolve_link(path, source_path), heading.strip() or None))
     for target, heading in _MARKDOWN_LINK_RE.findall(text):
         if "://" in target or target.startswith("#"):
             continue
         path = target.split("?", 1)[0]
-        if path.endswith(".md"):
+        if path.lower().endswith(".md"):
             results.add((_resolve_link(path, source_path), heading.strip() or None))
     return tuple(sorted(results))
 
 
 def _resolve_link(target: str, source_path: str) -> str:
-    if target.startswith("/") or ("/" in target and not target.startswith(("./", "../"))):
+    if target.startswith("/") or (
+        "/" in target and not target.startswith(("./", "../"))
+    ):
         return target.strip("/")
     parent = PurePosixPath(source_path).parent
     parts: list[str] = []
@@ -310,9 +346,19 @@ def _body_start_line(content: str) -> int:
 
 def _tags(value: object) -> tuple[str, ...]:
     if isinstance(value, str):
-        return tuple(dict.fromkeys(item.strip().lstrip("#") for item in value.split() if item.strip()))
+        return tuple(
+            dict.fromkeys(
+                item.strip().lstrip("#") for item in value.split() if item.strip()
+            )
+        )
     if isinstance(value, (list, tuple)):
-        return tuple(dict.fromkeys(str(item).strip().lstrip("#") for item in value if str(item).strip()))
+        return tuple(
+            dict.fromkeys(
+                str(item).strip().lstrip("#")
+                for item in value
+                if str(item).strip()
+            )
+        )
     return ()
 
 

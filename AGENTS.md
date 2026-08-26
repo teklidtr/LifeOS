@@ -44,6 +44,17 @@ tests or modifies that runtime contract. Filename alone does not grant authority
 
 Do not opportunistically implement neighboring subsystems.
 
+### Complexity budget and scope control
+
+Correctness and security do not justify unbounded implementation growth. Keep the smallest coherent solution that satisfies the task and its invariants.
+
+1. Treat production code size, changed-file count, new abstractions, and new subsystem dependencies as a complexity budget. If review fixes materially expand that budget, stop and reassess the design before adding more code.
+2. When multiple findings are variants of the same invariant, do not keep adding call-site guards. Centralize the invariant once, remove duplicate enforcement where practical, and prefer a net-neutral or net-negative production diff during hardening/consolidation.
+3. A review finding is not automatically a requirement to expand the current PR. Fix findings that violate acceptance criteria, documented contracts, correctness, privacy, security, or compatibility. Record independently useful hardening or cleanup that is not blocking the task as follow-up work instead of widening the PR.
+4. A zero-finding review is not the completion criterion. Completion is based on the task contract, resolved blocking findings, required validation, and required review classes. Do not keep changing correct code merely to make successive reviewers run out of suggestions.
+5. If repeated review rounds keep increasing code size or exposing sibling variants of the same issue, pause the review loop and perform a consolidation/scope audit. If the resulting solution is still disproportionately broad, split independently mergeable work into follow-up tasks or PRs.
+6. After a consolidation pass has restored a coherent boundary and broad validation is green, use re-review to validate that boundary rather than restart open-ended hardening. New non-blocking edge-case improvements belong in follow-up work unless they expose a core correctness or security defect.
+
 ## Architectural boundaries
 
 - Markdown vault files are canonical human-readable state.
@@ -78,6 +89,33 @@ Treat documentation as part of the implementation, not follow-up polish:
 
 A completed task file is historical evidence; it does not replace updating the documents that describe LifeOS's current behavior.
 
+## Local validation before CI
+
+CI is an independent verification layer and safety net, not the primary mechanism for discovering deterministic implementation regressions. Agents must make a serious local attempt to catch test failures before pushing a change and before using CI or Codex review as feedback.
+
+For every implementation change:
+
+1. Run the directly relevant regression tests locally before pushing.
+2. Run the tests for the affected module or subsystem, including sibling entry points when the changed behavior is shared.
+3. When a change touches shared infrastructure, a public facade, multiple subsystems, a trust/privacy boundary, persistence or relocation semantics, or another cross-cutting invariant, run the broadest practical local pytest suite before pushing. Default to the full local pytest suite when the change can plausibly cause failures across multiple test shards or otherwise has a wide compatibility surface.
+4. Treat lint, formatting, type checking, compilation, collection, smoke checks, test selection, and cached/incremental test tools as useful accelerators, not substitutes for the behavioral pytest coverage required by the risk of the change. A green fast-check pipeline does not prove behavioral compatibility.
+5. Push only after locally reproducible deterministic failures have been fixed. CI should confirm the implementation in an independent environment, not be the first place an ordinary deterministic regression is discovered.
+6. If CI finds a deterministic regression that appropriate local validation should have caught, fix the regression, add or strengthen regression coverage when useful, and expand the local validation performed for that class of change before continuing the review cycle.
+7. If a required check genuinely cannot run locally, record the limitation and reason in the task or PR, run the closest practical local substitute, and leave the unavailable check to CI explicitly rather than silently treating CI as the default test runner.
+
+Clean-room, container, platform-specific, or other checks whose value specifically depends on the CI environment may remain CI checkpoints. This exception does not remove the obligation to run the relevant local behavioral tests first.
+
+### Refactor and consolidation safety
+
+Refactors and consolidation passes are not behavior-free. When the intent is to preserve behavior while centralizing an invariant or deleting duplication:
+
+1. Before pushing, search the repository for every renamed, removed, or shape-changed helper; monkeypatch target; accessed return attribute; and exact error string changed by the diff. Tests or sibling modules that depend on an underscore-prefixed helper still represent repository compatibility evidence.
+2. Preserve existing call shapes, return shapes, patch points, and observable error wording by default when the refactor does not require changing them. If a seam must intentionally change, migrate all known callers and tests in the same change and make the reason explicit.
+3. Centralize the invariant at one enforcement boundary and remove or route old duplicate implementations through it. Do not add a new abstraction while leaving parallel security, privacy, filesystem, or identity logic alive elsewhere.
+4. When local pytest cannot run, repository-wide dependency search for changed seams is mandatory as the closest static substitute. Ruff, mypy, compilation, and collection cannot detect return-shape, monkeypatch-target, or exact-message compatibility regressions.
+5. Before full validation, compare the candidate against the previous known-good head and account for every changed line as required behavior, deliberate consolidation, or regression coverage. Remove incidental cleanup, comment churn, error-text drift, and unrelated refactors from a trust-boundary fix.
+6. If CI finds a deterministic compatibility regression after a consolidation pass, treat it as a missed pre-push audit. Restore compatibility unless the change was intentional; otherwise migrate every dependent surface together, broaden the seam search, and only then continue the review cycle.
+
 ## Code Review Rules
 
 Use these rules to catch LifeOS-specific invariant violations that may not be obvious from the diff alone. Keep mechanical checks in tests and CI.
@@ -96,17 +134,37 @@ Use these rules to catch LifeOS-specific invariant violations that may not be ob
 
 ## Pull Request Review Workflow
 
+Codex review is a paid, high-signal checkpoint, not an iterative substitute for implementation, repository-wide reasoning, or CI. Use it only after the implementation agent has made the review surface stable and has exhausted cheaper deterministic validation.
+
 Before a pull request is considered ready to merge:
 
 1. Complete the implementation, documentation impact, and relevant local validation. Ordinary PR pushes should receive a green `fast-checks` result.
-2. Once the implementation is stable, request `@codex review`.
-3. Address valid findings, add regression coverage where appropriate, and re-run the relevant validation.
-4. Request another `@codex review` when review fixes materially change behavior, architecture, public interfaces, trust boundaries, or a substantial portion of the implementation. Batch related fixes before requesting the next review. Do not request another review for trivial or purely mechanical changes.
-5. Repeat the review/fix cycle only while material changes continue to be introduced.
-6. For a security-sensitive pull request, request `@codex security review` after the normal review cycle has stabilized.
-7. Address valid security findings and re-run affected validation. Request another security review only if those fixes materially change a security or trust boundary.
-8. After the final material commit and required review cycle are stable, request the GitHub full-validation checkpoint by adding the `full-validation` label to the PR. The checkpoint must produce green `full-test` and `docker-setup-e2e` checks for the current PR head. If material commits land afterward, remove and re-add the label to request a fresh checkpoint without a dummy commit.
-9. Do not merge while `fast-checks`, the latest required full-validation checkpoint, or relevant review findings are unresolved or failing.
+2. Before requesting Codex review, stabilize the branch:
+   - Resolve all known implementation TODOs, known review findings, and failing deterministic checks first.
+   - Run the broadest practical non-Codex validation needed to catch compatibility and regression failures before paying for another review. For changes spanning multiple subsystems, public contracts, or trust boundaries, prefer the full pytest suite and clean-room/Docker validation before another Codex review when practical.
+   - Treat this as a pre-review checkpoint, not a replacement for the required final `full-validation` checkpoint.
+   - Do not request review while material implementation work is still actively changing the branch.
+3. Perform a pre-Codex invariant audit for cross-cutting changes. When a change affects an invariant such as privacy policy, runtime exclusion, stable identity, relocation, proposal authorization, canonical mutation, or an externally callable contract, search all relevant call sites and sibling entry points before requesting review. Do not fix only the single path that exposed the issue if the same invariant can apply elsewhere.
+4. Once the implementation is stable and the pre-review audit is complete, request one `@codex review` for the current head.
+   - After requesting review, avoid material commits until that review finishes unless a newly discovered correctness or security issue requires an immediate fix.
+   - If the head materially changes while a review is in progress, treat that review as evidence about the reviewed snapshot, not as authoritative approval of the new head.
+   - Do not stack or overlap additional `@codex review` requests for newer heads while an earlier review is still processing. Let the active review finish, batch all resulting work, stabilize the new head, then request the next review only if required.
+5. Address valid findings, add regression coverage where appropriate, and re-run the relevant validation.
+   - Review findings are implemented by the current implementation agent whenever any available tool path can perform the change safely. Difficulty, file size, inconvenience, lack of a local checkout, or a cumbersome edit path do not count as inability; use available write mechanisms such as GitHub blob/tree/commit APIs rather than delegating implementation.
+   - Do not comment `@codex address that feedback` merely because Codex found the issue or because implementing the fix is difficult. Use it only when no available tool path can safely perform the required code change at all.
+   - If `@codex address that feedback` is exceptionally required, review Codex's resulting diff as external implementation work, preserve repository invariants, add or update regression coverage, and run the normal validation before resolving the finding.
+   - Batch all valid findings from the same review before requesting another review.
+   - If one finding reveals a cross-cutting invariant violation, audit every relevant caller, adapter, facade, CLI/MCP/API surface, derived subsystem, and alternate execution path for the same class of bug before re-reviewing.
+6. Request another `@codex review` only when the batched review fixes materially change behavior, architecture, public interfaces, trust boundaries, or a substantial portion of the implementation. Do not request another review for trivial, documentation-only, or purely mechanical fixes.
+7. Do not mechanically repeat review/fix cycles indefinitely.
+   - If consecutive reviews keep finding variants of the same cross-cutting invariant, stop requesting Codex review and perform a repository-wide invariant audit or centralize the enforcement boundary before trying again.
+   - If the PR has grown so broad that review findings repeatedly expose unrelated subsystem interactions, consider splitting remaining independently mergeable work into separate tasks/PRs rather than using repeated Codex reviews to discover the architecture incrementally.
+   - Do not use "no findings" as the stopping condition. Once task requirements, blocking correctness/security findings, required validation, and required review classes are satisfied, move non-blocking hardening ideas to follow-up work.
+   - Resume Codex review only after the implementation and invariant boundary are stable enough that a new review is expected to validate the solution rather than continue discovering its shape.
+8. For a security-sensitive pull request, request `@codex security review` only after the normal review cycle has stabilized.
+9. Address valid security findings and re-run affected validation. Batch security fixes. Request another security review only if those fixes materially change a security or trust boundary.
+10. After the final material commit and required review cycle are stable, request the GitHub full-validation checkpoint by adding the `full-validation` label to the PR. The checkpoint must produce green `full-test` and `docker-setup-e2e` checks for the current PR head. If material commits land afterward, remove and re-add the label to request a fresh checkpoint without a dummy commit.
+11. Do not merge while `fast-checks`, the latest required full-validation checkpoint, or relevant review findings are unresolved or failing.
 
 ### Security-sensitive changes
 

@@ -1,6 +1,7 @@
 """LifeOS MCP Server definition and tools."""
 
 import logging
+import posixpath
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar, cast
@@ -11,6 +12,9 @@ from pydantic import BaseModel, ConfigDict
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import runtime_exclusion_prefix
+from lifeos.runtime_scope import build_runtime_exclusion_matcher
 from lifeos.facade.consequential_tools import (
     APPLY_PROPOSAL_DESCRIPTOR,
     APPROVE_PROPOSAL_DESCRIPTOR,
@@ -50,6 +54,7 @@ from lifeos.facade.proposal_tools import (
     create_wiki_proposal,
     evolve_wiki_proposal,
     evolve_study_learning_proposal,
+    resolve_create_wiki_target,
     update_wiki_section_proposal,
 )
 from lifeos.facade.read_only import (
@@ -84,6 +89,8 @@ from lifeos.mcp.models import (
     RuntimeActivityMCPResult,
 )
 from lifeos.registry import Registry
+from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime import ActivityStore
 from lifeos.wiki.layout import WikiPageKind
 
@@ -154,14 +161,12 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "canonical note bodies."
 )
 
-
 REGISTRY_REFRESH_MCP_DESCRIPTION = (
     f"{REGISTRY_REFRESH_DESCRIPTOR.description} Use this explicit maintenance tool when "
     "derived indexes should be refreshed outside proposal-building ingestion; ingestion "
     "proposal tools refresh automatically. This writes only rebuildable registry data and "
     "does not change Markdown."
 )
-
 READ_MARKDOWN_MCP_DESCRIPTION = (
     f"{READ_MARKDOWN_DESCRIPTOR.description} Use this before ingestion to inspect the source "
     "and any relevant wiki notes; paths are vault-relative."
@@ -211,7 +216,7 @@ UPDATE_WIKI_SECTION_PROPOSAL_MCP_DESCRIPTION = (
 COMPOUND_WIKI_PROPOSAL_MCP_DESCRIPTION = (
     f"{COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.description} Use after vault_read_markdown has "
     "inspected both the source and existing update target. LifeOS automatically refreshes the "
-    "disposable registry before source and target verification. Supply the absent create "
+    "disposable registry before source verification. Supply the absent create "
     "target with its grounded title and body, plus one exact heading and replacement body for "
     "the existing target. LifeOS selects the update operation from canonical ownership. This "
     "creates one atomic two-operation draft and does not modify either target."
@@ -258,7 +263,6 @@ def _strict_tool(
         ),
     )
     strict_model.model_rebuild()
-
     strict_metadata = tool.fn_metadata.model_copy(update={"arg_model": strict_model})
     return tool.model_copy(
         update={
@@ -301,30 +305,131 @@ def create_mcp_server(
     authorizer: ConsequentialAuthorizer,
     runtime_dir: Path | None = None,
 ) -> FastMCP:
-    activity = ActivityStore(runtime_dir or (vault_root / ".lifeos"))
+    resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
+    activity = ActivityStore(resolved_runtime_dir)
+
+    def _external_registry_identity_allow_path() -> Callable[[str], bool]:
+        try:
+            runtime_prefix = runtime_exclusion_prefix(
+                vault_root,
+                runtime_dir=resolved_runtime_dir,
+            )
+            runtime_excluded = build_runtime_exclusion_matcher(
+                vault_root,
+                runtime_dir=resolved_runtime_dir,
+                snapshot_prefix=runtime_prefix,
+            )
+        except CoherenceError as error:
+            raise ToolExecutionError("Could not resolve configured runtime directory") from error
+        try:
+            policy = load_retrieval_policy(vault_root)
+        except RetrievalError as error:
+            raise ToolExecutionError("Retrieval policy is invalid") from error
+        scope = RetrievalScope()
+
+        def allowed(path: str) -> bool:
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
+            normalized = posixpath.normpath(path)
+            try:
+                if runtime_excluded(normalized):
+                    return False
+            except CoherenceError as error:
+                raise ToolExecutionError("Could not verify configured runtime exclusion") from error
+            try:
+                return scope_decision(
+                    path,
+                    scope=scope,
+                    policy=policy,
+                    mode="external",
+                ).allowed
+            except RetrievalError as error:
+                raise ToolExecutionError("Retrieval policy is invalid") from error
+
+        return allowed
+
+    def _reject_runtime_paths(*paths: str | None) -> None:
+        allow_path = _external_registry_identity_allow_path()
+        denied = sorted({path for path in paths if path is not None and not allow_path(path)})
+        if denied:
+            raise ToolValidationError(
+                "MCP ingestion paths are unavailable under the external retrieval policy"
+            )
+
+    def _visible_registry_paths(
+        paths: tuple[str, ...],
+        *,
+        allow_path: Callable[[str], bool],
+    ) -> list[str]:
+        return [path for path in paths if allow_path(path)]
+
+    def _visible_registry_renames(
+        renames: tuple[tuple[str, str], ...],
+        *,
+        allow_path: Callable[[str], bool],
+    ) -> list[tuple[str, str]]:
+        return [
+            (old_path, new_path)
+            for old_path, new_path in renames
+            if allow_path(old_path) and allow_path(new_path)
+        ]
 
     def _refresh_for_ingestion(source_path: str) -> None:
-        result = refresh_registry(vault_root=vault_root, registry=registry)
+        allow_identity = _external_registry_identity_allow_path()
+        result = refresh_registry(
+            vault_root=vault_root,
+            registry=registry,
+            identity_allow_path=allow_identity,
+        )
+        visible_renamed = _visible_registry_renames(result.renamed, allow_path=allow_identity)
+        relocated_paths = [path for pair in visible_renamed for path in pair]
         activity.append(
             tool="ingestion_registry_preflight",
             source_paths=[source_path],
-            changed_paths=[*result.new, *result.modified, *result.deleted],
+            changed_paths=[
+                *_visible_registry_paths(result.new, allow_path=allow_identity),
+                *_visible_registry_paths(result.modified, allow_path=allow_identity),
+                *_visible_registry_paths(result.deleted, allow_path=allow_identity),
+                *relocated_paths,
+            ],
         )
 
     def registry_refresh_tool() -> RegistryRefreshMCPResult:
         def op() -> RegistryRefreshMCPResult:
-            result = refresh_registry(vault_root=vault_root, registry=registry)
+            allow_identity = _external_registry_identity_allow_path()
+            result = refresh_registry(
+                vault_root=vault_root,
+                registry=registry,
+                identity_allow_path=allow_identity,
+            )
+            visible_new = _visible_registry_paths(result.new, allow_path=allow_identity)
+            visible_modified = _visible_registry_paths(result.modified, allow_path=allow_identity)
+            visible_unchanged = _visible_registry_paths(result.unchanged, allow_path=allow_identity)
+            visible_deleted = _visible_registry_paths(result.deleted, allow_path=allow_identity)
+            visible_renamed = _visible_registry_renames(result.renamed, allow_path=allow_identity)
+            relocated_paths = [path for pair in visible_renamed for path in pair]
             activity.append(
                 tool="registry_refresh",
-                changed_paths=[*result.new, *result.modified, *result.deleted],
+                changed_paths=[
+                    *visible_new,
+                    *visible_modified,
+                    *visible_deleted,
+                    *relocated_paths,
+                ],
             )
-            return {
-                "new": list(result.new),
-                "modified": list(result.modified),
-                "unchanged": list(result.unchanged),
-                "deleted": list(result.deleted),
+            payload: RegistryRefreshMCPResult = {
+                "new": visible_new,
+                "modified": visible_modified,
+                "unchanged": visible_unchanged,
+                "deleted": visible_deleted,
                 "proposals_indexed": result.proposals_indexed,
             }
+            if visible_renamed:
+                payload["renamed"] = [
+                    {"from_path": old_path, "to_path": new_path}
+                    for old_path, new_path in visible_renamed
+                ]
+            return payload
 
         return _invoke_mcp_tool(op)
 
@@ -363,8 +468,11 @@ def create_mcp_server(
                 "question": pack.question,
                 "instructions": [
                     {
-                        "id": item.id, "text": item.text, "authority": item.authority,
-                        "scope": item.scope, "priority": item.priority,
+                        "id": item.id,
+                        "text": item.text,
+                        "authority": item.authority,
+                        "scope": item.scope,
+                        "priority": item.priority,
                         "applicable_sources": list(item.applicable_sources),
                         "applicability": list(item.applicability),
                     }
@@ -372,8 +480,10 @@ def create_mcp_server(
                 ],
                 "sources": [
                     {
-                        "path": item.path, "title": item.title,
-                        "description": item.description, "excerpt": item.excerpt,
+                        "path": item.path,
+                        "title": item.title,
+                        "description": item.description,
+                        "excerpt": item.excerpt,
                         "score": item.score,
                     }
                     for item in pack.sources
@@ -382,8 +492,10 @@ def create_mcp_server(
                 "omissions": list(pack.omissions),
                 "diagnostics": [
                     {
-                        "code": item.code, "severity": item.severity,
-                        "source_path": item.source_path, "line": item.line,
+                        "code": item.code,
+                        "severity": item.severity,
+                        "source_path": item.source_path,
+                        "line": item.line,
                         "message": item.message,
                     }
                     for item in pack.diagnostics
@@ -397,9 +509,7 @@ def create_mcp_server(
             result = search_wiki(
                 vault_root=vault_root, request=WikiSearchRequest(query=query, limit=limit)
             )
-            activity.append(
-                tool="wiki_search", source_paths=[hit.path for hit in result.hits]
-            )
+            activity.append(tool="wiki_search", source_paths=[hit.path for hit in result.hits])
             return {
                 "query": result.query,
                 "hits": [
@@ -447,15 +557,23 @@ def create_mcp_server(
                     for item in updates or []
                 ),
             )
+            _reject_runtime_paths(
+                request.source_path,
+                *(item.target_path for item in request.creates),
+                *(item.target_path for item in request.updates),
+            )
             _refresh_for_ingestion(source_path)
             result = evolve_wiki_proposal(
                 vault_root=vault_root,
                 registry=registry,
                 request=request,
+                runtime_dir=resolved_runtime_dir,
             )
             activity.append(
-                tool="ingestion_evolve_wiki_proposal", source_paths=[source_path],
-                proposal_id=result.proposal_id, target_paths=list(result.target_paths),
+                tool="ingestion_evolve_wiki_proposal",
+                source_paths=[source_path],
+                proposal_id=result.proposal_id,
+                target_paths=list(result.target_paths),
                 operation_count=result.operation_count,
             )
             return {
@@ -479,15 +597,20 @@ def create_mcp_server(
                 source_path=source_path,
                 wiki_creates=tuple(
                     EvolveWikiCreateRequest(
-                        target_path=item.target_path, title=item.title, body=item.body,
-                        rationale=item.rationale, tags=tuple(item.tags or ()),
+                        target_path=item.target_path,
+                        title=item.title,
+                        body=item.body,
+                        rationale=item.rationale,
+                        tags=tuple(item.tags or ()),
                         tag_rationale=item.tag_rationale,
                     )
                     for item in wiki_creates or []
                 ),
                 wiki_updates=tuple(
                     EvolveWikiUpdateRequest(
-                        target_path=item.target_path, heading=item.heading, body=item.body,
+                        target_path=item.target_path,
+                        heading=item.heading,
+                        body=item.body,
                         rationale=item.rationale,
                         tags=None if item.tags is None else tuple(item.tags),
                         tag_rationale=item.tag_rationale,
@@ -496,8 +619,12 @@ def create_mcp_server(
                 ),
                 flashcards=tuple(
                     StudyFlashcardCreateRequest(
-                        target_path=item.target_path, card_id=item.card_id, topic=item.topic,
-                        question=item.question, answer=item.answer, rationale=item.rationale,
+                        target_path=item.target_path,
+                        card_id=item.card_id,
+                        topic=item.topic,
+                        question=item.question,
+                        answer=item.answer,
+                        rationale=item.rationale,
                         learning_context=item.learning_context,
                         knowledge_refs=tuple(item.knowledge_refs or ()),
                         estimated_seconds=item.estimated_seconds,
@@ -505,21 +632,33 @@ def create_mcp_server(
                     for item in flashcards or []
                 ),
             )
+            _reject_runtime_paths(
+                request.source_path,
+                *(item.target_path for item in request.wiki_creates),
+                *(item.target_path for item in request.wiki_updates),
+                *(item.target_path for item in request.flashcards),
+                *(ref for item in request.flashcards for ref in item.knowledge_refs),
+            )
             _refresh_for_ingestion(source_path)
             result = evolve_study_learning_proposal(
                 vault_root=vault_root,
                 registry=registry,
                 request=request,
+                runtime_dir=resolved_runtime_dir,
             )
             activity.append(
-                tool="study_evolve_learning_proposal", source_paths=[source_path],
-                proposal_id=result.proposal_id, target_paths=list(result.target_paths),
+                tool="study_evolve_learning_proposal",
+                source_paths=[source_path],
+                proposal_id=result.proposal_id,
+                target_paths=list(result.target_paths),
                 operation_count=result.operation_count,
             )
             return {
-                "proposal_id": result.proposal_id, "proposal_path": result.proposal_path,
+                "proposal_id": result.proposal_id,
+                "proposal_path": result.proposal_path,
                 "target_paths": list(result.target_paths),
-                "operation_count": result.operation_count, "status": "draft",
+                "operation_count": result.operation_count,
+                "status": "draft",
             }
 
         return _invoke_mcp_tool(op)
@@ -545,6 +684,12 @@ def create_mcp_server(
                 page_kind=page_kind,
                 slug=slug,
             )
+            resolved_target = resolve_create_wiki_target(
+                target_path=request.target_path,
+                page_kind=request.page_kind,
+                slug=request.slug,
+            )
+            _reject_runtime_paths(request.source_path, resolved_target)
             _refresh_for_ingestion(source_path)
             res = create_wiki_proposal(
                 vault_root=vault_root,
@@ -552,8 +697,11 @@ def create_mcp_server(
                 request=request,
             )
             activity.append(
-                tool="ingestion_create_wiki_proposal", source_paths=[source_path],
-                proposal_id=res.proposal_id, target_paths=[res.target_path], operation_count=1,
+                tool="ingestion_create_wiki_proposal",
+                source_paths=[source_path],
+                proposal_id=res.proposal_id,
+                target_paths=[res.target_path],
+                operation_count=1,
             )
             return {
                 "proposal_id": res.proposal_id,
@@ -581,15 +729,20 @@ def create_mcp_server(
                 tags=None if tags is None else tuple(tags),
                 tag_rationale=tag_rationale,
             )
+            _reject_runtime_paths(request.source_path, request.target_path)
             _refresh_for_ingestion(source_path)
             res = update_wiki_section_proposal(
                 vault_root=vault_root,
                 registry=registry,
                 request=request,
+                runtime_dir=resolved_runtime_dir,
             )
             activity.append(
-                tool="ingestion_update_wiki_section_proposal", source_paths=[source_path],
-                proposal_id=res.proposal_id, target_paths=[res.target_path], operation_count=1,
+                tool="ingestion_update_wiki_section_proposal",
+                source_paths=[source_path],
+                proposal_id=res.proposal_id,
+                target_paths=[res.target_path],
+                operation_count=1,
             )
             return {
                 "proposal_id": res.proposal_id,
@@ -628,16 +781,29 @@ def create_mcp_server(
                 create_page_kind=create_page_kind,
                 create_slug=create_slug,
             )
+            resolved_create_target = resolve_create_wiki_target(
+                target_path=request.create_target_path,
+                page_kind=request.create_page_kind,
+                slug=request.create_slug,
+            )
+            _reject_runtime_paths(
+                request.source_path,
+                resolved_create_target,
+                request.update_target_path,
+            )
             _refresh_for_ingestion(source_path)
             res = create_wiki_and_update_section_proposal(
                 vault_root=vault_root,
                 registry=registry,
                 request=request,
+                runtime_dir=resolved_runtime_dir,
             )
             activity.append(
                 tool="ingestion_create_wiki_and_update_section_proposal",
-                source_paths=[source_path], proposal_id=res.proposal_id,
-                target_paths=[res.create_target_path, res.update_target_path], operation_count=2,
+                source_paths=[source_path],
+                proposal_id=res.proposal_id,
+                target_paths=[res.create_target_path, res.update_target_path],
+                operation_count=2,
             )
             return {
                 "proposal_id": res.proposal_id,
@@ -684,13 +850,22 @@ def create_mcp_server(
 
     def proposal_apply_tool(proposal_id: str) -> ApplyProposalMCPResult:
         def op() -> ApplyProposalMCPResult:
-            res = apply_proposal_tool(
-                vault_root=vault_root,
-                authorizer=authorizer,
-                request=ApplyProposalRequest(proposal_id=proposal_id),
-            )
+            if runtime_dir is None:
+                res = apply_proposal_tool(
+                    vault_root=vault_root,
+                    authorizer=authorizer,
+                    request=ApplyProposalRequest(proposal_id=proposal_id),
+                )
+            else:
+                res = apply_proposal_tool(
+                    vault_root=vault_root,
+                    authorizer=authorizer,
+                    request=ApplyProposalRequest(proposal_id=proposal_id),
+                    identity_runtime_dir=runtime_dir,
+                )
             activity.append(
-                tool="proposal_apply", proposal_id=res.proposal_id,
+                tool="proposal_apply",
+                proposal_id=res.proposal_id,
                 changed_paths=list(res.changed_paths),
             )
             return {
@@ -709,7 +884,8 @@ def create_mcp_server(
         return {
             "records": [
                 {
-                    "timestamp": item.timestamp, "tool": item.tool,
+                    "timestamp": item.timestamp,
+                    "tool": item.tool,
                     "focus_paths": list(item.focus_paths),
                     "instruction_ids": list(item.instruction_ids),
                     "source_paths": list(item.source_paths),
@@ -756,7 +932,9 @@ def create_mcp_server(
                 description=VAULT_CONTEXT_MCP_DESCRIPTION,
                 annotations=ToolAnnotations(
                     title="Build vault context",
-                    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
                     openWorldHint=False,
                 ),
             ),
@@ -790,7 +968,9 @@ def create_mcp_server(
                 description=STUDY_EVOLVE_LEARNING_MCP_DESCRIPTION,
                 annotations=ToolAnnotations(
                     title="Evolve study learning",
-                    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=False,
                     openWorldHint=False,
                 ),
             ),
@@ -836,7 +1016,9 @@ def create_mcp_server(
                 description=RUNTIME_ACTIVITY_MCP_DESCRIPTION,
                 annotations=ToolAnnotations(
                     title="Inspect LifeOS runtime activity",
-                    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
                     openWorldHint=False,
                 ),
             ),

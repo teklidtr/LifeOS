@@ -20,7 +20,7 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
 from lifeos.retrieval import RetrievalError, RetrievalPolicy, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
-from lifeos.vault import VaultAccessError, read_vault_markdown
+from lifeos.vault import VaultAccessError, is_markdown_path, read_vault_markdown
 
 RetrievalMode = Literal["local", "external"]
 
@@ -78,7 +78,7 @@ def read_markdown(
     except FileTrackingError as e:
         raise ToolValidationError(f"Invalid vault path: {e}") from e
 
-    if not request.vault_path.endswith(".md"):
+    if not is_markdown_path(request.vault_path):
         raise ToolValidationError("Only Markdown files (.md) are supported")
 
     _require_allowed(

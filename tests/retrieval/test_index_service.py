@@ -51,7 +51,7 @@ def test_interrupted_rebuild_resumes_without_publishing_partial_index(tmp_path: 
     assert not service.staging_path.exists()
 
 
-def test_incremental_create_edit_delete_and_content_rename(tmp_path: Path) -> None:
+def test_incremental_create_edit_delete_and_legacy_move(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
     runtime = vault / ".lifeos"
@@ -59,8 +59,10 @@ def test_incremental_create_edit_delete_and_content_rename(tmp_path: Path) -> No
     service = RetrievalIndexService(vault_root=vault, runtime_dir=runtime)
     service.rebuild()
     (vault / "wiki/a.md").rename(vault / "wiki/renamed.md")
-    renamed = service.incremental_sync()
-    assert renamed.renamed == (("wiki/a.md", "wiki/renamed.md"),)
+    moved = service.incremental_sync()
+    assert moved.renamed == ()
+    assert moved.deleted == ("wiki/a.md",)
+    assert moved.created == ("wiki/renamed.md",)
     write(vault, "wiki/renamed.md", "# A\n\nChanged.")
     write(vault, "wiki/new.md", "# New\n\nNew note.")
     changed = service.incremental_sync()

@@ -31,6 +31,7 @@ from .._transaction_files import (
     rollback_creation,
     rollback_replacement,
 )
+from ..config import runtime_overlaps_reserved_canonical
 from ..markdown.parser import parse_markdown_note
 from ..wiki.layout import is_emergent_generated_parent
 from ..ownership.manifest import (
@@ -55,13 +56,10 @@ from .recovery import (
     RecoveryPhase,
     RecoveryStateFiles,
     RecoveryTransactionId,
-    acquire_recovery_lock,
     generate_recovery_transaction_id,
-    initialize_recovery_transaction,
-    remove_rolled_back_recovery_transaction,
-    write_recovery_journal,
 )
 from .recovery_service import _recover_interrupted_applications_locked
+from .recovery_store import PinnedRecoveryStore, acquire_pinned_recovery_store
 from .schema import ProposalStatus
 from .unified_diff import apply_diff
 from .validation import preflight_proposal
@@ -168,7 +166,9 @@ class _ApplicationContext:
     vault_root: Path
     applied_by: str
     applied_at: str
+    runtime_dir: Path
     recovery_root: Path
+    recovery_store: PinnedRecoveryStore
     outcome: ProposalApplicationResult
 
 
@@ -333,7 +333,7 @@ def _advance_recovery_phase(
     *,
     journal: RecoveryJournal,
     next_phase: RecoveryPhase,
-    recovery_root: Path,
+    recovery_store: PinnedRecoveryStore,
 ) -> _PhaseResult:
     expected = _LEGAL_PHASE_TRANSITIONS.get(journal.phase)
     if expected is not next_phase:
@@ -341,7 +341,7 @@ def _advance_recovery_phase(
             f"Illegal recovery phase transition: {journal.phase.value} -> {next_phase.value}"
         )
     updated = replace(journal, phase=next_phase)
-    write_recovery_journal(recovery_root=recovery_root, journal=updated)
+    recovery_store.write_journal(updated)
     return _PhaseResult(journal=updated, phase=next_phase)
 
 
@@ -350,6 +350,7 @@ def _validate_application_proposal(
     *,
     vault_root: Path,
     outcome: ProposalApplicationResult,
+    runtime_dir: Path | None = None,
 ) -> None:
     if proposal.patch_document.schema_version == 1:
         for operation in proposal.patch_document.operations:
@@ -360,7 +361,14 @@ def _validate_application_proposal(
                     code=ApplicationErrorCode.VALIDATION_ERROR,
                 )
 
-    preflight_result = preflight_proposal(proposal, vault_root=vault_root)
+    if runtime_dir is None:
+        preflight_result = preflight_proposal(proposal, vault_root=vault_root)
+    else:
+        preflight_result = preflight_proposal(
+            proposal,
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+        )
     if preflight_result.state == "valid":
         return
     finding_messages = [finding.message for finding in preflight_result.findings]
@@ -425,6 +433,20 @@ def _validate_proposal_sources_locked(
         )
 
 
+def _open_directory_chain(root_fd: int, relative_path: str) -> int:
+    """Open a vault-relative directory chain without following any component symlink."""
+    current_fd = os.dup(root_fd)
+    try:
+        for segment in Path(relative_path).parts:
+            next_fd = open_directory_secure(Path(segment), dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except Exception:
+        os.close(current_fd)
+        raise
+
+
 def _open_or_create_target_parent(
     *,
     vault_root: Path,
@@ -432,9 +454,11 @@ def _open_or_create_target_parent(
     parent_relative: str,
     operation: PatchOperation,
     created_parent_paths: list[str] | None = None,
+    require_authority: Callable[[], None] | None = None,
 ) -> ParentDescriptor:
+    del vault_root
     try:
-        parent_fd = open_directory_secure(vault_root / parent_relative)
+        parent_fd = _open_directory_chain(root_fd, parent_relative)
     except SecureIOError as open_error:
         if not (
             operation.op == "create_generated_file"
@@ -446,37 +470,39 @@ def _open_or_create_target_parent(
         parts = parent_path.parts
         if not parts or parts[0] not in {"wiki", "flashcards"}:
             raise open_error
-        canonical_root = parts[0]
 
+        current_fd = os.dup(root_fd)
         try:
-            current_fd = open_directory_secure(vault_root / canonical_root, dir_fd=root_fd)
-        except SecureIOError:
-            # Canonical generated roots are never created implicitly.
-            raise open_error
-
-        try:
-            current_parts = [canonical_root]
+            try:
+                child_fd = open_directory_secure(Path(parts[0]), dir_fd=current_fd)
+            except SecureIOError:
+                raise open_error
+            os.close(current_fd)
+            current_fd = child_fd
+            current_parts = [parts[0]]
             for segment in parts[1:]:
                 try:
                     child_fd = open_directory_secure(Path(segment), dir_fd=current_fd)
                 except SecureIOError:
+                    if require_authority is not None:
+                        require_authority()
+                    live_child_path = "/".join((*current_parts, segment))
                     try:
-                        os.mkdir(segment, 0o755, dir_fd=current_fd)
+                        # Resolve the complete reviewed path from the pinned vault as part of
+                        # mkdir; an opened ancestor may have been relocated meanwhile.
+                        os.mkdir(live_child_path, 0o755, dir_fd=root_fd)
                     except FileExistsError:
                         pass
                     except OSError as error:
                         raise SecureIOError(
                             code="dir_create_failed",
                             message=(
-                                "Failed to lazily create generated directory: "
-                                f"{error.strerror}"
+                                f"Failed to lazily create generated directory: {error.strerror}"
                             ),
                         ) from error
                     else:
                         if created_parent_paths is not None:
-                            created_parent_paths.append(
-                                "/".join((*current_parts, segment))
-                            )
+                            created_parent_paths.append("/".join((*current_parts, segment)))
                     sync_result = fsync_directory(current_fd)
                     if sync_result.state == DirectorySyncState.FAILED:
                         raise SecureIOError(
@@ -486,8 +512,6 @@ def _open_or_create_target_parent(
                                 f"{sync_result.errno_name}"
                             ),
                         )
-                    # O_NOFOLLOW in open_directory_secure keeps an existing or
-                    # raced symlink from becoming a traversal path.
                     child_fd = open_directory_secure(Path(segment), dir_fd=current_fd)
                 os.close(current_fd)
                 current_fd = child_fd
@@ -503,7 +527,55 @@ def _open_or_create_target_parent(
         dev=parent_stat.st_dev,
         ino=parent_stat.st_ino,
         path=parent_relative,
+        authority_fd=root_fd,
     )
+
+
+def _prepare_canonical_parent_descriptors(
+    *,
+    proposal: LoadedProposal,
+    vault_root: Path,
+    root_fd: int,
+    parent_descriptors: Dict[str, ParentDescriptor],
+    created_parent_paths: list[str],
+    require_authority: Callable[[], None],
+    outcome: ProposalApplicationResult,
+) -> None:
+    try:
+        system_fd = _open_directory_chain(root_fd, "system")
+    except SecureIOError:
+        system_fd = None
+    if system_fd is not None:
+        system_stat = os.fstat(system_fd)
+        parent_descriptors["system"] = ParentDescriptor(
+            fd=system_fd,
+            dev=system_stat.st_dev,
+            ino=system_stat.st_ino,
+            path="system",
+            authority_fd=root_fd,
+        )
+
+    for operation in proposal.patch_document.operations:
+        if operation.op == "release_generated_ownership":
+            continue
+        parent_relative = str(Path(operation.target_path).parent)
+        if parent_relative in parent_descriptors:
+            continue
+        try:
+            parent_descriptors[parent_relative] = _open_or_create_target_parent(
+                vault_root=vault_root,
+                root_fd=root_fd,
+                parent_relative=parent_relative,
+                operation=operation,
+                created_parent_paths=created_parent_paths,
+                require_authority=require_authority,
+            )
+        except SecureIOError as error:
+            raise ApplicationError(
+                "Missing target parent directory",
+                outcome,
+                code=ApplicationErrorCode.TARGET_CONFLICT,
+            ) from error
 
 
 def _candidate_for_operation(
@@ -647,8 +719,8 @@ def _validate_precommit_state(
     outcome: ProposalApplicationResult,
 ) -> None:
     vault_lock_stat = os.stat(
-        ".lifeos/locks/vault-mutation.lock",
-        dir_fd=root_fd,
+        vault_lock.filename,
+        dir_fd=vault_lock.dir_fd,
         follow_symlinks=False,
     )
     assert vault_lock.lock_fd is not None
@@ -679,7 +751,19 @@ def _validate_precommit_state(
     for relative_path, descriptor in parent_descriptors.items():
         if relative_path == ".":
             continue
-        parent_stat = os.stat(descriptor.path, dir_fd=root_fd, follow_symlinks=False)
+        observed_fd: int | None = None
+        try:
+            observed_fd = _open_directory_chain(root_fd, relative_path)
+            parent_stat = os.fstat(observed_fd)
+        except (OSError, SecureIOError) as error:
+            raise ApplicationError(
+                "Parent descriptor mutated",
+                outcome,
+                code=ApplicationErrorCode.TARGET_MUTATED,
+            ) from error
+        finally:
+            if observed_fd is not None:
+                os.close(observed_fd)
         if parent_stat.st_dev != descriptor.dev or parent_stat.st_ino != descriptor.ino:
             raise ApplicationError(
                 "Parent descriptor mutated",
@@ -780,9 +864,11 @@ def _install_prepared_targets(
     outcome: ProposalApplicationResult,
     durability: str,
     update_op_state: Callable[[int, OperationState, Optional[str]], None],
+    require_authority: Callable[[], None],
 ) -> tuple[str, bool]:
     write_occurred = False
     for prepared in prepared_ops:
+        require_authority()
         try:
             if prepared.original_identity is not None:
                 sync_result = publish_replacement(
@@ -812,11 +898,13 @@ def _install_ownership_manifest(
     manifest_identity: Optional[TargetIdentity],
     outcome: ProposalApplicationResult,
     durability: str,
+    require_authority: Callable[[], None],
 ) -> tuple[str, bool, ProposalApplicationResult]:
     if not ownership_changed:
         _application_checkpoint("after_ownership_install")
         return durability, False, outcome
     assert manifest_staging is not None
+    require_authority()
     try:
         if manifest_identity is not None:
             sync_result = publish_replacement(
@@ -841,7 +929,9 @@ def _commit_proposal_lifecycle(
     proposal_identity: TargetIdentity,
     outcome: ProposalApplicationResult,
     durability: str,
+    require_authority: Callable[[], None],
 ) -> str:
+    require_authority()
     try:
         sync_result = publish_replacement("proposal.md", lifecycle_staging, proposal_identity)
     except (OSError, TransactionError) as error:
@@ -865,7 +955,7 @@ def _rollback_application(
     manifest_backup: Optional[BackupFile],
     transaction_initialized: bool,
     transaction_id: Optional[RecoveryTransactionId],
-    recovery_root: Path,
+    recovery_store: PinnedRecoveryStore,
     durability: str,
     recovery_artifacts_retained: bool,
     update_op_state: Callable[[int, OperationState, Optional[str]], None],
@@ -931,10 +1021,7 @@ def _rollback_application(
     if transaction_initialized and rollback_succeeded:
         assert transaction_id is not None
         try:
-            remove_rolled_back_recovery_transaction(
-                recovery_root=recovery_root,
-                transaction_id=transaction_id,
-            )
+            recovery_store.remove_rolled_back(transaction_id)
             transaction_initialized = False
         except RecoveryError:
             rollback_succeeded = False
@@ -952,6 +1039,24 @@ def _rollback_application(
         application_error=error if isinstance(error, ApplicationError) else None,
         unexpected_error=None if isinstance(error, ApplicationError) else error,
     )
+
+
+def _cleanup_created_parent_paths(*, root_fd: int, created_parent_paths: list[str]) -> None:
+    """Best-effort rollback of empty generated directories on the pinned vault inode."""
+    for relative_path in reversed(created_parent_paths):
+        parts = Path(relative_path).parts
+        if not parts:
+            continue
+        parent_relative = str(Path(*parts[:-1])) if len(parts) > 1 else "."
+        parent_fd: int | None = None
+        try:
+            parent_fd = _open_directory_chain(root_fd, parent_relative)
+            os.rmdir(parts[-1], dir_fd=parent_fd)
+        except (OSError, SecureIOError):
+            pass
+        finally:
+            if parent_fd is not None:
+                os.close(parent_fd)
 
 
 def _cleanup_application_resources(
@@ -1038,6 +1143,7 @@ def apply_proposal(
     vault_root: Path,
     applied_by: str,
     applied_at: str,
+    identity_runtime_dir: Path | None = None,
 ) -> ProposalApplicationResult:
     outcome = _create_initial_outcome(proposal)
     if not applied_by:
@@ -1053,12 +1159,40 @@ def apply_proposal(
             code=ApplicationErrorCode.VALIDATION_ERROR,
         )
 
-    runtime_dir = vault_root / ".lifeos"
-    recovery_root = runtime_dir / "recovery"
+    runtime_dir = identity_runtime_dir or (vault_root / ".lifeos")
     try:
-        with acquire_recovery_lock(runtime_dir=runtime_dir):
+        resolved_runtime = runtime_dir.resolve(strict=False)
+        resolved_vault = vault_root.resolve(strict=False)
+    except (OSError, RuntimeError) as error:
+        raise ApplicationError(
+            "Could not validate runtime directory boundary",
+            outcome,
+            code=ApplicationErrorCode.VALIDATION_ERROR,
+        ) from error
+    if resolved_runtime == resolved_vault:
+        raise ApplicationError(
+            "Runtime directory must not be the canonical vault root",
+            outcome,
+            code=ApplicationErrorCode.VALIDATION_ERROR,
+        )
+    if runtime_overlaps_reserved_canonical(vault_root, runtime_dir):
+        raise ApplicationError(
+            "Runtime directory must not overlap reserved canonical subtrees",
+            outcome,
+            code=ApplicationErrorCode.VALIDATION_ERROR,
+        )
+
+    try:
+        with acquire_pinned_recovery_store(
+            runtime_dir=runtime_dir,
+            authority_root=vault_root,
+        ) as recovery_store:
             try:
-                _recover_interrupted_applications_locked(vault_root=vault_root)
+                _recover_interrupted_applications_locked(
+                    vault_root=vault_root,
+                    runtime_dir=runtime_dir,
+                    recovery_store=recovery_store,
+                )
             except RecoveryCorruptStateError as error:
                 raise ApplicationError(
                     "Recovery state is ambiguous",
@@ -1076,7 +1210,8 @@ def apply_proposal(
                 vault_root=vault_root,
                 applied_by=applied_by,
                 applied_at=applied_at,
-                recovery_root=recovery_root,
+                runtime_dir=runtime_dir,
+                recovery_store=recovery_store,
                 outcome=outcome,
             )
     except RecoveryLockUnavailableError as error:
@@ -1093,7 +1228,8 @@ def _apply_proposal_locked(
     vault_root: Path,
     applied_by: str,
     applied_at: str,
-    recovery_root: Path,
+    runtime_dir: Path,
+    recovery_store: PinnedRecoveryStore,
     outcome: ProposalApplicationResult,
 ) -> ProposalApplicationResult:
     """Orchestrate one locked application through the explicit state machine."""
@@ -1103,10 +1239,28 @@ def _apply_proposal_locked(
             vault_root=vault_root,
             applied_by=applied_by,
             applied_at=applied_at,
-            recovery_root=recovery_root,
+            runtime_dir=runtime_dir,
+            recovery_root=recovery_store.recovery_root,
+            recovery_store=recovery_store,
             outcome=outcome,
         )
     )
+
+
+def _require_current_recovery_authority(
+    *,
+    recovery_store: PinnedRecoveryStore,
+    outcome: ProposalApplicationResult,
+) -> None:
+    try:
+        recovery_store.require_current_runtime_path()
+        recovery_store.require_current_authority_path()
+    except RecoveryError as error:
+        raise ApplicationError(
+            "Recovery or mutation authority changed during proposal application",
+            outcome,
+            code=ApplicationErrorCode.RECOVERY_REQUIRED,
+        ) from error
 
 
 def _execute_application_transaction(
@@ -1116,11 +1270,9 @@ def _execute_application_transaction(
     vault_root = context.vault_root
     applied_by = context.applied_by
     applied_at = context.applied_at
-    recovery_root = context.recovery_root
+    runtime_dir = context.runtime_dir
+    recovery_store = context.recovery_store
     outcome = context.outcome
-    canonical_proposals_root = vault_root / "proposals"
-    proposal_dir_path = canonical_proposals_root / proposal.proposal_dir
-
     vault_lock: Optional[OwnedLock] = None
     proposal_lock: Optional[OwnedLock] = None
     vault_locked = False
@@ -1129,7 +1281,6 @@ def _execute_application_transaction(
     locks_fd: Optional[int] = None
     root_fd: Optional[int] = None
     prop_fd: Optional[int] = None
-
     parent_descriptors: Dict[str, ParentDescriptor] = {}
     created_parent_paths: list[str] = []
     prepared_ops: List[_PreparedOp] = []
@@ -1138,7 +1289,6 @@ def _execute_application_transaction(
     manifest_backup: Optional[BackupFile] = None
     lifecycle_staging: Optional[StagingFile] = None
     lifecycle_backup: Optional[BackupFile] = None
-
     manifest_committed = False
     lifecycle_committed = False
     ownership_changed = False
@@ -1161,14 +1311,20 @@ def _execute_application_transaction(
         operation_results[index] = replace(operation_results[index], state=state, error=error)
         outcome = replace(outcome, operation_results=tuple(operation_results))
 
+    def require_authority() -> None:
+        _require_current_recovery_authority(
+            recovery_store=recovery_store,
+            outcome=outcome,
+        )
+
     try:
         try:
-            lifeos_fd = open_directory_secure(vault_root / ".lifeos")
+            lifeos_fd = os.dup(recovery_store.runtime_fd)
             try:
-                locks_fd = open_directory_secure(vault_root / ".lifeos" / "locks", dir_fd=lifeos_fd)
+                locks_fd = open_directory_secure(Path("locks"), dir_fd=lifeos_fd)
             except SecureIOError:
                 os.mkdir("locks", 0o700, dir_fd=lifeos_fd)
-                locks_fd = open_directory_secure(vault_root / ".lifeos" / "locks", dir_fd=lifeos_fd)
+                locks_fd = open_directory_secure(Path("locks"), dir_fd=lifeos_fd)
         except (OSError, SecureIOError) as error:
             raise ApplicationError(
                 "Failed to setup transaction",
@@ -1187,14 +1343,42 @@ def _execute_application_transaction(
                 code=ApplicationErrorCode.LOCK_ERROR,
             ) from error
 
+        require_authority()
         try:
-            prop_fd = open_directory_secure(proposal_dir_path)
+            root_fd = recovery_store.open_authority_root()
+        except RecoveryError as error:
+            raise ApplicationError(
+                "Failed to open pinned vault mutation authority",
+                outcome,
+                code=ApplicationErrorCode.RECOVERY_REQUIRED,
+            ) from error
+        root_stat = os.fstat(root_fd)
+        parent_descriptors["."] = ParentDescriptor(
+            fd=root_fd,
+            dev=root_stat.st_dev,
+            ino=root_stat.st_ino,
+            path=".",
+            authority_fd=root_fd,
+        )
+
+        try:
+            proposals_fd = _open_directory_chain(root_fd, "proposals")
+            prop_fd = open_directory_secure(Path(proposal.proposal_dir), dir_fd=proposals_fd)
         except SecureIOError as error:
             raise ApplicationError(
                 "Failed to open proposal dir",
                 outcome,
                 code=ApplicationErrorCode.IO_ERROR,
             ) from error
+        proposals_stat = os.fstat(proposals_fd)
+        parent_descriptors["proposals"] = ParentDescriptor(
+            fd=proposals_fd,
+            dev=proposals_stat.st_dev,
+            ino=proposals_stat.st_ino,
+            path="proposals",
+            authority_fd=root_fd,
+        )
+
         proposal_lock = OwnedLock(prop_fd, ".lifeos-transition.lock")
         try:
             proposal_lock.acquire()
@@ -1212,63 +1396,24 @@ def _execute_application_transaction(
             vault_root=vault_root,
             outcome=outcome,
         )
-        _validate_application_proposal(proposal, vault_root=vault_root, outcome=outcome)
-
-        try:
-            root_fd = open_directory_secure(vault_root)
-        except SecureIOError as error:
-            raise ApplicationError(
-                "Failed to open vault root",
-                outcome,
-                code=ApplicationErrorCode.IO_ERROR,
-            ) from error
-
-        root_stat = os.fstat(root_fd)
-        parent_descriptors["."] = ParentDescriptor(
-            fd=root_fd, dev=root_stat.st_dev, ino=root_stat.st_ino, path="."
+        require_authority()
+        _validate_application_proposal(
+            proposal,
+            vault_root=vault_root,
+            outcome=outcome,
+            runtime_dir=runtime_dir,
         )
-        proposals_fd = open_directory_secure(canonical_proposals_root, dir_fd=root_fd)
-        proposals_stat = os.fstat(proposals_fd)
-        parent_descriptors["proposals"] = ParentDescriptor(
-            fd=proposals_fd,
-            dev=proposals_stat.st_dev,
-            ino=proposals_stat.st_ino,
-            path="proposals",
+        require_authority()
+
+        _prepare_canonical_parent_descriptors(
+            proposal=proposal,
+            vault_root=vault_root,
+            root_fd=root_fd,
+            parent_descriptors=parent_descriptors,
+            created_parent_paths=created_parent_paths,
+            require_authority=require_authority,
+            outcome=outcome,
         )
-
-        try:
-            system_fd = open_directory_secure(vault_root / "system")
-        except SecureIOError:
-            system_fd = None
-        if system_fd is not None:
-            system_stat = os.fstat(system_fd)
-            parent_descriptors["system"] = ParentDescriptor(
-                fd=system_fd,
-                dev=system_stat.st_dev,
-                ino=system_stat.st_ino,
-                path="system",
-            )
-
-        for op in proposal.patch_document.operations:
-            if op.op == "release_generated_ownership":
-                continue
-            target_path = op.target_path
-            parent_relative = str(Path(target_path).parent)
-            if parent_relative not in parent_descriptors:
-                try:
-                    parent_descriptors[parent_relative] = _open_or_create_target_parent(
-                        vault_root=vault_root,
-                        root_fd=root_fd,
-                        parent_relative=parent_relative,
-                        operation=op,
-                        created_parent_paths=created_parent_paths,
-                    )
-                except SecureIOError as error:
-                    raise ApplicationError(
-                        "Missing target parent directory",
-                        outcome,
-                        code=ApplicationErrorCode.TARGET_CONFLICT,
-                    ) from error
 
         manifest_bytes: Optional[bytes] = None
         if "system" in parent_descriptors:
@@ -1376,6 +1521,7 @@ def _execute_application_transaction(
         proposal_candidate = serialize_proposal_markdown(new_metadata, proposal.body)
 
         for candidate in operation_candidates:
+            require_authority()
             try:
                 staging = create_staging_file(
                     target_name=candidate.target_name,
@@ -1415,6 +1561,7 @@ def _execute_application_transaction(
             )
             manifest_mode = stat.S_IMODE(manifest_identity.mode)
         if ownership_changed:
+            require_authority()
             system_parent = parent_descriptors["system"]
             manifest_staging = create_staging_file(
                 "generated-ownership.json",
@@ -1430,11 +1577,13 @@ def _execute_application_transaction(
             for index in manifest_operation_indexes:
                 update_op_state(index, OperationState.PREPARED)
 
+        require_authority()
         proposal_parent = ParentDescriptor(
             fd=prop_fd,
             dev=os.fstat(prop_fd).st_dev,
             ino=os.fstat(prop_fd).st_ino,
-            path=proposal.proposal_dir,
+            path=f"proposals/{proposal.proposal_dir}",
+            authority_fd=root_fd,
         )
         proposal_identity = require_replacement_identity(
             get_target_identity("proposal.md", proposal_parent),
@@ -1548,70 +1697,78 @@ def _execute_application_transaction(
             ownership_state=ownership_state,
             proposal_state=proposal_state,
         )
-        transaction_dir = initialize_recovery_transaction(
-            recovery_root=recovery_root, journal=recovery_journal
-        )
+        transaction_dir = recovery_store.initialize_transaction(recovery_journal)
         transaction_initialized = True
-
-        for prepared, recovery_operation in zip(prepared_ops, recovery_operations, strict=True):
-            write_recovery_artifact(
-                transaction_dir=transaction_dir,
-                artifact=RecoveryArtifact(
-                    relative_path=recovery_operation.staged_path,
-                    content_hash=recovery_operation.staged_hash,
-                    size=recovery_operation.staged_size,
-                    mode=recovery_operation.staged_mode,
-                ),
-                content=prepared.candidate.candidate_content,
-            )
-            if recovery_operation.backup_path is not None:
-                assert prepared.candidate.original_content is not None
-                assert recovery_operation.backup_hash is not None
-                assert recovery_operation.backup_size is not None
+        transaction_fd = recovery_store.open_transaction(transaction_id)
+        try:
+            for prepared, recovery_operation in zip(prepared_ops, recovery_operations, strict=True):
                 write_recovery_artifact(
                     transaction_dir=transaction_dir,
+                    transaction_fd=transaction_fd,
                     artifact=RecoveryArtifact(
-                        relative_path=recovery_operation.backup_path,
-                        content_hash=recovery_operation.backup_hash,
-                        size=recovery_operation.backup_size,
-                        mode=recovery_operation.expected_pre_mode or 0,
+                        relative_path=recovery_operation.staged_path,
+                        content_hash=recovery_operation.staged_hash,
+                        size=recovery_operation.staged_size,
+                        mode=recovery_operation.staged_mode,
                     ),
-                    content=prepared.candidate.original_content,
+                    content=prepared.candidate.candidate_content,
                 )
+                if recovery_operation.backup_path is not None:
+                    assert prepared.candidate.original_content is not None
+                    assert recovery_operation.backup_hash is not None
+                    assert recovery_operation.backup_size is not None
+                    write_recovery_artifact(
+                        transaction_dir=transaction_dir,
+                        transaction_fd=transaction_fd,
+                        artifact=RecoveryArtifact(
+                            relative_path=recovery_operation.backup_path,
+                            content_hash=recovery_operation.backup_hash,
+                            size=recovery_operation.backup_size,
+                            mode=recovery_operation.expected_pre_mode or 0,
+                        ),
+                        content=prepared.candidate.original_content,
+                    )
 
-        write_recovery_artifact(
-            transaction_dir=transaction_dir,
-            artifact=_artifact(ownership_state.staged_path, manifest_candidate, manifest_mode),
-            content=manifest_candidate,
-        )
-        if manifest_bytes is not None:
-            assert ownership_state.backup_path is not None
             write_recovery_artifact(
                 transaction_dir=transaction_dir,
-                artifact=_artifact(ownership_state.backup_path, manifest_bytes, manifest_mode),
-                content=manifest_bytes,
+                transaction_fd=transaction_fd,
+                artifact=_artifact(ownership_state.staged_path, manifest_candidate, manifest_mode),
+                content=manifest_candidate,
             )
-        write_recovery_artifact(
-            transaction_dir=transaction_dir,
-            artifact=_artifact(proposal_state.staged_path, proposal_candidate, proposal_mode),
-            content=proposal_candidate,
-        )
-        write_recovery_artifact(
-            transaction_dir=transaction_dir,
-            artifact=_artifact(
-                proposal_state.backup_path or "backups/proposal",
-                proposal_original,
-                proposal_mode,
-            ),
-            content=proposal_original,
-        )
-        write_recovery_journal(recovery_root=recovery_root, journal=recovery_journal)
+            if manifest_bytes is not None:
+                assert ownership_state.backup_path is not None
+                write_recovery_artifact(
+                    transaction_dir=transaction_dir,
+                    transaction_fd=transaction_fd,
+                    artifact=_artifact(ownership_state.backup_path, manifest_bytes, manifest_mode),
+                    content=manifest_bytes,
+                )
+            write_recovery_artifact(
+                transaction_dir=transaction_dir,
+                transaction_fd=transaction_fd,
+                artifact=_artifact(proposal_state.staged_path, proposal_candidate, proposal_mode),
+                content=proposal_candidate,
+            )
+            write_recovery_artifact(
+                transaction_dir=transaction_dir,
+                transaction_fd=transaction_fd,
+                artifact=_artifact(
+                    proposal_state.backup_path or "backups/proposal",
+                    proposal_original,
+                    proposal_mode,
+                ),
+                content=proposal_original,
+            )
+        finally:
+            os.close(transaction_fd)
+        recovery_store.write_journal(recovery_journal)
         _application_checkpoint("after_prepared_journal")
 
         assert root_fd is not None
         assert prop_fd is not None
         assert vault_lock is not None
         assert proposal_lock is not None
+        require_authority()
         _validate_precommit_state(
             vault_root=vault_root,
             root_fd=root_fd,
@@ -1624,12 +1781,14 @@ def _execute_application_transaction(
             ownership_changed=ownership_changed,
             outcome=outcome,
         )
+        require_authority()
 
         durability, targets_written = _install_prepared_targets(
             prepared_ops=prepared_ops,
             outcome=outcome,
             durability=durability,
             update_op_state=update_op_state,
+            require_authority=require_authority,
         )
         write_occurred = write_occurred or targets_written
 
@@ -1637,7 +1796,7 @@ def _execute_application_transaction(
         recovery_journal = _advance_recovery_phase(
             journal=recovery_journal,
             next_phase=RecoveryPhase.TARGETS_INSTALLED,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
         ).journal
         _application_checkpoint("after_all_targets")
 
@@ -1647,6 +1806,7 @@ def _execute_application_transaction(
             manifest_identity=manifest_identity,
             outcome=outcome,
             durability=durability,
+            require_authority=require_authority,
         )
         write_occurred = write_occurred or manifest_committed
         if manifest_committed:
@@ -1657,7 +1817,7 @@ def _execute_application_transaction(
         recovery_journal = _advance_recovery_phase(
             journal=recovery_journal,
             next_phase=RecoveryPhase.OWNERSHIP_INSTALLED,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
         ).journal
         _application_checkpoint("before_proposal_commit")
 
@@ -1667,6 +1827,7 @@ def _execute_application_transaction(
             proposal_identity=proposal_identity,
             outcome=outcome,
             durability=durability,
+            require_authority=require_authority,
         )
         lifecycle_committed = True
         write_occurred = True
@@ -1675,12 +1836,12 @@ def _execute_application_transaction(
         recovery_journal = _advance_recovery_phase(
             journal=recovery_journal,
             next_phase=RecoveryPhase.PROPOSAL_COMMITTED,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
         ).journal
         recovery_journal = _advance_recovery_phase(
             journal=recovery_journal,
             next_phase=RecoveryPhase.COMPLETE,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
         ).journal
 
         outcome = replace(
@@ -1710,7 +1871,7 @@ def _execute_application_transaction(
             manifest_backup=manifest_backup,
             transaction_initialized=transaction_initialized,
             transaction_id=transaction_id,
-            recovery_root=recovery_root,
+            recovery_store=recovery_store,
             durability=durability,
             recovery_artifacts_retained=recovery_artifacts_retained,
             update_op_state=update_op_state,
@@ -1725,6 +1886,15 @@ def _execute_application_transaction(
         unexpected_error = rollback_result.unexpected_error
 
     finally:
+        if (
+            (application_error is not None or unexpected_error is not None)
+            and root_fd is not None
+            and created_parent_paths
+        ):
+            _cleanup_created_parent_paths(
+                root_fd=root_fd,
+                created_parent_paths=created_parent_paths,
+            )
         cleanup_result = _cleanup_application_resources(
             prepared_ops=prepared_ops,
             manifest_staging=manifest_staging,
@@ -1744,16 +1914,6 @@ def _execute_application_transaction(
         cleanup_succeeded = cleanup_result.cleanup_succeeded
         vault_lock_released = cleanup_result.vault_lock_released
         proposal_lock_released = cleanup_result.proposal_lock_released
-
-        if application_error is not None or unexpected_error is not None:
-            # Parent folders are implicit support for reviewed generated creates,
-            # not independent durable output. Remove newly created empty folders
-            # after a failed application; non-empty or raced paths are left alone.
-            for relative_path in reversed(created_parent_paths):
-                try:
-                    (vault_root / relative_path).rmdir()
-                except OSError:
-                    pass
 
         if transaction_initialized and (
             recovery_journal is None or recovery_journal.phase is not RecoveryPhase.COMPLETE

@@ -1,3 +1,23 @@
+from . import application as _application
+from . import validation as _validation
+from .application import (
+    ApplicationError,
+    OperationApplicationResult,
+    OperationState,
+    ProposalApplicationResult,
+    apply_proposal,
+)
+from .coherence_validation import preflight_proposal as _coherent_preflight_proposal
+from .lifecycle import (
+    ProposalTransitionResult,
+    TransitionError,
+    approve_metadata,
+    approve_proposal,
+    reject_metadata,
+    reject_proposal,
+    submit_metadata_for_review,
+    submit_proposal_for_review,
+)
 from .loader import (
     LoadedProposal,
     ProposalCollectionResult,
@@ -5,6 +25,16 @@ from .loader import (
     ProposalLoadResult,
     load_proposal_directory,
     load_proposals,
+)
+from .migration import (
+    LegacyLifecycleMigrationCandidate,
+    LegacyLifecycleMigrationError,
+    LegacyLifecycleMigrationPlan,
+    LegacyLifecycleMigrationResult,
+    migrate_legacy_lifecycle,
+    migrate_legacy_metadata,
+    migrate_legacy_proposal,
+    plan_legacy_lifecycle_migration,
 )
 from .patches import (
     AnyPatchDocument,
@@ -18,23 +48,13 @@ from .patches import (
     PatchOperationV1,
     PatchOperationV2,
     PatchSchemaError,
+    ReleaseGeneratedOwnershipV2,
     ReplaceGeneratedFile,
     ReplaceGeneratedFileV2,
-    ReleaseGeneratedOwnershipV2,
     ReplaceManagedBlock,
     serialize_patch_document,
     serialize_patch_json_bytes,
     validate_patch_document,
-)
-from .schema import (
-    ProposalMetadata,
-    ProposalRisk,
-    ProposalSchemaError,
-    ProposalStatus,
-    generate_proposal_id,
-    serialize_metadata,
-    validate_metadata,
-    validate_proposal_id,
 )
 from .review_snapshot import (
     REVIEW_SNAPSHOT_FILENAME,
@@ -50,21 +70,54 @@ from .review_snapshot import (
     serialize_review_snapshot_bytes,
     validate_review_snapshot,
 )
+from .schema import (
+    ProposalMetadata,
+    ProposalRisk,
+    ProposalSchemaError,
+    ProposalStatus,
+    generate_proposal_id,
+    serialize_metadata,
+    validate_metadata,
+    validate_proposal_id,
+)
+from .target_identity import (
+    TARGET_IDENTITY_EXTENSION,
+    TARGET_IDENTITY_SCHEMA_VERSION,
+    ProposalTargetIdentity,
+    ProposalTargetIdentityError,
+    assess_proposal_target_identities,
+    parse_target_identities,
+    with_target_identity_extension,
+)
 from .validation import (
     OperationPreflightResult,
     PreflightFinding,
     PreflightState,
     ProposalPreflightResult,
-    preflight_proposal,
 )
+
+# Validation and application both resolve their preflight callable through module globals at
+# runtime. Repoint both globals after normal imports so every public application path gets the
+# same fail-closed stable-identity checks without import-order side effects.
+_validation.preflight_proposal = _coherent_preflight_proposal
+setattr(_application, "preflight_proposal", _coherent_preflight_proposal)
+preflight_proposal = _coherent_preflight_proposal
 
 __all__ = [
     "AnyPatchDocument",
+    "ApplicationError",
     "CreateFile",
     "CreateGeneratedFile",
     "CreateGeneratedFileV2",
+    "LegacyLifecycleMigrationCandidate",
+    "LegacyLifecycleMigrationError",
+    "LegacyLifecycleMigrationPlan",
+    "LegacyLifecycleMigrationResult",
     "LoadedProposal",
+    "OperationApplicationResult",
     "OperationPreflightResult",
+    "OperationReviewSnapshot",
+    "OperationState",
     "PatchDocument",
     "PatchDocumentV2",
     "PatchHumanFile",
@@ -74,93 +127,58 @@ __all__ = [
     "PatchSchemaError",
     "PreflightFinding",
     "PreflightState",
+    "ProposalApplicationResult",
     "ProposalCollectionResult",
     "ProposalLoadFinding",
     "ProposalLoadResult",
     "ProposalMetadata",
     "ProposalPreflightResult",
-    "ProposalRisk",
     "ProposalReviewSnapshot",
+    "ProposalRisk",
     "ProposalSchemaError",
     "ProposalStatus",
-    "ReplaceGeneratedFile",
-    "ReplaceGeneratedFileV2",
-    "ReleaseGeneratedOwnershipV2",
-    "ReplaceManagedBlock",
+    "ProposalTargetIdentity",
+    "ProposalTargetIdentityError",
+    "ProposalTransitionResult",
     "REVIEW_SNAPSHOT_FILENAME",
     "REVIEW_SNAPSHOT_SCHEMA_VERSION",
+    "ReleaseGeneratedOwnershipV2",
+    "ReplaceGeneratedFile",
+    "ReplaceGeneratedFileV2",
+    "ReplaceManagedBlock",
     "ReviewSnapshotError",
-    "OperationReviewSnapshot",
+    "TARGET_IDENTITY_EXTENSION",
+    "TARGET_IDENTITY_SCHEMA_VERSION",
+    "TransitionError",
+    "apply_proposal",
+    "approve_metadata",
+    "approve_proposal",
+    "assess_proposal_target_identities",
     "build_review_snapshot",
     "build_review_snapshot_bytes_from_patches",
     "generate_proposal_id",
     "load_proposal_directory",
     "load_proposals",
-    "preflight_proposal",
+    "migrate_legacy_lifecycle",
+    "migrate_legacy_metadata",
+    "migrate_legacy_proposal",
     "operation_unified_diff",
     "parse_review_snapshot_bytes",
+    "parse_target_identities",
+    "plan_legacy_lifecycle_migration",
+    "preflight_proposal",
+    "reject_metadata",
+    "reject_proposal",
     "serialize_metadata",
     "serialize_patch_document",
     "serialize_patch_json_bytes",
     "serialize_review_snapshot",
     "serialize_review_snapshot_bytes",
+    "submit_metadata_for_review",
+    "submit_proposal_for_review",
     "validate_metadata",
     "validate_patch_document",
     "validate_proposal_id",
     "validate_review_snapshot",
-]
-from .lifecycle import (
-    ProposalTransitionResult,
-    TransitionError,
-    submit_metadata_for_review,
-    approve_metadata,
-    reject_metadata,
-    submit_proposal_for_review,
-    approve_proposal,
-    reject_proposal,
-)
-from .migration import (
-    LegacyLifecycleMigrationCandidate,
-    LegacyLifecycleMigrationError,
-    LegacyLifecycleMigrationPlan,
-    LegacyLifecycleMigrationResult,
-    migrate_legacy_lifecycle,
-    migrate_legacy_metadata,
-    migrate_legacy_proposal,
-    plan_legacy_lifecycle_migration,
-)
-
-from .application import (
-    ApplicationError,
-    OperationApplicationResult,
-    OperationState,
-    ProposalApplicationResult,
-    apply_proposal,
-)
-
-__all__ += [
-    "ProposalTransitionResult",
-    "TransitionError",
-    "submit_metadata_for_review",
-    "approve_metadata",
-    "reject_metadata",
-    "submit_proposal_for_review",
-    "approve_proposal",
-    "reject_proposal",
-    "ApplicationError",
-    "OperationApplicationResult",
-    "OperationState",
-    "ProposalApplicationResult",
-    "apply_proposal",
-]
-
-__all__ += [
-    "LegacyLifecycleMigrationCandidate",
-    "LegacyLifecycleMigrationError",
-    "LegacyLifecycleMigrationPlan",
-    "LegacyLifecycleMigrationResult",
-    "migrate_legacy_lifecycle",
-    "migrate_legacy_metadata",
-    "migrate_legacy_proposal",
-    "plan_legacy_lifecycle_migration",
+    "with_target_identity_extension",
 ]

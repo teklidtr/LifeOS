@@ -69,7 +69,10 @@ def _walk_vault_paths(
             finally:
                 os.close(child_fd)
             continue
-        if stat.S_ISREG(entry_stat.st_mode) and any(name.endswith(suffix) for suffix in suffixes):
+        folded_name = name.casefold()
+        if stat.S_ISREG(entry_stat.st_mode) and any(
+            folded_name.endswith(suffix.casefold()) for suffix in suffixes
+        ):
             yield relative
 
 
