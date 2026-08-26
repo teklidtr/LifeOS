@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,12 +12,24 @@ from typing import Any
 
 
 logger = logging.getLogger(__name__)
+_ACTIVITY_ACTOR: ContextVar[str | None] = ContextVar("lifeos_activity_actor", default=None)
+
+
+def push_activity_actor(actor_id: str | None) -> Token[str | None]:
+    """Bind an actor to activity emitted by the current request context."""
+    return _ACTIVITY_ACTOR.set(actor_id)
+
+
+def reset_activity_actor(token: Token[str | None]) -> None:
+    """Restore the previous request-scoped activity actor."""
+    _ACTIVITY_ACTOR.reset(token)
 
 
 @dataclass(frozen=True, slots=True)
 class ActivityRecord:
     timestamp: str
     tool: str
+    actor_id: str | None = None
     focus_paths: tuple[str, ...] = ()
     instruction_ids: tuple[str, ...] = ()
     source_paths: tuple[str, ...] = ()
@@ -58,6 +71,7 @@ class ActivityStore:
         record = ActivityRecord(
             timestamp=timestamp,
             tool=tool,
+            actor_id=_ACTIVITY_ACTOR.get(),
             focus_paths=self._clean_paths(focus_paths),
             instruction_ids=self._clean_paths(instruction_ids),
             source_paths=self._clean_paths(source_paths),
@@ -85,10 +99,12 @@ class ActivityStore:
                 raw: Any = json.loads(line)
                 if not isinstance(raw, dict):
                     continue
+                raw_actor = raw.get("actor_id")
                 records.append(
                     ActivityRecord(
                         timestamp=str(raw["timestamp"]),
                         tool=str(raw["tool"]),
+                        actor_id=None if raw_actor is None else str(raw_actor),
                         focus_paths=tuple(raw.get("focus_paths", ())),
                         instruction_ids=tuple(raw.get("instruction_ids", ())),
                         source_paths=tuple(raw.get("source_paths", ())),
