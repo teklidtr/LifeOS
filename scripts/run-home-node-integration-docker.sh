@@ -33,7 +33,27 @@ docker run --rm --user 0:0 --entrypoint sh \
   "$image" -c 'chown -R 10001:10001 /vault'
 chmod 0777 "$runtime"
 
-before="$(sha256sum "$vault/lifeos.yml" "$vault/.git/HEAD")"
+canonical_snapshot() {
+  python3 - "$vault" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+rows: list[tuple[str, str]] = []
+for path in root.rglob("*"):
+    if not path.is_file():
+        continue
+    relative = path.relative_to(root)
+    if relative.parts and relative.parts[0] == ".lifeos":
+        continue
+    rows.append((relative.as_posix(), hashlib.sha256(path.read_bytes()).hexdigest()))
+for relative, digest in sorted(rows):
+    print(f"{digest}  {relative}")
+PY
+}
+
+before="$(canonical_snapshot)"
 
 start_node() {
   docker rm -f "$container" >/dev/null 2>&1 || true
@@ -65,14 +85,20 @@ wait_for_status() {
   local port="$3"
   local attempt
   for attempt in $(seq 1 60); do
-    if python3 - "$path" "$expected" "$port" <<'PY'
+    if python3 - "$path" "$expected" "$port" "$token_file" <<'PY'
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
-path, expected, port = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+path, expected, port, token_file = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+headers: dict[str, str] = {}
+if path == "/readyz":
+    token = Path(token_file).read_text(encoding="utf-8").strip()
+    headers["Authorization"] = f"Bearer {token}"
+request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers)
 try:
-    response = urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=2)
+    response = urllib.request.urlopen(request, timeout=2)
     status = response.status
 except urllib.error.HTTPError as error:
     status = error.code
@@ -116,9 +142,10 @@ port="$(host_port)"
 wait_for_status /healthz 200 "$port"
 wait_for_status /readyz 200 "$port"
 
-after="$(sha256sum "$vault/lifeos.yml" "$vault/.git/HEAD")"
+after="$(canonical_snapshot)"
 if [[ "$before" != "$after" ]]; then
-  echo "Canonical vault/Git bootstrap state changed across service restart or runtime rebuild" >&2
+  echo "Canonical vault/Git state changed across service restart or runtime rebuild" >&2
+  diff -u <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
   exit 1
 fi
 
