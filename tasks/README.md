@@ -15,8 +15,6 @@ Every task must contain metadata, goal, scope, out-of-scope boundaries, acceptan
 
 Only `ready/` tasks may be selected. Newly discovered work becomes a separate backlog task.
 
-When `tasks/ready/` contains no implementation task, the implementation agent may promote exactly one task from `tasks/backlog/` to `tasks/ready/` before selection, provided its dependencies are completed and repository authority, dependency ordering, and current architecture make it the next appropriate task. The agent must briefly record why that task is next. If multiple backlog tasks are equally eligible and the repository does not establish an ordering, do not choose arbitrarily; obtain an explicit user decision. Promotion only makes a task selectable; normal `ready/` → `in-progress/` workflow still applies.
-
 ## Documentation impact
 
 Every implementation task must contain a `# Documentation impact` section. Documentation is part of task completion, not optional follow-up work.
