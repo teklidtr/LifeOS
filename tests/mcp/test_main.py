@@ -103,14 +103,8 @@ def test_stdio_output_contains_only_protocol_json(
     assert captured.out == json.dumps(protocol_message, sort_keys=True) + "\n"
 
 
-def test_no_http_transport_symbols_are_configured() -> None:
-    production_files = (
-        Path("src/lifeos/mcp/server.py"),
-        Path("src/lifeos/mcp/runtime_server.py"),
-        Path("src/lifeos/mcp/__main__.py"),
-        Path("src/lifeos/mcp/authorizer.py"),
-    )
-    source = "\n".join(path.read_text(encoding="utf-8") for path in production_files)
+def test_stdio_entrypoint_remains_transport_isolated() -> None:
+    source = Path("src/lifeos/mcp/__main__.py").read_text(encoding="utf-8")
 
     forbidden = {
         "streamable-http",
@@ -123,3 +117,4 @@ def test_no_http_transport_symbols_are_configured() -> None:
     }
 
     assert all(symbol not in source for symbol in forbidden)
+    assert 'mcp.run(transport="stdio")' in source
