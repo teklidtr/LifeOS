@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import pytest
@@ -27,9 +28,9 @@ def test_http_allowlists_reject_blank_or_untrimmed_values() -> None:
 
 def test_port_parser_rejects_out_of_range_values() -> None:
     assert _parse_port("8000") == 8000
-    with pytest.raises(Exception, match="between 1 and 65535"):
+    with pytest.raises(argparse.ArgumentTypeError, match="between 1 and 65535"):
         _parse_port("0")
-    with pytest.raises(Exception, match="between 1 and 65535"):
+    with pytest.raises(argparse.ArgumentTypeError, match="between 1 and 65535"):
         _parse_port("65536")
 
 
