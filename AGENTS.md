@@ -33,7 +33,7 @@ tests or modifies that runtime contract. Filename alone does not grant authority
 
 ## Implementation workflow
 
-1. Select exactly one task from `tasks/ready/`. When `tasks/ready/` contains no implementation task, first apply the empty-ready backlog promotion rule in `tasks/README.md`; a successfully promoted task is then selected through the normal `ready/` workflow.
+1. Select exactly one task from `tasks/ready/`.
 2. Move it to `tasks/in-progress/`.
 3. Inspect existing code and tests.
 4. Implement only the stated scope.
@@ -148,38 +148,79 @@ Before a pull request is considered ready to merge:
 4. Once the implementation is stable and the pre-review audit is complete, request one `@codex review` for the current head.
    - After requesting review, avoid material commits until that review finishes unless a newly discovered correctness or security issue requires an immediate fix.
    - If the head materially changes while a review is in progress, treat that review as evidence about the reviewed snapshot, not as authoritative approval of the new head.
-   - Do not stack or overlap additional `@codex review` requests for newer heads while an earlier review is still processing. Let the active review finish, batch all resulting work, stabilize the new head, then request the next review only if required.
-5. Address valid findings, add regression coverage where appropriate, and re-run the relevant validation.
-   - Review findings are implemented by the current implementation agent whenever any available tool path can perform the change safely. Difficulty, file size, inconvenience, lack of a local checkout, or a cumbersome edit path do not count as inability; use available write mechanisms such as GitHub blob/tree/commit APIs rather than delegating implementation.
-   - Do not comment `@codex address that feedback` merely because Codex found the issue or because implementing the fix is difficult. Use it only when no available tool path can safely perform the required code change at all.
-   - If `@codex address that feedback` is exceptionally required, review Codex's resulting diff as external implementation work, preserve repository invariants, add or update regression coverage, and run the normal validation before resolving the finding.
-   - Batch all valid findings from the same review before requesting another review.
-   - If one finding reveals a cross-cutting invariant violation, audit every relevant caller, adapter, facade, CLI/MCP/API surface, derived subsystem, and alternate execution path for the same class of bug before re-reviewing.
-6. Request another `@codex review` only when the batched review fixes materially change behavior, architecture, public interfaces, trust boundaries, or a substantial portion of the implementation. Do not request another review for trivial, documentation-only, or purely mechanical fixes.
-7. Do not mechanically repeat review/fix cycles indefinitely.
-   - If consecutive reviews keep finding variants of the same cross-cutting invariant, stop requesting Codex review and perform a repository-wide invariant audit or centralize the enforcement boundary before trying again.
-   - If the PR has grown so broad that review findings repeatedly expose unrelated subsystem interactions, consider splitting remaining independently mergeable work into separate tasks/PRs rather than using repeated Codex reviews to discover the architecture incrementally.
-   - Do not use "no findings" as the stopping condition. Once task requirements, blocking correctness/security findings, required validation, and required review classes are satisfied, move non-blocking hardening ideas to follow-up work.
-   - Resume Codex review only after the implementation and invariant boundary are stable enough that a new review is expected to validate the solution rather than continue discovering its shape.
-8. For a security-sensitive pull request, request `@codex security review` only after the normal review cycle has stabilized.
-9. Address valid security findings and re-run affected validation. Batch security fixes. Request another security review only if those fixes materially change a security or trust boundary.
-10. After the final material commit and required review cycle are stable, request the GitHub full-validation checkpoint by adding the `full-validation` label to the PR. The checkpoint must produce green `full-test` and `docker-setup-e2e` checks for the current PR head. If material commits land afterward, remove and re-add the label to request a fresh checkpoint without a dummy commit.
-11. Do not merge while `fast-checks`, the latest required full-validation checkpoint, or relevant review findings are unresolved or failing.
+5. Treat the first review as a risk-discovery pass. Triage findings yourself before making edits:
+   - Fix findings that are actionable, in scope, and relevant to the task's acceptance criteria or repository invariants.
+   - Batch related findings into one coherent correction pass. Do not make one commit or request one re-review per comment.
+   - When a finding exposes an invariant with possible sibling violations, search the repository and fix all in-scope variants together.
+   - Push a consolidated fix set with focused regression tests and rerun appropriate local validation.
+6. Request a second normal `@codex review` only when the first review found material issues and the corrective batch changed behavior, security, or the reviewed contract enough that another pass is justified. Do not request another normal review merely because the previous review had suggestions or non-blocking improvements.
+7. If the normal review is clean or only non-blocking follow-up ideas remain, treat the normal review class as stable. Do not continue iterative review rounds trying to force a zero-finding result.
+8. For a **security-sensitive PR**, request `@codex security review` only after the normal review stabilizes. Security-sensitive means the change touches authorization, authentication, secrets, privacy boundaries, externally controlled paths/data, canonical mutation safety, recovery integrity, transport security, or public/external service exposure. Apply the same triage rule: fix only actionable in-scope security findings, batch fixes, and request one follow-up security review only if material security behavior changed.
+9. After the final material commit and required Codex review classes are stable, request the explicit full-validation checkpoint by adding the `full-validation` label to the PR. The full-validation workflow provides the required `full-test` and `docker-setup-e2e` checks; if `full-validation` is already present from an older head, remove and re-add it so the checkpoint runs against the current commit.
+10. Treat a validated checkpoint as tied to that exact reviewed head. If any material commit lands after the successful checkpoint, rerun the affected local validation, obtain re-review when the changed behavior or invariant warrants it, and request a fresh full-validation checkpoint for the new head.
+11. Require these gates before merge:
+   - ordinary `fast-checks` is green for the final PR head;
+   - `full-test` is green for the final PR head;
+   - `docker-setup-e2e` is green for the final PR head;
+   - all actionable normal/security Codex findings are resolved;
+   - no unrelated implementation remains in the branch.
 
-### Security-sensitive changes
+Do not merge a PR merely because Codex produced no findings. Do not merge a PR with known deterministic failures, unresolved blocking findings, stale full-validation evidence, or material implementation work that has not been reviewed. Do not burn repeated Codex reviews on implementation churn that local tests, CI, or repository-wide reasoning should catch first.
 
-Treat a pull request as security-sensitive when it changes or exposes areas such as:
+## Suggested task sequence
 
-- authentication, authorization, permissions, or protected-scope enforcement
-- privacy or retrieval-policy boundaries
-- MCP, API, or other externally callable surfaces
-- filesystem access, path traversal, or symlink handling
-- canonical-state mutation or proposal/authorization boundaries
-- secrets, credentials, configuration trust, or external execution boundaries
-- parsing or processing of untrusted external input
+1. Put a clear task in `tasks/ready/`.
+2. Move it to `tasks/in-progress/`.
+3. Implement it in a branch or worktree.
+4. Run required local validation.
+5. Push the branch and open a pull request.
+6. Let ordinary PR `fast-checks` run on the stable branch head.
+7. Complete normal Codex review and any justified re-review on the stable head.
+8. For security-sensitive changes, complete the security review after normal review stabilizes.
+9. Add the `full-validation` label only after the final material commit and review stabilization, then require green `full-test` plus `docker-setup-e2e`.
+10. Mark the task complete only after required validation and review obligations are satisfied.
 
-Security review is not required for changes that clearly do not affect a security boundary, such as documentation-only edits or isolated presentation changes.
+## Task template
 
-## Completion standard
+```markdown
+---
+id: LIFEOS-XXXX
+title: Short title
+status: backlog | ready | in-progress | completed
+phase: N
+risk: low | medium | high
+---
 
-A task is complete only when acceptance criteria pass, tests pass, unrelated files remain untouched, newly discovered work is captured separately, and documentation impact has been resolved in the same PR. A task that changes documented behavior or contracts without updating the affected documentation is not complete.
+# Goal
+
+...
+
+# Scope
+
+...
+
+# Out of scope
+
+...
+
+# Acceptance criteria
+
+...
+
+# Documentation impact
+
+Status: required
+
+- `docs/user-manual/...`: describe the user-facing change.
+
+# Validation
+
+```bash
+uv run pytest -q tests/path/to/affected_area
+uv run ruff check src tests
+```
+
+# Relevant decisions
+
+- DD-XXX: ...
+```
