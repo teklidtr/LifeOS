@@ -119,3 +119,36 @@ def test_store_rejects_filesystem_selected_reserved_runtime_before_state(
 
     assert not (vault / "proposals" / "node" / "recovery.lock").exists()
     assert not (vault / "proposals" / "node" / "recovery").exists()
+
+
+def test_rejected_case_variant_reserved_root_is_removed_when_created(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    real_open = os.open
+
+    def case_insensitive_reserved_open(
+        path: object, flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        selected = os.fspath(path)
+        if dir_fd is not None and selected == "proposals":
+            try:
+                return real_open("Proposals", flags, mode, dir_fd=dir_fd)
+            except FileNotFoundError:
+                pass
+        return real_open(selected, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(
+        "lifeos.proposals.recovery_store.os.open",
+        case_insensitive_reserved_open,
+    )
+
+    with pytest.raises(RecoveryLockUnavailableError, match="reserved canonical"):
+        with acquire_pinned_recovery_store(
+            runtime_dir=vault / "Proposals" / "node",
+            authority_root=vault,
+        ):
+            pass
+
+    assert not (vault / "Proposals").exists()
