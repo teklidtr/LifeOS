@@ -40,19 +40,24 @@ def test_recovery_creation_rollback_unlinks_through_live_canonical_path(
     target.chmod(0o640)
     parent = _parent(canonical_parent)
     moved_parent = vault / "moved"
-    real_unlink = recovery_io.os.unlink
+    real_replace = recovery_io.os.replace
     relocated = False
 
-    def relocate_then_unlink(path: object, *args: object, **kwargs: object) -> None:
+    def relocate_then_replace(src: object, dst: object, *args: object, **kwargs: object) -> None:
         nonlocal relocated
-        if not relocated:
+        is_canonical_consume = (
+            str(src) == "note.md"
+            and str(dst).startswith(".note.md.")
+            and str(dst).endswith(".unlink-quarantine")
+        )
+        if not relocated and is_canonical_consume:
             canonical_parent.rename(moved_parent)
             canonical_parent.mkdir()
             (canonical_parent / "note.md").write_bytes(b"foreign\n")
             relocated = True
-        real_unlink(path, *args, **kwargs)
+        real_replace(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(recovery_io.os, "unlink", relocate_then_unlink)
+    monkeypatch.setattr(recovery_io.os, "replace", relocate_then_replace)
     try:
         with pytest.raises(RecoveryIOUnavailableError, match="Failed to unlink target"):
             remove_installed_creation(

@@ -477,8 +477,13 @@ def test_preparation_invariants(tmp_path, monkeypatch):
 
     def mock_replace(src, dst, src_dir_fd=None, dst_dir_fd=None):
         nonlocal invariants_checked
-        # This is called during the first canonical commit
-        if str(dst) == "test1.txt" and not invariants_checked:
+        # This is called immediately before the first canonical target is consumed.
+        is_test1_consume = (
+            str(src) == "test1.txt"
+            and str(dst).startswith(".test1.txt.")
+            and str(dst).endswith(".replace-quarantine")
+        )
+        if is_test1_consume and not invariants_checked:
             try:
                 staged_files = [p for p in vault_root.iterdir() if p.name.endswith(".staged")]
                 backup_files = [p for p in vault_root.iterdir() if p.name.endswith(".backup")]
@@ -890,26 +895,20 @@ def test_public_error_redaction(tmp_path, monkeypatch):
     loaded = load_proposal_directory(prop_dir, proposals_root=proposals_root)
     assert loaded.proposal is not None
 
-    orig_replace = os.replace
-
-    def mock_replace(src, dst, src_dir_fd=None, dst_dir_fd=None):
-        if ".backup" in str(src):
-            raise OSError(
-                errno.EACCES, "Permission denied", "/private/tmp/secret-vault/generated-file.md"
-            )
-        orig_replace(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
-
     orig_link = os.link
 
     def mock_link(src, dst, src_dir_fd=None, dst_dir_fd=None, follow_symlinks=True):
         if dst == "test2.txt" or str(dst) == "test2.txt":
             raise OSError("Injected")
+        if ".backup" in str(src) and (dst == "test1.txt" or str(dst) == "test1.txt"):
+            raise OSError(
+                errno.EACCES, "Permission denied", "/private/tmp/secret-vault/generated-file.md"
+            )
         orig_link(
             src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, follow_symlinks=follow_symlinks
         )
 
     monkeypatch.setattr(os, "link", mock_link)
-    monkeypatch.setattr(os, "replace", mock_replace)
 
     with pytest.raises(ApplicationError) as exc_info:
         apply_proposal(
