@@ -46,6 +46,9 @@ semantic contributions are reconciled by the external agent, desired changes are
   exclusion rules.
 - **Provenance is target-specific.** A batch-level source union must not falsely imply that every
   source contributed to every changed page.
+- **Reviewability is bounded across multiple dimensions.** Source count, distinct target count,
+  and total serialized patch/review payload are separate limits; no one dimension substitutes for
+  the others.
 - **One logical folder batch must not silently fan out into conflicting proposals.** If a folder
   exceeds a documented safety/workload bound, require narrowing or an explicit subsequent batch
   rather than automatically emitting per-source drafts.
@@ -72,8 +75,15 @@ semantic contributions are reconciled by the external agent, desired changes are
   paths per proposal** unless implementation evidence recorded in this task justifies a smaller
   bound. Exceeding the bound must fail or require explicit narrowing; it must not silently split
   the batch into multiple conflicting proposals.
-- Preserve the existing 1..12 **target-operation** budget for wiki evolution unless repository
-  evidence requires an explicit versioned contract change.
+- Define a folder/multi-source-specific target-operation budget rather than inheriting the
+  single-source 12-operation limit. Use a deterministic initial maximum of **32 distinct target
+  operations per proposal**. The existing single-source contract may retain its 1..12 bound for
+  compatibility.
+- Add a deterministic total serialized patch/review payload budget in addition to source and
+  target counts. Start with **2 MiB per proposal** for the canonical patch/review payload unless
+  implementation evidence recorded in this task justifies a smaller limit or an existing stricter
+  proposal-engine bound must remain authoritative. Exceeding the byte budget must fail before
+  draft persistence and must not silently split the batch.
 - Replace the current implicit `one proposal -> one SourceSnapshot` assumption with a model that
   can verify several source snapshots for one proposal while retaining backwards compatibility
   for existing single-source APIs.
@@ -113,10 +123,14 @@ semantic contributions are reconciled by the external agent, desired changes are
   - three sources contributing to one generated-owned wiki note with all and only the relevant
     source snapshots accumulated in provenance;
   - several sources contributing to several targets with distinct per-target source subsets;
+  - a batch using more than 12 but no more than 32 targets and remaining valid when byte/source
+    limits are satisfied;
   - one selected source changing after discovery/registration and causing the whole proposal
     publication to fail closed;
   - a target changing after draft publication and remaining stale at application time;
   - a folder/batch above the source bound refusing automatic fan-out;
+  - a batch above the 32-target bound refusing automatic fan-out;
+  - a batch above the total patch/review byte budget failing before draft persistence;
   - existing single-source ingestion behavior remaining compatible.
 
 # Out of scope
@@ -145,6 +159,12 @@ semantic contributions are reconciled by the external agent, desired changes are
   emit multiple drafts merely because the folder contains multiple sources.
 - The multi-source proposal contract accepts at most 64 distinct source paths and refuses an
   oversized logical batch without silently fan-out/splitting it.
+- The multi-source proposal contract accepts at most **32 distinct target operations**, independent
+  of the legacy single-source 12-target limit, and refuses an oversized target set without silent
+  fan-out/splitting.
+- The serialized canonical patch/review payload is bounded to **2 MiB per folder-ingestion
+  proposal** unless implementation evidence in this task records a stricter authoritative limit;
+  oversized payloads fail before draft persistence rather than being silently split.
 - The final patch document contains at most one operation for each `target_path`, even when
   several sources or several desired section changes affect that target.
 - Three independent contributions to one human-owned file are reconciled into one unified
@@ -176,8 +196,9 @@ Status: required
 - `docs/architecture.md`: document folder/multi-source ingestion, batch atomicity, target-centric
   reconciliation, and the source-vs-target responsibility boundary.
 - `docs/design-decisions.md`: add a durable decision establishing the logical ingestion batch as
-  the proposal boundary for multi-source work, one operation per target, and target-specific
-  provenance while preserving external-agent semantic responsibility.
+  the proposal boundary for multi-source work, one operation per target, target-specific
+  provenance, and independent source/target/payload reviewability budgets while preserving
+  external-agent semantic responsibility.
 - `docs/data-model.md`: document multi-source proposal grounding and target-specific source sets.
 - `docs/generated-wiki-provenance.md`: document several source snapshots contributing in one
   reviewed generated-page mutation.
@@ -186,7 +207,7 @@ Status: required
 - `docs/user-manual/14-generated-wiki-source-history.md`: explain source history for a page
   jointly grounded by several files in one ingestion batch.
 - `docs/user-manual/15-mcp-exploration.md`: document the MCP-only folder exploration -> joint
-  reasoning -> target-reconciled proposal workflow and source-count bound.
+  reasoning -> target-reconciled proposal workflow and source/target/payload bounds.
 - MCP tool descriptions/runtime instructions must be updated to keep the public agent contract
   synchronized with implementation.
 
