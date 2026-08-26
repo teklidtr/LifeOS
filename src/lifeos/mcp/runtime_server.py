@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
@@ -64,8 +65,13 @@ def create_mcp_server(
     registry: Registry,
     authorizer: ConsequentialAuthorizer,
     runtime_dir: Path | None = None,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    transport_security: TransportSecuritySettings | None = None,
+    stateless_http: bool = False,
+    json_response: bool = False,
 ) -> FastMCP:
-    """Compose the stable core MCP server with policy-aware exploration primitives."""
+    """Compose one MCP tool surface for local STDIO or authenticated network transport."""
     resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
 
     def runtime_scoped_invoke(operation: Callable[[], object]) -> object:
@@ -81,7 +87,9 @@ def create_mcp_server(
                     snapshot_prefix=runtime_prefix,
                 )
             except CoherenceError as error:
-                raise ToolExecutionError("Could not resolve configured runtime directory") from error
+                raise ToolExecutionError(
+                    "Could not resolve configured runtime directory"
+                ) from error
 
             def runtime_excluded(path: str) -> bool:
                 try:
@@ -167,4 +175,9 @@ def create_mcp_server(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
         tools=[*core_tools, *policy_reads, *exploration, wiki_search, *coherence],
+        host=host,
+        port=port,
+        transport_security=transport_security,
+        stateless_http=stateless_http,
+        json_response=json_response,
     )
