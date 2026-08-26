@@ -269,6 +269,110 @@ def _create_verified_guard(
         raise TransactionError(f"Mutation guard verification failed: {error}") from error
 
 
+def _link_if_absent(
+    source_name: str,
+    target_name: str,
+    *,
+    source_fd: int,
+    target_fd: int,
+) -> bool:
+    """Publish one hardlink without replacing an entry that appeared concurrently."""
+    try:
+        os.link(
+            source_name,
+            target_name,
+            src_dir_fd=source_fd,
+            dst_dir_fd=target_fd,
+            follow_symlinks=False,
+        )
+    except FileExistsError:
+        return False
+    except OSError as error:
+        raise TransactionError(f"Failed to publish guarded link: {error}") from error
+    return True
+
+
+def _restore_quarantine_if_absent(
+    quarantine_name: str,
+    target_name: str,
+    *,
+    dir_fd: int,
+) -> bool:
+    restored = _link_if_absent(
+        quarantine_name,
+        target_name,
+        source_fd=dir_fd,
+        target_fd=dir_fd,
+    )
+    if restored:
+        _remove_created_artifact(quarantine_name, dir_fd)
+    return restored
+
+
+def _quarantine_verified_target(
+    target_name: str,
+    *,
+    dir_fd: int,
+    expected_identity: TargetIdentity,
+    require_mode: bool,
+    suffix: str,
+) -> str:
+    """Atomically consume a dirent and prove the moved inode is the reviewed target.
+
+    A writer racing after guard creation can only have its replacement moved aside. If that
+    happened, restore the foreign inode without overwriting any newer entry and fail closed.
+    """
+    quarantine_name = f".{target_name}.{secrets.token_hex(8)}.{suffix}-quarantine"
+    try:
+        os.replace(
+            target_name,
+            quarantine_name,
+            src_dir_fd=dir_fd,
+            dst_dir_fd=dir_fd,
+        )
+    except OSError as error:
+        raise TransactionError(f"Failed to quarantine guarded target: {error}") from error
+
+    try:
+        quarantined = _target_identity_at(quarantine_name, dir_fd)
+        matches = (
+            _identity_matches(quarantined, expected_identity)
+            if require_mode
+            else _content_identity_matches(quarantined, expected_identity)
+        )
+        if matches:
+            return quarantine_name
+    except TransactionError as error:
+        verification_error = error
+    else:
+        verification_error = TransactionError("Canonical target changed during guarded mutation")
+
+    try:
+        restored = _restore_quarantine_if_absent(
+            quarantine_name,
+            target_name,
+            dir_fd=dir_fd,
+        )
+    except TransactionError as restore_error:
+        raise TransactionError(
+            "Canonical target changed during guarded mutation; foreign quarantine retained"
+        ) from restore_error
+    if not restored:
+        raise TransactionError(
+            "Canonical target changed during guarded mutation; foreign quarantine retained"
+        ) from verification_error
+    raise TransactionError("Canonical target changed during guarded mutation") from verification_error
+
+
+def _best_effort_remove(name: str | None, dir_fd: int) -> None:
+    if name is None:
+        return
+    try:
+        os.unlink(name, dir_fd=dir_fd)
+    except OSError:
+        pass
+
+
 def get_target_identity(name: str, parent: ParentDescriptor) -> TargetIdentity | None:
     return _target_identity_at(name, parent.fd)
 
@@ -502,14 +606,15 @@ def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncRes
     try:
         os.unlink(staging.name, dir_fd=staging.parent.fd)
     except OSError:
-        pass  # Not critical to failure of publication
+        pass
 
     return fsync_directory(staging.parent.fd)
 
 
-def publish_replacement(
+def _legacy_publish_replacement(
     target_name: str, staging: StagingFile, original_identity: TargetIdentity
 ) -> DirectorySyncResult:
+    """Preserve historical same-fd atomic replacement for authorityless callers."""
     require_directory_binding(staging.parent.fd, staging.parent_binding)
     current_target = get_target_identity(target_name, staging.parent)
     if not _content_identity_matches(current_target, original_identity):
@@ -572,21 +677,105 @@ def publish_replacement(
         raise TransactionError(f"Failed to publish replacement: {e}") from e
     finally:
         if guard_created:
-            try:
-                os.unlink(guard_name, dir_fd=live_parent_fd)
-            except OSError:
-                pass
+            _best_effort_remove(guard_name, live_parent_fd)
         _close_live_parent(staging.parent, live_parent_fd)
 
     return fsync_directory(staging.parent.fd)
 
 
-def remove_verified_target(
+def publish_replacement(
+    target_name: str, staging: StagingFile, original_identity: TargetIdentity
+) -> DirectorySyncResult:
+    if staging.parent.authority_fd is None:
+        return _legacy_publish_replacement(target_name, staging, original_identity)
+
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
+    current_target = get_target_identity(target_name, staging.parent)
+    if not _content_identity_matches(current_target, original_identity):
+        if current_target is None:
+            raise TransactionError("Target identity mutated (absent) before replacement")
+        if (
+            current_target.dev != original_identity.dev
+            or current_target.ino != original_identity.ino
+        ):
+            raise TransactionError("Target identity mutated before replacement")
+        raise TransactionError("Target content hash mutated before replacement")
+
+    current_staging = _target_identity_at(staging.name, staging.parent.fd)
+    if current_staging is None or current_staging.content_hash != staging.candidate_hash:
+        raise TransactionError("Staging hash mutated before publication")
+    if stat.S_IMODE(current_staging.mode) != stat.S_IMODE(staging.intended_mode):
+        raise TransactionError("Staging mode mutated before publication")
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
+
+    live_parent_fd = open_live_parent_for_mutation(staging.parent)
+    guard_name = f".{target_name}.{secrets.token_hex(8)}.replace-guard"
+    quarantine_name: str | None = None
+    guard_created = False
+    try:
+        live_identity = _target_identity_at(target_name, live_parent_fd)
+        if not _content_identity_matches(live_identity, original_identity):
+            raise TransactionError("Target identity mutated before replacement")
+        _create_verified_guard(
+            target_name,
+            guard_name,
+            live_parent_fd,
+            original_identity,
+            require_mode=False,
+        )
+        guard_created = True
+        quarantine_name = _quarantine_verified_target(
+            target_name,
+            dir_fd=live_parent_fd,
+            expected_identity=original_identity,
+            require_mode=False,
+            suffix="replace",
+        )
+        if not _link_if_absent(
+            staging.name,
+            target_name,
+            source_fd=staging.parent.fd,
+            target_fd=live_parent_fd,
+        ):
+            raise TransactionError("Target changed during replacement publication")
+        try:
+            require_live_parent(staging.parent)
+        except TransactionError as binding_error:
+            installed = _target_identity_at(target_name, live_parent_fd)
+            if _identity_matches(installed, current_staging):
+                candidate_quarantine = _quarantine_verified_target(
+                    target_name,
+                    dir_fd=live_parent_fd,
+                    expected_identity=current_staging,
+                    require_mode=True,
+                    suffix="replacement-rollback",
+                )
+                try:
+                    _link_if_absent(
+                        guard_name,
+                        target_name,
+                        source_fd=live_parent_fd,
+                        target_fd=live_parent_fd,
+                    )
+                finally:
+                    _best_effort_remove(candidate_quarantine, live_parent_fd)
+            raise binding_error
+        _best_effort_remove(staging.name, staging.parent.fd)
+    finally:
+        if quarantine_name is not None:
+            _best_effort_remove(quarantine_name, live_parent_fd)
+        if guard_created:
+            _best_effort_remove(guard_name, live_parent_fd)
+        _close_live_parent(staging.parent, live_parent_fd)
+
+    return fsync_directory(staging.parent.fd)
+
+
+def _legacy_remove_verified_target(
     target_name: str,
     parent: ParentDescriptor,
     expected_identity: TargetIdentity,
 ) -> DirectorySyncResult:
-    """Remove one reviewed target without ever switching to a replacement parent inode."""
     live_parent_fd = open_live_parent_for_mutation(parent)
     guard_name = f".{target_name}.{secrets.token_hex(8)}.unlink-guard"
     guard_created = False
@@ -625,10 +814,61 @@ def remove_verified_target(
         raise TransactionError(f"Failed to remove verified target: {e}") from e
     finally:
         if guard_created:
-            try:
-                os.unlink(guard_name, dir_fd=live_parent_fd)
-            except OSError:
-                pass
+            _best_effort_remove(guard_name, live_parent_fd)
+        _close_live_parent(parent, live_parent_fd)
+
+    return fsync_directory(parent.fd)
+
+
+def remove_verified_target(
+    target_name: str,
+    parent: ParentDescriptor,
+    expected_identity: TargetIdentity,
+) -> DirectorySyncResult:
+    """Remove an authority-bound reviewed target without deleting a later replacement inode."""
+    if parent.authority_fd is None:
+        return _legacy_remove_verified_target(target_name, parent, expected_identity)
+
+    live_parent_fd = open_live_parent_for_mutation(parent)
+    guard_name = f".{target_name}.{secrets.token_hex(8)}.unlink-guard"
+    quarantine_name: str | None = None
+    guard_created = False
+    try:
+        live_identity = _target_identity_at(target_name, live_parent_fd)
+        if not _identity_matches(live_identity, expected_identity):
+            raise TransactionError("Canonical target changed before removal")
+        _create_verified_guard(
+            target_name,
+            guard_name,
+            live_parent_fd,
+            expected_identity,
+            require_mode=True,
+        )
+        guard_created = True
+        quarantine_name = _quarantine_verified_target(
+            target_name,
+            dir_fd=live_parent_fd,
+            expected_identity=expected_identity,
+            require_mode=True,
+            suffix="unlink",
+        )
+        try:
+            require_live_parent(parent)
+        except TransactionError as binding_error:
+            _link_if_absent(
+                guard_name,
+                target_name,
+                source_fd=live_parent_fd,
+                target_fd=live_parent_fd,
+            )
+            raise binding_error
+        if _target_identity_at(target_name, live_parent_fd) is not None:
+            raise TransactionError("Canonical target changed during removal")
+    finally:
+        if quarantine_name is not None:
+            _best_effort_remove(quarantine_name, live_parent_fd)
+        if guard_created:
+            _best_effort_remove(guard_name, live_parent_fd)
         _close_live_parent(parent, live_parent_fd)
 
     return fsync_directory(parent.fd)
@@ -638,14 +878,14 @@ def rollback_creation(target_name: str, staging: StagingFile) -> DirectorySyncRe
     require_directory_binding(staging.parent.fd, staging.parent_binding)
     current_identity = get_target_identity(target_name, staging.parent)
     if current_identity is None:
-        return DirectorySyncResult(DirectorySyncState.CONFIRMED, None)  # already absent
+        return DirectorySyncResult(DirectorySyncState.CONFIRMED, None)
     if current_identity.content_hash != staging.candidate_hash:
         raise TransactionError("Canonical file mutated externally, rollback refused")
     require_directory_binding(staging.parent.fd, staging.parent_binding)
     return remove_verified_target(target_name, staging.parent, current_identity)
 
 
-def rollback_replacement(
+def _legacy_rollback_replacement(
     target_name: str, staging: StagingFile, backup: BackupFile
 ) -> DirectorySyncResult:
     require_directory_binding(staging.parent.fd, staging.parent_binding)
@@ -697,10 +937,99 @@ def rollback_replacement(
         raise TransactionError(f"Rollback replace failed: {e}") from e
     finally:
         if guard_created:
-            try:
-                os.unlink(guard_name, dir_fd=live_parent_fd)
-            except OSError:
-                pass
+            _best_effort_remove(guard_name, live_parent_fd)
+        _close_live_parent(staging.parent, live_parent_fd)
+
+    return fsync_directory(staging.parent.fd)
+
+
+def rollback_replacement(
+    target_name: str, staging: StagingFile, backup: BackupFile
+) -> DirectorySyncResult:
+    if staging.parent.authority_fd is None:
+        return _legacy_rollback_replacement(target_name, staging, backup)
+
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
+    try:
+        os.stat(target_name, dir_fd=staging.parent.fd, follow_symlinks=False)
+    except OSError as e:
+        raise TransactionError(f"Rollback target stat failed: {e}") from e
+
+    current_target = _target_identity_at(target_name, staging.parent.fd)
+    if current_target is None or current_target.content_hash != staging.candidate_hash:
+        raise TransactionError("Canonical file mutated externally, rollback refused")
+
+    try:
+        bk_st = os.stat(backup.name, dir_fd=backup.parent.fd, follow_symlinks=False)
+    except OSError as e:
+        raise TransactionError(f"Rollback backup stat failed: {e}") from e
+
+    if bk_st.st_dev != backup.original_identity.dev or bk_st.st_ino != backup.original_identity.ino:
+        raise TransactionError("Backup identity mutated")
+
+    bk_hash = _hash_file_secure(backup.name, backup.parent.fd)
+    if bk_hash != backup.original_identity.content_hash:
+        raise TransactionError("Backup content hash mutated")
+    require_directory_binding(staging.parent.fd, staging.parent_binding)
+
+    live_parent_fd = open_live_parent_for_mutation(staging.parent)
+    guard_name = f".{target_name}.{secrets.token_hex(8)}.rollback-guard"
+    quarantine_name: str | None = None
+    guard_created = False
+    try:
+        live_target = _target_identity_at(target_name, live_parent_fd)
+        if live_target is None or live_target.content_hash != staging.candidate_hash:
+            raise TransactionError("Canonical file mutated externally, rollback refused")
+        _create_verified_guard(
+            target_name,
+            guard_name,
+            live_parent_fd,
+            live_target,
+            require_mode=True,
+        )
+        guard_created = True
+        quarantine_name = _quarantine_verified_target(
+            target_name,
+            dir_fd=live_parent_fd,
+            expected_identity=live_target,
+            require_mode=True,
+            suffix="rollback",
+        )
+        if not _link_if_absent(
+            backup.name,
+            target_name,
+            source_fd=backup.parent.fd,
+            target_fd=live_parent_fd,
+        ):
+            raise TransactionError("Canonical file changed during rollback")
+        try:
+            require_live_parent(staging.parent)
+        except TransactionError as binding_error:
+            installed = _target_identity_at(target_name, live_parent_fd)
+            if _identity_matches(installed, backup.original_identity):
+                original_quarantine = _quarantine_verified_target(
+                    target_name,
+                    dir_fd=live_parent_fd,
+                    expected_identity=backup.original_identity,
+                    require_mode=True,
+                    suffix="rollback-restore",
+                )
+                try:
+                    _link_if_absent(
+                        quarantine_name,
+                        target_name,
+                        source_fd=live_parent_fd,
+                        target_fd=live_parent_fd,
+                    )
+                finally:
+                    _best_effort_remove(original_quarantine, live_parent_fd)
+            raise binding_error
+        _best_effort_remove(backup.name, backup.parent.fd)
+    finally:
+        if quarantine_name is not None:
+            _best_effort_remove(quarantine_name, live_parent_fd)
+        if guard_created:
+            _best_effort_remove(guard_name, live_parent_fd)
         _close_live_parent(staging.parent, live_parent_fd)
 
     return fsync_directory(staging.parent.fd)
