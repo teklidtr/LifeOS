@@ -22,6 +22,7 @@ observation, and agent-assisted reflection.
 14. [Generated Wiki Source History](14-generated-wiki-source-history.md)
 15. [MCP Exploration and Controlled Mutation](15-mcp-exploration.md)
 16. [Cross-Device Vault Coherence](16-cross-device-vault-coherence.md)
+17. [Home-Node Runtime Safety](17-home-node-runtime-safety.md)
 
 ## Suggested reading path
 
@@ -32,13 +33,14 @@ Chapter 12 before designing or tracking personal experiments, Chapter 13 before
 importing media or using meal and exercise capture, Chapter 14 when you want
 to understand how generated Wiki pages remember the canonical sources that
 contributed to them, Chapter 15 before giving an MCP-connected agent a broad
-vault exploration task, and Chapter 16 before synchronizing one canonical vault
+vault exploration task, Chapter 16 before synchronizing one canonical vault
 across multiple human-editable devices or transferring LifeOS mutation authority
-between nodes. Chapter 13 also identifies which rich-capture capabilities are
-fully wired in the standard plugin, which depend on a host renderer, and which
-remain provider-ready contracts. Chapter 1 is useful when you want to understand
-the system boundaries, while Chapter 3 is the reference chapter for individual
-modules.
+between nodes, and Chapter 17 when operating a long-lived `lifeos serve` node or
+recovering from a runtime mount/path replacement. Chapter 13 also identifies which
+rich-capture capabilities are fully wired in the standard plugin, which depend on
+a host renderer, and which remain provider-ready contracts. Chapter 1 is useful
+when you want to understand the system boundaries, while Chapter 3 is the
+reference chapter for individual modules.
 
 ## Navigation
 
