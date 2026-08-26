@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -8,6 +9,7 @@ import pytest
 from lifeos.facade.registry_tools import RegistryRefreshResult
 import lifeos.mcp.runtime_server as runtime_server
 import lifeos.mcp.server as core_server
+import lifeos.runtime_scope as runtime_scope
 
 
 def test_runtime_exclusion_spelling_is_refreshed_for_each_invocation(
@@ -101,3 +103,61 @@ def test_copied_core_registry_refresh_snapshots_runtime_spelling_per_invocation(
     tool.fn()
 
     assert observed == ["Runtime/", "runtime/"]
+
+
+def test_core_refresh_excludes_case_renamed_runtime_after_prefix_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime_dir = vault / "Runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "export.md").write_text("runtime-only\n", encoding="utf-8")
+    renamed_runtime = vault / "runtime"
+    real_open = os.open
+    renamed = False
+
+    def case_insensitive_open(
+        path: object,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        selected = os.fspath(path)
+        if dir_fd is not None and selected == "Runtime":
+            try:
+                return real_open(selected, flags, mode, dir_fd=dir_fd)
+            except FileNotFoundError:
+                return real_open("runtime", flags, mode, dir_fd=dir_fd)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    def fake_refresh_registry(
+        *,
+        vault_root: Path,
+        registry: object,
+        identity_allow_path: object,
+    ) -> RegistryRefreshResult:
+        nonlocal renamed
+        assert vault_root == vault
+        assert identity_allow_path is not None
+        if not renamed:
+            runtime_dir.rename(renamed_runtime)
+            renamed = True
+        assert not identity_allow_path("runtime/export.md")  # type: ignore[operator]
+        return RegistryRefreshResult((), (), (), (), 0)
+
+    monkeypatch.setattr(runtime_scope.os, "open", case_insensitive_open)
+    monkeypatch.setattr(core_server, "refresh_registry", fake_refresh_registry)
+    server = runtime_server.create_mcp_server(
+        vault_root=vault,
+        registry=MagicMock(),
+        authorizer=MagicMock(),
+        runtime_dir=runtime_dir,
+    )
+    tool = server._tool_manager.get_tool("registry_refresh")
+
+    tool.fn()
+
+    assert renamed_runtime.is_dir()
