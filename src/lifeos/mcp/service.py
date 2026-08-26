@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 import hmac
 import json
+import logging
 import os
 import sys
-import logging
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
@@ -99,8 +99,12 @@ class AuthenticatedServiceApp:
         self._readiness = readiness
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
+        if scope["type"] == "lifespan":
             await self._app(scope, receive, send)
+            return
+        if scope["type"] != "http":
+            if scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 1008})
             return
 
         path = str(scope.get("path", ""))
@@ -167,6 +171,9 @@ def build_transport_security(
     allowed_origins: Sequence[str],
 ) -> TransportSecuritySettings | None:
     """Keep loopback defaults safe and require an explicit Host allowlist for remote binds."""
+    values = (*allowed_hosts, *allowed_origins)
+    if any(not value.strip() or value != value.strip() for value in values):
+        raise ServiceConfigurationError("HTTP allowlist values must be non-empty and trimmed")
     if host in _LOOPBACK_HOSTS and not allowed_hosts and not allowed_origins:
         return None
     if not allowed_hosts:
@@ -225,6 +232,16 @@ def _run_uvicorn(app: ASGIApp, *, host: str, port: int) -> None:
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
+def _parse_port(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("port must be an integer") from error
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535")
+    return port
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="lifeos serve",
@@ -237,7 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Stable actor identity for remote proposals",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
-    parser.add_argument("--port", default=8000, type=int, help="Bind port (default: 8000)")
+    parser.add_argument("--port", default=8000, type=_parse_port, help="Bind port (default: 8000)")
     parser.add_argument(
         "--allowed-host",
         action="append",
@@ -260,12 +277,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             allowed_hosts=args.allowed_host,
             allowed_origins=args.allowed_origin,
         )
-    except (ConfigError, ServiceConfigurationError) as error:
+        readiness = ServiceReadiness(config, args.config)
+        authorizer = AuthenticatedSubmitAuthorizer(actor_id=args.actor_id, readiness=readiness)
+    except (ConfigError, ServiceConfigurationError, ValueError) as error:
         print(f"Service configuration error: {error}", file=sys.stderr)
         return 1
 
-    readiness = ServiceReadiness(config, args.config)
-    authorizer = AuthenticatedSubmitAuthorizer(actor_id=args.actor_id, readiness=readiness)
     registry = Registry(config.runtime_dir / "registry.db")
     create_mcp_server = _load_runtime_server_factory()
     mcp = create_mcp_server(
