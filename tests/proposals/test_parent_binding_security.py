@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import lifeos._transaction_files as transaction_files
 from lifeos._transaction_files import (
     ParentDescriptor,
     TransactionError,
@@ -102,6 +103,88 @@ def test_creation_syscall_selects_live_reviewed_path_after_final_check(
             publish_creation("note.md", staging)
         assert not (vault / "moved" / "note.md").exists()
         assert not canonical_parent.joinpath("note.md").exists()
+    finally:
+        os.close(parent.fd)
+        assert parent.authority_fd is not None
+        os.close(parent.authority_fd)
+
+
+def test_replacement_syscall_never_overwrites_foreign_replacement_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    canonical_parent = vault / "wiki"
+    canonical_parent.mkdir(parents=True)
+    target = canonical_parent / "note.md"
+    target.write_bytes(b"original\n")
+    parent = _parent(canonical_parent)
+    original = get_target_identity("note.md", parent)
+    assert original is not None
+    staging = create_staging_file("note.md", b"candidate\n", parent, 0o644)
+    moved_parent = vault / "moved"
+    real_replace = os.replace
+    relocated = False
+
+    def relocate_then_replace(*args: object, **kwargs: object) -> None:
+        nonlocal relocated
+        if not relocated:
+            canonical_parent.rename(moved_parent)
+            canonical_parent.mkdir()
+            (canonical_parent / "note.md").write_bytes(b"foreign\n")
+            relocated = True
+        real_replace(*args, **kwargs)
+
+    monkeypatch.setattr(transaction_files.os, "replace", relocate_then_replace)
+    try:
+        with pytest.raises(TransactionError, match="parent directory moved"):
+            publish_replacement("note.md", staging, original)
+
+        assert (moved_parent / "note.md").read_bytes() == b"original\n"
+        assert (canonical_parent / "note.md").read_bytes() == b"foreign\n"
+    finally:
+        os.close(parent.fd)
+        assert parent.authority_fd is not None
+        os.close(parent.authority_fd)
+
+
+def test_staging_race_leaves_no_artifact_in_replacement_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    canonical_parent = vault / "wiki"
+    canonical_parent.mkdir(parents=True)
+    parent = _parent(canonical_parent)
+    moved_parent = vault / "moved"
+    real_open = os.open
+    relocated = False
+
+    def relocate_then_open(
+        path: object,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal relocated
+        selected = os.fspath(path)
+        if (
+            not relocated
+            and isinstance(selected, str)
+            and selected.startswith(".note.md.")
+            and selected.endswith(".staged")
+        ):
+            canonical_parent.rename(moved_parent)
+            canonical_parent.mkdir()
+            relocated = True
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(transaction_files.os, "open", relocate_then_open)
+    try:
+        with pytest.raises(TransactionError, match="parent directory moved"):
+            create_staging_file("note.md", b"candidate\n", parent, 0o644)
+
+        assert not list(moved_parent.glob("*.staged"))
+        assert not list(canonical_parent.glob("*.staged"))
     finally:
         os.close(parent.fd)
         assert parent.authority_fd is not None
