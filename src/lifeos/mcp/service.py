@@ -46,6 +46,45 @@ class ReadinessProbe(Protocol):
         ...
 
 
+def _nearest_existing_parent(path: Path) -> Path:
+    candidate = path
+    while not candidate.exists() and candidate.parent != candidate:
+        candidate = candidate.parent
+    return candidate
+
+
+def service_storage_issue(config: LifeOSConfig) -> str | None:
+    """Return a fail-closed storage issue for the current service process, if any."""
+    required_directories = (
+        ("canonical vault root", config.vault_root),
+        ("proposal directory", config.vault_root / "proposals"),
+    )
+    for label, path in required_directories:
+        if not path.is_dir():
+            return f"{label} does not exist or is not a directory: {path}"
+        if not os.access(path, os.R_OK | os.W_OK | os.X_OK):
+            return f"{label} is not readable/writable by the service process: {path}"
+
+    runtime_dir = config.runtime_dir
+    if runtime_dir.exists():
+        if not runtime_dir.is_dir():
+            return f"runtime directory is not a directory: {runtime_dir}"
+        if not os.access(runtime_dir, os.R_OK | os.W_OK | os.X_OK):
+            return f"runtime directory is not readable/writable by the service process: {runtime_dir}"
+    else:
+        parent = _nearest_existing_parent(runtime_dir.parent)
+        if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
+            return f"runtime directory cannot be created by the service process: {runtime_dir}"
+    return None
+
+
+def validate_service_storage(config: LifeOSConfig) -> None:
+    """Require write authority needed for remote draft/submission and runtime state."""
+    issue = service_storage_issue(config)
+    if issue is not None:
+        raise ServiceConfigurationError(issue)
+
+
 class ServiceReadiness:
     """Re-evaluate deterministic vault readiness without mutating canonical state."""
 
@@ -54,6 +93,8 @@ class ServiceReadiness:
         self._config_path = config_path
 
     def ready(self) -> bool:
+        if service_storage_issue(self._config) is not None:
+            return False
         try:
             return collect_doctor(self._config, config_path=self._config_path).ready
         except Exception:
@@ -83,7 +124,7 @@ class AuthenticatedSubmitAuthorizer:
 
 
 class AuthenticatedServiceApp:
-    """ASGI boundary adding bearer auth plus non-sensitive health/readiness probes."""
+    """ASGI boundary adding bearer auth plus bounded liveness/readiness probes."""
 
     def __init__(
         self,
@@ -111,14 +152,6 @@ class AuthenticatedServiceApp:
         if path == "/healthz":
             await _send_json(send, 200, {"status": "ok"})
             return
-        if path == "/readyz":
-            ready = self._readiness.ready()
-            await _send_json(
-                send,
-                200 if ready else 503,
-                {"status": "ready" if ready else "blocked"},
-            )
-            return
 
         if not _request_has_token(scope, self._token):
             await _send_json(
@@ -126,6 +159,15 @@ class AuthenticatedServiceApp:
                 401,
                 {"error": "authentication-required"},
                 extra_headers=((b"www-authenticate", b"Bearer"),),
+            )
+            return
+
+        if path == "/readyz":
+            ready = self._readiness.ready()
+            await _send_json(
+                send,
+                200 if ready else 503,
+                {"status": "ready" if ready else "blocked"},
             )
             return
 
@@ -265,7 +307,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--allowed-origin",
         action="append",
         default=[],
-        help="Allowed browser Origin; repeat only when a browser MCP client is required",
+        help=(
+            "Allowed Origin for MCP transport security; repeat as needed. "
+            "This validates Origin but does not enable browser CORS."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -279,6 +324,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         readiness = ServiceReadiness(config, args.config)
         authorizer = AuthenticatedSubmitAuthorizer(actor_id=args.actor_id, readiness=readiness)
+        validate_service_storage(config)
     except (ConfigError, ServiceConfigurationError, ValueError) as error:
         print(f"Service configuration error: {error}", file=sys.stderr)
         return 1
