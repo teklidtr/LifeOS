@@ -307,7 +307,7 @@ def create_mcp_server(
     resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
     activity = ActivityStore(resolved_runtime_dir)
 
-    def _path_inside_runtime(path: str) -> bool:
+    def _external_registry_identity_allow_path() -> Callable[[str], bool]:
         try:
             runtime_prefix = runtime_exclusion_prefix(
                 vault_root,
@@ -315,13 +315,7 @@ def create_mcp_server(
             )
         except CoherenceError as error:
             raise ToolExecutionError("Could not resolve configured runtime directory") from error
-        if runtime_prefix is None:
-            return False
-        normalized = posixpath.normpath(path)
-        runtime_root = runtime_prefix.rstrip("/")
-        return normalized == runtime_root or normalized.startswith(runtime_prefix)
-
-    def _external_registry_identity_allow_path() -> Callable[[str], bool]:
+        runtime_root = runtime_prefix.rstrip("/") if runtime_prefix is not None else None
         try:
             policy = load_retrieval_policy(vault_root)
         except RetrievalError as error:
@@ -331,7 +325,10 @@ def create_mcp_server(
         def allowed(path: str) -> bool:
             if path.startswith("conversations/") or path.startswith("proposals/"):
                 return False
-            if _path_inside_runtime(path):
+            normalized = posixpath.normpath(path)
+            if runtime_prefix is not None and (
+                normalized == runtime_root or normalized.startswith(runtime_prefix)
+            ):
                 return False
             try:
                 return scope_decision(
