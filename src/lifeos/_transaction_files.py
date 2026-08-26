@@ -398,6 +398,7 @@ def _quarantine_verified_target(
     expected_identity: TargetIdentity,
     require_mode: bool,
     suffix: str,
+    recovery_bound: bool = True,
 ) -> str:
     """Atomically consume a dirent and prove the moved inode is the reviewed target.
 
@@ -405,11 +406,15 @@ def _quarantine_verified_target(
     happened, restore the foreign inode without overwriting any newer entry and fail closed.
     Recovery-bound callers use transaction-derived names for reproducible crash recovery.
     """
-    quarantine_name = _recovery_quarantine_name(
-        target_name,
-        content_hash=expected_identity.content_hash,
-        mode=expected_identity.mode,
-        suffix=suffix,
+    quarantine_name = (
+        _recovery_quarantine_name(
+            target_name,
+            content_hash=expected_identity.content_hash,
+            mode=expected_identity.mode,
+            suffix=suffix,
+        )
+        if recovery_bound
+        else None
     ) or f".{target_name}.{secrets.token_hex(8)}.{suffix}-quarantine"
     try:
         os.replace(
@@ -497,6 +502,40 @@ def fsync_directory(fd: int) -> DirectorySyncResult:
                     state=DirectorySyncState.UNSUPPORTED, errno_name=err_name
                 )
             return DirectorySyncResult(state=DirectorySyncState.FAILED, errno_name=err_name)
+
+
+def _remove_verified_artifact(
+    name: str,
+    parent: ParentDescriptor,
+    expected_identity: TargetIdentity,
+) -> DirectorySyncResult:
+    """Remove only the exact recovery artifact inode that was previously verified."""
+    if parent.authority_fd is None:
+        raise TransactionError("Verified recovery artifact cleanup requires pinned authority")
+
+    live_parent_fd = open_live_parent_for_mutation(parent)
+    cleanup_name: str | None = None
+    try:
+        live_identity = _target_identity_at(name, live_parent_fd)
+        if not _identity_matches(live_identity, expected_identity):
+            raise TransactionError("Recovery mutation artifact changed before cleanup")
+        cleanup_name = _quarantine_verified_target(
+            name,
+            dir_fd=live_parent_fd,
+            expected_identity=expected_identity,
+            require_mode=True,
+            suffix="cleanup",
+            recovery_bound=False,
+        )
+        require_live_parent(parent)
+        if _target_identity_at(name, live_parent_fd) is not None:
+            raise TransactionError("Recovery mutation artifact path changed during cleanup")
+    finally:
+        if cleanup_name is not None:
+            _best_effort_remove(cleanup_name, live_parent_fd)
+        _close_live_parent(parent, live_parent_fd)
+
+    return fsync_directory(parent.fd)
 
 
 def _remove_created_artifact(name: str, parent_fd: int) -> None:
@@ -1054,7 +1093,11 @@ def rollback_replacement(
         raise TransactionError(f"Rollback target stat failed: {e}") from e
 
     current_target = _target_identity_at(target_name, staging.parent.fd)
-    if current_target is None or current_target.content_hash != staging.candidate_hash:
+    if (
+        current_target is None
+        or current_target.content_hash != staging.candidate_hash
+        or stat.S_IMODE(current_target.mode) != stat.S_IMODE(staging.intended_mode)
+    ):
         raise TransactionError("Canonical file mutated externally, rollback refused")
 
     try:
@@ -1073,28 +1116,38 @@ def rollback_replacement(
     live_parent_fd = open_live_parent_for_mutation(staging.parent)
     guard_name = _recovery_guard_name(
         target_name,
-        content_hash=current_target.content_hash,
-        mode=current_target.mode,
+        content_hash=staging.candidate_hash,
+        mode=staging.intended_mode,
         suffix="rollback",
     ) or f".{target_name}.{secrets.token_hex(8)}.rollback-guard"
     quarantine_name: str | None = None
     guard_created = False
     try:
         live_target = _target_identity_at(target_name, live_parent_fd)
-        if live_target is None or live_target.content_hash != staging.candidate_hash:
+        if (
+            live_target is None
+            or live_target.content_hash != staging.candidate_hash
+            or stat.S_IMODE(live_target.mode) != stat.S_IMODE(staging.intended_mode)
+        ):
             raise TransactionError("Canonical file mutated externally, rollback refused")
+        expected_live_target = TargetIdentity(
+            dev=live_target.dev,
+            ino=live_target.ino,
+            mode=staging.intended_mode,
+            content_hash=staging.candidate_hash,
+        )
         _create_verified_guard(
             target_name,
             guard_name,
             live_parent_fd,
-            live_target,
+            expected_live_target,
             require_mode=True,
         )
         guard_created = True
         quarantine_name = _quarantine_verified_target(
             target_name,
             dir_fd=live_parent_fd,
-            expected_identity=live_target,
+            expected_identity=expected_live_target,
             require_mode=True,
             suffix="rollback",
         )

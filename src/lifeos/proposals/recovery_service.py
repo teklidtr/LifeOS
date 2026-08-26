@@ -24,8 +24,8 @@ from lifeos._transaction_files import (
     TransactionError,
     _recovery_guard_name,
     _recovery_quarantine_name,
+    _remove_verified_artifact,
     _set_recovery_transaction_id,
-    fsync_directory,
     get_target_identity,
     publish_creation,
 )
@@ -93,6 +93,7 @@ class _MutationArtifactExpectation:
     name: str
     expected_hash: str
     expected_mode: int
+    proves_canonical_consumed: bool
 
 
 def recover_interrupted_applications(
@@ -306,13 +307,20 @@ def _artifact_candidates(
 ) -> tuple[_MutationArtifactExpectation, ...]:
     candidates: dict[str, _MutationArtifactExpectation] = {}
 
-    def add(name: str | None, *, expected_hash: str, expected_mode: int) -> None:
+    def add(
+        name: str | None,
+        *,
+        expected_hash: str,
+        expected_mode: int,
+        proves_canonical_consumed: bool = False,
+    ) -> None:
         if name is None:
             return
         candidates[name] = _MutationArtifactExpectation(
             name=name,
             expected_hash=expected_hash,
             expected_mode=expected_mode,
+            proves_canonical_consumed=proves_canonical_consumed,
         )
 
     if expectation.expected_pre_state is RecoveryExpectedState.PRESENT:
@@ -341,6 +349,7 @@ def _artifact_candidates(
             ),
             expected_hash=pre_hash,
             expected_mode=pre_mode,
+            proves_canonical_consumed=True,
         )
         add(
             _recovery_guard_name(
@@ -361,6 +370,7 @@ def _artifact_candidates(
             ),
             expected_hash=staged_hash,
             expected_mode=staged_mode,
+            proves_canonical_consumed=True,
         )
         add(
             _recovery_quarantine_name(
@@ -371,6 +381,7 @@ def _artifact_candidates(
             ),
             expected_hash=staged_hash,
             expected_mode=staged_mode,
+            proves_canonical_consumed=True,
         )
         add(
             _recovery_quarantine_name(
@@ -381,6 +392,7 @@ def _artifact_candidates(
             ),
             expected_hash=pre_hash,
             expected_mode=pre_mode,
+            proves_canonical_consumed=True,
         )
     else:
         staged_hash = expectation.staged_hash
@@ -404,29 +416,25 @@ def _artifact_candidates(
             ),
             expected_hash=staged_hash,
             expected_mode=staged_mode,
+            proves_canonical_consumed=True,
         )
 
     return tuple(candidates.values())
 
 
-def _sync_mutation_cleanup(parent: ParentDescriptor) -> None:
-    result = fsync_directory(parent.fd)
-    if result.state is DirectorySyncState.FAILED:
-        raise RecoveryUnavailableError("Failed to sync recovery mutation cleanup")
-
-
-def _remove_mutation_artifacts(parent: ParentDescriptor, names: tuple[str, ...]) -> None:
-    removed = False
-    for name in names:
+def _remove_mutation_artifacts(
+    parent: ParentDescriptor,
+    artifacts: tuple[tuple[_MutationArtifactExpectation, TargetIdentity], ...],
+) -> None:
+    for candidate, identity in artifacts:
         try:
-            os.unlink(name, dir_fd=parent.fd)
-            removed = True
-        except FileNotFoundError:
-            continue
-        except OSError as error:
-            raise RecoveryUnavailableError("Failed to clean recovery mutation artifact") from error
-    if removed:
-        _sync_mutation_cleanup(parent)
+            result = _remove_verified_artifact(candidate.name, parent, identity)
+        except TransactionError as error:
+            raise RecoveryConflictError(
+                "Recovery mutation artifact changed outside recovery"
+            ) from error
+        if result.state is DirectorySyncState.FAILED:
+            raise RecoveryUnavailableError("Failed to sync recovery mutation cleanup")
 
 
 def _classify_identity(
@@ -516,7 +524,7 @@ def _reconcile_interrupted_mutation_artifact(
         except TransactionError as error:
             raise RecoveryCorruptStateError("Canonical target is not a regular file") from error
 
-        found: list[_MutationArtifactExpectation] = []
+        found: list[tuple[_MutationArtifactExpectation, TargetIdentity]] = []
         for candidate in _artifact_candidates(target_name=target_name, expectation=expectation):
             try:
                 identity = get_target_identity(candidate.name, parent)
@@ -532,7 +540,7 @@ def _reconcile_interrupted_mutation_artifact(
                 expected_mode=candidate.expected_mode,
             ):
                 raise RecoveryConflictError("Recovery mutation artifact changed outside recovery")
-            found.append(candidate)
+            found.append((candidate, identity))
 
         if not found:
             return
@@ -541,6 +549,10 @@ def _reconcile_interrupted_mutation_artifact(
             if _classify_identity(canonical_identity, expectation) is _CanonicalState.OTHER:
                 raise RecoveryConflictError("Canonical target changed outside recovery")
         elif expectation.expected_pre_state is RecoveryExpectedState.PRESENT:
+            if not any(candidate.proves_canonical_consumed for candidate, _ in found):
+                raise RecoveryConflictError(
+                    "Missing canonical target lacks verified quarantine evidence"
+                )
             _restore_pre_from_journal_backup(
                 transaction_dir=transaction_dir,
                 transaction_fd=transaction_fd,
@@ -548,7 +560,7 @@ def _reconcile_interrupted_mutation_artifact(
                 parent=parent,
                 expectation=expectation,
             )
-        _remove_mutation_artifacts(parent, tuple(candidate.name for candidate in found))
+        _remove_mutation_artifacts(parent, tuple(found))
     finally:
         os.close(parent.fd)
 
