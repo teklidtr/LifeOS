@@ -366,10 +366,10 @@ Every proposal-producing ingestion tool still stops at draft. `proposal_submit`,
 `proposal_approve`, and `proposal_apply` require separate explicit lifecycle intent.
 
 For debugging, `runtime_activity` exposes recent disposable routing metadata such as tool
-names, focus/source paths, applied instruction IDs, proposal IDs, targets, and changed paths.
-Automatic ingestion refreshes appear as `ingestion_registry_preflight` activity records. It
-does **not** copy canonical Markdown bodies or flashcard answers into `.lifeos` activity
-logs.
+names, request actor IDs when available, focus/source paths, applied instruction IDs, proposal
+IDs, targets, and changed paths. Automatic ingestion refreshes appear as
+`ingestion_registry_preflight` activity records. It does **not** copy bearer credentials,
+canonical Markdown bodies, or flashcard answers into `.lifeos` activity logs.
 
 ## 4.12 Build the semantic retrieval index
 
@@ -435,9 +435,9 @@ synchronized or mounted deployment.
 ## 4.15 Run an always-on home node
 
 Use the home-node service when a phone, laptop, or tablet should reach one authoritative
-LifeOS node without storing a local vault copy. The node owns the filesystem view and runs the
-same deterministic MCP tool/facade surface as local STDIO; agent intelligence still runs in
-the external client.
+LifeOS node without storing a local vault copy. The node owns the filesystem view and uses the
+same deterministic MCP/facade/business-rule core as local STDIO, with a deliberately narrower
+network capability surface; agent intelligence still runs in the external client.
 
 ### Direct service mode
 
@@ -472,15 +472,20 @@ lifeos serve \
 ```
 
 The service fails before accepting MCP traffic unless its process identity can read/write the
-canonical vault root and `proposals/`, and can use or create the configured runtime directory.
-This is deliberate: a node that can only read the vault must not advertise a working remote
-draft/submit surface.
+canonical vault root and a real, non-symlink `proposals/` directory, and can use or create the
+configured runtime directory. Proposal publication rechecks the same proposal-root boundary
+with descriptor-relative, no-follow filesystem operations. This is deliberate: a node that can
+only read the vault, or whose proposal root can redirect writes, must not advertise a working
+remote draft/submit surface.
 
 The default bind is `127.0.0.1:8000`. The Streamable HTTP MCP endpoint is `/mcp`.
-`/healthz` is a public, content-free liveness probe. `/readyz` runs the deterministic readiness
-contract and returns 503 when the node is blocked, but it requires the same bearer credential as
-`/mcp` because readiness can be influenced by protected canonical state. An unauthenticated
-`/readyz` request returns 401. Neither probe returns the bearer secret or vault content.
+`/healthz` is a public, content-free liveness probe. `/readyz` requires the same bearer
+credential as `/mcp`, but its 200/503 result is deliberately policy-neutral: it checks service
+storage authority and does not traverse protected Markdown or let protected note identity or
+content affect readiness. An unauthenticated `/readyz` request returns 401. Detailed doctor,
+retrieval-policy, proposal-coherence, ownership, provenance, hash, stale-write, and recovery
+checks remain operation-specific and continue to fail closed where relevant. Neither probe
+returns the bearer secret or vault content.
 
 A non-loopback bind is rejected unless you also supply at least one explicit Host allowlist:
 
@@ -504,9 +509,12 @@ publish port 8000 directly to the public Internet. LifeOS does not configure rou
 certificates, reverse proxies, or browser CORS for you.
 
 The configured `--actor-id` is the stable attribution for authenticated requests handled by
-that service process. The initial headless contract permits an authenticated client to explore,
-create guarded draft proposals, and explicitly submit them. Remote `proposal_approve` and
-`proposal_apply` are denied even with the bearer token. Review/approval/application remains a
+that service process and is persisted with disposable `runtime_activity` records; bearer
+credentials are not. The initial headless contract permits an authenticated client to explore,
+create guarded draft proposals, and explicitly submit them. The home-node MCP tool list omits
+`proposal_approve` and `proposal_apply` entirely, so forbidden lifecycle operations are rejected
+at the transport capability boundary before proposal state is loaded or inspected. Local STDIO
+retains the full reviewed lifecycle surface. Review/approval/application therefore remains a
 trusted human/local path rather than turning possession of one network token into authority to
 rewrite canonical notes.
 
