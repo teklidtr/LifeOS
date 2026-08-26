@@ -8,8 +8,10 @@ from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 
+from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.facade.authorization import ConsequentialAuthorizer
+from lifeos.facade.errors import ToolExecutionError
 from lifeos.facade.read_only import WikiSearchRequest, search_wiki
 from lifeos.mcp.coherence_tools import build_coherence_tools
 from lifeos.mcp.exploration_tools import (
@@ -27,9 +29,12 @@ from lifeos.mcp.server import (
 from lifeos.registry import Registry
 from lifeos.retrieval.contracts import (
     push_node_local_excluded_prefixes,
+    push_node_local_exclusion_predicates,
     reset_node_local_excluded_prefixes,
+    reset_node_local_exclusion_predicates,
 )
 from lifeos.runtime import ActivityStore
+from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
 _POLICY_READ_OVERRIDES = frozenset(
     {"vault_read_markdown", "wiki_search", "vault_context", "runtime_activity"}
@@ -65,16 +70,35 @@ def create_mcp_server(
 
     def runtime_scoped_invoke(operation: Callable[[], object]) -> object:
         def scoped_operation() -> object:
-            runtime_prefix = runtime_exclusion_prefix(
-                vault_root,
-                runtime_dir=resolved_runtime_dir,
-            )
+            try:
+                runtime_prefix = runtime_exclusion_prefix(
+                    vault_root,
+                    runtime_dir=resolved_runtime_dir,
+                )
+                matcher = build_runtime_exclusion_matcher(
+                    vault_root,
+                    runtime_dir=resolved_runtime_dir,
+                    snapshot_prefix=runtime_prefix,
+                )
+            except CoherenceError as error:
+                raise ToolExecutionError("Could not resolve configured runtime directory") from error
+
+            def runtime_excluded(path: str) -> bool:
+                try:
+                    return matcher(path)
+                except CoherenceError as error:
+                    raise ToolExecutionError(
+                        "Could not verify configured runtime exclusion"
+                    ) from error
+
             runtime_exclusions = (runtime_prefix,) if runtime_prefix is not None else ()
-            token = push_node_local_excluded_prefixes(runtime_exclusions)
+            prefix_token = push_node_local_excluded_prefixes(runtime_exclusions)
+            predicate_token = push_node_local_exclusion_predicates((runtime_excluded,))
             try:
                 return operation()
             finally:
-                reset_node_local_excluded_prefixes(token)
+                reset_node_local_exclusion_predicates(predicate_token)
+                reset_node_local_excluded_prefixes(prefix_token)
 
         return _invoke_mcp_tool(scoped_operation)
 
