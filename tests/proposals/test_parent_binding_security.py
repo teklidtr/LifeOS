@@ -10,10 +10,13 @@ import lifeos._transaction_files as transaction_files
 from lifeos._transaction_files import (
     ParentDescriptor,
     TransactionError,
+    create_hardlink_backup,
     create_staging_file,
     get_target_identity,
     publish_creation,
     publish_replacement,
+    remove_verified_target,
+    rollback_replacement,
 )
 
 
@@ -186,6 +189,125 @@ def test_staging_race_leaves_no_artifact_in_replacement_parent(
         assert not list(moved_parent.glob("*.staged"))
         assert not list(canonical_parent.glob("*.staged"))
     finally:
+        os.close(parent.fd)
+        assert parent.authority_fd is not None
+        os.close(parent.authority_fd)
+
+
+def test_replacement_guard_rejects_target_inode_swap_before_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    canonical_parent = vault / "wiki"
+    canonical_parent.mkdir(parents=True)
+    target = canonical_parent / "note.md"
+    target.write_bytes(b"original\n")
+    parent = _parent(canonical_parent)
+    original = get_target_identity("note.md", parent)
+    assert original is not None
+    staging = create_staging_file("note.md", b"candidate\n", parent, 0o644)
+    real_link = os.link
+    swapped = False
+
+    def swap_then_link(src: object, dst: object, *args: object, **kwargs: object) -> None:
+        nonlocal swapped
+        if not swapped and os.fspath(dst).endswith(".replace-guard"):
+            target.unlink()
+            target.write_bytes(b"foreign\n")
+            swapped = True
+        real_link(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(transaction_files.os, "link", swap_then_link)
+    try:
+        with pytest.raises(TransactionError, match="unexpected target identity"):
+            publish_replacement("note.md", staging, original)
+
+        assert target.read_bytes() == b"foreign\n"
+        assert not list(canonical_parent.glob("*.replace-guard"))
+    finally:
+        os.close(parent.fd)
+        assert parent.authority_fd is not None
+        os.close(parent.authority_fd)
+
+
+def test_remove_guard_rejects_target_inode_swap_before_unlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    canonical_parent = vault / "wiki"
+    canonical_parent.mkdir(parents=True)
+    target = canonical_parent / "note.md"
+    target.write_bytes(b"installed\n")
+    parent = _parent(canonical_parent)
+    expected = get_target_identity("note.md", parent)
+    assert expected is not None
+    real_link = os.link
+    swapped = False
+
+    def swap_then_link(src: object, dst: object, *args: object, **kwargs: object) -> None:
+        nonlocal swapped
+        if not swapped and os.fspath(dst).endswith(".unlink-guard"):
+            target.unlink()
+            target.write_bytes(b"foreign\n")
+            swapped = True
+        real_link(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(transaction_files.os, "link", swap_then_link)
+    try:
+        with pytest.raises(TransactionError, match="unexpected target identity"):
+            remove_verified_target("note.md", parent, expected)
+
+        assert target.read_bytes() == b"foreign\n"
+        assert not list(canonical_parent.glob("*.unlink-guard"))
+    finally:
+        os.close(parent.fd)
+        assert parent.authority_fd is not None
+        os.close(parent.authority_fd)
+
+
+def test_rollback_guard_rejects_target_inode_swap_before_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    canonical_parent = vault / "wiki"
+    canonical_parent.mkdir(parents=True)
+    target = canonical_parent / "note.md"
+    target.write_bytes(b"original\n")
+    parent = _parent(canonical_parent)
+    original = get_target_identity("note.md", parent)
+    assert original is not None
+    staging = create_staging_file("note.md", b"candidate\n", parent, 0o644)
+    backup = create_hardlink_backup("note.md", parent, original)
+    target.unlink()
+    target.write_bytes(b"candidate\n")
+    real_link = os.link
+    swapped = False
+
+    def swap_then_link(src: object, dst: object, *args: object, **kwargs: object) -> None:
+        nonlocal swapped
+        if not swapped and os.fspath(dst).endswith(".rollback-guard"):
+            target.unlink()
+            target.write_bytes(b"foreign\n")
+            swapped = True
+        real_link(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(transaction_files.os, "link", swap_then_link)
+    try:
+        with pytest.raises(TransactionError, match="unexpected target identity"):
+            rollback_replacement("note.md", staging, backup)
+
+        assert target.read_bytes() == b"foreign\n"
+        assert (canonical_parent / backup.name).read_bytes() == b"original\n"
+        assert not list(canonical_parent.glob("*.rollback-guard"))
+    finally:
+        try:
+            (canonical_parent / staging.name).unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            (canonical_parent / backup.name).unlink()
+        except FileNotFoundError:
+            pass
         os.close(parent.fd)
         assert parent.authority_fd is not None
         os.close(parent.authority_fd)
