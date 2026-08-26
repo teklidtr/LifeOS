@@ -33,7 +33,7 @@ tests or modifies that runtime contract. Filename alone does not grant authority
 
 ## Implementation workflow
 
-1. Select exactly one task from `tasks/ready/`.
+1. Select exactly one task from `tasks/ready/`. When `tasks/ready/` contains no implementation task, first apply the empty-ready backlog promotion rule in `tasks/README.md`; a successfully promoted task is then selected through the normal `ready/` workflow.
 2. Move it to `tasks/in-progress/`.
 3. Inspect existing code and tests.
 4. Implement only the stated scope.
