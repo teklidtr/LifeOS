@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+from .._transaction_files import _set_recovery_mutation_token, _set_recovery_transaction_id
 from .recovery import (
     RecoveryConflictError,
     RecoveryCorruptStateError,
@@ -174,6 +175,7 @@ class PinnedRecoveryStore:
             os.fsync(self.recovery_fd)
         except OSError as exc:
             raise RecoveryUnavailableError("Initialization failed") from exc
+        _set_recovery_transaction_id(str(journal.transaction_id))
         return self.recovery_root / name
 
     def write_journal(self, journal: RecoveryJournal) -> None:
@@ -242,6 +244,7 @@ def acquire_pinned_recovery_store(
     recovery_fd: int | None = None
     lock_fd: int | None = None
     runtime_id: tuple[int, int] | None = None
+    previous_mutation_token = _set_recovery_mutation_token(None)
     try:
         try:
             authority_fd = _open_runtime_chain(authority_path, create_missing=False)
@@ -283,6 +286,7 @@ def acquire_pinned_recovery_store(
             authority_fd=authority_fd,
         )
     finally:
+        _set_recovery_mutation_token(previous_mutation_token)
         if runtime_id is not None:
             with _LOCKS_GUARD:
                 _HELD_RUNTIME_IDS.discard(runtime_id)

@@ -1,9 +1,11 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
 
+import lifeos._transaction_files as transaction_files
 import lifeos.proposals.application as application_module
 import lifeos.proposals.recovery_service as recovery_service_module
 from lifeos.proposals.application import ApplicationError, ApplicationErrorCode, apply_proposal
@@ -113,6 +115,110 @@ def test_recovery_from_prepared_phase_is_idempotent(
     assert first.transactions[0].action is RecoveryAction.ROLLED_BACK
     assert second.transactions == ()
     _assert_pre_state(vault_root, meta.id)
+
+
+def test_recovery_restores_replacement_interrupted_after_quarantine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    meta, vault_root, proposal = _load_two_target_application(tmp_path)
+    real_replace = transaction_files.os.replace
+    real_best_effort_remove = transaction_files._best_effort_remove
+    interrupted = False
+
+    def replace_then_interrupt(src: object, dst: object, *args: object, **kwargs: object) -> None:
+        nonlocal interrupted
+        real_replace(src, dst, *args, **kwargs)
+        if (
+            not interrupted
+            and os.fspath(src) == "test1.txt"
+            and os.fspath(dst).endswith(".replace-quarantine")
+        ):
+            interrupted = True
+            raise _InjectedInterruption("after replacement quarantine")
+
+    monkeypatch.setattr(transaction_files.os, "replace", replace_then_interrupt)
+    # A real process exit would skip Python finally blocks. Preserve both mutation artifacts
+    # so recovery sees the exact on-disk state after the canonical dirent was consumed.
+    monkeypatch.setattr(transaction_files, "_best_effort_remove", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(_InjectedInterruption):
+        apply_proposal(
+            proposal,
+            vault_root=vault_root,
+            applied_by="admin",
+            applied_at="2026-07-13T03:00:00Z",
+        )
+
+    assert interrupted is True
+    assert not (vault_root / "test1.txt").exists()
+    journal = _single_journal(vault_root)
+    assert journal.phase is RecoveryPhase.PREPARED
+    transaction_dir = vault_root / ".lifeos" / "recovery" / str(journal.transaction_id)
+    assert not (transaction_dir / "mutation-token").exists()
+    assert len(list(vault_root.glob(".test1.txt.*.replace-guard"))) == 1
+    assert len(list(vault_root.glob(".test1.txt.*.replace-quarantine"))) == 1
+
+    monkeypatch.setattr(transaction_files.os, "replace", real_replace)
+    monkeypatch.setattr(transaction_files, "_best_effort_remove", real_best_effort_remove)
+
+    result = recover_interrupted_applications(vault_root=vault_root)
+
+    assert result.transactions[0].phase_before is RecoveryPhase.PREPARED
+    assert result.transactions[0].action is RecoveryAction.ROLLED_BACK
+    _assert_pre_state(vault_root, meta.id)
+    assert not list(vault_root.glob(".test1.txt.*.replace-guard"))
+    assert not list(vault_root.glob(".test1.txt.*.replace-quarantine"))
+
+
+def test_recovery_discards_interrupted_creation_unlink_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    meta, vault_root, proposal = _load_two_target_application(tmp_path)
+    _interrupt_at(monkeypatch, "after_all_targets")
+    with pytest.raises(_InjectedInterruption):
+        apply_proposal(
+            proposal,
+            vault_root=vault_root,
+            applied_by="admin",
+            applied_at="2026-07-13T03:00:00Z",
+        )
+
+    assert (vault_root / "test2.txt").read_bytes() == b"new_content2"
+    real_replace = transaction_files.os.replace
+    real_best_effort_remove = transaction_files._best_effort_remove
+    interrupted = False
+
+    def replace_then_interrupt(src: object, dst: object, *args: object, **kwargs: object) -> None:
+        nonlocal interrupted
+        real_replace(src, dst, *args, **kwargs)
+        if (
+            not interrupted
+            and os.fspath(src) == "test2.txt"
+            and os.fspath(dst).endswith(".unlink-quarantine")
+        ):
+            interrupted = True
+            raise _InjectedInterruption("after creation rollback quarantine")
+
+    monkeypatch.setattr(transaction_files.os, "replace", replace_then_interrupt)
+    monkeypatch.setattr(transaction_files, "_best_effort_remove", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(_InjectedInterruption):
+        recover_interrupted_applications(vault_root=vault_root)
+
+    assert interrupted is True
+    assert not (vault_root / "test2.txt").exists()
+    assert len(list(vault_root.glob(".test2.txt.*.unlink-guard"))) == 1
+    assert len(list(vault_root.glob(".test2.txt.*.unlink-quarantine"))) == 1
+
+    monkeypatch.setattr(transaction_files.os, "replace", real_replace)
+    monkeypatch.setattr(transaction_files, "_best_effort_remove", real_best_effort_remove)
+
+    result = recover_interrupted_applications(vault_root=vault_root)
+
+    assert result.transactions[0].action is RecoveryAction.ROLLED_BACK
+    _assert_pre_state(vault_root, meta.id)
+    assert not list(vault_root.glob(".test2.txt.*.unlink-guard"))
+    assert not list(vault_root.glob(".test2.txt.*.unlink-quarantine"))
 
 
 def test_recovery_from_partial_target_phase_is_idempotent(

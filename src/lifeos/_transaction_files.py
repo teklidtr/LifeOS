@@ -4,6 +4,7 @@ import stat
 import hashlib
 import sys
 import errno
+from contextvars import ContextVar
 from enum import Enum
 from dataclasses import dataclass
 
@@ -68,6 +69,87 @@ _DIRECTORY_FLAGS = (
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
 )
+_ACTIVE_RECOVERY_MUTATION_TOKEN: ContextVar[str | None] = ContextVar(
+    "lifeos_recovery_mutation_token", default=None
+)
+
+
+def _mutation_token_for_transaction_id(transaction_id: str) -> str:
+    if not transaction_id:
+        raise TransactionError("Invalid recovery transaction ID")
+    return hashlib.sha256(
+        f"lifeos-recovery-mutation-v1\0{transaction_id}".encode("utf-8")
+    ).hexdigest()[:32]
+
+
+def _set_recovery_mutation_token(token: str | None) -> str | None:
+    if token is not None and (
+        len(token) != 32 or any(character not in "0123456789abcdef" for character in token)
+    ):
+        raise TransactionError("Invalid recovery mutation token")
+    previous = _ACTIVE_RECOVERY_MUTATION_TOKEN.get()
+    _ACTIVE_RECOVERY_MUTATION_TOKEN.set(token)
+    return previous
+
+
+def _set_recovery_transaction_id(transaction_id: str | None) -> str | None:
+    token = None if transaction_id is None else _mutation_token_for_transaction_id(transaction_id)
+    return _set_recovery_mutation_token(token)
+
+
+def _recovery_mutation_artifact_name(
+    target_name: str,
+    *,
+    content_hash: str,
+    mode: int,
+    role: str,
+    token: str | None = None,
+) -> str | None:
+    selected_token = token if token is not None else _ACTIVE_RECOVERY_MUTATION_TOKEN.get()
+    if selected_token is None:
+        return None
+    normalized_hash = content_hash.removeprefix("sha256:")
+    digest = hashlib.sha256(
+        (
+            f"{selected_token}\0{target_name}\0{normalized_hash}\0"
+            f"{stat.S_IMODE(mode)}\0{role}"
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+    return f".{target_name}.{digest}.{role}"
+
+
+def _recovery_quarantine_name(
+    target_name: str,
+    *,
+    content_hash: str,
+    mode: int,
+    suffix: str,
+    token: str | None = None,
+) -> str | None:
+    return _recovery_mutation_artifact_name(
+        target_name,
+        content_hash=content_hash,
+        mode=mode,
+        role=f"{suffix}-quarantine",
+        token=token,
+    )
+
+
+def _recovery_guard_name(
+    target_name: str,
+    *,
+    content_hash: str,
+    mode: int,
+    suffix: str,
+    token: str | None = None,
+) -> str | None:
+    return _recovery_mutation_artifact_name(
+        target_name,
+        content_hash=content_hash,
+        mode=mode,
+        role=f"{suffix}-guard",
+        token=token,
+    )
 
 
 def _directory_entry_name(parent_fd: int, child_stat: os.stat_result) -> str:
@@ -321,8 +403,14 @@ def _quarantine_verified_target(
 
     A writer racing after guard creation can only have its replacement moved aside. If that
     happened, restore the foreign inode without overwriting any newer entry and fail closed.
+    Recovery-bound callers use transaction-derived names for reproducible crash recovery.
     """
-    quarantine_name = f".{target_name}.{secrets.token_hex(8)}.{suffix}-quarantine"
+    quarantine_name = _recovery_quarantine_name(
+        target_name,
+        content_hash=expected_identity.content_hash,
+        mode=expected_identity.mode,
+        suffix=suffix,
+    ) or f".{target_name}.{secrets.token_hex(8)}.{suffix}-quarantine"
     try:
         os.replace(
             target_name,
@@ -709,7 +797,12 @@ def publish_replacement(
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     live_parent_fd = open_live_parent_for_mutation(staging.parent)
-    guard_name = f".{target_name}.{secrets.token_hex(8)}.replace-guard"
+    guard_name = _recovery_guard_name(
+        target_name,
+        content_hash=original_identity.content_hash,
+        mode=original_identity.mode,
+        suffix="replace",
+    ) or f".{target_name}.{secrets.token_hex(8)}.replace-guard"
     quarantine_name: str | None = None
     guard_created = False
     try:
@@ -830,7 +923,12 @@ def remove_verified_target(
         return _legacy_remove_verified_target(target_name, parent, expected_identity)
 
     live_parent_fd = open_live_parent_for_mutation(parent)
-    guard_name = f".{target_name}.{secrets.token_hex(8)}.unlink-guard"
+    guard_name = _recovery_guard_name(
+        target_name,
+        content_hash=expected_identity.content_hash,
+        mode=expected_identity.mode,
+        suffix="unlink",
+    ) or f".{target_name}.{secrets.token_hex(8)}.unlink-guard"
     quarantine_name: str | None = None
     guard_created = False
     try:
@@ -973,7 +1071,12 @@ def rollback_replacement(
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     live_parent_fd = open_live_parent_for_mutation(staging.parent)
-    guard_name = f".{target_name}.{secrets.token_hex(8)}.rollback-guard"
+    guard_name = _recovery_guard_name(
+        target_name,
+        content_hash=current_target.content_hash,
+        mode=current_target.mode,
+        suffix="rollback",
+    ) or f".{target_name}.{secrets.token_hex(8)}.rollback-guard"
     quarantine_name: str | None = None
     guard_created = False
     try:

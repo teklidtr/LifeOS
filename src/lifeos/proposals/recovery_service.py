@@ -13,14 +13,21 @@ from lifeos._recovery_io import (
     RecoveryIOCorruptStateError,
     RecoveryIOError,
     RecoveryIOUnavailableError,
+    prepare_canonical_staging_from_artifact,
     remove_installed_creation,
     restore_canonical_from_backup,
 )
 from lifeos._transaction_files import (
+    DirectorySyncState,
     ParentDescriptor,
     TargetIdentity,
     TransactionError,
+    _recovery_guard_name,
+    _recovery_quarantine_name,
+    _set_recovery_transaction_id,
+    fsync_directory,
     get_target_identity,
+    publish_creation,
 )
 from lifeos.config import runtime_overlaps_reserved_canonical
 from lifeos.proposals.recovery import (
@@ -79,6 +86,13 @@ class _FileExpectation:
     backup_path: str | None
     backup_hash: str | None
     backup_size: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _MutationArtifactExpectation:
+    name: str
+    expected_hash: str
+    expected_mode: int
 
 
 def recover_interrupted_applications(
@@ -168,6 +182,18 @@ def _recover_transaction(
             phase_before=journal.phase,
             action=RecoveryAction.CLEANED,
         )
+
+    _set_recovery_transaction_id(str(journal.transaction_id))
+    reconcile_fd = recovery_store.open_transaction(journal.transaction_id)
+    try:
+        _reconcile_interrupted_mutation_artifacts(
+            root_fd=root_fd,
+            transaction_dir=transaction_dir,
+            transaction_fd=reconcile_fd,
+            journal=journal,
+        )
+    finally:
+        os.close(reconcile_fd)
 
     if journal.phase is RecoveryPhase.PROPOSAL_COMMITTED:
         _verify_all_staged(root_fd=root_fd, journal=journal)
@@ -275,19 +301,137 @@ def _matches(identity: TargetIdentity, *, expected_hash: str, expected_mode: int
     ) == stat.S_IMODE(expected_mode)
 
 
-def _classify_path(
-    *, root_fd: int, target_path: str, expectation: _FileExpectation
-) -> _CanonicalState:
-    parent, target_name = _open_target_parent(root_fd=root_fd, target_path=target_path)
-    try:
-        identity = get_target_identity(target_name, parent)
-    except TransactionError as error:
-        raise RecoveryCorruptStateError("Canonical target is not a regular file") from error
-    except OSError as error:
-        raise RecoveryUnavailableError("Failed to inspect canonical target") from error
-    finally:
-        os.close(parent.fd)
+def _artifact_candidates(
+    *, target_name: str, expectation: _FileExpectation
+) -> tuple[_MutationArtifactExpectation, ...]:
+    candidates: dict[str, _MutationArtifactExpectation] = {}
 
+    def add(name: str | None, *, expected_hash: str, expected_mode: int) -> None:
+        if name is None:
+            return
+        candidates[name] = _MutationArtifactExpectation(
+            name=name,
+            expected_hash=expected_hash,
+            expected_mode=expected_mode,
+        )
+
+    if expectation.expected_pre_state is RecoveryExpectedState.PRESENT:
+        if expectation.expected_pre_hash is None or expectation.expected_pre_mode is None:
+            raise RecoveryCorruptStateError("Recovery pre-state metadata is incomplete")
+        pre_hash = expectation.expected_pre_hash
+        pre_mode = expectation.expected_pre_mode
+        staged_hash = expectation.staged_hash
+        staged_mode = expectation.staged_mode
+        add(
+            _recovery_guard_name(
+                target_name,
+                content_hash=pre_hash,
+                mode=pre_mode,
+                suffix="replace",
+            ),
+            expected_hash=pre_hash,
+            expected_mode=pre_mode,
+        )
+        add(
+            _recovery_quarantine_name(
+                target_name,
+                content_hash=pre_hash,
+                mode=pre_mode,
+                suffix="replace",
+            ),
+            expected_hash=pre_hash,
+            expected_mode=pre_mode,
+        )
+        add(
+            _recovery_guard_name(
+                target_name,
+                content_hash=staged_hash,
+                mode=staged_mode,
+                suffix="rollback",
+            ),
+            expected_hash=staged_hash,
+            expected_mode=staged_mode,
+        )
+        add(
+            _recovery_quarantine_name(
+                target_name,
+                content_hash=staged_hash,
+                mode=staged_mode,
+                suffix="rollback",
+            ),
+            expected_hash=staged_hash,
+            expected_mode=staged_mode,
+        )
+        add(
+            _recovery_quarantine_name(
+                target_name,
+                content_hash=staged_hash,
+                mode=staged_mode,
+                suffix="replacement-rollback",
+            ),
+            expected_hash=staged_hash,
+            expected_mode=staged_mode,
+        )
+        add(
+            _recovery_quarantine_name(
+                target_name,
+                content_hash=pre_hash,
+                mode=pre_mode,
+                suffix="rollback-restore",
+            ),
+            expected_hash=pre_hash,
+            expected_mode=pre_mode,
+        )
+    else:
+        staged_hash = expectation.staged_hash
+        staged_mode = expectation.staged_mode
+        add(
+            _recovery_guard_name(
+                target_name,
+                content_hash=staged_hash,
+                mode=staged_mode,
+                suffix="unlink",
+            ),
+            expected_hash=staged_hash,
+            expected_mode=staged_mode,
+        )
+        add(
+            _recovery_quarantine_name(
+                target_name,
+                content_hash=staged_hash,
+                mode=staged_mode,
+                suffix="unlink",
+            ),
+            expected_hash=staged_hash,
+            expected_mode=staged_mode,
+        )
+
+    return tuple(candidates.values())
+
+
+def _sync_mutation_cleanup(parent: ParentDescriptor) -> None:
+    result = fsync_directory(parent.fd)
+    if result.state is DirectorySyncState.FAILED:
+        raise RecoveryUnavailableError("Failed to sync recovery mutation cleanup")
+
+
+def _remove_mutation_artifacts(parent: ParentDescriptor, names: tuple[str, ...]) -> None:
+    removed = False
+    for name in names:
+        try:
+            os.unlink(name, dir_fd=parent.fd)
+            removed = True
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise RecoveryUnavailableError("Failed to clean recovery mutation artifact") from error
+    if removed:
+        _sync_mutation_cleanup(parent)
+
+
+def _classify_identity(
+    identity: TargetIdentity | None, expectation: _FileExpectation
+) -> _CanonicalState:
     if identity is None:
         if expectation.expected_pre_state is RecoveryExpectedState.ABSENT:
             return _CanonicalState.PRE
@@ -313,6 +457,146 @@ def _classify_path(
         return _CanonicalState.STAGED
 
     return _CanonicalState.OTHER
+
+
+def _restore_pre_from_journal_backup(
+    *,
+    transaction_dir: Path,
+    transaction_fd: int,
+    target_name: str,
+    parent: ParentDescriptor,
+    expectation: _FileExpectation,
+) -> None:
+    if (
+        expectation.expected_pre_hash is None
+        or expectation.expected_pre_mode is None
+        or expectation.backup_path is None
+        or expectation.backup_hash is None
+        or expectation.backup_size is None
+    ):
+        raise RecoveryCorruptStateError("Recovery backup metadata is incomplete")
+    if expectation.backup_hash != expectation.expected_pre_hash:
+        raise RecoveryCorruptStateError("Recovery backup metadata is inconsistent")
+
+    try:
+        staging = prepare_canonical_staging_from_artifact(
+            transaction_dir=transaction_dir,
+            transaction_fd=transaction_fd,
+            artifact=RecoveryArtifact(
+                relative_path=expectation.backup_path,
+                content_hash=expectation.backup_hash,
+                size=expectation.backup_size,
+                mode=expectation.expected_pre_mode,
+            ),
+            target_name=target_name,
+            target_parent=parent,
+            intended_mode=expectation.expected_pre_mode,
+        )
+        sync_result = publish_creation(target_name, staging)
+    except RecoveryIOCorruptStateError as error:
+        raise RecoveryCorruptStateError("Recovery backup is corrupt") from error
+    except (RecoveryIOError, TransactionError, OSError) as error:
+        raise RecoveryUnavailableError("Failed to restore interrupted canonical mutation") from error
+    if sync_result.state is DirectorySyncState.FAILED:
+        raise RecoveryUnavailableError("Failed to sync restored canonical mutation")
+
+
+def _reconcile_interrupted_mutation_artifact(
+    *,
+    root_fd: int,
+    transaction_dir: Path,
+    transaction_fd: int,
+    target_path: str,
+    expectation: _FileExpectation,
+) -> None:
+    parent, target_name = _open_target_parent(root_fd=root_fd, target_path=target_path)
+    try:
+        try:
+            canonical_identity = get_target_identity(target_name, parent)
+        except TransactionError as error:
+            raise RecoveryCorruptStateError("Canonical target is not a regular file") from error
+
+        found: list[_MutationArtifactExpectation] = []
+        for candidate in _artifact_candidates(target_name=target_name, expectation=expectation):
+            try:
+                identity = get_target_identity(candidate.name, parent)
+            except TransactionError as error:
+                raise RecoveryCorruptStateError(
+                    "Recovery mutation artifact is not a regular file"
+                ) from error
+            if identity is None:
+                continue
+            if not _matches(
+                identity,
+                expected_hash=candidate.expected_hash,
+                expected_mode=candidate.expected_mode,
+            ):
+                raise RecoveryConflictError("Recovery mutation artifact changed outside recovery")
+            found.append(candidate)
+
+        if not found:
+            return
+
+        if canonical_identity is not None:
+            if _classify_identity(canonical_identity, expectation) is _CanonicalState.OTHER:
+                raise RecoveryConflictError("Canonical target changed outside recovery")
+        elif expectation.expected_pre_state is RecoveryExpectedState.PRESENT:
+            _restore_pre_from_journal_backup(
+                transaction_dir=transaction_dir,
+                transaction_fd=transaction_fd,
+                target_name=target_name,
+                parent=parent,
+                expectation=expectation,
+            )
+        _remove_mutation_artifacts(parent, tuple(candidate.name for candidate in found))
+    finally:
+        os.close(parent.fd)
+
+
+def _reconcile_interrupted_mutation_artifacts(
+    *,
+    root_fd: int,
+    transaction_dir: Path,
+    transaction_fd: int,
+    journal: RecoveryJournal,
+) -> None:
+    for operation in journal.operations:
+        _reconcile_interrupted_mutation_artifact(
+            root_fd=root_fd,
+            transaction_dir=transaction_dir,
+            transaction_fd=transaction_fd,
+            target_path=operation.target_path,
+            expectation=_expectation(operation),
+        )
+    _reconcile_interrupted_mutation_artifact(
+        root_fd=root_fd,
+        transaction_dir=transaction_dir,
+        transaction_fd=transaction_fd,
+        target_path="system/generated-ownership.json",
+        expectation=_expectation(journal.ownership_state),
+    )
+    _reconcile_interrupted_mutation_artifact(
+        root_fd=root_fd,
+        transaction_dir=transaction_dir,
+        transaction_fd=transaction_fd,
+        target_path=f"proposals/{journal.proposal_id}/proposal.md",
+        expectation=_expectation(journal.proposal_state),
+    )
+
+
+def _classify_path(
+    *, root_fd: int, target_path: str, expectation: _FileExpectation
+) -> _CanonicalState:
+    parent, target_name = _open_target_parent(root_fd=root_fd, target_path=target_path)
+    try:
+        identity = get_target_identity(target_name, parent)
+    except TransactionError as error:
+        raise RecoveryCorruptStateError("Canonical target is not a regular file") from error
+    except OSError as error:
+        raise RecoveryUnavailableError("Failed to inspect canonical target") from error
+    finally:
+        os.close(parent.fd)
+    return _classify_identity(identity, expectation)
 
 
 def _rollback_operation(
