@@ -93,3 +93,29 @@ def test_pinned_recovery_store_rejects_runtime_symlink_component(tmp_path: Path)
     with pytest.raises(RecoveryLockUnavailableError):
         with acquire_pinned_recovery_store(runtime_dir=runtime):
             pytest.fail("symlinked runtime must not produce a pinned recovery store")
+
+
+def test_store_rejects_filesystem_selected_reserved_runtime_before_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    (vault / "proposals").mkdir(parents=True)
+    real_open = os.open
+
+    def case_insensitive_open(
+        path: object, flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        selected = os.fspath(path)
+        if dir_fd is not None and selected == "Proposals":
+            selected = "proposals"
+        return real_open(selected, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr("lifeos.proposals.recovery_store.os.open", case_insensitive_open)
+    with pytest.raises(RecoveryLockUnavailableError, match="reserved canonical"):
+        with acquire_pinned_recovery_store(
+            runtime_dir=vault / "Proposals" / "node", authority_root=vault
+        ):
+            pass
+
+    assert not (vault / "proposals" / "node" / "recovery.lock").exists()
+    assert not (vault / "proposals" / "node" / "recovery").exists()

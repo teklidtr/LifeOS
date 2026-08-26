@@ -248,7 +248,11 @@ def acquire_pinned_recovery_store(
         except (OSError, RecoveryLockUnavailableError) as exc:
             raise RecoveryLockUnavailableError("Failed to acquire mutation authority") from exc
 
-        runtime_fd = _open_runtime_chain(runtime_path)
+        runtime_fd = _open_runtime_from_authority(
+            runtime_path=runtime_path,
+            authority_path=authority_path,
+            authority_fd=authority_fd,
+        )
         runtime_state = os.fstat(runtime_fd)
         runtime_id = (runtime_state.st_dev, runtime_state.st_ino)
         with _LOCKS_GUARD:
@@ -259,10 +263,7 @@ def acquire_pinned_recovery_store(
         try:
             lock_fd = os.open(
                 "recovery.lock",
-                os.O_RDWR
-                | os.O_CREAT
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0),
+                os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
                 0o600,
                 dir_fd=runtime_fd,
             )
@@ -357,7 +358,58 @@ def _open_runtime_chain(path: Path, *, create_missing: bool = True) -> int:
                     raise RecoveryLockUnavailableError(
                         "Runtime directory contains a symlink or non-directory component"
                     ) from exc
-                raise RecoveryLockUnavailableError("Failed to open runtime directory component") from exc
+                raise RecoveryLockUnavailableError(
+                    "Failed to open runtime directory component"
+                ) from exc
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except Exception:
+        os.close(current_fd)
+        raise
+
+
+def _open_runtime_from_authority(
+    *, runtime_path: Path, authority_path: Path, authority_fd: int
+) -> int:
+    """Acquire an in-vault runtime and validate its selected root before runtime state."""
+    try:
+        relative = runtime_path.relative_to(authority_path)
+    except ValueError:
+        return _open_runtime_chain(runtime_path)
+    if not relative.parts:
+        raise RecoveryLockUnavailableError("Runtime overlaps canonical vault authority")
+
+    current_fd = os.dup(authority_fd)
+    try:
+        for index, component in enumerate(relative.parts):
+            try:
+                next_fd = os.open(component, _DIR_FLAGS, dir_fd=current_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, 0o700, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                next_fd = os.open(component, _DIR_FLAGS, dir_fd=current_fd)
+            if index == 0:
+                selected = os.fstat(next_fd)
+                for reserved in ("proposals", "system"):
+                    try:
+                        reserved_fd = os.open(reserved, _DIR_FLAGS, dir_fd=authority_fd)
+                    except FileNotFoundError:
+                        continue
+                    try:
+                        canonical = os.fstat(reserved_fd)
+                    finally:
+                        os.close(reserved_fd)
+                    if (selected.st_dev, selected.st_ino) == (
+                        canonical.st_dev,
+                        canonical.st_ino,
+                    ):
+                        os.close(next_fd)
+                        raise RecoveryLockUnavailableError(
+                            "Runtime overlaps reserved canonical authority"
+                        )
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -444,10 +496,18 @@ def _read_regular_at(parent_fd: int, name: str) -> bytes:
             total += len(chunk)
         after = os.fstat(fd)
         if (
-            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
-            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
-            or total != after.st_size
-        ):
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ) or total != after.st_size:
             raise RecoveryCorruptStateError("Recovery file changed during read")
         return b"".join(chunks)
     except OSError as exc:
@@ -487,7 +547,11 @@ def _remove_tree_at(parent_fd: int, name: str) -> None:
     try:
         for entry in os.listdir(child_fd):
             state = _stat_at(child_fd, entry)
-            if state is not None and stat.S_ISDIR(state.st_mode) and not stat.S_ISLNK(state.st_mode):
+            if (
+                state is not None
+                and stat.S_ISDIR(state.st_mode)
+                and not stat.S_ISLNK(state.st_mode)
+            ):
                 _remove_tree_at(child_fd, entry)
             else:
                 os.unlink(entry, dir_fd=child_fd)

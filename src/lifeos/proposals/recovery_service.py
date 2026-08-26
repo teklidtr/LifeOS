@@ -89,15 +89,11 @@ def recover_interrupted_applications(
     resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
     try:
         if resolved_runtime_dir.resolve(strict=False) == vault_root.resolve(strict=False):
-            raise RecoveryCorruptStateError(
-                "Runtime directory overlaps the canonical vault root"
-            )
+            raise RecoveryCorruptStateError("Runtime directory overlaps the canonical vault root")
     except (OSError, RuntimeError) as exc:
         raise RecoveryUnavailableError("Could not validate runtime directory boundary") from exc
     if runtime_overlaps_reserved_canonical(vault_root, resolved_runtime_dir):
-        raise RecoveryCorruptStateError(
-            "Runtime directory overlaps a reserved canonical subtree"
-        )
+        raise RecoveryCorruptStateError("Runtime directory overlaps a reserved canonical subtree")
     with acquire_pinned_recovery_store(
         runtime_dir=resolved_runtime_dir,
         authority_root=vault_root,
@@ -248,9 +244,7 @@ def _recover_transaction(
     )
 
 
-def _complete_transaction(
-    *, recovery_store: PinnedRecoveryStore, journal: RecoveryJournal
-) -> None:
+def _complete_transaction(*, recovery_store: PinnedRecoveryStore, journal: RecoveryJournal) -> None:
     completed = replace(journal, phase=RecoveryPhase.COMPLETE)
     recovery_store.write_journal(completed)
     recovery_store.remove_completed(journal.transaction_id)
@@ -276,10 +270,9 @@ def _prefixed_hash(identity: TargetIdentity) -> str:
 
 
 def _matches(identity: TargetIdentity, *, expected_hash: str, expected_mode: int) -> bool:
-    return (
-        _prefixed_hash(identity) == expected_hash
-        and stat.S_IMODE(identity.mode) == stat.S_IMODE(expected_mode)
-    )
+    return _prefixed_hash(identity) == expected_hash and stat.S_IMODE(
+        identity.mode
+    ) == stat.S_IMODE(expected_mode)
 
 
 def _classify_path(
@@ -448,9 +441,7 @@ def _verify_all_staged(*, root_fd: int, journal: RecoveryJournal) -> None:
             required=_CanonicalState.STAGED,
         )
     ownership_required = (
-        _CanonicalState.STAGED
-        if _journal_changes_ownership(journal)
-        else _CanonicalState.PRE
+        _CanonicalState.STAGED if _journal_changes_ownership(journal) else _CanonicalState.PRE
     )
     _require_state(
         root_fd=root_fd,
@@ -493,8 +484,7 @@ def _pre_and_staged_are_equivalent(expectation: _FileExpectation) -> bool:
         expectation.expected_pre_state is RecoveryExpectedState.PRESENT
         and expectation.expected_pre_hash == expectation.staged_hash
         and expectation.expected_pre_mode is not None
-        and stat.S_IMODE(expectation.expected_pre_mode)
-        == stat.S_IMODE(expectation.staged_mode)
+        and stat.S_IMODE(expectation.expected_pre_mode) == stat.S_IMODE(expectation.staged_mode)
     )
 
 
@@ -547,9 +537,7 @@ def _open_target_parent(*, root_fd: int, target_path: str) -> tuple[ParentDescri
         try:
             state = os.fstat(current_fd)
         except OSError as error:
-            raise RecoveryUnavailableError(
-                "Failed to inspect recovery target parent"
-            ) from error
+            raise RecoveryUnavailableError("Failed to inspect recovery target parent") from error
         if not stat.S_ISDIR(state.st_mode):
             raise RecoveryCorruptStateError("Recovery target parent is not a directory")
         return (
@@ -558,6 +546,7 @@ def _open_target_parent(*, root_fd: int, target_path: str) -> tuple[ParentDescri
                 dev=state.st_dev,
                 ino=state.st_ino,
                 path=path.parent.as_posix(),
+                authority_fd=root_fd,
             ),
             path.name,
         )

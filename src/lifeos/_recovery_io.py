@@ -47,13 +47,15 @@ class RecoveryArtifact:
     mode: int
 
 
-
 def _validate_recovery_artifact(artifact: RecoveryArtifact) -> None:
     if type(artifact) is not RecoveryArtifact:
         raise RecoveryIOInvalidArtifactError("Artifact is not exactly a RecoveryArtifact")
     _validate_artifact_relative_path(artifact.relative_path)
     import re
-    if type(artifact.content_hash) is not str or not re.match(r"^sha256:[0-9a-f]{64}$", artifact.content_hash):
+
+    if type(artifact.content_hash) is not str or not re.match(
+        r"^sha256:[0-9a-f]{64}$", artifact.content_hash
+    ):
         raise RecoveryIOInvalidArtifactError("Invalid artifact content hash")
     if type(artifact.size) is not int:
         raise RecoveryIOInvalidArtifactError("Artifact size is not an int")
@@ -109,7 +111,12 @@ def _hash_fd(fd: int) -> str:
 
 def _open_transaction_dir(transaction_dir: Path) -> int:
     try:
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
         fd = os.open(transaction_dir, flags)
     except OSError as e:
         raise RecoveryIOCorruptStateError("Failed to securely open transaction directory") from e
@@ -128,10 +135,17 @@ def _open_transaction_dir(transaction_dir: Path) -> int:
 
 def _open_subdirectory(tx_fd: int, subdir_name: str) -> int:
     try:
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
         fd = os.open(subdir_name, flags, dir_fd=tx_fd)
     except OSError as e:
-        raise RecoveryIOCorruptStateError(f"Failed to securely open subdirectory {subdir_name}") from e
+        raise RecoveryIOCorruptStateError(
+            f"Failed to securely open subdirectory {subdir_name}"
+        ) from e
 
     try:
         st = os.fstat(fd)
@@ -184,17 +198,10 @@ def _open_artifact_subdirectory(
         try:
             tx_fd_state = os.fstat(tx_fd)
         except OSError as error:
-            raise RecoveryIOUnavailableError(
-                "Failed to stat transaction directory"
-            ) from error
+            raise RecoveryIOUnavailableError("Failed to stat transaction directory") from error
         if not stat.S_ISDIR(tx_fd_state.st_mode):
-            raise RecoveryIOCorruptStateError(
-                "Transaction descriptor is not a directory"
-            )
-        if (
-            tx_fd_state.st_dev != tx_path_state.st_dev
-            or tx_fd_state.st_ino != tx_path_state.st_ino
-        ):
+            raise RecoveryIOCorruptStateError("Transaction descriptor is not a directory")
+        if tx_fd_state.st_dev != tx_path_state.st_dev or tx_fd_state.st_ino != tx_path_state.st_ino:
             raise RecoveryIOCorruptStateError("Transaction directory changed during open")
 
         try:
@@ -222,9 +229,7 @@ def _open_artifact_subdirectory(
         except OSError as error:
             raise RecoveryIOUnavailableError("Failed to stat subdirectory") from error
         if not stat.S_ISDIR(sub_fd_state.st_mode):
-            raise RecoveryIOCorruptStateError(
-                "Subdirectory descriptor is not a directory"
-            )
+            raise RecoveryIOCorruptStateError("Subdirectory descriptor is not a directory")
         if (
             sub_fd_state.st_dev != sub_path_state.st_dev
             or sub_fd_state.st_ino != sub_path_state.st_ino
@@ -317,7 +322,13 @@ def write_recovery_artifact(
 
         tmp_name = f".{filename}.{secrets.token_hex(8)}.tmp"
         try:
-            flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+            flags = (
+                os.O_RDWR
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+            )
             tmp_fd = os.open(tmp_name, flags, 0o600, dir_fd=sub_fd)
         except OSError as e:
             raise RecoveryIOUnavailableError("Failed to open temporary file") from e
@@ -338,7 +349,11 @@ def write_recovery_artifact(
                 expected_hash=artifact.content_hash,
                 expected_mode=artifact.mode,
             )
-        except (RecoveryIOCorruptStateError, RecoveryIOConflictError, RecoveryIOInvalidArtifactError):
+        except (
+            RecoveryIOCorruptStateError,
+            RecoveryIOConflictError,
+            RecoveryIOInvalidArtifactError,
+        ):
             os.close(tmp_fd)
             try:
                 os.unlink(tmp_name, dir_fd=sub_fd)
@@ -379,7 +394,9 @@ def write_recovery_artifact(
         try:
             os.unlink(tmp_name, dir_fd=sub_fd)
         except OSError as e:
-            raise RecoveryIOUnavailableError("Failed to unlink temporary file after publication") from e
+            raise RecoveryIOUnavailableError(
+                "Failed to unlink temporary file after publication"
+            ) from e
 
         try:
             final_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
@@ -519,7 +536,10 @@ def remove_installed_creation(
     if type(target_parent) is not ParentDescriptor:
         raise RecoveryIOInvalidArtifactError("target_parent must be a ParentDescriptor")
     import re
-    if type(expected_installed_hash) is not str or not re.match(r"^sha256:[0-9a-f]{64}$", expected_installed_hash):
+
+    if type(expected_installed_hash) is not str or not re.match(
+        r"^sha256:[0-9a-f]{64}$", expected_installed_hash
+    ):
         raise RecoveryIOInvalidArtifactError("Invalid expected_installed_hash")
     if type(expected_installed_mode) is not int or not (0o000 <= expected_installed_mode <= 0o7777):
         raise RecoveryIOInvalidArtifactError("Invalid expected_installed_mode")
@@ -543,11 +563,30 @@ def remove_installed_creation(
     if target_id is None:
         raise RecoveryIOConflictError("Expected installed target is absent before rollback")
 
-    if (target_id.content_hash if target_id.content_hash.startswith("sha256:") else f"sha256:{target_id.content_hash}") != expected_installed_hash:
+    if (
+        target_id.content_hash
+        if target_id.content_hash.startswith("sha256:")
+        else f"sha256:{target_id.content_hash}"
+    ) != expected_installed_hash:
         raise RecoveryIOConflictError("Canonical target hash mutated externally")
 
+    live_name = target_name
+    live_fd = target_parent.fd
+    if target_parent.authority_fd is not None:
+        live_name = (
+            target_name
+            if target_parent.path in ("", ".")
+            else f"{target_parent.path}/{target_name}"
+        )
+        live_fd = target_parent.authority_fd
+        try:
+            live_state = os.stat(live_name, dir_fd=live_fd, follow_symlinks=False)
+        except OSError as e:
+            raise RecoveryIOUnavailableError("Failed to inspect live canonical target") from e
+        if (live_state.st_dev, live_state.st_ino) != (target_id.dev, target_id.ino):
+            raise RecoveryIOConflictError("Canonical target path changed before rollback")
     try:
-        os.unlink(target_name, dir_fd=target_parent.fd)
+        os.unlink(live_name, dir_fd=live_fd)
     except OSError as e:
         raise RecoveryIOUnavailableError("Failed to unlink target") from e
 
@@ -579,15 +618,24 @@ def restore_canonical_from_backup(
     if type(target_parent) is not ParentDescriptor:
         raise RecoveryIOInvalidArtifactError("target_parent must be a ParentDescriptor")
     import re
-    if type(expected_installed_hash) is not str or not re.match(r"^sha256:[0-9a-f]{64}$", expected_installed_hash):
+
+    if type(expected_installed_hash) is not str or not re.match(
+        r"^sha256:[0-9a-f]{64}$", expected_installed_hash
+    ):
         raise RecoveryIOInvalidArtifactError("Invalid expected_installed_hash")
-    if type(expected_restored_hash) is not str or not re.match(r"^sha256:[0-9a-f]{64}$", expected_restored_hash):
+    if type(expected_restored_hash) is not str or not re.match(
+        r"^sha256:[0-9a-f]{64}$", expected_restored_hash
+    ):
         raise RecoveryIOInvalidArtifactError("Invalid expected_restored_hash")
     if type(expected_installed_mode) is not int or not (0o000 <= expected_installed_mode <= 0o7777):
         raise RecoveryIOInvalidArtifactError("Invalid expected_installed_mode")
     if type(expected_restored_mode) is not int or not (0o000 <= expected_restored_mode <= 0o7777):
         raise RecoveryIOInvalidArtifactError("Invalid expected_restored_mode")
-    if (backup.content_hash if backup.content_hash.startswith("sha256:") else f"sha256:{backup.content_hash}") != expected_restored_hash:
+    if (
+        backup.content_hash
+        if backup.content_hash.startswith("sha256:")
+        else f"sha256:{backup.content_hash}"
+    ) != expected_restored_hash:
         raise RecoveryIOInvalidArtifactError("Backup artifact hash mismatch")
     if backup.mode != expected_restored_mode:
         raise RecoveryIOInvalidArtifactError("Backup artifact mode mismatch")
@@ -605,7 +653,11 @@ def restore_canonical_from_backup(
     except OSError as e:
         raise RecoveryIOUnavailableError("Failed to stat canonical target") from e
 
-    if (target_id.content_hash if target_id.content_hash.startswith("sha256:") else f"sha256:{target_id.content_hash}") != expected_installed_hash:
+    if (
+        target_id.content_hash
+        if target_id.content_hash.startswith("sha256:")
+        else f"sha256:{target_id.content_hash}"
+    ) != expected_installed_hash:
         raise RecoveryIOConflictError("Canonical target hash mutated externally")
 
     staging = prepare_canonical_staging_from_artifact(
@@ -635,7 +687,11 @@ def restore_canonical_from_backup(
     restored_id = get_target_identity(target_name, target_parent)
     if restored_id is None:
         raise RecoveryIOCorruptStateError("Canonical target disappeared after restore")
-    if (restored_id.content_hash if restored_id.content_hash.startswith("sha256:") else f"sha256:{restored_id.content_hash}") != expected_restored_hash:
+    if (
+        restored_id.content_hash
+        if restored_id.content_hash.startswith("sha256:")
+        else f"sha256:{restored_id.content_hash}"
+    ) != expected_restored_hash:
         raise RecoveryIOCorruptStateError("Restored canonical target hash mismatch")
 
     try:

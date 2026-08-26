@@ -30,6 +30,7 @@ class ParentDescriptor:
     dev: int
     ino: int
     path: str
+    authority_fd: int | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,36 @@ def require_directory_binding(fd: int, expected: DirectoryBinding) -> None:
         raise TransactionError("Canonical parent directory moved before mutation")
 
 
+def _live_relative(parent: ParentDescriptor, name: str) -> str:
+    base = parent.path
+    if base in ("", "."):
+        return name
+    return f"{base}/{name}"
+
+
+def require_live_parent(parent: ParentDescriptor) -> None:
+    """Prove the reviewed vault-relative path still selects the opened parent."""
+    if parent.authority_fd is None:
+        return
+    try:
+        live_fd = os.open(parent.path or ".", _DIRECTORY_FLAGS, dir_fd=parent.authority_fd)
+        live = os.fstat(live_fd)
+    except OSError as error:
+        raise TransactionError("Canonical parent directory moved before mutation") from error
+    finally:
+        if "live_fd" in locals():
+            os.close(live_fd)
+    if (live.st_dev, live.st_ino) != (parent.dev, parent.ino):
+        raise TransactionError("Canonical parent directory moved before mutation")
+
+
+def _mutation_destination(parent: ParentDescriptor, name: str) -> tuple[str, int]:
+    """Select canonical names through the live pinned vault in the mutation syscall."""
+    if parent.authority_fd is None:
+        return name, parent.fd
+    return _live_relative(parent, name), parent.authority_fd
+
+
 def _hash_fd(fd: int) -> str:
     hasher = hashlib.sha256()
     with os.fdopen(os.dup(fd), "rb") as f:
@@ -202,6 +233,7 @@ def fsync_directory(fd: int) -> DirectorySyncResult:
 def create_staging_file(
     target_name: str, content: bytes, parent: ParentDescriptor, intended_mode: int
 ) -> StagingFile:
+    require_live_parent(parent)
     parent_binding = capture_directory_binding(parent.fd)
     random_hex = secrets.token_hex(8)
     staging_name = f".{target_name}.{random_hex}.staged"
@@ -209,7 +241,8 @@ def create_staging_file(
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
     try:
         require_directory_binding(parent.fd, parent_binding)
-        fd = os.open(staging_name, flags, 0o600, dir_fd=parent.fd)
+        staging_path, staging_dir_fd = _mutation_destination(parent, staging_name)
+        fd = os.open(staging_path, flags, 0o600, dir_fd=staging_dir_fd)
     except OSError as e:
         raise TransactionError(f"Failed to create staging file {staging_name}: {e}") from e
 
@@ -274,11 +307,14 @@ def create_hardlink_backup(
     backup_name = f".{target_name}.{random_hex}.backup"
 
     try:
+        require_live_parent(parent)
+        target_path, source_fd = _mutation_destination(parent, target_name)
+        backup_path, destination_fd = _mutation_destination(parent, backup_name)
         os.link(
-            target_name,
-            backup_name,
-            src_dir_fd=parent.fd,
-            dst_dir_fd=parent.fd,
+            target_path,
+            backup_path,
+            src_dir_fd=source_fd,
+            dst_dir_fd=destination_fd,
             follow_symlinks=False,
         )
     except OSError as e:
@@ -330,15 +366,25 @@ def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncRes
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
+        target_path, target_dir_fd = _mutation_destination(staging.parent, target_name)
         os.link(
             staging.name,
-            target_name,
+            target_path,
             src_dir_fd=staging.parent.fd,
-            dst_dir_fd=staging.parent.fd,
+            dst_dir_fd=target_dir_fd,
             follow_symlinks=False,
         )
     except OSError as e:
         raise TransactionError(f"Failed to publish creation via link: {e}") from e
+
+    try:
+        require_live_parent(staging.parent)
+    except TransactionError:
+        try:
+            os.unlink(target_path, dir_fd=target_dir_fd)
+        except OSError:
+            pass
+        raise
 
     try:
         os.unlink(staging.name, dir_fd=staging.parent.fd)
@@ -370,11 +416,14 @@ def publish_replacement(
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
+        target_path, target_dir_fd = _mutation_destination(staging.parent, target_name)
         os.replace(
-            staging.name, target_name, src_dir_fd=staging.parent.fd, dst_dir_fd=staging.parent.fd
+            staging.name, target_path, src_dir_fd=staging.parent.fd, dst_dir_fd=target_dir_fd
         )
     except OSError as e:
         raise TransactionError(f"Failed to publish replacement: {e}") from e
+
+    require_live_parent(staging.parent)
 
     return fsync_directory(staging.parent.fd)
 
@@ -394,7 +443,8 @@ def rollback_creation(target_name: str, staging: StagingFile) -> DirectorySyncRe
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
-        os.unlink(target_name, dir_fd=staging.parent.fd)
+        target_path, target_dir_fd = _mutation_destination(staging.parent, target_name)
+        os.unlink(target_path, dir_fd=target_dir_fd)
     except OSError as e:
         raise TransactionError(f"Rollback unlink failed: {e}") from e
 
@@ -428,9 +478,8 @@ def rollback_replacement(
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     try:
-        os.replace(
-            backup.name, target_name, src_dir_fd=backup.parent.fd, dst_dir_fd=staging.parent.fd
-        )
+        target_path, target_dir_fd = _mutation_destination(staging.parent, target_name)
+        os.replace(backup.name, target_path, src_dir_fd=backup.parent.fd, dst_dir_fd=target_dir_fd)
     except OSError as e:
         raise TransactionError(f"Rollback replace failed: {e}") from e
 

@@ -306,15 +306,15 @@ def create_mcp_server(
 ) -> FastMCP:
     resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
     activity = ActivityStore(resolved_runtime_dir)
-    try:
-        runtime_prefix = runtime_exclusion_prefix(
-            vault_root,
-            runtime_dir=resolved_runtime_dir,
-        )
-    except CoherenceError as error:
-        raise ValueError("Could not resolve configured runtime directory") from error
 
     def _path_inside_runtime(path: str) -> bool:
+        try:
+            runtime_prefix = runtime_exclusion_prefix(
+                vault_root,
+                runtime_dir=resolved_runtime_dir,
+            )
+        except CoherenceError as error:
+            raise ToolExecutionError("Could not resolve configured runtime directory") from error
         if runtime_prefix is None:
             return False
         normalized = posixpath.normpath(path)
@@ -347,13 +347,7 @@ def create_mcp_server(
 
     def _reject_runtime_paths(*paths: str | None) -> None:
         allow_path = _external_registry_identity_allow_path()
-        denied = sorted(
-            {
-                path
-                for path in paths
-                if path is not None and not allow_path(path)
-            }
-        )
+        denied = sorted({path for path in paths if path is not None and not allow_path(path)})
         if denied:
             raise ToolValidationError(
                 "MCP ingestion paths are unavailable under the external retrieval policy"
@@ -471,8 +465,11 @@ def create_mcp_server(
                 "question": pack.question,
                 "instructions": [
                     {
-                        "id": item.id, "text": item.text, "authority": item.authority,
-                        "scope": item.scope, "priority": item.priority,
+                        "id": item.id,
+                        "text": item.text,
+                        "authority": item.authority,
+                        "scope": item.scope,
+                        "priority": item.priority,
                         "applicable_sources": list(item.applicable_sources),
                         "applicability": list(item.applicability),
                     }
@@ -480,8 +477,10 @@ def create_mcp_server(
                 ],
                 "sources": [
                     {
-                        "path": item.path, "title": item.title,
-                        "description": item.description, "excerpt": item.excerpt,
+                        "path": item.path,
+                        "title": item.title,
+                        "description": item.description,
+                        "excerpt": item.excerpt,
                         "score": item.score,
                     }
                     for item in pack.sources
@@ -490,8 +489,10 @@ def create_mcp_server(
                 "omissions": list(pack.omissions),
                 "diagnostics": [
                     {
-                        "code": item.code, "severity": item.severity,
-                        "source_path": item.source_path, "line": item.line,
+                        "code": item.code,
+                        "severity": item.severity,
+                        "source_path": item.source_path,
+                        "line": item.line,
                         "message": item.message,
                     }
                     for item in pack.diagnostics
@@ -505,9 +506,7 @@ def create_mcp_server(
             result = search_wiki(
                 vault_root=vault_root, request=WikiSearchRequest(query=query, limit=limit)
             )
-            activity.append(
-                tool="wiki_search", source_paths=[hit.path for hit in result.hits]
-            )
+            activity.append(tool="wiki_search", source_paths=[hit.path for hit in result.hits])
             return {
                 "query": result.query,
                 "hits": [
@@ -568,8 +567,10 @@ def create_mcp_server(
                 runtime_dir=resolved_runtime_dir,
             )
             activity.append(
-                tool="ingestion_evolve_wiki_proposal", source_paths=[source_path],
-                proposal_id=result.proposal_id, target_paths=list(result.target_paths),
+                tool="ingestion_evolve_wiki_proposal",
+                source_paths=[source_path],
+                proposal_id=result.proposal_id,
+                target_paths=list(result.target_paths),
                 operation_count=result.operation_count,
             )
             return {
@@ -593,15 +594,20 @@ def create_mcp_server(
                 source_path=source_path,
                 wiki_creates=tuple(
                     EvolveWikiCreateRequest(
-                        target_path=item.target_path, title=item.title, body=item.body,
-                        rationale=item.rationale, tags=tuple(item.tags or ()),
+                        target_path=item.target_path,
+                        title=item.title,
+                        body=item.body,
+                        rationale=item.rationale,
+                        tags=tuple(item.tags or ()),
                         tag_rationale=item.tag_rationale,
                     )
                     for item in wiki_creates or []
                 ),
                 wiki_updates=tuple(
                     EvolveWikiUpdateRequest(
-                        target_path=item.target_path, heading=item.heading, body=item.body,
+                        target_path=item.target_path,
+                        heading=item.heading,
+                        body=item.body,
                         rationale=item.rationale,
                         tags=None if item.tags is None else tuple(item.tags),
                         tag_rationale=item.tag_rationale,
@@ -610,8 +616,12 @@ def create_mcp_server(
                 ),
                 flashcards=tuple(
                     StudyFlashcardCreateRequest(
-                        target_path=item.target_path, card_id=item.card_id, topic=item.topic,
-                        question=item.question, answer=item.answer, rationale=item.rationale,
+                        target_path=item.target_path,
+                        card_id=item.card_id,
+                        topic=item.topic,
+                        question=item.question,
+                        answer=item.answer,
+                        rationale=item.rationale,
                         learning_context=item.learning_context,
                         knowledge_refs=tuple(item.knowledge_refs or ()),
                         estimated_seconds=item.estimated_seconds,
@@ -634,14 +644,18 @@ def create_mcp_server(
                 runtime_dir=resolved_runtime_dir,
             )
             activity.append(
-                tool="study_evolve_learning_proposal", source_paths=[source_path],
-                proposal_id=result.proposal_id, target_paths=list(result.target_paths),
+                tool="study_evolve_learning_proposal",
+                source_paths=[source_path],
+                proposal_id=result.proposal_id,
+                target_paths=list(result.target_paths),
                 operation_count=result.operation_count,
             )
             return {
-                "proposal_id": result.proposal_id, "proposal_path": result.proposal_path,
+                "proposal_id": result.proposal_id,
+                "proposal_path": result.proposal_path,
                 "target_paths": list(result.target_paths),
-                "operation_count": result.operation_count, "status": "draft",
+                "operation_count": result.operation_count,
+                "status": "draft",
             }
 
         return _invoke_mcp_tool(op)
@@ -680,8 +694,11 @@ def create_mcp_server(
                 request=request,
             )
             activity.append(
-                tool="ingestion_create_wiki_proposal", source_paths=[source_path],
-                proposal_id=res.proposal_id, target_paths=[res.target_path], operation_count=1,
+                tool="ingestion_create_wiki_proposal",
+                source_paths=[source_path],
+                proposal_id=res.proposal_id,
+                target_paths=[res.target_path],
+                operation_count=1,
             )
             return {
                 "proposal_id": res.proposal_id,
@@ -718,8 +735,11 @@ def create_mcp_server(
                 runtime_dir=resolved_runtime_dir,
             )
             activity.append(
-                tool="ingestion_update_wiki_section_proposal", source_paths=[source_path],
-                proposal_id=res.proposal_id, target_paths=[res.target_path], operation_count=1,
+                tool="ingestion_update_wiki_section_proposal",
+                source_paths=[source_path],
+                proposal_id=res.proposal_id,
+                target_paths=[res.target_path],
+                operation_count=1,
             )
             return {
                 "proposal_id": res.proposal_id,
@@ -777,8 +797,10 @@ def create_mcp_server(
             )
             activity.append(
                 tool="ingestion_create_wiki_and_update_section_proposal",
-                source_paths=[source_path], proposal_id=res.proposal_id,
-                target_paths=[res.create_target_path, res.update_target_path], operation_count=2,
+                source_paths=[source_path],
+                proposal_id=res.proposal_id,
+                target_paths=[res.create_target_path, res.update_target_path],
+                operation_count=2,
             )
             return {
                 "proposal_id": res.proposal_id,
@@ -839,7 +861,8 @@ def create_mcp_server(
                     identity_runtime_dir=runtime_dir,
                 )
             activity.append(
-                tool="proposal_apply", proposal_id=res.proposal_id,
+                tool="proposal_apply",
+                proposal_id=res.proposal_id,
                 changed_paths=list(res.changed_paths),
             )
             return {
@@ -858,7 +881,8 @@ def create_mcp_server(
         return {
             "records": [
                 {
-                    "timestamp": item.timestamp, "tool": item.tool,
+                    "timestamp": item.timestamp,
+                    "tool": item.tool,
                     "focus_paths": list(item.focus_paths),
                     "instruction_ids": list(item.instruction_ids),
                     "source_paths": list(item.source_paths),
@@ -905,7 +929,9 @@ def create_mcp_server(
                 description=VAULT_CONTEXT_MCP_DESCRIPTION,
                 annotations=ToolAnnotations(
                     title="Build vault context",
-                    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
                     openWorldHint=False,
                 ),
             ),
@@ -939,7 +965,9 @@ def create_mcp_server(
                 description=STUDY_EVOLVE_LEARNING_MCP_DESCRIPTION,
                 annotations=ToolAnnotations(
                     title="Evolve study learning",
-                    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+                    readOnlyHint=False,
+                    destructiveHint=False,
+                    idempotentHint=False,
                     openWorldHint=False,
                 ),
             ),
@@ -985,7 +1013,9 @@ def create_mcp_server(
                 description=RUNTIME_ACTIVITY_MCP_DESCRIPTION,
                 annotations=ToolAnnotations(
                     title="Inspect LifeOS runtime activity",
-                    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
                     openWorldHint=False,
                 ),
             ),

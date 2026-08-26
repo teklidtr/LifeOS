@@ -486,23 +486,23 @@ def _open_or_create_target_parent(
                 except SecureIOError:
                     if require_authority is not None:
                         require_authority()
+                    live_child_path = "/".join((*current_parts, segment))
                     try:
-                        os.mkdir(segment, 0o755, dir_fd=current_fd)
+                        # Resolve the complete reviewed path from the pinned vault as part of
+                        # mkdir; an opened ancestor may have been relocated meanwhile.
+                        os.mkdir(live_child_path, 0o755, dir_fd=root_fd)
                     except FileExistsError:
                         pass
                     except OSError as error:
                         raise SecureIOError(
                             code="dir_create_failed",
                             message=(
-                                "Failed to lazily create generated directory: "
-                                f"{error.strerror}"
+                                f"Failed to lazily create generated directory: {error.strerror}"
                             ),
                         ) from error
                     else:
                         if created_parent_paths is not None:
-                            created_parent_paths.append(
-                                "/".join((*current_parts, segment))
-                            )
+                            created_parent_paths.append("/".join((*current_parts, segment)))
                     sync_result = fsync_directory(current_fd)
                     if sync_result.state == DirectorySyncState.FAILED:
                         raise SecureIOError(
@@ -527,6 +527,7 @@ def _open_or_create_target_parent(
         dev=parent_stat.st_dev,
         ino=parent_stat.st_ino,
         path=parent_relative,
+        authority_fd=root_fd,
     )
 
 
@@ -551,6 +552,7 @@ def _prepare_canonical_parent_descriptors(
             dev=system_stat.st_dev,
             ino=system_stat.st_ino,
             path="system",
+            authority_fd=root_fd,
         )
 
     for operation in proposal.patch_document.operations:
@@ -1352,7 +1354,11 @@ def _execute_application_transaction(
             ) from error
         root_stat = os.fstat(root_fd)
         parent_descriptors["."] = ParentDescriptor(
-            fd=root_fd, dev=root_stat.st_dev, ino=root_stat.st_ino, path="."
+            fd=root_fd,
+            dev=root_stat.st_dev,
+            ino=root_stat.st_ino,
+            path=".",
+            authority_fd=root_fd,
         )
 
         try:
@@ -1370,6 +1376,7 @@ def _execute_application_transaction(
             dev=proposals_stat.st_dev,
             ino=proposals_stat.st_ino,
             path="proposals",
+            authority_fd=root_fd,
         )
 
         proposal_lock = OwnedLock(prop_fd, ".lifeos-transition.lock")
@@ -1575,7 +1582,8 @@ def _execute_application_transaction(
             fd=prop_fd,
             dev=os.fstat(prop_fd).st_dev,
             ino=os.fstat(prop_fd).st_ino,
-            path=proposal.proposal_dir,
+            path=f"proposals/{proposal.proposal_dir}",
+            authority_fd=root_fd,
         )
         proposal_identity = require_replacement_identity(
             get_target_identity("proposal.md", proposal_parent),
@@ -1693,9 +1701,7 @@ def _execute_application_transaction(
         transaction_initialized = True
         transaction_fd = recovery_store.open_transaction(transaction_id)
         try:
-            for prepared, recovery_operation in zip(
-                prepared_ops, recovery_operations, strict=True
-            ):
+            for prepared, recovery_operation in zip(prepared_ops, recovery_operations, strict=True):
                 write_recovery_artifact(
                     transaction_dir=transaction_dir,
                     transaction_fd=transaction_fd,
@@ -1726,9 +1732,7 @@ def _execute_application_transaction(
             write_recovery_artifact(
                 transaction_dir=transaction_dir,
                 transaction_fd=transaction_fd,
-                artifact=_artifact(
-                    ownership_state.staged_path, manifest_candidate, manifest_mode
-                ),
+                artifact=_artifact(ownership_state.staged_path, manifest_candidate, manifest_mode),
                 content=manifest_candidate,
             )
             if manifest_bytes is not None:
@@ -1736,17 +1740,13 @@ def _execute_application_transaction(
                 write_recovery_artifact(
                     transaction_dir=transaction_dir,
                     transaction_fd=transaction_fd,
-                    artifact=_artifact(
-                        ownership_state.backup_path, manifest_bytes, manifest_mode
-                    ),
+                    artifact=_artifact(ownership_state.backup_path, manifest_bytes, manifest_mode),
                     content=manifest_bytes,
                 )
             write_recovery_artifact(
                 transaction_dir=transaction_dir,
                 transaction_fd=transaction_fd,
-                artifact=_artifact(
-                    proposal_state.staged_path, proposal_candidate, proposal_mode
-                ),
+                artifact=_artifact(proposal_state.staged_path, proposal_candidate, proposal_mode),
                 content=proposal_candidate,
             )
             write_recovery_artifact(
