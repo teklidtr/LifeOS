@@ -8,6 +8,10 @@ from lifeos.config import LifeOSConfig
 from lifeos.mcp.service import ServiceReadiness
 from lifeos.registry import Registry
 from lifeos.runtime import ActivityStore
+from lifeos.runtime.activity import (
+    push_activity_runtime_dir_fd,
+    reset_activity_runtime_dir_fd,
+)
 from lifeos.runtime.authority import RuntimeDirectoryAuthority
 
 pytestmark = pytest.mark.skipif(
@@ -59,6 +63,25 @@ def test_activity_store_remains_bound_to_original_runtime_inode(tmp_path: Path) 
         held_runtime = _replace_runtime_with_symlink(runtime, wiki)
 
         store.append(tool="vault_list")
+
+        assert (held_runtime / "activity" / "mcp.jsonl").is_file()
+        assert not (wiki / "activity" / "mcp.jsonl").exists()
+    finally:
+        authority.close()
+
+
+def test_activity_store_inherits_bound_runtime_authority(tmp_path: Path) -> None:
+    config, runtime, wiki = _service_fixture(tmp_path)
+    authority = RuntimeDirectoryAuthority.open(runtime)
+    try:
+        token = push_activity_runtime_dir_fd(authority.fd)
+        try:
+            store = ActivityStore(config.runtime_dir)
+        finally:
+            reset_activity_runtime_dir_fd(token)
+        held_runtime = _replace_runtime_with_symlink(runtime, wiki)
+
+        store.append(tool="proposal_submit")
 
         assert (held_runtime / "activity" / "mcp.jsonl").is_file()
         assert not (wiki / "activity" / "mcp.jsonl").exists()
