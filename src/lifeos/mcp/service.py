@@ -372,6 +372,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             allowed_hosts=args.allowed_host,
             allowed_origins=args.allowed_origin,
         )
+        # Preserve the established CLI error precedence: malformed actor identity is rejected
+        # before storage inspection or runtime-directory creation.
+        preflight_readiness = ServiceReadiness(config, args.config)
+        authorizer = AuthenticatedSubmitAuthorizer(
+            actor_id=args.actor_id,
+            readiness=preflight_readiness,
+        )
         validate_service_storage(config)
         runtime_authority = RuntimeDirectoryAuthority.open(config.runtime_dir)
         if not Path(f"/proc/self/fd/{runtime_authority.fd}").exists():
