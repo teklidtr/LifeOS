@@ -16,8 +16,8 @@ from typing import Any, Protocol
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from lifeos._secure_io import SecureIOError, open_directory_secure
 from lifeos.config import ConfigError, LifeOSConfig, load_config
-from lifeos.doctor import collect_doctor
 from lifeos.facade.authorization import (
     AuthorizationDeniedError,
     AuthorizationUnavailableError,
@@ -26,6 +26,7 @@ from lifeos.facade.authorization import (
     ConsequentialAuthorizationRequest,
 )
 from lifeos.registry import Registry
+from lifeos.runtime.activity import push_activity_actor, reset_activity_actor
 
 SERVICE_TOKEN_ENV = "LIFEOS_SERVICE_TOKEN"
 SERVICE_TOKEN_FILE_ENV = "LIFEOS_SERVICE_TOKEN_FILE"
@@ -54,16 +55,29 @@ def _nearest_existing_parent(path: Path) -> Path:
 
 
 def service_storage_issue(config: LifeOSConfig) -> str | None:
-    """Return a fail-closed storage issue for the current service process, if any."""
-    required_directories = (
-        ("canonical vault root", config.vault_root),
-        ("proposal directory", config.vault_root / "proposals"),
-    )
-    for label, path in required_directories:
-        if not path.is_dir():
-            return f"{label} does not exist or is not a directory: {path}"
-        if not os.access(path, os.R_OK | os.W_OK | os.X_OK):
-            return f"{label} is not readable/writable by the service process: {path}"
+    """Return a fail-closed, policy-neutral storage issue for this service process."""
+    if not config.vault_root.is_dir():
+        return f"canonical vault root does not exist or is not a directory: {config.vault_root}"
+    if not os.access(config.vault_root, os.R_OK | os.W_OK | os.X_OK):
+        return (
+            "canonical vault root is not readable/writable by the service process: "
+            f"{config.vault_root}"
+        )
+
+    proposals_root = config.vault_root / "proposals"
+    proposals_fd = -1
+    try:
+        proposals_fd = open_directory_secure(proposals_root)
+    except SecureIOError:
+        return (
+            "proposal directory does not exist, is not a directory, or is a symlink: "
+            f"{proposals_root}"
+        )
+    finally:
+        if proposals_fd != -1:
+            os.close(proposals_fd)
+    if not os.access(proposals_root, os.R_OK | os.W_OK | os.X_OK):
+        return f"proposal directory is not readable/writable by the service process: {proposals_root}"
 
     runtime_dir = config.runtime_dir
     if runtime_dir.exists():
@@ -86,20 +100,14 @@ def validate_service_storage(config: LifeOSConfig) -> None:
 
 
 class ServiceReadiness:
-    """Re-evaluate deterministic vault readiness without mutating canonical state."""
+    """Report policy-neutral service storage readiness without traversing Markdown."""
 
     def __init__(self, config: LifeOSConfig, config_path: Path) -> None:
         self._config = config
         self._config_path = config_path
 
     def ready(self) -> bool:
-        if service_storage_issue(self._config) is not None:
-            return False
-        try:
-            return collect_doctor(self._config, config_path=self._config_path).ready
-        except Exception:
-            logger.exception("LifeOS service readiness check failed")
-            return False
+        return service_storage_issue(self._config) is None
 
 
 class AuthenticatedSubmitAuthorizer:
@@ -172,9 +180,11 @@ class AuthenticatedServiceApp:
             return
 
         actor_token = _REMOTE_ACTOR.set(self._actor_id)
+        activity_actor_token = push_activity_actor(self._actor_id)
         try:
             await self._app(scope, receive, send)
         finally:
+            reset_activity_actor(activity_actor_token)
             _REMOTE_ACTOR.reset(actor_token)
 
 
@@ -341,6 +351,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         transport_security=transport_security,
         stateless_http=True,
         json_response=True,
+        excluded_core_tools=frozenset({"proposal_approve", "proposal_apply"}),
     )
     app = AuthenticatedServiceApp(
         mcp.streamable_http_app(),
