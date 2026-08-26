@@ -11,12 +11,14 @@ completion.
 
 This repository contains the **LifeOS application**. Your personal Markdown belongs in a
 separate **LifeOS vault**. The application supplies deterministic business rules, CLI tools,
-the optional Obsidian plugin, and a local MCP server. The vault remains portable canonical
-Markdown plus a small amount of Git-tracked system metadata.
+the optional Obsidian plugin, a local STDIO MCP server, and an optional authenticated
+always-on MCP home-node service. The vault remains portable canonical Markdown plus a small
+amount of Git-tracked system metadata.
 
 Agent-assisted ingestion is MCP-only. LifeOS does not embed an ingestion model runtime or
-require a provider API key. External agents connect to the local STDIO MCP server and can
-produce reviewable proposals; they do not silently rewrite canonical notes.
+require a provider API key. External agents connect through local STDIO or the authenticated
+home-node MCP transport and can produce reviewable proposals; they do not silently rewrite
+canonical notes.
 
 ## Quick start
 
@@ -58,8 +60,17 @@ cd /absolute/path/to/lifeos-application
 uv sync --extra mcp
 ```
 
-See the Setup & Installation Guide for the tested Codex registration command, vault/runtime
-boundaries, doctor exit semantics, and Obsidian plugin installation.
+Local STDIO remains the simplest first-class mode. For an always-on Linux/NAS/Raspberry
+Pi-class node, `lifeos serve` exposes the same MCP tool surface over authenticated Streamable
+HTTP. It binds only to loopback by default, requires a bearer secret from an environment
+variable or secret file, keeps a stable configured actor identity, and never authorizes
+remote proposal approval/application in the initial home-node contract. The supplied
+`deploy/home-node/` OCI/Compose deployment keeps the host publication on loopback by default
+and is validated for `linux/arm64` as part of full validation.
+
+See the Setup & Installation Guide for the tested local registration command, home-node
+container deployment, authentication/TLS/private-network guidance, vault/runtime boundaries,
+Home Assistant Yellow path, doctor exit semantics, and Obsidian plugin installation.
 
 ## User documentation
 
@@ -97,10 +108,12 @@ Pull requests targeting `master` use two validation levels:
   standard Python.
 - A full checkpoint is requested by adding the `full-validation` label to the PR. That event
   runs the complete pytest suite across four stateless `full-test-shard-*` runners plus the
-  clean-room `docker-setup-e2e` gate. The aggregate `full-test` check succeeds only when every
-  pytest shard succeeds. If material commits land after a successful checkpoint, remove and
-  re-add `full-validation` to validate the new head without creating a dummy commit. Other
-  label events do not emit the required `full-test` or `docker-setup-e2e` check names.
+  clean-room `docker-setup-e2e` gate. The Docker gate also exercises the authenticated
+  home-node image, restart/runtime-rebuild behavior, and a real `linux/arm64` image build.
+  The aggregate `full-test` check succeeds only when every pytest shard succeeds. If material
+  commits land after a successful checkpoint, remove and re-add `full-validation` to validate
+  the new head without creating a dummy commit. Other label events do not emit the required
+  `full-test` or `docker-setup-e2e` check names.
 - Every push to `master` and every manual `workflow_dispatch` of the full-validation workflow
   runs the complete full checkpoint automatically.
 
