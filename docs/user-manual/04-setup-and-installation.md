@@ -2,10 +2,10 @@
 
 # 4. Setup & Installation Guide
 
-LifeOS is a local Python application and Markdown vault, not a hosted web
-service. The core system requires no external account. Agent-assisted ingestion
-uses an optional local MCP integration; LifeOS itself has no embedded model
-client or provider API-key configuration.
+LifeOS is a local/private Python application and Markdown vault, not a managed hosted
+service. The core system requires no external account. Agent-assisted ingestion uses optional
+MCP integration over local STDIO or an explicitly configured authenticated home-node
+transport; LifeOS itself has no embedded model client or provider API-key configuration.
 
 ## 4.1 Prerequisites
 
@@ -330,8 +330,9 @@ For another MCP-compatible client, configure the same executable and arguments d
   --actor-id your-trusted-identity
 ```
 
-Keep the server local and use STDIO transport. Do not expose it as an unauthenticated
-network service.
+For this local mode, keep the server on STDIO. Do not improvise an unauthenticated HTTP
+wrapper around `lifeos-mcp`; use the supported authenticated `lifeos serve` home-node mode in
+Section 4.15 when the MCP endpoint must be reachable over a network.
 
 The MCP server supplies universal LifeOS runtime instructions. `system/instructions.yml`
 supplies this vault's scoped behavioral instructions. The application repository's
@@ -430,6 +431,129 @@ be proven to be the same note automatically.
 
 See [Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) before configuring a
 synchronized or mounted deployment.
+
+## 4.15 Run an always-on home node
+
+Use the home-node service when a phone, laptop, or tablet should reach one authoritative
+LifeOS node without storing a local vault copy. The node owns the filesystem view and runs the
+same deterministic MCP tool/facade surface as local STDIO; agent intelligence still runs in
+the external client.
+
+### Direct service mode
+
+Install the MCP extra and check the selected vault first:
+
+```bash
+uv sync --extra mcp
+lifeos doctor --config /absolute/path/to/LifeOS-vault/lifeos.yml
+```
+
+Create a high-entropy bearer secret outside the vault. A file is preferable for a long-lived
+service because process launch configuration does not contain the secret value:
+
+```bash
+mkdir -p ~/.config/lifeos
+python -c 'import secrets; print(secrets.token_urlsafe(48))' \
+  > ~/.config/lifeos/home-node-token
+chmod 600 ~/.config/lifeos/home-node-token
+export LIFEOS_SERVICE_TOKEN_FILE="$HOME/.config/lifeos/home-node-token"
+```
+
+Set exactly one of `LIFEOS_SERVICE_TOKEN` or `LIFEOS_SERVICE_TOKEN_FILE`. The token must be at
+least 32 characters. Do not place it in canonical Markdown, `lifeos.yml`, Git, or a vault
+activity note.
+
+Start the service locally:
+
+```bash
+lifeos serve \
+  --config /absolute/path/to/LifeOS-vault/lifeos.yml \
+  --actor-id home-node
+```
+
+The default bind is `127.0.0.1:8000`. The Streamable HTTP MCP endpoint is `/mcp`.
+`/healthz` is a non-sensitive liveness probe; `/readyz` runs the deterministic readiness
+contract and returns 503 when the node is blocked. Neither probe returns the bearer secret or
+vault content.
+
+A non-loopback bind is rejected unless you also supply at least one explicit Host allowlist:
+
+```bash
+lifeos serve \
+  --config /absolute/path/to/LifeOS-vault/lifeos.yml \
+  --actor-id home-node \
+  --host 0.0.0.0 \
+  --allowed-host 'lifeos.example.internal:*'
+```
+
+Treat that command as only one layer of the network boundary. Supported exposure patterns are
+a trusted private LAN, a VPN/overlay network, or an authenticated TLS reverse proxy. For
+traffic leaving a trusted host/network boundary, terminate TLS before forwarding to LifeOS.
+Do not publish port 8000 directly to the public Internet. LifeOS does not configure routers,
+VPNs, DNS, certificates, or reverse proxies for you.
+
+The configured `--actor-id` is the stable attribution for authenticated requests handled by
+that service process. The initial headless contract permits an authenticated client to explore,
+create guarded draft proposals, and explicitly submit them. Remote `proposal_approve` and
+`proposal_apply` are denied even with the bearer token. Review/approval/application remains a
+trusted human/local path rather than turning possession of one network token into authority to
+rewrite canonical notes.
+
+### Docker / Compose
+
+The repository includes a generic Linux image and Compose deployment under
+`deploy/home-node/`. It is the preferred basis for a NAS, mini PC, Raspberry Pi-class server,
+or another OCI-capable host.
+
+```bash
+cd /absolute/path/to/lifeos-application/deploy/home-node
+cp .env.example .env
+```
+
+Edit `.env` so `LIFEOS_VAULT_PATH` points to the canonical vault and
+`LIFEOS_TOKEN_FILE` points to a token file outside that vault. Then start the node:
+
+```bash
+docker compose up -d --build
+```
+
+Compose publishes only on host loopback by default. To make the node reachable through a
+private/VPN address, change **both** `LIFEOS_PUBLISH_ADDRESS` and `LIFEOS_ALLOWED_HOST` rather
+than replacing the allowlist with a wildcard. Keep TLS at the reverse proxy/VPN boundary when
+transport crosses an untrusted network.
+
+The vault bind mount, including canonical Markdown and its active-node Git history, persists
+across container replacement. A separate Docker volume is mounted at `/vault/.lifeos`, so
+registry/index/cache/runtime state can be discarded and rebuilt without deleting canonical
+vault content. The container runs as an unprivileged numeric user, drops Linux capabilities,
+uses a read-only root filesystem, and receives the bearer token through a mounted secret file.
+
+The full-validation gate builds and exercises this container, verifies restart/runtime rebuild
+behavior, and separately builds the same Dockerfile for `linux/arm64`.
+
+### Home Assistant Yellow
+
+A Yellow running a normal container-capable Linux host can use the same OCI/Compose path.
+When the Yellow runs **Home Assistant OS**, use a thin Home Assistant App wrapper rather than
+putting Supervisor-specific code into LifeOS core. Home Assistant's current App format is
+container based and maps its `aarch64` architecture to Docker `linux/arm64`.
+
+The wrapper should stay deployment-only and contain, at minimum:
+
+- `config.yaml` declaring `arch: [aarch64]`, `startup: services`, a mapped TCP port for 8000,
+  and an `image:` reference to the same versioned multi-architecture LifeOS image;
+- a writable persistent `/data` area for App-owned configuration/secrets and an explicitly
+  mapped Home Assistant `share`/`addon_config` location for the canonical vault when that is
+  the chosen storage topology;
+- a tiny startup script that maps the selected vault path, secret file, actor ID, Host
+  allowlist, and port into the same `lifeos serve` command used everywhere else;
+- no Supervisor/Home Assistant API, privileged mode, host networking, Docker socket, or
+  embedded LLM permission unless a future task establishes a specific need.
+
+Home Assistant documents `/data` as persistent App storage, `ports` for explicit container
+port publication, `map` for allowed shared directories, and generic multi-arch `image` names
+in its App configuration reference. This thin wrapper is packaging around the generic image;
+it is not a second LifeOS runtime or synchronization protocol.
 
 ---
 
