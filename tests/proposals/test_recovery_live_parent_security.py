@@ -48,6 +48,7 @@ def test_recovery_creation_rollback_unlinks_through_live_canonical_path(
         if not relocated:
             canonical_parent.rename(moved_parent)
             canonical_parent.mkdir()
+            (canonical_parent / "note.md").write_bytes(b"foreign\n")
             relocated = True
         real_unlink(path, *args, **kwargs)
 
@@ -62,7 +63,7 @@ def test_recovery_creation_rollback_unlinks_through_live_canonical_path(
             )
 
         assert (moved_parent / "note.md").read_bytes() == content
-        assert not (canonical_parent / "note.md").exists()
+        assert (canonical_parent / "note.md").read_bytes() == b"foreign\n"
     finally:
         os.close(parent.fd)
         assert parent.authority_fd is not None
