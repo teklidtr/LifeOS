@@ -152,7 +152,7 @@ def _open_relative_directory_chain(root_fd: int, relative_path: str) -> int:
 def open_live_parent_for_mutation(parent: ParentDescriptor) -> int:
     """Open the reviewed parent from pinned authority and prove it is the reviewed inode."""
     if parent.authority_fd is None:
-        return os.dup(parent.fd)
+        return parent.fd
     live_fd = _open_relative_directory_chain(parent.authority_fd, parent.path)
     live = os.fstat(live_fd)
     if (live.st_dev, live.st_ino) != (parent.dev, parent.ino):
@@ -161,8 +161,15 @@ def open_live_parent_for_mutation(parent: ParentDescriptor) -> int:
     return live_fd
 
 
+def _close_live_parent(parent: ParentDescriptor, live_fd: int) -> None:
+    if parent.authority_fd is not None:
+        os.close(live_fd)
+
+
 def require_live_parent(parent: ParentDescriptor) -> None:
     """Prove the reviewed vault-relative path still selects the opened parent."""
+    if parent.authority_fd is None:
+        return
     live_fd = open_live_parent_for_mutation(parent)
     os.close(live_fd)
 
@@ -204,12 +211,19 @@ def _target_identity_at(name: str, dir_fd: int) -> TargetIdentity | None:
     return TargetIdentity(dev=st.st_dev, ino=st.st_ino, mode=st.st_mode, content_hash=content_hash)
 
 
-def _identity_matches(observed: TargetIdentity | None, expected: TargetIdentity) -> bool:
+def _content_identity_matches(observed: TargetIdentity | None, expected: TargetIdentity) -> bool:
     return bool(
         observed is not None
         and observed.dev == expected.dev
         and observed.ino == expected.ino
         and observed.content_hash == expected.content_hash
+    )
+
+
+def _identity_matches(observed: TargetIdentity | None, expected: TargetIdentity) -> bool:
+    return bool(
+        _content_identity_matches(observed, expected)
+        and observed is not None
         and stat.S_IMODE(observed.mode) == stat.S_IMODE(expected.mode)
     )
 
@@ -279,7 +293,7 @@ def create_staging_file(
         raise TransactionError(f"Failed to create staging file {staging_name}: {e}") from e
     finally:
         if live_parent_fd is not None:
-            os.close(live_parent_fd)
+            _close_live_parent(parent, live_parent_fd)
 
     try:
         written = 0
@@ -356,7 +370,7 @@ def create_hardlink_backup(
     try:
         live_parent_fd = open_live_parent_for_mutation(parent)
         live_identity = _target_identity_at(target_name, live_parent_fd)
-        if not _identity_matches(live_identity, original_identity):
+        if not _content_identity_matches(live_identity, original_identity):
             raise TransactionError("Target identity mutated before backup")
         os.link(
             target_name,
@@ -369,7 +383,7 @@ def create_hardlink_backup(
         raise TransactionError(f"Failed to create hardlink backup: {e}") from e
     finally:
         if live_parent_fd is not None:
-            os.close(live_parent_fd)
+            _close_live_parent(parent, live_parent_fd)
 
     try:
         st = os.stat(backup_name, dir_fd=parent.fd, follow_symlinks=False)
@@ -442,7 +456,7 @@ def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncRes
     except OSError as e:
         raise TransactionError(f"Failed to publish creation via link: {e}") from e
     finally:
-        os.close(live_parent_fd)
+        _close_live_parent(staging.parent, live_parent_fd)
 
     try:
         os.unlink(staging.name, dir_fd=staging.parent.fd)
@@ -457,7 +471,7 @@ def publish_replacement(
 ) -> DirectorySyncResult:
     require_directory_binding(staging.parent.fd, staging.parent_binding)
     current_target = get_target_identity(target_name, staging.parent)
-    if not _identity_matches(current_target, original_identity):
+    if not _content_identity_matches(current_target, original_identity):
         if current_target is None:
             raise TransactionError("Target identity mutated (absent) before replacement")
         if (
@@ -481,7 +495,7 @@ def publish_replacement(
     guard_created = False
     try:
         live_identity = _target_identity_at(target_name, live_parent_fd)
-        if not _identity_matches(live_identity, original_identity):
+        if not _content_identity_matches(live_identity, original_identity):
             raise TransactionError("Target identity mutated before replacement")
         os.link(
             target_name,
@@ -521,7 +535,7 @@ def publish_replacement(
                 os.unlink(guard_name, dir_fd=live_parent_fd)
             except OSError:
                 pass
-        os.close(live_parent_fd)
+        _close_live_parent(staging.parent, live_parent_fd)
 
     return fsync_directory(staging.parent.fd)
 
@@ -574,7 +588,7 @@ def remove_verified_target(
                 os.unlink(guard_name, dir_fd=live_parent_fd)
             except OSError:
                 pass
-        os.close(live_parent_fd)
+        _close_live_parent(parent, live_parent_fd)
 
     return fsync_directory(parent.fd)
 
@@ -631,7 +645,7 @@ def rollback_replacement(
     except OSError as e:
         raise TransactionError(f"Rollback replace failed: {e}") from e
     finally:
-        os.close(live_parent_fd)
+        _close_live_parent(staging.parent, live_parent_fd)
 
     return fsync_directory(staging.parent.fd)
 
