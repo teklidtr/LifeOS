@@ -61,12 +61,13 @@ uv sync --extra mcp
 ```
 
 Local STDIO remains the simplest first-class mode. For an always-on Linux/NAS/Raspberry
-Pi-class node, `lifeos serve` exposes the same MCP tool surface over authenticated Streamable
-HTTP. It binds only to loopback by default, requires a bearer secret from an environment
-variable or secret file, keeps a stable configured actor identity, and never authorizes
-remote proposal approval/application in the initial home-node contract. The supplied
-`deploy/home-node/` OCI/Compose deployment keeps the host publication on loopback by default
-and is validated for `linux/arm64` as part of full validation.
+Pi-class node, `lifeos serve` exposes the same deterministic MCP/facade/business-rule core
+over authenticated Streamable HTTP with a deliberately narrower network capability set. It
+binds only to loopback by default, requires a bearer secret from an environment variable or
+secret file, records a stable configured actor in disposable remote activity, permits remote
+proposal submission, and omits `proposal_approve`/`proposal_apply` from the home-node tool
+surface. The supplied `deploy/home-node/` OCI/Compose deployment keeps host publication on
+loopback by default and is validated for `linux/arm64` as part of full validation.
 
 See the Setup & Installation Guide for the tested local registration command, home-node
 container deployment, authentication/TLS/private-network guidance, vault/runtime boundaries,
