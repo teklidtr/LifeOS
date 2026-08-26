@@ -47,7 +47,7 @@ def test_runtime_exclusion_spelling_is_refreshed_for_each_invocation(
     assert observed == ["Runtime/", "runtime/"]
 
 
-def test_copied_core_registry_refresh_recomputes_runtime_spelling_each_call(
+def test_copied_core_registry_refresh_snapshots_runtime_spelling_per_invocation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -57,7 +57,12 @@ def test_copied_core_registry_refresh_recomputes_runtime_spelling_each_call(
     runtime_dir.mkdir()
     observed: list[str] = []
     spellings = iter(("Runtime/", "runtime/"))
-    runtime_paths = iter(("Runtime/export.md", "runtime/export.md"))
+    runtime_paths = iter(
+        (
+            ("Runtime/export-a.md", "Runtime/export-b.md"),
+            ("runtime/export-a.md", "runtime/export-b.md"),
+        )
+    )
 
     def current_prefix(
         vault_root: Path,
@@ -78,8 +83,8 @@ def test_copied_core_registry_refresh_recomputes_runtime_spelling_each_call(
     ) -> RegistryRefreshResult:
         assert vault_root == vault
         assert identity_allow_path is not None
-        path = next(runtime_paths)
-        assert not identity_allow_path(path)  # type: ignore[operator]
+        for path in next(runtime_paths):
+            assert not identity_allow_path(path)  # type: ignore[operator]
         return RegistryRefreshResult((), (), (), (), 0)
 
     monkeypatch.setattr(core_server, "runtime_exclusion_prefix", current_prefix)
