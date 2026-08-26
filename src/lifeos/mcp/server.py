@@ -14,6 +14,7 @@ from mcp.types import ToolAnnotations
 
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
+from lifeos.runtime_scope import build_runtime_exclusion_matcher
 from lifeos.facade.consequential_tools import (
     APPLY_PROPOSAL_DESCRIPTOR,
     APPROVE_PROPOSAL_DESCRIPTOR,
@@ -313,9 +314,13 @@ def create_mcp_server(
                 vault_root,
                 runtime_dir=resolved_runtime_dir,
             )
+            runtime_excluded = build_runtime_exclusion_matcher(
+                vault_root,
+                runtime_dir=resolved_runtime_dir,
+                snapshot_prefix=runtime_prefix,
+            )
         except CoherenceError as error:
             raise ToolExecutionError("Could not resolve configured runtime directory") from error
-        runtime_root = runtime_prefix.rstrip("/") if runtime_prefix is not None else None
         try:
             policy = load_retrieval_policy(vault_root)
         except RetrievalError as error:
@@ -326,10 +331,11 @@ def create_mcp_server(
             if path.startswith("conversations/") or path.startswith("proposals/"):
                 return False
             normalized = posixpath.normpath(path)
-            if runtime_prefix is not None and (
-                normalized == runtime_root or normalized.startswith(runtime_prefix)
-            ):
-                return False
+            try:
+                if runtime_excluded(normalized):
+                    return False
+            except CoherenceError as error:
+                raise ToolExecutionError("Could not verify configured runtime exclusion") from error
             try:
                 return scope_decision(
                     path,
