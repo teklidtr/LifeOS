@@ -384,11 +384,13 @@ def _open_runtime_from_authority(
     current_fd = os.dup(authority_fd)
     try:
         for index, component in enumerate(relative.parts):
+            created_here = False
             try:
                 next_fd = os.open(component, _DIR_FLAGS, dir_fd=current_fd)
             except FileNotFoundError:
                 try:
                     os.mkdir(component, 0o700, dir_fd=current_fd)
+                    created_here = True
                 except FileExistsError:
                     pass
                 except OSError as exc:
@@ -398,6 +400,11 @@ def _open_runtime_from_authority(
                 try:
                     next_fd = os.open(component, _DIR_FLAGS, dir_fd=current_fd)
                 except OSError as exc:
+                    if created_here:
+                        try:
+                            os.rmdir(component, dir_fd=current_fd)
+                        except OSError:
+                            pass
                     raise RecoveryLockUnavailableError(
                         "Failed to open created runtime directory component"
                     ) from exc
@@ -425,6 +432,13 @@ def _open_runtime_from_authority(
                         canonical.st_ino,
                     ):
                         os.close(next_fd)
+                        if created_here:
+                            try:
+                                os.rmdir(component, dir_fd=current_fd)
+                            except OSError as cleanup_error:
+                                raise RecoveryLockUnavailableError(
+                                    "Failed to clean rejected reserved runtime root"
+                                ) from cleanup_error
                         raise RecoveryLockUnavailableError(
                             "Runtime overlaps reserved canonical authority"
                         )
