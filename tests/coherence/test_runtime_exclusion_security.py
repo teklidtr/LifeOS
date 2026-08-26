@@ -85,3 +85,15 @@ def test_runtime_matcher_keeps_distinct_case_sensitive_directory_in_scope(tmp_pa
 
     assert matcher("Runtime/export.md")
     assert not matcher("runtime/canonical.md")
+
+
+def test_runtime_matcher_allows_non_runtime_path_when_vault_root_is_absent(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    matcher = build_runtime_exclusion_matcher(
+        vault,
+        runtime_dir=vault / ".lifeos",
+        snapshot_prefix=".lifeos/",
+    )
+
+    assert matcher(".lifeos/export.md")
+    assert not matcher("wiki/note.md")
