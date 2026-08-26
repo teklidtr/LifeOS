@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -33,18 +35,65 @@ class UnsupportedSchemaVersionError(RegistryError):
 class Registry:
     """A caller-located SQLite registry with explicit initialization."""
 
-    def __init__(self, database_path: Path) -> None:
-        self._database_path = Path(database_path).resolve(strict=False)
+    def __init__(self, database_path: Path, *, directory_fd: int | None = None) -> None:
+        if directory_fd is None:
+            self._database_path = Path(database_path).resolve(strict=False)
+        else:
+            # Keep the configured lexical runtime address for exclusion/reporting while SQLite
+            # opens through the pinned directory descriptor below.
+            self._database_path = Path(os.path.abspath(database_path))
+        self._directory_fd = directory_fd
 
     @property
     def database_path(self) -> Path:
-        """Return the normalized database path without touching the filesystem."""
+        """Return the normalized logical database path without touching the filesystem."""
         return self._database_path
+
+    def _validate_bound_directory(self) -> None:
+        if self._directory_fd is None:
+            return
+        try:
+            state = os.fstat(self._directory_fd)
+        except OSError as exc:
+            raise RegistryOpenError("Registry runtime directory descriptor is unavailable") from exc
+        if not stat.S_ISDIR(state.st_mode):
+            raise RegistryOpenError("Registry runtime authority is not a directory")
+
+    def _validate_bound_database_entry(self, *, allow_missing: bool) -> bool:
+        if self._directory_fd is None:
+            return self._database_path.exists()
+        self._validate_bound_directory()
+        try:
+            state = os.stat(
+                self._database_path.name,
+                dir_fd=self._directory_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            if allow_missing:
+                return False
+            return False
+        except OSError as exc:
+            raise RegistryOpenError("Could not inspect registry database entry") from exc
+        if not stat.S_ISREG(state.st_mode):
+            raise RegistryOpenError("Registry database entry is not a regular file")
+        return True
+
+    def _sqlite_database_path(self, *, allow_missing: bool) -> Path:
+        if self._directory_fd is None:
+            return self._database_path
+        self._validate_bound_database_entry(allow_missing=allow_missing)
+        proc_directory = Path(f"/proc/self/fd/{self._directory_fd}")
+        if not proc_directory.exists():
+            raise RegistryOpenError(
+                "Descriptor-bound registry access requires Linux /proc/self/fd support"
+            )
+        return proc_directory / self._database_path.name
 
     @property
     def schema_version(self) -> int:
         """Return the applied version, or zero when the database does not exist."""
-        if not self._database_path.exists():
+        if not self._validate_bound_database_entry(allow_missing=True):
             return 0
 
         plan = _migration_plan()
@@ -159,6 +208,10 @@ class Registry:
             yield connection
 
     def _ensure_parent_directory(self) -> None:
+        if self._directory_fd is not None:
+            self._validate_bound_directory()
+            return
+
         parent = self._database_path.parent
         if parent.exists():
             if not parent.is_dir():
@@ -188,15 +241,16 @@ class Registry:
     def _open_connection(self, *, create: bool, read_only: bool) -> sqlite3.Connection:
         connection: sqlite3.Connection | None = None
         try:
+            database_path = self._sqlite_database_path(allow_missing=create)
             if create:
                 connection = sqlite3.connect(
-                    self._database_path,
+                    database_path,
                     isolation_level=None,
                     timeout=5.0,
                 )
             else:
                 mode = "ro" if read_only else "rw"
-                uri = f"{self._database_path.as_uri()}?mode={mode}"
+                uri = f"{database_path.as_uri()}?mode={mode}"
                 connection = sqlite3.connect(
                     uri,
                     uri=True,
