@@ -43,6 +43,7 @@ _READ_FLAGS = (
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
 )
+_OS_OPEN_SUPPORTS_DIR_FD = os.open in getattr(os, "supports_dir_fd", set())
 _LOCKS_GUARD = threading.Lock()
 _HELD_RUNTIME_IDS: set[tuple[int, int]] = set()
 
@@ -231,7 +232,7 @@ def acquire_pinned_recovery_store(
     authority_root: Path | None = None,
 ) -> Iterator[PinnedRecoveryStore]:
     """Pin runtime and hold one stable mutation authority for the whole store lifetime."""
-    if not hasattr(os, "O_NOFOLLOW") or os.open not in getattr(os, "supports_dir_fd", set()):
+    if not hasattr(os, "O_NOFOLLOW") or not _OS_OPEN_SUPPORTS_DIR_FD:
         raise RecoveryLockUnavailableError("Descriptor-safe runtime traversal is unavailable")
 
     runtime_path = Path(os.path.abspath(runtime_dir))
@@ -390,7 +391,24 @@ def _open_runtime_from_authority(
                     os.mkdir(component, 0o700, dir_fd=current_fd)
                 except FileExistsError:
                     pass
-                next_fd = os.open(component, _DIR_FLAGS, dir_fd=current_fd)
+                except OSError as exc:
+                    raise RecoveryLockUnavailableError(
+                        "Failed to create runtime directory component"
+                    ) from exc
+                try:
+                    next_fd = os.open(component, _DIR_FLAGS, dir_fd=current_fd)
+                except OSError as exc:
+                    raise RecoveryLockUnavailableError(
+                        "Failed to open created runtime directory component"
+                    ) from exc
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise RecoveryLockUnavailableError(
+                        "Runtime directory contains a symlink or non-directory component"
+                    ) from exc
+                raise RecoveryLockUnavailableError(
+                    "Failed to open runtime directory component"
+                ) from exc
             if index == 0:
                 selected = os.fstat(next_fd)
                 for reserved in ("proposals", "system"):
