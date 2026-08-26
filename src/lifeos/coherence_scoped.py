@@ -16,6 +16,7 @@ from lifeos.coherence import (
 )
 from lifeos.config import ConfigError, load_config
 from lifeos.markdown.parser import parse_markdown_note
+from lifeos.runtime_scope import build_runtime_exclusion_matcher
 from lifeos.scanner import ScannerError, scan_vault
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
@@ -159,6 +160,11 @@ def collect_scoped_identity_snapshot(
     hashing.
     """
     runtime_prefix = runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
+    runtime_excluded = build_runtime_exclusion_matcher(
+        vault_root,
+        runtime_dir=runtime_dir,
+        snapshot_prefix=runtime_prefix,
+    )
     try:
         entries = scan_vault(vault_root)
     except ScannerError as exc:
@@ -177,7 +183,7 @@ def collect_scoped_identity_snapshot(
             continue
         if relative_path in _IDENTITY_IGNORED_PATHS:
             continue
-        if runtime_prefix is not None and relative_path.startswith(runtime_prefix):
+        if runtime_excluded(relative_path):
             continue
         if not allow_path(relative_path):
             continue
