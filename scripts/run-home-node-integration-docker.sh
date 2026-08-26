@@ -116,6 +116,37 @@ PY
   return 1
 }
 
+refresh_registry_over_mcp() {
+  docker exec -i "$container" python - <<'PY'
+import asyncio
+from pathlib import Path
+
+import httpx
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+
+
+async def main() -> None:
+    token = Path("/run/secrets/lifeos_service_token").read_text(encoding="utf-8").strip()
+    async with httpx.AsyncClient(
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    ) as http_client:
+        async with streamable_http_client(
+            "http://127.0.0.1:8000/mcp",
+            http_client=http_client,
+        ) as (read_stream, write_stream, _get_session_id):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool("registry_refresh", arguments={})
+                if result.isError:
+                    raise RuntimeError("registry_refresh returned an MCP tool error")
+
+
+asyncio.run(main())
+PY
+}
+
 start_node
 port="$(host_port)"
 wait_for_status /healthz 200 "$port"
@@ -141,6 +172,11 @@ start_node
 port="$(host_port)"
 wait_for_status /healthz 200 "$port"
 wait_for_status /readyz 200 "$port"
+refresh_registry_over_mcp
+if [[ ! -s "$runtime/registry.db" ]]; then
+  echo "Authenticated registry_refresh did not recreate runtime registry.db" >&2
+  exit 1
+fi
 
 after="$(canonical_snapshot)"
 if [[ "$before" != "$after" ]]; then
