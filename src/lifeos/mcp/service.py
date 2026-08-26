@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import os
+import stat
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
@@ -27,6 +28,7 @@ from lifeos.facade.authorization import (
 )
 from lifeos.registry import Registry
 from lifeos.runtime.activity import push_activity_actor, reset_activity_actor
+from lifeos.runtime.authority import RuntimeAuthorityError, RuntimeDirectoryAuthority
 
 SERVICE_TOKEN_ENV = "LIFEOS_SERVICE_TOKEN"
 SERVICE_TOKEN_FILE_ENV = "LIFEOS_SERVICE_TOKEN_FILE"
@@ -54,7 +56,11 @@ def _nearest_existing_parent(path: Path) -> Path:
     return candidate
 
 
-def service_storage_issue(config: LifeOSConfig) -> str | None:
+def service_storage_issue(
+    config: LifeOSConfig,
+    *,
+    runtime_authority: RuntimeDirectoryAuthority | None = None,
+) -> str | None:
     """Return a fail-closed, policy-neutral storage issue for this service process."""
     if not config.vault_root.is_dir():
         return f"canonical vault root does not exist or is not a directory: {config.vault_root}"
@@ -80,21 +86,41 @@ def service_storage_issue(config: LifeOSConfig) -> str | None:
         return f"proposal directory is not readable/writable by the service process: {proposals_root}"
 
     runtime_dir = config.runtime_dir
-    if runtime_dir.exists():
-        if not runtime_dir.is_dir():
-            return f"runtime directory is not a directory: {runtime_dir}"
-        if not os.access(runtime_dir, os.R_OK | os.W_OK | os.X_OK):
+    if runtime_authority is not None:
+        if not runtime_authority.path_is_current():
+            return (
+                "runtime directory path no longer identifies the pinned service runtime: "
+                f"{runtime_dir}"
+            )
+        if not os.access(runtime_dir, os.R_OK | os.W_OK | os.X_OK, follow_symlinks=False):
             return f"runtime directory is not readable/writable by the service process: {runtime_dir}"
-    else:
+        return None
+
+    try:
+        runtime_state = os.lstat(runtime_dir)
+    except FileNotFoundError:
         parent = _nearest_existing_parent(runtime_dir.parent)
         if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
             return f"runtime directory cannot be created by the service process: {runtime_dir}"
+    except OSError:
+        return f"runtime directory cannot be inspected safely: {runtime_dir}"
+    else:
+        if stat.S_ISLNK(runtime_state.st_mode):
+            return f"runtime directory must not be a symlink: {runtime_dir}"
+        if not stat.S_ISDIR(runtime_state.st_mode):
+            return f"runtime directory is not a directory: {runtime_dir}"
+        if not os.access(runtime_dir, os.R_OK | os.W_OK | os.X_OK, follow_symlinks=False):
+            return f"runtime directory is not readable/writable by the service process: {runtime_dir}"
     return None
 
 
-def validate_service_storage(config: LifeOSConfig) -> None:
+def validate_service_storage(
+    config: LifeOSConfig,
+    *,
+    runtime_authority: RuntimeDirectoryAuthority | None = None,
+) -> None:
     """Require write authority needed for remote draft/submission and runtime state."""
-    issue = service_storage_issue(config)
+    issue = service_storage_issue(config, runtime_authority=runtime_authority)
     if issue is not None:
         raise ServiceConfigurationError(issue)
 
@@ -102,12 +128,25 @@ def validate_service_storage(config: LifeOSConfig) -> None:
 class ServiceReadiness:
     """Report policy-neutral service storage readiness without traversing Markdown."""
 
-    def __init__(self, config: LifeOSConfig, config_path: Path) -> None:
+    def __init__(
+        self,
+        config: LifeOSConfig,
+        config_path: Path,
+        *,
+        runtime_authority: RuntimeDirectoryAuthority | None = None,
+    ) -> None:
         self._config = config
         self._config_path = config_path
+        self._runtime_authority = runtime_authority
 
     def ready(self) -> bool:
-        return service_storage_issue(self._config) is None
+        return (
+            service_storage_issue(
+                self._config,
+                runtime_authority=self._runtime_authority,
+            )
+            is None
+        )
 
 
 class AuthenticatedSubmitAuthorizer:
@@ -324,6 +363,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    runtime_authority: RuntimeDirectoryAuthority | None = None
     try:
         config = load_config(args.config)
         token = load_service_token()
@@ -332,35 +372,54 @@ def main(argv: Sequence[str] | None = None) -> int:
             allowed_hosts=args.allowed_host,
             allowed_origins=args.allowed_origin,
         )
-        readiness = ServiceReadiness(config, args.config)
-        authorizer = AuthenticatedSubmitAuthorizer(actor_id=args.actor_id, readiness=readiness)
         validate_service_storage(config)
-    except (ConfigError, ServiceConfigurationError, ValueError) as error:
+        runtime_authority = RuntimeDirectoryAuthority.open(config.runtime_dir)
+        if not Path(f"/proc/self/fd/{runtime_authority.fd}").exists():
+            raise ServiceConfigurationError(
+                "Home-node descriptor-bound registry access requires Linux /proc/self/fd"
+            )
+        readiness = ServiceReadiness(
+            config,
+            args.config,
+            runtime_authority=runtime_authority,
+        )
+        authorizer = AuthenticatedSubmitAuthorizer(actor_id=args.actor_id, readiness=readiness)
+        validate_service_storage(config, runtime_authority=runtime_authority)
+    except (ConfigError, RuntimeAuthorityError, ServiceConfigurationError, ValueError) as error:
+        if runtime_authority is not None:
+            runtime_authority.close()
         print(f"Service configuration error: {error}", file=sys.stderr)
         return 1
 
-    registry = Registry(config.runtime_dir / "registry.db")
-    create_mcp_server = _load_runtime_server_factory()
-    mcp = create_mcp_server(
-        vault_root=config.vault_root,
-        registry=registry,
-        authorizer=authorizer,
-        runtime_dir=config.runtime_dir,
-        host=args.host,
-        port=args.port,
-        transport_security=transport_security,
-        stateless_http=True,
-        json_response=True,
-        excluded_core_tools=frozenset({"proposal_approve", "proposal_apply"}),
-    )
-    app = AuthenticatedServiceApp(
-        mcp.streamable_http_app(),
-        token=token,
-        actor_id=args.actor_id,
-        readiness=readiness,
-    )
-    _run_uvicorn(app, host=args.host, port=args.port)
-    return 0
+    try:
+        registry = Registry(
+            config.runtime_dir / "registry.db",
+            directory_fd=runtime_authority.fd,
+        )
+        create_mcp_server = _load_runtime_server_factory()
+        mcp = create_mcp_server(
+            vault_root=config.vault_root,
+            registry=registry,
+            authorizer=authorizer,
+            runtime_dir=config.runtime_dir,
+            runtime_dir_fd=runtime_authority.fd,
+            host=args.host,
+            port=args.port,
+            transport_security=transport_security,
+            stateless_http=True,
+            json_response=True,
+            excluded_core_tools=frozenset({"proposal_approve", "proposal_apply"}),
+        )
+        app = AuthenticatedServiceApp(
+            mcp.streamable_http_app(),
+            token=token,
+            actor_id=args.actor_id,
+            readiness=readiness,
+        )
+        _run_uvicorn(app, host=args.host, port=args.port)
+        return 0
+    finally:
+        runtime_authority.close()
 
 
 if __name__ == "__main__":
