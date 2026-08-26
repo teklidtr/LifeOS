@@ -24,6 +24,7 @@ from lifeos.retrieval.contracts import (
 )
 from lifeos.retrieval.index import RetrievalIndex
 from lifeos.retrieval.models import ChunkedNote
+from lifeos.runtime_scope import build_runtime_exclusion_matcher
 from lifeos.scanner import ScannerError, scan_vault
 from lifeos.vault import VaultAccessError, VaultMarkdownFile, read_vault_markdown
 
@@ -271,6 +272,11 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                 self.vault_root,
                 runtime_dir=self.runtime_dir,
             )
+            runtime_excluded = build_runtime_exclusion_matcher(
+                self.vault_root,
+                runtime_dir=self.runtime_dir,
+                snapshot_prefix=runtime_prefix,
+            )
             entries = scan_vault(self.vault_root)
         except (CoherenceError, ScannerError) as exc:
             raise RetrievalError("source_unavailable", str(exc)) from exc
@@ -282,8 +288,11 @@ class RetrievalIndexService(_service.RetrievalIndexService):
             path = entry.path.as_posix()
             if path.startswith("conversations/") or path.startswith("proposals/"):
                 continue
-            if runtime_prefix is not None and path.startswith(runtime_prefix):
-                continue
+            try:
+                if runtime_excluded(path):
+                    continue
+            except CoherenceError as exc:
+                raise RetrievalError("source_unavailable", str(exc)) from exc
             decision = scope_decision(
                 path,
                 scope=RetrievalScope(),
