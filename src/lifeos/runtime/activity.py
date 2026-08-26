@@ -15,6 +15,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 _ACTIVITY_ACTOR: ContextVar[str | None] = ContextVar("lifeos_activity_actor", default=None)
+_ACTIVITY_RUNTIME_DIR_FD: ContextVar[int | None] = ContextVar(
+    "lifeos_activity_runtime_dir_fd", default=None
+)
 _DIRECTORY_FLAGS = (
     os.O_RDONLY
     | getattr(os, "O_DIRECTORY", 0)
@@ -31,6 +34,16 @@ def push_activity_actor(actor_id: str | None) -> Token[str | None]:
 def reset_activity_actor(token: Token[str | None]) -> None:
     """Restore the previous request-scoped activity actor."""
     _ACTIVITY_ACTOR.reset(token)
+
+
+def push_activity_runtime_dir_fd(runtime_dir_fd: int | None) -> Token[int | None]:
+    """Bind runtime-directory authority for ActivityStore instances built in this context."""
+    return _ACTIVITY_RUNTIME_DIR_FD.set(runtime_dir_fd)
+
+
+def reset_activity_runtime_dir_fd(token: Token[int | None]) -> None:
+    """Restore the previous ActivityStore runtime-directory authority."""
+    _ACTIVITY_RUNTIME_DIR_FD.reset(token)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +66,9 @@ class ActivityStore:
     def __init__(self, runtime_dir: Path, *, runtime_dir_fd: int | None = None) -> None:
         self.runtime_dir = Path(runtime_dir).resolve(strict=False)
         self.path = self.runtime_dir / "activity" / "mcp.jsonl"
-        self._runtime_dir_fd = runtime_dir_fd
+        self._runtime_dir_fd = (
+            runtime_dir_fd if runtime_dir_fd is not None else _ACTIVITY_RUNTIME_DIR_FD.get()
+        )
 
     @staticmethod
     def _clean_paths(values: tuple[str, ...] | list[str]) -> tuple[str, ...]:
