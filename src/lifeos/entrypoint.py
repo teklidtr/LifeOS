@@ -140,6 +140,21 @@ def _run_scan(argv: Sequence[str]) -> int:
     return 0
 
 
+def _run_serve(argv: Sequence[str]) -> int:
+    """Run the optional authenticated Streamable HTTP home-node service."""
+    try:
+        from lifeos.mcp.service import main as service_main
+    except ModuleNotFoundError as error:
+        if error.name == "mcp":
+            print(
+                "The LifeOS service requires the optional 'mcp' dependency group.",
+                file=sys.stderr,
+            )
+            return 1
+        raise
+    return service_main(argv)
+
+
 def _run_legacy_cli(arguments: list[str]) -> int:
     """Delegate established commands while keeping first-party setup commands discoverable."""
     try:
@@ -147,15 +162,16 @@ def _run_legacy_cli(arguments: list[str]) -> int:
     except SystemExit as error:
         if arguments in (["--help"], ["-h"]) and error.code == 0:
             print(
-                "\nsetup commands:\n"
+                "\nsetup and service commands:\n"
                 "  init [PATH]          Create a new LifeOS vault (default: current directory)\n"
-                "  doctor [OPTIONS]     Check installation and vault readiness without repair"
+                "  doctor [OPTIONS]     Check installation and vault readiness without repair\n"
+                "  serve [OPTIONS]      Run the authenticated always-on MCP home-node service"
             )
         raise
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Dispatch first-party setup commands before delegating established CLI commands."""
+    """Dispatch first-party setup/service commands before established CLI commands."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] == "init":
         return _run_init(arguments[1:])
@@ -163,6 +179,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_doctor(arguments[1:])
     if arguments and arguments[0] == "scan":
         return _run_scan(arguments[1:])
+    if arguments and arguments[0] == "serve":
+        return _run_serve(arguments[1:])
     return _run_legacy_cli(arguments)
 
 
