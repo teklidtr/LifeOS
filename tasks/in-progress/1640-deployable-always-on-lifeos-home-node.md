@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1640
 title: Add deployable always-on LifeOS home node
-status: ready
+status: in-progress
 phase: 16
 depends_on:
   - LIFEOS-1639
