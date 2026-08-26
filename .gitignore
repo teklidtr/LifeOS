@@ -14,6 +14,7 @@ build/
 .obsidian/workspace*
 .trash/
 .tokensave/
+deploy/home-node/.env
 
 .DS_Store
 
