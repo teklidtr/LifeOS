@@ -228,6 +228,47 @@ def _identity_matches(observed: TargetIdentity | None, expected: TargetIdentity)
     )
 
 
+def _create_verified_guard(
+    target_name: str,
+    guard_name: str,
+    dir_fd: int,
+    expected_identity: TargetIdentity,
+    *,
+    require_mode: bool,
+) -> None:
+    """Hard-link the live target and prove the link captured the reviewed inode."""
+    try:
+        os.link(
+            target_name,
+            guard_name,
+            src_dir_fd=dir_fd,
+            dst_dir_fd=dir_fd,
+            follow_symlinks=False,
+        )
+    except OSError as error:
+        raise TransactionError(f"Failed to create mutation guard: {error}") from error
+
+    try:
+        guard_identity = _target_identity_at(guard_name, dir_fd)
+        matches = (
+            _identity_matches(guard_identity, expected_identity)
+            if require_mode
+            else _content_identity_matches(guard_identity, expected_identity)
+        )
+        if not matches:
+            raise TransactionError("Mutation guard captured an unexpected target identity")
+    except Exception as error:
+        try:
+            _remove_created_artifact(guard_name, dir_fd)
+        except TransactionError as cleanup_error:
+            raise TransactionError(
+                f"Mutation guard verification failed: {error}. Cleanup failed: {cleanup_error}"
+            ) from error
+        if isinstance(error, TransactionError):
+            raise
+        raise TransactionError(f"Mutation guard verification failed: {error}") from error
+
+
 def get_target_identity(name: str, parent: ParentDescriptor) -> TargetIdentity | None:
     return _target_identity_at(name, parent.fd)
 
@@ -497,12 +538,12 @@ def publish_replacement(
         live_identity = _target_identity_at(target_name, live_parent_fd)
         if not _content_identity_matches(live_identity, original_identity):
             raise TransactionError("Target identity mutated before replacement")
-        os.link(
+        _create_verified_guard(
             target_name,
             guard_name,
-            src_dir_fd=live_parent_fd,
-            dst_dir_fd=live_parent_fd,
-            follow_symlinks=False,
+            live_parent_fd,
+            original_identity,
+            require_mode=False,
         )
         guard_created = True
         os.replace(
@@ -553,12 +594,12 @@ def remove_verified_target(
         live_identity = _target_identity_at(target_name, live_parent_fd)
         if not _identity_matches(live_identity, expected_identity):
             raise TransactionError("Canonical target changed before removal")
-        os.link(
+        _create_verified_guard(
             target_name,
             guard_name,
-            src_dir_fd=live_parent_fd,
-            dst_dir_fd=live_parent_fd,
-            follow_symlinks=False,
+            live_parent_fd,
+            expected_identity,
+            require_mode=True,
         )
         guard_created = True
         os.unlink(target_name, dir_fd=live_parent_fd)
@@ -631,10 +672,20 @@ def rollback_replacement(
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     live_parent_fd = open_live_parent_for_mutation(staging.parent)
+    guard_name = f".{target_name}.{secrets.token_hex(8)}.rollback-guard"
+    guard_created = False
     try:
         live_target = _target_identity_at(target_name, live_parent_fd)
         if live_target is None or live_target.content_hash != staging.candidate_hash:
             raise TransactionError("Canonical file mutated externally, rollback refused")
+        _create_verified_guard(
+            target_name,
+            guard_name,
+            live_parent_fd,
+            live_target,
+            require_mode=True,
+        )
+        guard_created = True
         os.replace(
             backup.name,
             target_name,
@@ -645,6 +696,11 @@ def rollback_replacement(
     except OSError as e:
         raise TransactionError(f"Rollback replace failed: {e}") from e
     finally:
+        if guard_created:
+            try:
+                os.unlink(guard_name, dir_fd=live_parent_fd)
+            except OSError:
+                pass
         _close_live_parent(staging.parent, live_parent_fd)
 
     return fsync_directory(staging.parent.fd)
