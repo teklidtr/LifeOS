@@ -12,12 +12,10 @@ from mcp.server.transport_security import TransportSecuritySettings
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.facade.authorization import ConsequentialAuthorizer
-from lifeos.facade.errors import ToolExecutionError, ToolValidationError
+from lifeos.facade.errors import ToolExecutionError
 from lifeos.facade.read_only import WikiSearchRequest, search_wiki
 from lifeos.mcp.coherence_tools import build_coherence_tools
 from lifeos.mcp.exploration_tools import (
-    RUNTIME_ACTIVITY_MCP_DESCRIPTION,
-    _activity_path_allowed,
     _strict_tool,
     build_exploration_tools,
     build_policy_read_tools,
@@ -30,14 +28,12 @@ from lifeos.mcp.server import (
     create_mcp_server as create_core_mcp_server,
 )
 from lifeos.registry import Registry
-from lifeos.retrieval import RetrievalError
 from lifeos.retrieval.contracts import (
     push_node_local_excluded_prefixes,
     push_node_local_exclusion_predicates,
     reset_node_local_excluded_prefixes,
     reset_node_local_exclusion_predicates,
 )
-from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime import ActivityStore
 from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
@@ -69,6 +65,7 @@ def create_mcp_server(
     registry: Registry,
     authorizer: ConsequentialAuthorizer,
     runtime_dir: Path | None = None,
+    runtime_dir_fd: int | None = None,
     host: str = "127.0.0.1",
     port: int = 8000,
     transport_security: TransportSecuritySettings | None = None,
@@ -121,15 +118,11 @@ def create_mcp_server(
         authorizer=authorizer,
         runtime_dir=resolved_runtime_dir,
     )
-    activity = ActivityStore(resolved_runtime_dir)
-    policy_reads = tuple(
-        tool
-        for tool in build_policy_read_tools(
-            vault_root=vault_root,
-            activity=activity,
-            invoke=runtime_scoped_invoke,
-        )
-        if tool.name != "runtime_activity"
+    activity = ActivityStore(resolved_runtime_dir, runtime_dir_fd=runtime_dir_fd)
+    policy_reads = build_policy_read_tools(
+        vault_root=vault_root,
+        activity=activity,
+        invoke=runtime_scoped_invoke,
     )
     exploration = build_exploration_tools(
         vault_root=vault_root,
@@ -169,55 +162,11 @@ def create_mcp_server(
 
         return cast(WikiSearchMCPResult, runtime_scoped_invoke(op))
 
-    def runtime_activity_tool(limit: int = 20) -> dict[str, object]:
-        def op() -> dict[str, object]:
-            try:
-                records = activity.read(limit=limit)
-            except ValueError as exc:
-                raise ToolValidationError(str(exc)) from exc
-            try:
-                load_retrieval_policy(vault_root)
-            except RetrievalError as exc:
-                raise ToolExecutionError("Retrieval policy is invalid") from exc
-
-            def visible(paths: tuple[str, ...]) -> list[str]:
-                return [
-                    path
-                    for path in paths
-                    if _activity_path_allowed(path, vault_root=vault_root)
-                ]
-
-            return {
-                "records": [
-                    {
-                        "timestamp": item.timestamp,
-                        "tool": item.tool,
-                        "actor_id": item.actor_id,
-                        "focus_paths": visible(item.focus_paths),
-                        "instruction_ids": list(item.instruction_ids),
-                        "source_paths": visible(item.source_paths),
-                        "proposal_id": item.proposal_id,
-                        "target_paths": visible(item.target_paths),
-                        "changed_paths": visible(item.changed_paths),
-                        "operation_count": item.operation_count,
-                    }
-                    for item in records
-                ]
-            }
-
-        return cast(dict[str, object], runtime_scoped_invoke(op))
-
     wiki_search = _strict_tool(
         wiki_search_tool,
         name="wiki_search",
         description=WIKI_SEARCH_MCP_DESCRIPTION,
         title="Search durable wiki",
-    )
-    runtime_activity = _strict_tool(
-        runtime_activity_tool,
-        name="runtime_activity",
-        description=RUNTIME_ACTIVITY_MCP_DESCRIPTION,
-        title="Read runtime activity",
     )
     core_tools = [
         tool
@@ -227,14 +176,7 @@ def create_mcp_server(
     return FastMCP(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
-        tools=[
-            *core_tools,
-            *policy_reads,
-            *exploration,
-            wiki_search,
-            runtime_activity,
-            *coherence,
-        ],
+        tools=[*core_tools, *policy_reads, *exploration, wiki_search, *coherence],
         host=host,
         port=port,
         transport_security=transport_security,
