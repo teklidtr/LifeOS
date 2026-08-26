@@ -17,6 +17,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from lifeos._atomic_write import atomic_write_file_secure
 from lifeos._secure_io import SecureIOError, open_directory_secure
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import collect_scoped_identity_snapshot, runtime_exclusion_prefix
@@ -34,6 +35,7 @@ from lifeos.ingestion.provenance import (
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import ReplaceGeneratedFileV2, validate_patch_document
+from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.proposals.schema import ProposalSchemaError, validate_metadata
 from lifeos.proposals.target_identity import (
     ProposalTargetIdentityError,
@@ -62,8 +64,6 @@ def _accumulate_generated_wiki_provenance(
     except ProvenanceValidationError as exc:
         raise _core.InvalidWikiSectionError("Generated wiki provenance is malformed") from exc
 
-    # Ownership and provenance are independent. A generated-owned file without the
-    # provenance block remains valid and is not silently assigned invented history.
     if provenance is None:
         return target_content
 
@@ -341,15 +341,13 @@ def _secure_persist_proposal_documents(*, proposals_root: Path, documents: Any) 
             flags |= getattr(os, "O_NOFOLLOW")
         proposal_fd = os.open(proposal_id, flags, dir_fd=proposals_fd)
 
-        _core.atomic_write_file_secure(
-            proposal_fd, "proposal.md", documents.proposal_markdown
-        )
-        _core.atomic_write_file_secure(proposal_fd, "patches.json", documents.patches_json)
-        review_json = _core.build_review_snapshot_bytes_from_patches(
+        atomic_write_file_secure(proposal_fd, "proposal.md", documents.proposal_markdown)
+        atomic_write_file_secure(proposal_fd, "patches.json", documents.patches_json)
+        review_json = build_review_snapshot_bytes_from_patches(
             vault_root=proposals_root.parent,
             patches_json=documents.patches_json,
         )
-        _core.atomic_write_file_secure(proposal_fd, "review.json", review_json)
+        atomic_write_file_secure(proposal_fd, "review.json", review_json)
         publication_complete = True
     except OSError as exc:
         raise _core.ProposalPublicationError(f"Failed to write proposal files: {exc}") from exc
@@ -376,23 +374,15 @@ def _secure_persist_proposal_documents(*, proposals_root: Path, documents: Any) 
     return proposal_dir
 
 
-# Core builders resolve this global at call time, so installing the wrapper here covers
-# single, compound, compounding, and study wiki updates without changing their public API.
 _core._build_wiki_section_operation = _build_wiki_section_operation
 _core.build_wiki_section_update_proposal = build_wiki_section_update_proposal
 _core.build_compound_wiki_proposal = build_compound_wiki_proposal
 _core.build_compounding_wiki_proposal = build_compounding_wiki_proposal
 _core.build_study_learning_proposal = build_study_learning_proposal
-
-# Proposal artifact publication is one descriptor-bound seam for create and update routes.
 _core._persist_proposal_documents = _secure_persist_proposal_documents
-
-# Existing-target publication is the narrowest point shared by all ingestion update routes.
-# Create-only proposals stay intentionally path-oriented until artifact publication.
 _core.persist_wiki_section_update_proposal = persist_wiki_section_update_proposal
 _core.persist_compound_wiki_proposal = persist_compound_wiki_proposal
 _core.persist_compounding_wiki_proposal = persist_compounding_wiki_proposal
 _core.persist_study_learning_proposal = persist_study_learning_proposal
 
-# Preserve the historical module surface, including globals patched directly by tests.
 sys.modules[__name__] = _core
