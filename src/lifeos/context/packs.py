@@ -25,16 +25,10 @@ from lifeos.vault import VaultAccessError, read_vault_markdown
 if TYPE_CHECKING:
     from lifeos.retrieval.contracts import (
         EmbeddingProvider,
-        RetrievalRequest,
         RetrievalScope,
         RerankingProvider,
     )
-    from lifeos.retrieval.models import IndexedChunk, IndexedDocument
-    from lifeos.retrieval.search import (
-        RankingComponents,
-        RetrievalEvidence,
-        RetrievalResponse,
-    )
+    from lifeos.retrieval.search import RetrievalEvidence, RetrievalResponse
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,7 +153,11 @@ def _canonical_note_info(
     parsed = parse_markdown_note(source.path, content=source.content)
     frontmatter = parsed.frontmatter
     raw_source = frontmatter.get("source")
-    note_source = raw_source.strip() if isinstance(raw_source, str) and raw_source.strip() else None
+    note_source = (
+        raw_source.strip()
+        if isinstance(raw_source, str) and raw_source.strip()
+        else None
+    )
     info = _CanonicalNoteInfo(
         title=parsed.durable_fields.title or source.path.stem.replace("-", " "),
         description=parsed.durable_fields.description or "",
@@ -221,10 +219,10 @@ def _retrieval_filter(
 
 def _scope_traversal_filter(
     *,
-    leaf_filter: PathFilter,
+    policy_filter: PathFilter,
     scope: RetrievalScope,
 ) -> PathFilter:
-    """Allow selected-scope ancestors during traversal while keeping leaf authorization strict."""
+    """Admit only policy-safe ancestors and descendants needed by explicit path scopes."""
     scoped_roots = tuple(
         dict.fromkeys(
             path.rstrip("/")
@@ -232,16 +230,21 @@ def _scope_traversal_filter(
             if isinstance(path, str) and path.rstrip("/")
         )
     )
-    if not scoped_roots:
-        return leaf_filter
 
     def allowed(path: str) -> bool:
-        if leaf_filter(path):
+        if not policy_filter(path):
+            return False
+        if not scoped_roots:
             return True
         candidate = path.rstrip("/")
         if not candidate:
             return True
-        return any(root.startswith(candidate + "/") for root in scoped_roots)
+        return any(
+            candidate == root
+            or candidate.startswith(root + "/")
+            or root.startswith(candidate + "/")
+            for root in scoped_roots
+        )
 
     return allowed
 
@@ -255,7 +258,15 @@ def _hybrid_context_source(
     ranking = item.ranking.to_dict()
     reasons = tuple(
         key
-        for key in ("exact", "lexical", "semantic", "metadata", "link", "graph", "rerank")
+        for key in (
+            "exact",
+            "lexical",
+            "semantic",
+            "metadata",
+            "link",
+            "graph",
+            "rerank",
+        )
         if float(ranking.get(key, 0.0)) > 0.0
     )
     matched = tuple(
@@ -283,54 +294,6 @@ def _hybrid_context_source(
     )
 
 
-def _merge_capability_state(
-    previous: str,
-    current: str,
-    *,
-    healthy: frozenset[str],
-) -> str:
-    if previous == current:
-        return previous
-    if previous not in healthy:
-        return previous
-    if current not in healthy:
-        return current
-    if "available" in {previous, current}:
-        return "available"
-    return current
-
-
-def _merge_retrieval_response_state(
-    previous: RetrievalResponse | None,
-    current: RetrievalResponse,
-) -> RetrievalResponse:
-    """Aggregate later-pass degradation instead of freezing the first successful state."""
-    if previous is None:
-        return current
-    disclosure = previous.provider_disclosure
-    if not current.provider_disclosure.allowed:
-        disclosure = current.provider_disclosure
-    elif disclosure.allowed and current.provider_disclosure.mode == "external":
-        disclosure = current.provider_disclosure
-    state = "degraded" if "degraded" in {previous.state, current.state} else previous.state
-    return replace(
-        previous,
-        state=state,
-        semantic_state=_merge_capability_state(
-            previous.semantic_state,
-            current.semantic_state,
-            healthy=frozenset({"available", "not-used", "not-configured"}),
-        ),
-        rerank_state=_merge_capability_state(
-            previous.rerank_state,
-            current.rerank_state,
-            healthy=frozenset({"available", "not-requested"}),
-        ),
-        diagnostics=tuple(dict.fromkeys((*previous.diagnostics, *current.diagnostics))),
-        provider_disclosure=disclosure,
-    )
-
-
 def _hybrid_sources(
     *,
     vault_root: Path,
@@ -350,45 +313,14 @@ def _hybrid_sources(
     tuple[ContextSource, ...] | None,
     RetrievalResponse | None,
     tuple[str, ...],
+    frozenset[str],
 ]:
-    """Collect note-distinct hybrid sources without weakening pre-candidate privacy."""
+    """Collect note-distinct hybrid sources in one retrieval operation."""
     from lifeos.retrieval import HybridRetriever, RetrievalError, RetrievalRequest
 
-    class _ContextPackRetriever(HybridRetriever):
-        def __init__(
-            self,
-            *,
-            suppressed_paths: frozenset[str],
-        ) -> None:
-            super().__init__(vault_root=vault_root, runtime_dir=runtime_dir)
-            self._suppressed_paths = suppressed_paths
-
-        def _authorize_candidates(
-            self,
-            candidates: list[
-                tuple[
-                    IndexedChunk,
-                    IndexedDocument,
-                    RankingComponents,
-                    tuple[str, ...],
-                ]
-            ],
-            request: RetrievalRequest,
-        ) -> list[
-            tuple[
-                IndexedChunk,
-                IndexedDocument,
-                RankingComponents,
-                tuple[str, ...],
-            ]
-        ]:
-            authorized = super()._authorize_candidates(candidates, request)
-            return [
-                item for item in authorized if item[0].path not in self._suppressed_paths
-            ]
-
+    blocked_paths = set(focus_paths)
     if source_slots <= 0:
-        return (), None, ()
+        return (), None, (), frozenset(blocked_paths)
     if caller_path_filter is not None:
         return (
             None,
@@ -397,6 +329,7 @@ def _hybrid_sources(
                 "Hybrid retrieval was disabled for caller-scoped path filtering; used "
                 "deterministic lexical fallback.",
             ),
+            frozenset(blocked_paths),
         )
     if retrieval_scope.allow_protected:
         return (
@@ -406,96 +339,75 @@ def _hybrid_sources(
                 "Hybrid retrieval was disabled for explicit protected scope; used "
                 "deterministic lexical fallback.",
             ),
+            frozenset(blocked_paths),
         )
 
     pinned = tuple(dict.fromkeys((*retrieval_scope.pinned_paths, *focus_paths)))
     base_scope = replace(retrieval_scope, pinned_paths=pinned)
-    desired = source_slots + 1
-    selected: list[ContextSource] = []
-    seen: set[str] = set()
-    duplicate_suppressed: set[str] = set()
-    response_for_state: RetrievalResponse | None = None
-    retrieval_omissions: list[str] = []
-    external_reranker = reranker is not None and not reranker.capabilities.local_only
-
-    # Hybrid retrieval ranks chunks while Context Packs rank notes. Suppression happens after
-    # link-score computation but before provider disclosure, so focus/previously selected notes
-    # keep contributing graph signals without consuming later result or reranker budgets. Known
-    # duplicate paths are carried across passes so the same evidence cannot reclaim a later slot.
-    for attempt in range(min(desired + 1, 22)):
-        suppressed = frozenset((*focus_paths, *seen, *duplicate_suppressed))
-        candidate_limit = min(100, max(16, desired * 4))
-        effective_reranker = reranker
-        if attempt > 0 and external_reranker:
-            effective_reranker = None
-            message = (
-                "External reranking was limited to the first hybrid pass to preserve the "
-                "per-request disclosure budget."
-            )
-            if message not in retrieval_omissions:
-                retrieval_omissions.append(message)
-        try:
-            response = _ContextPackRetriever(suppressed_paths=suppressed).search(
-                RetrievalRequest(
-                    question,
-                    scope=base_scope,
-                    limit=candidate_limit,
-                    context_budget=max(12_000, candidate_limit * 300),
-                ),
-                embedding_provider=embedding_provider,
-                reranker=effective_reranker,
-                graph_hints=graph_hints,
-            )
-        except RetrievalError as exc:
-            if exc.code == "cancelled":
-                raise ContextSearchError("Hybrid retrieval was cancelled") from exc
-            retrieval_omissions.append(
+    request_limit = min(100, source_slots + len(focus_paths) + 1)
+    try:
+        response = HybridRetriever(vault_root=vault_root, runtime_dir=runtime_dir).search(
+            RetrievalRequest(
+                question,
+                scope=base_scope,
+                limit=request_limit,
+                context_budget=max(24_000, request_limit * 12_000),
+            ),
+            embedding_provider=embedding_provider,
+            reranker=reranker,
+            graph_hints=graph_hints,
+            distinct_paths=True,
+        )
+    except RetrievalError as exc:
+        if exc.code == "cancelled":
+            raise ContextSearchError("Hybrid retrieval was cancelled") from exc
+        return (
+            None,
+            None,
+            (
                 f"Hybrid retrieval was unavailable ({exc.code}); used deterministic lexical "
-                "fallback."
-            )
-            return None, response_for_state, tuple(retrieval_omissions)
+                "fallback.",
+            ),
+            frozenset(blocked_paths),
+        )
 
-        response_for_state = _merge_retrieval_response_state(response_for_state, response)
-        if response.index_state != "healthy":
-            retrieval_omissions.append(
+    if response.index_state != "healthy":
+        return (
+            None,
+            response,
+            (
                 f"Hybrid retrieval index was {response.index_state}; used deterministic lexical "
-                "fallback."
-            )
-            return None, response_for_state, tuple(retrieval_omissions)
+                "fallback.",
+            ),
+            frozenset(blocked_paths),
+        )
 
-        if not response.results:
-            break
-        added = False
-        for item in response.results:
-            if (
-                item.path in focus_paths
-                or item.path in seen
-                or item.path in duplicate_suppressed
-            ):
-                continue
-            seen.add(item.path)
-            added = True
-            if item.path in diagnostic_paths:
-                continue
-            canonical = _canonical_note_info(
-                vault_root=vault_root,
-                path=item.path,
-                cache=canonical_info,
+    selected: list[ContextSource] = []
+    focus_set = frozenset(focus_paths)
+    for item in response.results:
+        item_duplicates = frozenset(item.duplicate_paths)
+        if item.path in focus_set or item_duplicates & focus_set:
+            blocked_paths.add(item.path)
+            blocked_paths.update(item.duplicate_paths)
+            continue
+        if item.path in diagnostic_paths:
+            blocked_paths.add(item.path)
+            continue
+        canonical = _canonical_note_info(
+            vault_root=vault_root,
+            path=item.path,
+            cache=canonical_info,
+        )
+        selected.append(
+            _hybrid_context_source(
+                item=item,
+                lexical=lexical_by_path.get(item.path),
+                canonical=canonical,
             )
-            selected.append(
-                _hybrid_context_source(
-                    item=item,
-                    lexical=lexical_by_path.get(item.path),
-                    canonical=canonical,
-                )
-            )
-            duplicate_suppressed.update(item.duplicate_paths)
-            if len(selected) >= desired:
-                return tuple(selected), response_for_state, tuple(retrieval_omissions)
-        if not added:
-            break
+        )
+        blocked_paths.update(item.duplicate_paths)
 
-    return tuple(selected), response_for_state, tuple(retrieval_omissions)
+    return tuple(selected), response, (), frozenset(blocked_paths)
 
 
 def _merge_hybrid_and_lexical(
@@ -503,10 +415,16 @@ def _merge_hybrid_and_lexical(
     hybrid: tuple[ContextSource, ...],
     lexical: tuple[SearchResult, ...],
     focused_paths: frozenset[str],
+    blocked_paths: frozenset[str],
 ) -> tuple[ContextSource, ...]:
-    """Keep authoritative hybrid order, then preserve lexical-only routing candidates."""
-    merged = list(hybrid)
-    seen = set(focused_paths)
+    """Fuse hybrid relevance with canonical lexical routing before final truncation."""
+    lexical_by_path = {item.path: item for item in lexical}
+    max_lexical = max((item.score for item in lexical), default=0)
+    hybrid_order = {item.path: index for index, item in enumerate(hybrid)}
+    lexical_order = {item.path: index for index, item in enumerate(lexical)}
+
+    merged: list[ContextSource] = list(hybrid)
+    seen = set(focused_paths) | set(blocked_paths)
     for hybrid_item in hybrid:
         seen.add(hybrid_item.path)
         seen.update(hybrid_item.duplicate_paths)
@@ -521,7 +439,29 @@ def _merge_hybrid_and_lexical(
             )
         )
         seen.add(lexical_item.path)
-    return tuple(merged)
+
+    def fused_score(item: ContextSource) -> float:
+        ranking = dict(item.ranking)
+        hybrid_signal = float(ranking.get("total", 0.0))
+        lexical_item = lexical_by_path.get(item.path)
+        lexical_signal = (
+            lexical_item.score / max_lexical
+            if lexical_item is not None and max_lexical > 0
+            else 0.0
+        )
+        return hybrid_signal * 0.65 + lexical_signal * 0.35
+
+    return tuple(
+        sorted(
+            merged,
+            key=lambda item: (
+                -fused_score(item),
+                hybrid_order.get(item.path, 1_000_000),
+                lexical_order.get(item.path, 1_000_000),
+                item.path,
+            ),
+        )
+    )
 
 
 def build_context_pack(
@@ -556,8 +496,25 @@ def build_context_pack(
         retrieval_mode=retrieval_mode,
         path_filter=path_filter,
     )
+    traversal_scope = replace(
+        scope,
+        paths=(),
+        folders=(),
+        note_types=(),
+        tags=(),
+        sources=(),
+        date_from=None,
+        date_to=None,
+        pinned_paths=(),
+    )
+    policy_traversal_filter = _retrieval_filter(
+        vault_root=vault_root,
+        scope=traversal_scope,
+        retrieval_mode=retrieval_mode,
+        path_filter=None,
+    )
     traversal_filter = _scope_traversal_filter(
-        leaf_filter=candidate_filter,
+        policy_filter=policy_traversal_filter,
         scope=scope,
     )
     # Instruction authority is separate from candidate scope narrowing. Only retrieval policy
@@ -592,22 +549,21 @@ def build_context_pack(
     retrieval_omissions: tuple[str, ...] = ()
     lexical_results: tuple[SearchResult, ...] = ()
     canonical_info: dict[str, _CanonicalNoteInfo] = {}
+    hybrid_blocked_paths = frozenset(focus_paths)
 
     if remaining > 0:
-        # Traversal may admit ancestors of explicit path/folder scopes, but every Markdown leaf
-        # is rechecked with candidate_filter before it can influence fallback or augmentation.
         search_report = lexical_search_report(
             vault_root=vault_root,
             query=question,
             limit=2_147_483_647,
-            path_filter=traversal_filter,
+            path_filter=candidate_filter,
+            traversal_filter=traversal_filter,
         )
         search_diagnostics = search_report.diagnostics
         lexical_results = tuple(
             item
             for item in search_report.results
-            if candidate_filter(item.path)
-            and _metadata_scope_allows(
+            if _metadata_scope_allows(
                 _canonical_note_info(
                     vault_root=vault_root,
                     path=item.path,
@@ -618,7 +574,12 @@ def build_context_pack(
         )
         lexical_by_path = {item.path: item for item in lexical_results}
         diagnostic_paths = frozenset(item.source_path for item in search_diagnostics)
-        hybrid, hybrid_response, retrieval_omissions = _hybrid_sources(
+        (
+            hybrid,
+            hybrid_response,
+            retrieval_omissions,
+            hybrid_blocked_paths,
+        ) = _hybrid_sources(
             vault_root=vault_root,
             runtime_dir=runtime_dir or (vault_root / ".lifeos"),
             question=question,
@@ -650,6 +611,7 @@ def build_context_pack(
             hybrid=hybrid,
             lexical=lexical_results,
             focused_paths=focused_paths_set,
+            blocked_paths=hybrid_blocked_paths,
         )
 
     limited = len(candidates) > remaining
