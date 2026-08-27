@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from lifeos.context import (
     ContextPack,
@@ -21,6 +23,9 @@ from lifeos.registry.file_tracking import FileTrackingError, validate_vault_path
 from lifeos.retrieval import RetrievalError, RetrievalPolicy, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.vault import VaultAccessError, is_markdown_path, read_vault_markdown
+
+if TYPE_CHECKING:
+    from lifeos.retrieval.contracts import EmbeddingProvider, RerankingProvider
 
 RetrievalMode = Literal["local", "external"]
 
@@ -216,9 +221,10 @@ def get_vault_context(
     vault_root: Path,
     request: VaultContextRequest,
     runtime_dir: Path | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+    reranker: RerankingProvider | None = None,
 ) -> ContextPack:
     """Build inspectable, policy-aware context without granting mutation authority."""
-    policy = _policy(vault_root)
     scope = RetrievalScope(allow_protected=request.allow_protected)
     try:
         return build_context_pack(
@@ -226,15 +232,11 @@ def get_vault_context(
             question=request.question,
             limit=request.limit,
             focus_paths=request.focus_paths,
-            path_filter=lambda path: _allowed(
-                path,
-                scope=scope,
-                policy=policy,
-                mode=request.mode,
-            ),
             runtime_dir=runtime_dir or (vault_root / ".lifeos"),
             retrieval_scope=scope,
             retrieval_mode=request.mode,
+            embedding_provider=embedding_provider,
+            reranker=reranker,
         )
     except ContextSearchExecutionError as exc:
         raise ToolExecutionError(str(exc)) from exc
