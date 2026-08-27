@@ -11,16 +11,29 @@ from typing import TYPE_CHECKING, Literal, cast
 from lifeos.context.instructions import ContextInstruction, load_instruction_report
 from lifeos.context.search import (
     ContextSearchError,
+    ContextSearchExecutionError,
     PathFilter,
     SearchResult,
     focused_search_results,
     lexical_search_report,
 )
 from lifeos.diagnostics import DomainDiagnostic
+from lifeos.markdown.parser import parse_markdown_note
+from lifeos.vault import VaultAccessError, read_vault_markdown
 
 if TYPE_CHECKING:
-    from lifeos.retrieval.contracts import EmbeddingProvider, RetrievalScope, RerankingProvider
-    from lifeos.retrieval.search import RetrievalEvidence, RetrievalResponse
+    from lifeos.retrieval.contracts import (
+        EmbeddingProvider,
+        RetrievalRequest,
+        RetrievalScope,
+        RerankingProvider,
+    )
+    from lifeos.retrieval.models import IndexedChunk, IndexedDocument
+    from lifeos.retrieval.search import (
+        RankingComponents,
+        RetrievalEvidence,
+        RetrievalResponse,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +54,16 @@ class ContextPack:
     evidence_gaps: tuple[str, ...]
     omissions: tuple[str, ...]
     diagnostics: tuple[DomainDiagnostic, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _CanonicalNoteInfo:
+    title: str
+    description: str
+    note_type: str | None
+    source: str | None
+    note_date: str | None
+    tags: tuple[str, ...]
 
 
 def _diagnostic_key(item: DomainDiagnostic) -> tuple[str, int, str, str, str]:
@@ -89,6 +112,80 @@ def _bounded_excerpt(
     return snippet
 
 
+def _frontmatter_tags(value: object) -> tuple[str, ...]:
+    """Normalize tags with the same semantics as the retrieval index."""
+    if isinstance(value, str):
+        return tuple(
+            dict.fromkeys(
+                item.strip().lstrip("#") for item in value.split() if item.strip()
+            )
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(
+            dict.fromkeys(
+                str(item).strip().lstrip("#")
+                for item in value
+                if str(item).strip()
+            )
+        )
+    return ()
+
+
+def _frontmatter_date(frontmatter: Mapping[str, object]) -> str | None:
+    """Normalize note dates with the same precedence as the retrieval index."""
+    for key in ("date", "created", "created_at", "day", "period_start"):
+        value = frontmatter.get(key)
+        if value is not None:
+            return str(value)[:10]
+    return None
+
+
+def _canonical_note_info(
+    *,
+    vault_root: Path,
+    path: str,
+    cache: dict[str, _CanonicalNoteInfo],
+) -> _CanonicalNoteInfo:
+    existing = cache.get(path)
+    if existing is not None:
+        return existing
+    try:
+        source = read_vault_markdown(vault_root, path)
+    except VaultAccessError as exc:
+        raise ContextSearchExecutionError(
+            f"Could not read retrieval candidate {path}: {exc}"
+        ) from exc
+    parsed = parse_markdown_note(source.path, content=source.content)
+    frontmatter = parsed.frontmatter
+    raw_source = frontmatter.get("source")
+    note_source = raw_source.strip() if isinstance(raw_source, str) and raw_source.strip() else None
+    info = _CanonicalNoteInfo(
+        title=parsed.durable_fields.title or source.path.stem.replace("-", " "),
+        description=parsed.durable_fields.description or "",
+        note_type=parsed.durable_fields.type,
+        source=note_source,
+        note_date=_frontmatter_date(frontmatter),
+        tags=_frontmatter_tags(frontmatter.get("tags")),
+    )
+    cache[path] = info
+    return info
+
+
+def _metadata_scope_allows(info: _CanonicalNoteInfo, scope: RetrievalScope) -> bool:
+    """Apply the retrieval index's metadata/date predicates to canonical fallback notes."""
+    if scope.note_types and (info.note_type or "") not in scope.note_types:
+        return False
+    if scope.tags and not set(scope.tags) <= set(info.tags):
+        return False
+    if scope.sources and (info.source or "") not in scope.sources:
+        return False
+    if scope.date_from and (info.note_date is None or info.note_date < scope.date_from):
+        return False
+    if scope.date_to and (info.note_date is None or info.note_date > scope.date_to):
+        return False
+    return True
+
+
 def _retrieval_filter(
     *,
     vault_root: Path,
@@ -103,7 +200,7 @@ def _retrieval_filter(
     try:
         policy = load_retrieval_policy(vault_root)
     except RetrievalError as exc:
-        raise ContextSearchError("Retrieval policy is invalid") from exc
+        raise ContextSearchExecutionError("Retrieval policy is invalid") from exc
 
     def allowed(path: str) -> bool:
         if path_filter is not None and not path_filter(path):
@@ -125,6 +222,7 @@ def _hybrid_context_source(
     *,
     item: RetrievalEvidence,
     lexical: SearchResult | None,
+    canonical: _CanonicalNoteInfo,
 ) -> ContextSource:
     ranking = item.ranking.to_dict()
     reasons = tuple(
@@ -133,7 +231,9 @@ def _hybrid_context_source(
         if float(ranking.get(key, 0.0)) > 0.0
     )
     matched = tuple(
-        dict.fromkeys((*item.matched_terms, *(lexical.matched_terms if lexical is not None else ())))
+        dict.fromkeys(
+            (*item.matched_terms, *(lexical.matched_terms if lexical is not None else ()))
+        )
     )
     excerpt = (
         lexical.excerpt
@@ -142,8 +242,8 @@ def _hybrid_context_source(
     )
     return ContextSource(
         path=item.path,
-        title=lexical.title if lexical is not None else item.title,
-        description=lexical.description if lexical is not None else "",
+        title=canonical.title,
+        description=canonical.description,
         excerpt=excerpt,
         score=max(0, int(round(item.ranking.total * 1000))),
         matched_terms=matched,
@@ -152,6 +252,54 @@ def _hybrid_context_source(
         retrieval_reasons=reasons or ("hybrid-ranking",),
         ranking=tuple((key, float(value)) for key, value in ranking.items()),
         duplicate_paths=item.duplicate_paths,
+    )
+
+
+def _merge_capability_state(
+    previous: str,
+    current: str,
+    *,
+    healthy: frozenset[str],
+) -> str:
+    if previous == current:
+        return previous
+    if previous not in healthy:
+        return previous
+    if current not in healthy:
+        return current
+    if "available" in {previous, current}:
+        return "available"
+    return current
+
+
+def _merge_retrieval_response_state(
+    previous: RetrievalResponse | None,
+    current: RetrievalResponse,
+) -> RetrievalResponse:
+    """Aggregate later-pass degradation instead of freezing the first successful state."""
+    if previous is None:
+        return current
+    disclosure = previous.provider_disclosure
+    if not current.provider_disclosure.allowed:
+        disclosure = current.provider_disclosure
+    elif disclosure.allowed and current.provider_disclosure.mode == "external":
+        disclosure = current.provider_disclosure
+    state = "degraded" if "degraded" in {previous.state, current.state} else previous.state
+    return replace(
+        previous,
+        state=state,
+        semantic_state=_merge_capability_state(
+            previous.semantic_state,
+            current.semantic_state,
+            healthy=frozenset({"available", "not-used", "not-configured"}),
+        ),
+        rerank_state=_merge_capability_state(
+            previous.rerank_state,
+            current.rerank_state,
+            healthy=frozenset({"available", "not-requested"}),
+        ),
+        diagnostics=tuple(dict.fromkeys((*previous.diagnostics, *current.diagnostics))),
+        provider_disclosure=disclosure,
     )
 
 
@@ -169,31 +317,67 @@ def _hybrid_sources(
     graph_hints: Mapping[str, float] | None,
     lexical_by_path: Mapping[str, SearchResult],
     diagnostic_paths: frozenset[str],
-) -> tuple[tuple[ContextSource, ...] | None, RetrievalResponse | None, str | None]:
+    canonical_info: dict[str, _CanonicalNoteInfo],
+) -> tuple[
+    tuple[ContextSource, ...] | None,
+    RetrievalResponse | None,
+    tuple[str, ...],
+]:
     """Collect note-distinct hybrid sources without weakening pre-candidate privacy."""
     from lifeos.retrieval import HybridRetriever, RetrievalError, RetrievalRequest
 
+    class _ContextPackRetriever(HybridRetriever):
+        def __init__(
+            self,
+            *,
+            suppressed_paths: frozenset[str],
+        ) -> None:
+            super().__init__(vault_root=vault_root, runtime_dir=runtime_dir)
+            self._suppressed_paths = suppressed_paths
+
+        def _authorize_candidates(
+            self,
+            candidates: list[
+                tuple[
+                    IndexedChunk,
+                    IndexedDocument,
+                    RankingComponents,
+                    tuple[str, ...],
+                ]
+            ],
+            request: RetrievalRequest,
+        ) -> list[
+            tuple[
+                IndexedChunk,
+                IndexedDocument,
+                RankingComponents,
+                tuple[str, ...],
+            ]
+        ]:
+            authorized = super()._authorize_candidates(candidates, request)
+            return [
+                item for item in authorized if item[0].path not in self._suppressed_paths
+            ]
+
     if source_slots <= 0:
-        return (), None, None
+        return (), None, ()
     if caller_path_filter is not None:
-        # An arbitrary callable cannot be translated into RetrievalScope and therefore cannot be
-        # proven before hybrid ranking/provider disclosure. The lexical path applies it during
-        # traversal before content access.
         return (
             None,
             None,
-            "Hybrid retrieval was disabled for caller-scoped path filtering; used deterministic "
-            "lexical fallback.",
+            (
+                "Hybrid retrieval was disabled for caller-scoped path filtering; used "
+                "deterministic lexical fallback.",
+            ),
         )
     if retrieval_scope.allow_protected:
-        # The derived index is built from default-deny sources, so an explicitly broadened
-        # protected request must use canonical policy-filtered lexical traversal rather than a
-        # healthy index that cannot contain the authorized protected notes.
         return (
             None,
             None,
-            "Hybrid retrieval was disabled for explicit protected scope; used deterministic "
-            "lexical fallback.",
+            (
+                "Hybrid retrieval was disabled for explicit protected scope; used "
+                "deterministic lexical fallback.",
+            ),
         )
 
     pinned = tuple(dict.fromkeys((*retrieval_scope.pinned_paths, *focus_paths)))
@@ -202,54 +386,55 @@ def _hybrid_sources(
     selected: list[ContextSource] = []
     seen: set[str] = set()
     response_for_state: RetrievalResponse | None = None
-    last_result_paths: tuple[str, ...] = ()
+    retrieval_omissions: list[str] = []
+    external_reranker = reranker is not None and not reranker.capabilities.local_only
 
-    # Hybrid retrieval ranks chunks. Context Packs rank notes, so if one long note consumes the
-    # first chunk window we retry with already represented paths excluded until enough distinct
-    # note paths are available or retrieval is exhausted. Most queries complete in one pass.
-    for _attempt in range(min(desired + 1, 22)):
-        excluded = tuple(
-            dict.fromkeys((*base_scope.excluded_paths, *focus_paths, *sorted(seen)))
-        )
-        scope = replace(base_scope, excluded_paths=excluded)
+    # Hybrid retrieval ranks chunks while Context Packs rank notes. Suppression happens after
+    # link-score computation but before provider disclosure, so focus/previously selected notes
+    # keep contributing graph signals without consuming later result or reranker budgets.
+    for attempt in range(min(desired + 1, 22)):
+        suppressed = frozenset((*focus_paths, *seen))
         candidate_limit = min(100, max(16, desired * 4))
+        effective_reranker = reranker
+        if attempt > 0 and external_reranker:
+            effective_reranker = None
+            message = (
+                "External reranking was limited to the first hybrid pass to preserve the "
+                "per-request disclosure budget."
+            )
+            if message not in retrieval_omissions:
+                retrieval_omissions.append(message)
         try:
-            response = HybridRetriever(
-                vault_root=vault_root,
-                runtime_dir=runtime_dir,
-            ).search(
+            response = _ContextPackRetriever(suppressed_paths=suppressed).search(
                 RetrievalRequest(
                     question,
-                    scope=scope,
+                    scope=base_scope,
                     limit=candidate_limit,
                     context_budget=max(12_000, candidate_limit * 300),
                 ),
                 embedding_provider=embedding_provider,
-                reranker=reranker,
+                reranker=effective_reranker,
                 graph_hints=graph_hints,
             )
         except RetrievalError as exc:
             if exc.code == "cancelled":
                 raise ContextSearchError("Hybrid retrieval was cancelled") from exc
-            return (
-                None,
-                response_for_state,
-                f"Hybrid retrieval was unavailable ({exc.code}); used deterministic lexical fallback.",
+            retrieval_omissions.append(
+                f"Hybrid retrieval was unavailable ({exc.code}); used deterministic lexical "
+                "fallback."
             )
+            return None, response_for_state, tuple(retrieval_omissions)
 
-        if response_for_state is None:
-            response_for_state = response
+        response_for_state = _merge_retrieval_response_state(response_for_state, response)
         if response.index_state != "healthy":
-            return (
-                None,
-                response,
-                f"Hybrid retrieval index was {response.index_state}; used deterministic lexical fallback.",
+            retrieval_omissions.append(
+                f"Hybrid retrieval index was {response.index_state}; used deterministic lexical "
+                "fallback."
             )
+            return None, response_for_state, tuple(retrieval_omissions)
 
-        current_paths = tuple(item.path for item in response.results)
-        if not current_paths or current_paths == last_result_paths:
+        if not response.results:
             break
-        last_result_paths = current_paths
         added = False
         for item in response.results:
             if item.path in focus_paths or item.path in seen:
@@ -258,18 +443,24 @@ def _hybrid_sources(
             added = True
             if item.path in diagnostic_paths:
                 continue
+            canonical = _canonical_note_info(
+                vault_root=vault_root,
+                path=item.path,
+                cache=canonical_info,
+            )
             selected.append(
                 _hybrid_context_source(
                     item=item,
                     lexical=lexical_by_path.get(item.path),
+                    canonical=canonical,
                 )
             )
             if len(selected) >= desired:
-                return tuple(selected), response_for_state, None
+                return tuple(selected), response_for_state, tuple(retrieval_omissions)
         if not added:
             break
 
-    return tuple(selected), response_for_state, None
+    return tuple(selected), response_for_state, tuple(retrieval_omissions)
 
 
 def _merge_hybrid_and_lexical(
@@ -352,21 +543,36 @@ def build_context_pack(
     search_diagnostics: tuple[DomainDiagnostic, ...] = ()
     hybrid: tuple[ContextSource, ...] | None = () if remaining == 0 else None
     hybrid_response: RetrievalResponse | None = None
-    retrieval_omission: str | None = None
+    retrieval_omissions: tuple[str, ...] = ()
     lexical_results: tuple[SearchResult, ...] = ()
+    canonical_info: dict[str, _CanonicalNoteInfo] = {}
 
     if remaining > 0:
+        # lexical_search_report already traverses and ranks the full allowed candidate set before
+        # slicing, so requesting its full ordered result list lets metadata/date scope filtering
+        # happen without out-of-scope notes consuming the Context Pack candidate budget.
         search_report = lexical_search_report(
             vault_root=vault_root,
             query=question,
-            limit=limit + len(focused) + 1,
+            limit=2_147_483_647,
             path_filter=candidate_filter,
         )
         search_diagnostics = search_report.diagnostics
-        lexical_results = search_report.results
+        lexical_results = tuple(
+            item
+            for item in search_report.results
+            if _metadata_scope_allows(
+                _canonical_note_info(
+                    vault_root=vault_root,
+                    path=item.path,
+                    cache=canonical_info,
+                ),
+                scope,
+            )
+        )
         lexical_by_path = {item.path: item for item in lexical_results}
         diagnostic_paths = frozenset(item.source_path for item in search_diagnostics)
-        hybrid, hybrid_response, retrieval_omission = _hybrid_sources(
+        hybrid, hybrid_response, retrieval_omissions = _hybrid_sources(
             vault_root=vault_root,
             runtime_dir=runtime_dir or (vault_root / ".lifeos"),
             question=question,
@@ -379,6 +585,7 @@ def build_context_pack(
             graph_hints=graph_hints,
             lexical_by_path=lexical_by_path,
             diagnostic_paths=diagnostic_paths,
+            canonical_info=canonical_info,
         )
 
     focused_paths_set = frozenset(item.path for item in focused)
@@ -431,9 +638,10 @@ def build_context_pack(
         omissions.append("No validated instructions applied to this context pack.")
 
     if not scope.allow_protected:
-        omissions.append("Protected scopes were excluded from candidate selection by retrieval policy.")
-    if retrieval_omission is not None:
-        omissions.append(retrieval_omission)
+        omissions.append(
+            "Protected scopes were excluded from candidate selection by retrieval policy."
+        )
+    omissions.extend(retrieval_omissions)
     if hybrid_response is not None and hybrid is not None:
         if hybrid_response.semantic_state == "not-configured":
             omissions.append(
@@ -454,7 +662,8 @@ def build_context_pack(
             )
         if not hybrid_response.provider_disclosure.allowed:
             omissions.append(
-                "Provider disclosure was blocked by retrieval policy; local retrieval results were used."
+                "Provider disclosure was blocked by retrieval policy; local retrieval results "
+                "were used."
             )
 
     diagnostics = tuple(
@@ -497,7 +706,9 @@ def format_context_pack(pack: ContextPack) -> str:
     if not pack.sources:
         lines.append("  none")
     for source in pack.sources:
-        lines.append(f"  {source.path} (score {source.score}, mode {source.retrieval_mode})")
+        lines.append(
+            f"  {source.path} (score {source.score}, mode {source.retrieval_mode})"
+        )
         if source.retrieval_reasons:
             lines.append(f"    retrieval reasons: {', '.join(source.retrieval_reasons)}")
         if source.score_evidence:
