@@ -22,7 +22,8 @@ python3 - <<'PY' > "$token_file"
 import secrets
 print(secrets.token_urlsafe(48))
 PY
-chmod 0444 "$token_file"
+chmod 0600 "$token_file"
+token="$(cat "$token_file")"
 
 docker build -f deploy/home-node/Dockerfile -t "$image" .
 docker run --rm --user 0:0 --entrypoint lifeos \
@@ -31,6 +32,22 @@ docker run --rm --user 0:0 --entrypoint lifeos \
 docker run --rm --user 0:0 --entrypoint sh \
   -v "$vault:/vault" \
   "$image" -c 'chown -R 10001:10001 /vault'
+# Compose file-backed secrets preserve host ownership/mode. Exercise the documented production
+# contract rather than making the bearer token world-readable for the test fixture.
+docker run --rm --user 0:0 --entrypoint sh \
+  -v "$token_file:/token" \
+  "$image" -c 'chown 10001:10001 /token && chmod 0400 /token'
+python3 - "$token_file" <<'PY'
+import os
+import stat
+import sys
+
+state = os.stat(sys.argv[1])
+if (state.st_uid, state.st_gid) != (10001, 10001):
+    raise SystemExit("service token fixture is not owned by 10001:10001")
+if stat.S_IMODE(state.st_mode) != 0o400:
+    raise SystemExit("service token fixture mode is not 0400")
+PY
 chmod 0777 "$runtime"
 
 canonical_snapshot() {
@@ -85,16 +102,14 @@ wait_for_status() {
   local port="$3"
   local attempt
   for attempt in $(seq 1 60); do
-    if python3 - "$path" "$expected" "$port" "$token_file" <<'PY'
+    if python3 - "$path" "$expected" "$port" "$token" <<'PY'
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 
-path, expected, port, token_file = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+path, expected, port, token = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 headers: dict[str, str] = {}
 if path == "/readyz":
-    token = Path(token_file).read_text(encoding="utf-8").strip()
     headers["Authorization"] = f"Bearer {token}"
 request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers)
 try:
@@ -153,7 +168,7 @@ wait_for_status /healthz 200 "$port"
 wait_for_status /readyz 200 "$port"
 wait_for_status /mcp 401 "$port"
 
-if docker logs "$container" 2>&1 | grep -Fq "$(cat "$token_file")"; then
+if docker logs "$container" 2>&1 | grep -Fq "$token"; then
   echo "Service token leaked into container logs" >&2
   exit 1
 fi
@@ -185,4 +200,4 @@ if [[ "$before" != "$after" ]]; then
   exit 1
 fi
 
-echo "Home-node Docker integration passed: auth boundary, readiness, restart, and runtime rebuild."
+echo "Home-node Docker integration passed: auth boundary, secret ownership, readiness, restart, and runtime rebuild."
