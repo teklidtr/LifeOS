@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from lifeos.context import build_context_pack
+from lifeos.facade.read_only import VaultContextRequest, get_vault_context
 from lifeos.retrieval import (
     DeterministicEmbeddingProvider,
     RetrievalIndexService,
@@ -141,6 +142,39 @@ def test_context_pack_falls_back_when_retrieval_index_is_unavailable(tmp_path: P
     assert any("lexical fallback" in omission for omission in pack.omissions)
 
 
+def test_context_pack_falls_back_when_retrieval_index_is_stale(tmp_path: Path) -> None:
+    vault, runtime, _provider = _indexed_vault(tmp_path)
+    _write(
+        vault,
+        "wiki/cell.md",
+        "---\nid: cell\ntitle: Cell\ndescription: Updated organelle note.\n---\n"
+        "Cells contain ATP-related energy-transforming organelles and new canonical evidence.",
+    )
+
+    pack = build_context_pack(
+        vault_root=vault,
+        runtime_dir=runtime,
+        question="ATP",
+    )
+
+    assert pack.sources
+    assert all(source.retrieval_mode == "lexical-fallback" for source in pack.sources)
+    assert any("index was stale" in omission for omission in pack.omissions)
+
+
+def test_vault_context_facade_uses_default_retrieval_runtime(tmp_path: Path) -> None:
+    vault, _runtime, _provider = _indexed_vault(tmp_path)
+
+    pack = get_vault_context(
+        vault_root=vault,
+        request=VaultContextRequest(question="ATP", limit=3),
+    )
+
+    assert pack.sources
+    assert any(source.retrieval_mode == "hybrid" for source in pack.sources)
+    assert any("Semantic retrieval was not configured" in omission for omission in pack.omissions)
+
+
 def test_context_pack_hybrid_retrieval_respects_protected_scope(tmp_path: Path) -> None:
     vault, runtime, provider = _indexed_vault(tmp_path)
 
@@ -154,3 +188,24 @@ def test_context_pack_hybrid_retrieval_respects_protected_scope(tmp_path: Path) 
     )
 
     assert "private/secret.md" not in {source.path for source in pack.sources}
+    assert "Protected scopes were excluded from candidate selection by retrieval policy." in pack.omissions
+
+
+def test_external_protected_scope_uses_lexical_fallback_before_hybrid_candidates(
+    tmp_path: Path,
+) -> None:
+    vault, runtime, provider = _indexed_vault(tmp_path)
+
+    pack = build_context_pack(
+        vault_root=vault,
+        runtime_dir=runtime,
+        question="secret ATP",
+        retrieval_scope=RetrievalScope(allow_protected=True),
+        retrieval_mode="external",
+        embedding_provider=provider,
+        path_filter=lambda _path: True,
+    )
+
+    secret = next(source for source in pack.sources if source.path == "private/secret.md")
+    assert secret.retrieval_mode == "lexical-fallback"
+    assert any("protected external scope" in omission for omission in pack.omissions)
