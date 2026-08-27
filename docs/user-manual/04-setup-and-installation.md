@@ -366,8 +366,10 @@ Every proposal-producing ingestion tool still stops at draft. `proposal_submit`,
 `proposal_approve`, and `proposal_apply` require separate explicit lifecycle intent.
 
 For debugging, `runtime_activity` exposes recent disposable routing metadata such as tool
-names, request actor IDs when available, focus/source paths, applied instruction IDs, proposal
-IDs, targets, and changed paths. Automatic ingestion refreshes appear as
+names, request actor IDs when available, focus/source paths, proposal IDs, targets, and changed
+paths. Historical instruction IDs are intentionally redacted from MCP diagnostics because a
+later diagnostic read cannot safely reconstruct the protected-scope intent under which an
+instruction may originally have applied. Automatic ingestion refreshes appear as
 `ingestion_registry_preflight` activity records. It does **not** copy bearer credentials,
 canonical Markdown bodies, or flashcard answers into `.lifeos` activity logs.
 
