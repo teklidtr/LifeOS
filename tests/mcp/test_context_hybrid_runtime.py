@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from lifeos.mcp.runtime_server import create_mcp_server
-from lifeos.retrieval import RetrievalIndexService
+from lifeos.retrieval import DeterministicEmbeddingProvider, RetrievalIndexService
 
 
 def _write(root: Path, path: str, content: str) -> None:
@@ -53,3 +53,49 @@ def test_vault_context_uses_configured_runtime_and_exposes_additive_provenance(
     assert source["ranking"]
     assert source["duplicate_paths"] == []
     assert any("Semantic retrieval was not configured" in item for item in result["omissions"])
+
+
+def test_vault_context_uses_provider_injected_at_runtime_without_request_fields(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
+    vault.mkdir()
+    body = "Oxidative phosphorylation produces ATP."
+    _write(
+        vault,
+        "wiki/energy.md",
+        f"---\nid: energy\ntitle: Energy\n---\n{body}",
+    )
+    service = RetrievalIndexService(vault_root=vault, runtime_dir=runtime)
+    service.rebuild()
+    provider = DeterministicEmbeddingProvider(
+        dimensions=4,
+        phrase_vectors={
+            "cellular power production": [1, 0, 0, 0],
+            body: [1, 0, 0, 0],
+        },
+    )
+    service.embed_missing(provider)
+
+    server = create_mcp_server(
+        vault_root=vault,
+        registry=MagicMock(),
+        authorizer=MagicMock(),
+        runtime_dir=runtime,
+        embedding_provider=provider,
+    )
+    tool = server._tool_manager.get_tool("vault_context")
+
+    result = tool.fn(question="cellular power production", limit=3)
+
+    assert set(tool.parameters["properties"]) == {
+        "question",
+        "focus_paths",
+        "limit",
+        "allow_protected",
+    }
+    source = next(item for item in result["sources"] if item["path"] == "wiki/energy.md")
+    assert source["retrieval_mode"] == "hybrid"
+    assert "semantic" in source["retrieval_reasons"]
+    assert not any("Semantic retrieval was not configured" in item for item in result["omissions"])
