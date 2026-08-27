@@ -132,6 +132,7 @@ def create_mcp_server(
         vault_root=vault_root,
         activity=activity,
         invoke=runtime_scoped_invoke,
+        runtime_dir=resolved_runtime_dir,
     )
     exploration = build_exploration_tools(
         vault_root=vault_root,
