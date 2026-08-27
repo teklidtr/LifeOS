@@ -111,8 +111,11 @@ class ActivityStore:
 
     @staticmethod
     def _verify_regular_file(fd: int) -> None:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
             raise OSError("activity log path is not a regular file")
+        if metadata.st_nlink > 1:
+            raise OSError("activity log path has multiple hard links")
 
     def append(
         self,
