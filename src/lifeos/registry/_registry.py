@@ -59,15 +59,28 @@ class Registry:
         if not stat.S_ISDIR(state.st_mode):
             raise RegistryOpenError("Registry runtime authority is not a directory")
 
+    @staticmethod
+    def _validate_database_descriptor(fd: int) -> None:
+        try:
+            state = os.fstat(fd)
+        except OSError as exc:
+            raise RegistryOpenError("Could not inspect registry database descriptor") from exc
+        if not stat.S_ISREG(state.st_mode):
+            raise RegistryOpenError("Registry database entry is not a regular file")
+        if state.st_nlink > 1:
+            raise RegistryOpenError("Registry database entry has multiple hard links")
+
     def _validate_bound_database_entry(self, *, allow_missing: bool) -> bool:
         if self._directory_fd is None:
             try:
-                state = os.stat(self._database_path)
+                state = os.stat(self._database_path, follow_symlinks=False)
             except FileNotFoundError:
                 return False
             except OSError as exc:
                 raise RegistryOpenError("Could not inspect registry database entry") from exc
-            if stat.S_ISREG(state.st_mode) and state.st_nlink > 1:
+            if not stat.S_ISREG(state.st_mode):
+                raise RegistryOpenError("Registry database entry is not a regular file")
+            if state.st_nlink > 1:
                 raise RegistryOpenError("Registry database entry has multiple hard links")
             return True
         self._validate_bound_directory()
@@ -78,8 +91,6 @@ class Registry:
                 follow_symlinks=False,
             )
         except FileNotFoundError:
-            if allow_missing:
-                return False
             return False
         except OSError as exc:
             raise RegistryOpenError("Could not inspect registry database entry") from exc
@@ -89,17 +100,62 @@ class Registry:
             raise RegistryOpenError("Registry database entry has multiple hard links")
         return True
 
-    def _sqlite_database_path(self, *, allow_missing: bool) -> Path:
-        if self._directory_fd is None:
-            self._validate_bound_database_entry(allow_missing=allow_missing)
-            return self._database_path
-        self._validate_bound_database_entry(allow_missing=allow_missing)
-        proc_directory = Path(f"/proc/self/fd/{self._directory_fd}")
-        if not proc_directory.exists():
+    def _open_database_descriptor(self, *, create: bool, read_only: bool) -> int | None:
+        """Open and validate the database inode before SQLite sees it on Linux.
+
+        The long-lived home-node path requires this descriptor binding. Ordinary local registry
+        use takes the same hardened path whenever /proc/self/fd is available, while platforms
+        without that facility retain the portable pathname fallback.
+        """
+        proc_root = Path("/proc/self/fd")
+        if not proc_root.is_dir():
+            if self._directory_fd is not None:
+                raise RegistryOpenError(
+                    "Descriptor-bound registry access requires Linux /proc/self/fd support"
+                )
+            return None
+
+        if self._directory_fd is not None:
+            self._validate_bound_directory()
+
+        flags = os.O_RDONLY if read_only else os.O_RDWR
+        flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        if create:
+            flags |= os.O_CREAT
+
+        try:
+            if self._directory_fd is None:
+                if create:
+                    fd = os.open(self._database_path, flags, 0o600)
+                else:
+                    fd = os.open(self._database_path, flags)
+            else:
+                if create:
+                    fd = os.open(
+                        self._database_path.name,
+                        flags,
+                        0o600,
+                        dir_fd=self._directory_fd,
+                    )
+                else:
+                    fd = os.open(
+                        self._database_path.name,
+                        flags,
+                        dir_fd=self._directory_fd,
+                    )
+        except FileNotFoundError as exc:
             raise RegistryOpenError(
-                "Descriptor-bound registry access requires Linux /proc/self/fd support"
-            )
-        return proc_directory / self._database_path.name
+                f"Could not open registry database {self._database_path}: file does not exist"
+            ) from exc
+        except OSError as exc:
+            raise RegistryOpenError("Could not safely open registry database entry") from exc
+
+        try:
+            self._validate_database_descriptor(fd)
+        except RegistryOpenError:
+            os.close(fd)
+            raise
+        return fd
 
     @property
     def schema_version(self) -> int:
@@ -243,16 +299,30 @@ class Registry:
         create: bool,
         read_only: bool,
     ) -> Iterator[sqlite3.Connection]:
-        connection = self._open_connection(create=create, read_only=read_only)
+        connection, database_fd = self._open_connection(create=create, read_only=read_only)
         try:
             yield connection
         finally:
             connection.close()
+            if database_fd is not None:
+                os.close(database_fd)
 
-    def _open_connection(self, *, create: bool, read_only: bool) -> sqlite3.Connection:
+    def _open_connection(
+        self,
+        *,
+        create: bool,
+        read_only: bool,
+    ) -> tuple[sqlite3.Connection, int | None]:
         connection: sqlite3.Connection | None = None
+        database_fd: int | None = None
         try:
-            database_path = self._sqlite_database_path(allow_missing=create)
+            database_fd = self._open_database_descriptor(create=create, read_only=read_only)
+            if database_fd is not None:
+                database_path = Path(f"/proc/self/fd/{database_fd}")
+            else:
+                self._validate_bound_database_entry(allow_missing=create)
+                database_path = self._database_path
+
             if create:
                 connection = sqlite3.connect(
                     database_path,
@@ -270,20 +340,30 @@ class Registry:
                 )
 
             connection.row_factory = sqlite3.Row
+            if database_fd is not None and not read_only:
+                journal_mode = connection.execute("PRAGMA journal_mode = MEMORY").fetchone()
+                if journal_mode is None or str(journal_mode[0]).lower() != "memory":
+                    raise RegistryOpenError(
+                        f"Could not enable in-memory registry journaling for {self._database_path}."
+                    )
             connection.execute("PRAGMA foreign_keys = ON")
             row = connection.execute("PRAGMA foreign_keys").fetchone()
             if row is None or row[0] != 1:
                 raise RegistryOpenError(
                     f"Could not enable foreign-key enforcement for {self._database_path}."
                 )
-            return connection
+            return connection, database_fd
         except RegistryOpenError:
             if connection is not None:
                 connection.close()
+            if database_fd is not None:
+                os.close(database_fd)
             raise
         except sqlite3.Error as exc:
             if connection is not None:
                 connection.close()
+            if database_fd is not None:
+                os.close(database_fd)
             raise RegistryOpenError(
                 f"Could not open registry database {self._database_path}: {exc}"
             ) from exc
