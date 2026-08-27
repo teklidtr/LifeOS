@@ -57,13 +57,13 @@ async def test_remote_http_client_explores_and_submits_without_local_vault(
     )
     http_client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=service_app),
-        base_url="http://127.0.0.1",
+        base_url="http://127.0.0.1:8000",
         headers={"Authorization": f"Bearer {token}"},
     )
 
     async with mcp.session_manager.run(), http_client:
         async with streamable_http_client(
-            "http://127.0.0.1/mcp",
+            "http://127.0.0.1:8000/mcp",
             http_client=http_client,
         ) as (read_stream, write_stream, _get_session_id):
             async with ClientSession(read_stream, write_stream) as session:
