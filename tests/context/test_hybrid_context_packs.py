@@ -152,6 +152,27 @@ def test_context_pack_falls_back_when_retrieval_index_is_unavailable(tmp_path: P
     assert any("lexical fallback" in omission for omission in pack.omissions)
 
 
+def test_lexical_fallback_keeps_protected_scope_default_deny(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _write(
+        vault,
+        "wiki/public.md",
+        "---\ntitle: Public ATP\ndescription: Public evidence.\n---\nShared ATP evidence.",
+    )
+    _write(
+        vault,
+        "private/secret.md",
+        "---\ntitle: Secret ATP\ndescription: Protected evidence.\n---\nShared ATP evidence secret.",
+    )
+
+    pack = build_context_pack(vault_root=vault, question="ATP evidence", limit=8)
+
+    assert [source.path for source in pack.sources] == ["wiki/public.md"]
+    assert pack.sources[0].retrieval_mode == "lexical-fallback"
+    assert "Protected scopes were excluded from candidate selection by retrieval policy." in pack.omissions
+
+
 def test_context_pack_falls_back_when_retrieval_index_is_stale(tmp_path: Path) -> None:
     vault, runtime, _provider = _indexed_vault(tmp_path)
     _write(
@@ -201,10 +222,15 @@ def test_context_pack_hybrid_retrieval_respects_protected_scope(tmp_path: Path) 
     assert "Protected scopes were excluded from candidate selection by retrieval policy." in pack.omissions
 
 
-def test_external_protected_scope_uses_lexical_fallback_before_hybrid_candidates(
+def test_external_protected_scope_uses_policy_allowlisted_lexical_fallback(
     tmp_path: Path,
 ) -> None:
     vault, runtime, provider = _indexed_vault(tmp_path)
+    _write(
+        vault,
+        "system/retrieval-policy.yml",
+        "schema_version: 1\nexternal_allowed_prefixes: [private]\n",
+    )
 
     pack = build_context_pack(
         vault_root=vault,
