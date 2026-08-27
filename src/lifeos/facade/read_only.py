@@ -40,7 +40,8 @@ VAULT_CONTEXT_DESCRIPTOR = ToolDescriptor(
     name="vault.context",
     description=(
         "Build a bounded reasoning context from explicit focus paths, applicable vault "
-        "instructions, and relevant canonical Markdown."
+        "instructions, and relevant canonical Markdown using healthy hybrid retrieval when "
+        "available and deterministic local fallback otherwise."
     ),
     effect=ToolEffect.READ_ONLY,
 )
@@ -214,6 +215,7 @@ def get_vault_context(
     *,
     vault_root: Path,
     request: VaultContextRequest,
+    runtime_dir: Path | None = None,
 ) -> ContextPack:
     """Build inspectable, policy-aware context without granting mutation authority."""
     policy = _policy(vault_root)
@@ -230,6 +232,9 @@ def get_vault_context(
                 policy=policy,
                 mode=request.mode,
             ),
+            runtime_dir=runtime_dir or (vault_root / ".lifeos"),
+            retrieval_scope=scope,
+            retrieval_mode=request.mode,
         )
     except ContextSearchExecutionError as exc:
         raise ToolExecutionError(str(exc)) from exc
