@@ -344,13 +344,15 @@ def _secure_persist_proposal_documents(*, proposals_root: Path, documents: Any) 
             flags |= getattr(os, "O_NOFOLLOW")
         proposal_fd = os.open(proposal_id, flags, dir_fd=proposals_fd)
 
-        _core.atomic_write_file_secure(proposal_fd, "proposal.md", documents.proposal_markdown)
-        _core.atomic_write_file_secure(proposal_fd, "patches.json", documents.patches_json)
-        review_json = _core.build_review_snapshot_bytes_from_patches(
+        atomic_write = getattr(_core, "atomic_write_file_secure")
+        atomic_write(proposal_fd, "proposal.md", documents.proposal_markdown)
+        atomic_write(proposal_fd, "patches.json", documents.patches_json)
+        build_review_snapshot = getattr(_core, "build_review_snapshot_bytes_from_patches")
+        review_json = build_review_snapshot(
             vault_root=proposals_root.parent,
             patches_json=documents.patches_json,
         )
-        _core.atomic_write_file_secure(proposal_fd, "review.json", review_json)
+        atomic_write(proposal_fd, "review.json", review_json)
         publication_complete = True
     except OSError as exc:
         raise _core.ProposalPublicationError(f"Failed to write proposal files: {exc}") from exc
