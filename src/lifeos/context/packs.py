@@ -16,6 +16,7 @@ from lifeos.context.search import (
     SearchResult,
     focused_search_results,
     lexical_search_report,
+    lexical_terms,
 )
 from lifeos.diagnostics import DomainDiagnostic
 from lifeos.markdown.parser import parse_markdown_note
@@ -218,6 +219,33 @@ def _retrieval_filter(
     return allowed
 
 
+def _scope_traversal_filter(
+    *,
+    leaf_filter: PathFilter,
+    scope: RetrievalScope,
+) -> PathFilter:
+    """Allow selected-scope ancestors during traversal while keeping leaf authorization strict."""
+    scoped_roots = tuple(
+        dict.fromkeys(
+            path.rstrip("/")
+            for path in (*scope.paths, *scope.folders)
+            if isinstance(path, str) and path.rstrip("/")
+        )
+    )
+    if not scoped_roots:
+        return leaf_filter
+
+    def allowed(path: str) -> bool:
+        if leaf_filter(path):
+            return True
+        candidate = path.rstrip("/")
+        if not candidate:
+            return True
+        return any(root.startswith(candidate + "/") for root in scoped_roots)
+
+    return allowed
+
+
 def _hybrid_context_source(
     *,
     item: RetrievalEvidence,
@@ -385,15 +413,17 @@ def _hybrid_sources(
     desired = source_slots + 1
     selected: list[ContextSource] = []
     seen: set[str] = set()
+    duplicate_suppressed: set[str] = set()
     response_for_state: RetrievalResponse | None = None
     retrieval_omissions: list[str] = []
     external_reranker = reranker is not None and not reranker.capabilities.local_only
 
     # Hybrid retrieval ranks chunks while Context Packs rank notes. Suppression happens after
     # link-score computation but before provider disclosure, so focus/previously selected notes
-    # keep contributing graph signals without consuming later result or reranker budgets.
+    # keep contributing graph signals without consuming later result or reranker budgets. Known
+    # duplicate paths are carried across passes so the same evidence cannot reclaim a later slot.
     for attempt in range(min(desired + 1, 22)):
-        suppressed = frozenset((*focus_paths, *seen))
+        suppressed = frozenset((*focus_paths, *seen, *duplicate_suppressed))
         candidate_limit = min(100, max(16, desired * 4))
         effective_reranker = reranker
         if attempt > 0 and external_reranker:
@@ -437,7 +467,11 @@ def _hybrid_sources(
             break
         added = False
         for item in response.results:
-            if item.path in focus_paths or item.path in seen:
+            if (
+                item.path in focus_paths
+                or item.path in seen
+                or item.path in duplicate_suppressed
+            ):
                 continue
             seen.add(item.path)
             added = True
@@ -455,6 +489,7 @@ def _hybrid_sources(
                     canonical=canonical,
                 )
             )
+            duplicate_suppressed.update(item.duplicate_paths)
             if len(selected) >= desired:
                 return tuple(selected), response_for_state, tuple(retrieval_omissions)
         if not added:
@@ -471,7 +506,10 @@ def _merge_hybrid_and_lexical(
 ) -> tuple[ContextSource, ...]:
     """Keep authoritative hybrid order, then preserve lexical-only routing candidates."""
     merged = list(hybrid)
-    seen = {item.path for item in hybrid} | set(focused_paths)
+    seen = set(focused_paths)
+    for item in hybrid:
+        seen.add(item.path)
+        seen.update(item.duplicate_paths)
     for item in lexical:
         if item.path in seen:
             continue
@@ -504,6 +542,10 @@ def build_context_pack(
 
     if type(limit) is not int or limit <= 0:
         raise ContextSearchError("limit must be a positive integer")
+    if not isinstance(question, str) or not question.strip():
+        raise ContextSearchError("question must be a non-empty string")
+    if not lexical_terms(question):
+        raise ContextSearchError("question must contain searchable terms")
     if retrieval_mode not in {"local", "external"}:
         raise ContextSearchError("retrieval_mode must be local or external")
 
@@ -513,6 +555,10 @@ def build_context_pack(
         scope=scope,
         retrieval_mode=retrieval_mode,
         path_filter=path_filter,
+    )
+    traversal_filter = _scope_traversal_filter(
+        leaf_filter=candidate_filter,
+        scope=scope,
     )
     # Instruction authority is separate from candidate scope narrowing. Only retrieval policy
     # and disclosure mode constrain discovery of the allowlisted instruction file; applicability
@@ -548,20 +594,20 @@ def build_context_pack(
     canonical_info: dict[str, _CanonicalNoteInfo] = {}
 
     if remaining > 0:
-        # lexical_search_report already traverses and ranks the full allowed candidate set before
-        # slicing, so requesting its full ordered result list lets metadata/date scope filtering
-        # happen without out-of-scope notes consuming the Context Pack candidate budget.
+        # Traversal may admit ancestors of explicit path/folder scopes, but every Markdown leaf
+        # is rechecked with candidate_filter before it can influence fallback or augmentation.
         search_report = lexical_search_report(
             vault_root=vault_root,
             query=question,
             limit=2_147_483_647,
-            path_filter=candidate_filter,
+            path_filter=traversal_filter,
         )
         search_diagnostics = search_report.diagnostics
         lexical_results = tuple(
             item
             for item in search_report.results
-            if _metadata_scope_allows(
+            if candidate_filter(item.path)
+            and _metadata_scope_allows(
                 _canonical_note_info(
                     vault_root=vault_root,
                     path=item.path,
