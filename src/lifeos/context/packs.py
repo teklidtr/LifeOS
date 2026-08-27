@@ -218,23 +218,20 @@ def build_context_pack(
         for item in focused_results
     )
 
-    hybrid: tuple[ContextSource, ...] | None = None
-    hybrid_response: RetrievalResponse | None = None
-    retrieval_omission: str | None = None
-    if runtime_dir is not None:
-        hybrid, hybrid_response, retrieval_omission = _hybrid_sources(
-            vault_root=vault_root,
-            runtime_dir=runtime_dir,
-            question=question,
-            limit=limit,
-            focus_paths=focus_paths,
-            path_filter=path_filter,
-            retrieval_scope=retrieval_scope,
-            retrieval_mode=retrieval_mode,
-            embedding_provider=embedding_provider,
-            reranker=reranker,
-            graph_hints=graph_hints,
-        )
+    resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
+    hybrid, hybrid_response, retrieval_omission = _hybrid_sources(
+        vault_root=vault_root,
+        runtime_dir=resolved_runtime_dir,
+        question=question,
+        limit=limit,
+        focus_paths=focus_paths,
+        path_filter=path_filter,
+        retrieval_scope=retrieval_scope,
+        retrieval_mode=retrieval_mode,
+        embedding_provider=embedding_provider,
+        reranker=reranker,
+        graph_hints=graph_hints,
+    )
 
     search_diagnostics: tuple[DomainDiagnostic, ...] = ()
     remaining = max(0, limit - len(focused))
@@ -250,7 +247,7 @@ def build_context_pack(
         lexical = tuple(
             _as_context_source(
                 item,
-                retrieval_mode="lexical-fallback" if runtime_dir is not None else "lexical",
+                retrieval_mode="lexical-fallback",
                 retrieval_reasons=("deterministic-lexical",),
             )
             for item in search_report.results
