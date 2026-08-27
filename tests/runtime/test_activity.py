@@ -75,7 +75,7 @@ def test_activity_store_does_not_block_on_fifo_log(
         worker.start()
         assert finished.wait(1.0), "activity FIFO access blocked instead of failing safely"
         worker.join(timeout=0.1)
-        assert outcome["record"].tool == "vault_context"  # type: ignore[union-attr]
+        assert getattr(outcome["record"], "tool") == "vault_context"
         assert outcome["read"] == ()
     finally:
         if runtime_fd is not None:
