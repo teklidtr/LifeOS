@@ -9,11 +9,21 @@ in-progress/
 completed/
 ```
 
-A task moves between directories without changing its filename.
+A task moves between directories without changing its filename. When a task moves, its frontmatter `status` must be updated to match the destination directory.
 
 Every task must contain metadata, goal, scope, out-of-scope boundaries, acceptance criteria, documentation impact, validation commands, and relevant decisions.
 
-Only `ready/` tasks may be selected. Newly discovered work becomes a separate backlog task.
+Only `ready/` tasks may be selected for implementation. Backlog tasks must never be implemented directly.
+
+If `tasks/ready/` contains no task files, an agent may promote exactly one task from `tasks/backlog/` to `tasks/ready/` before selecting work. A backlog task is eligible for promotion only when:
+
+- its required task contract is complete enough to implement without inventing scope;
+- every task listed in `depends_on` is already in `tasks/completed/`;
+- no explicit current-user instruction or repository rule requires it to remain in backlog.
+
+When promoting a task, move the file to `tasks/ready/` and change its frontmatter `status` from `backlog` to `ready`. If multiple backlog tasks are eligible, promote exactly one rather than filling the ready queue speculatively. Explicit current-user priority takes precedence when choosing which eligible task to promote.
+
+Newly discovered work becomes a separate backlog task.
 
 ## Documentation impact
 
