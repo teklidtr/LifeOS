@@ -13,7 +13,16 @@ token_file="$tmp/service-token"
 
 cleanup() {
   docker rm -f "$container" >/dev/null 2>&1 || true
-  rm -rf "$tmp"
+  # The production-like fixture deliberately gives service-owned files UID/GID 10001:10001.
+  # Remove those through a root helper container so a failing gate does not hide its primary
+  # error behind host-side cleanup permission failures.
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    docker run --rm --user 0:0 --entrypoint sh \
+      -v "$tmp:/cleanup" \
+      "$image" -c 'rm -rf /cleanup/vault /cleanup/runtime /cleanup/service-token' \
+      >/dev/null 2>&1 || true
+  fi
+  rm -rf "$tmp" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -155,10 +164,75 @@ async def main() -> None:
                 await session.initialize()
                 result = await session.call_tool("registry_refresh", arguments={})
                 if result.isError:
-                    raise RuntimeError("registry_refresh returned an MCP tool error")
+                    details = "; ".join(
+                        getattr(item, "text", repr(item)) for item in result.content
+                    )
+                    raise RuntimeError(
+                        f"registry_refresh returned an MCP tool error: {details}"
+                    )
 
 
 asyncio.run(main())
+PY
+}
+
+diagnose_registry_refresh() {
+  docker logs "$container" >&2 || true
+  echo "Running descriptor-bound registry refresh diagnostic inside the failing container" >&2
+  docker exec -i "$container" python - <<'PY' >&2 || true
+import posixpath
+import traceback
+from pathlib import Path
+
+from lifeos.coherence_scoped import runtime_exclusion_prefix
+from lifeos.config import load_config
+from lifeos.facade.registry_tools import refresh_registry
+from lifeos.registry import Registry
+from lifeos.retrieval import RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
+from lifeos.runtime.authority import RuntimeDirectoryAuthority
+from lifeos.runtime_scope import build_runtime_exclusion_matcher
+
+config = load_config(Path("/vault/lifeos.yml"))
+try:
+    with RuntimeDirectoryAuthority.open(config.runtime_dir) as authority:
+        prefix = runtime_exclusion_prefix(
+            config.vault_root,
+            runtime_dir=config.runtime_dir,
+        )
+        runtime_excluded = build_runtime_exclusion_matcher(
+            config.vault_root,
+            runtime_dir=config.runtime_dir,
+            snapshot_prefix=prefix,
+        )
+        policy = load_retrieval_policy(config.vault_root)
+        scope = RetrievalScope()
+
+        def allowed(path: str) -> bool:
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
+            normalized = posixpath.normpath(path)
+            if runtime_excluded(normalized):
+                return False
+            return scope_decision(
+                path,
+                scope=scope,
+                policy=policy,
+                mode="external",
+            ).allowed
+
+        registry = Registry(
+            config.runtime_dir / "registry.db",
+            directory_fd=authority.fd,
+        )
+        result = refresh_registry(
+            vault_root=config.vault_root,
+            registry=registry,
+            identity_allow_path=allowed,
+        )
+        print(f"Direct descriptor-bound refresh unexpectedly succeeded: {result}")
+except Exception:
+    traceback.print_exc()
 PY
 }
 
@@ -187,7 +261,10 @@ start_node
 port="$(host_port)"
 wait_for_status /healthz 200 "$port"
 wait_for_status /readyz 200 "$port"
-refresh_registry_over_mcp
+if ! refresh_registry_over_mcp; then
+  diagnose_registry_refresh
+  exit 1
+fi
 if [[ ! -s "$runtime/registry.db" ]]; then
   echo "Authenticated registry_refresh did not recreate runtime registry.db" >&2
   exit 1
