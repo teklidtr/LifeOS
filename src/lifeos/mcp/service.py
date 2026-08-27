@@ -239,7 +239,7 @@ def load_service_token(env: Mapping[str, str] | None = None) -> str:
     if token_file:
         try:
             token = Path(token_file).read_text(encoding="utf-8").strip()
-        except OSError as error:
+        except (OSError, UnicodeError) as error:
             raise ServiceConfigurationError("Could not read service token file") from error
     elif inline:
         token = inline.strip()
