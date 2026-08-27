@@ -15,11 +15,12 @@ registry and MCP activity stores use that pinned directory authority for their w
 rename, mount replacement, or symlink at the configured runtime pathname cannot redirect those
 writes into `wiki/`, `journal/`, `proposals/`, or another canonical subtree.
 
-Activity-log entries are also treated as disposable runtime files rather than trusted paths.
-LifeOS rejects special-file, symlink, and multiply hard-linked `activity/mcp.jsonl` entries
-instead of reading from or appending through them. If an activity entry has been replaced or
-hard-linked unexpectedly, remove or rebuild that disposable runtime entry rather than trying to
-preserve it as canonical history.
+Runtime entries are treated as disposable files rather than trusted paths. Before SQLite access,
+LifeOS rejects a multiply hard-linked `registry.db` entry so disposable registry state cannot
+share an inode with canonical Markdown. LifeOS also rejects special-file, symlink, and multiply
+hard-linked `activity/mcp.jsonl` entries instead of reading from or appending through them. If a
+registry or activity entry has been replaced or hard-linked unexpectedly, remove or rebuild that
+disposable runtime entry rather than trying to preserve it as canonical history.
 
 `/readyz` also revalidates that the configured pathname still selects the directory inode that
 was pinned at startup. If the path is replaced, becomes a symlink, disappears, or selects a

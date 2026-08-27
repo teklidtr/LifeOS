@@ -61,7 +61,15 @@ class Registry:
 
     def _validate_bound_database_entry(self, *, allow_missing: bool) -> bool:
         if self._directory_fd is None:
-            return self._database_path.exists()
+            try:
+                state = os.stat(self._database_path)
+            except FileNotFoundError:
+                return False
+            except OSError as exc:
+                raise RegistryOpenError("Could not inspect registry database entry") from exc
+            if stat.S_ISREG(state.st_mode) and state.st_nlink > 1:
+                raise RegistryOpenError("Registry database entry has multiple hard links")
+            return True
         self._validate_bound_directory()
         try:
             state = os.stat(
@@ -77,10 +85,13 @@ class Registry:
             raise RegistryOpenError("Could not inspect registry database entry") from exc
         if not stat.S_ISREG(state.st_mode):
             raise RegistryOpenError("Registry database entry is not a regular file")
+        if state.st_nlink > 1:
+            raise RegistryOpenError("Registry database entry has multiple hard links")
         return True
 
     def _sqlite_database_path(self, *, allow_missing: bool) -> Path:
         if self._directory_fd is None:
+            self._validate_bound_database_entry(allow_missing=allow_missing)
             return self._database_path
         self._validate_bound_database_entry(allow_missing=allow_missing)
         proc_directory = Path(f"/proc/self/fd/{self._directory_fd}")
