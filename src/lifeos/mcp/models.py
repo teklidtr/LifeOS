@@ -86,7 +86,7 @@ class RegistryRefreshMCPResult(TypedDict):
     modified: list[str]
     unchanged: list[str]
     deleted: list[str]
-    renamed: list[RegistryRenameMCPResult]
+    renamed: NotRequired[list[RegistryRenameMCPResult] | None]
     proposals_indexed: int
 
 
