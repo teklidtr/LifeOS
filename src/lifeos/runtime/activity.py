@@ -19,6 +19,7 @@ _ACTIVITY_RUNTIME_DIR_FD: ContextVar[int | None] = ContextVar(
     "lifeos_activity_runtime_dir_fd", default=None
 )
 _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+MAX_ACTIVITY_LOG_BYTES = 8 * 1024 * 1024
 _DIRECTORY_FLAGS = (
     os.O_RDONLY
     | getattr(os, "O_DIRECTORY", 0)
@@ -117,6 +118,30 @@ class ActivityStore:
         if metadata.st_nlink > 1:
             raise OSError("activity log path has multiple hard links")
 
+    @staticmethod
+    def _verify_readable_size(fd: int) -> None:
+        """Reject an oversized disposable log before allocating for its contents."""
+        if os.fstat(fd).st_size > MAX_ACTIVITY_LOG_BYTES:
+            raise OSError("activity log exceeds the maximum readable size")
+
+    @classmethod
+    def _read_lines(cls, fd: int) -> list[str]:
+        """Read at most the activity budget, including when a writer races the size check."""
+        cls._verify_regular_file(fd)
+        cls._verify_readable_size(fd)
+        chunks: list[bytes] = []
+        remaining = MAX_ACTIVITY_LOG_BYTES + 1
+        while remaining:
+            chunk = os.read(fd, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        content = b"".join(chunks)
+        if len(content) > MAX_ACTIVITY_LOG_BYTES:
+            raise OSError("activity log exceeds the maximum readable size")
+        return content.decode("utf-8").splitlines()
+
     def append(
         self,
         *,
@@ -190,9 +215,7 @@ class ActivityStore:
                 except FileNotFoundError:
                     return ()
                 try:
-                    self._verify_regular_file(log_fd)
-                    with os.fdopen(log_fd, "r", encoding="utf-8", closefd=False) as handle:
-                        lines = handle.read().splitlines()
+                    lines = self._read_lines(log_fd)
                 finally:
                     os.close(log_fd)
             else:
@@ -205,14 +228,12 @@ class ActivityStore:
                     except FileNotFoundError:
                         return ()
                     try:
-                        self._verify_regular_file(log_fd)
-                        with os.fdopen(log_fd, "r", encoding="utf-8", closefd=False) as handle:
-                            lines = handle.read().splitlines()
+                        lines = self._read_lines(log_fd)
                     finally:
                         os.close(log_fd)
                 finally:
                     os.close(activity_fd)
-        except OSError as error:
+        except (OSError, UnicodeError) as error:
             logger.warning("Unable to read LifeOS activity records from %s: %s", self.path, error)
             return ()
 
