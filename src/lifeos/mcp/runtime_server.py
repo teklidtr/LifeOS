@@ -14,6 +14,7 @@ from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.facade.errors import ToolExecutionError
 from lifeos.facade.read_only import WikiSearchRequest, search_wiki
+from lifeos.mcp.activity_store import MCPActivityStore
 from lifeos.mcp.coherence_tools import build_coherence_tools
 from lifeos.mcp.exploration_tools import (
     _strict_tool,
@@ -34,7 +35,6 @@ from lifeos.retrieval.contracts import (
     reset_node_local_excluded_prefixes,
     reset_node_local_exclusion_predicates,
 )
-from lifeos.runtime import ActivityStore
 from lifeos.runtime.activity import (
     push_activity_runtime_dir_fd,
     reset_activity_runtime_dir_fd,
@@ -124,7 +124,7 @@ def create_mcp_server(
             authorizer=authorizer,
             runtime_dir=resolved_runtime_dir,
         )
-        activity = ActivityStore(resolved_runtime_dir, runtime_dir_fd=runtime_dir_fd)
+        activity = MCPActivityStore(resolved_runtime_dir, runtime_dir_fd=runtime_dir_fd)
     finally:
         reset_activity_runtime_dir_fd(activity_runtime_token)
 
