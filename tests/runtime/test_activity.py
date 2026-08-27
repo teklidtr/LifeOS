@@ -1,4 +1,8 @@
+import os
 from pathlib import Path
+from threading import Event, Thread
+
+import pytest
 
 from lifeos.runtime import ActivityStore
 
@@ -38,3 +42,41 @@ def test_activity_store_write_failure_does_not_break_primary_operation(tmp_path:
     assert record.tool == "vault_read_markdown"
     assert record.source_paths == ("wiki/example.md",)
     assert not store.path.exists()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO regression requires POSIX mkfifo")
+@pytest.mark.parametrize("descriptor_bound", [False, True])
+def test_activity_store_does_not_block_on_fifo_log(
+    tmp_path: Path,
+    descriptor_bound: bool,
+) -> None:
+    runtime = tmp_path / ".lifeos"
+    activity = runtime / "activity"
+    activity.mkdir(parents=True)
+    os.mkfifo(activity / "mcp.jsonl")
+
+    runtime_fd: int | None = None
+    if descriptor_bound:
+        runtime_fd = os.open(
+            runtime,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+    store = ActivityStore(runtime, runtime_dir_fd=runtime_fd)
+    finished = Event()
+    outcome: dict[str, object] = {}
+
+    def exercise() -> None:
+        outcome["record"] = store.append(tool="vault_context")
+        outcome["read"] = store.read()
+        finished.set()
+
+    worker = Thread(target=exercise, daemon=True)
+    try:
+        worker.start()
+        assert finished.wait(1.0), "activity FIFO access blocked instead of failing safely"
+        worker.join(timeout=0.1)
+        assert outcome["record"].tool == "vault_context"  # type: ignore[union-attr]
+        assert outcome["read"] == ()
+    finally:
+        if runtime_fd is not None:
+            os.close(runtime_fd)
