@@ -9,6 +9,7 @@ from lifeos.facade.exploration import VaultListRequest
 from lifeos.mcp.exploration_tools import _validated_request
 from lifeos.mcp.runtime_server import create_mcp_server
 from lifeos.mcp.server import _invoke_mcp_tool
+from lifeos.runtime import ActivityStore
 
 
 def test_runtime_replaces_legacy_reads_with_policy_aware_inputs(tmp_path: Path) -> None:
@@ -108,3 +109,27 @@ def test_runtime_activity_refilters_protected_paths_after_explicit_read(tmp_path
     assert all(
         "journal/private/secret.md" not in record["source_paths"] for record in read_records
     )
+
+
+def test_runtime_activity_redacts_historical_instruction_ids(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime = tmp_path / ".lifeos"
+    ActivityStore(runtime).append(
+        tool="vault_context",
+        instruction_ids=["protected-private-rule"],
+    )
+    server = create_mcp_server(
+        vault_root=vault,
+        registry=MagicMock(),
+        authorizer=MagicMock(),
+        runtime_dir=runtime,
+    )
+
+    activity = server._tool_manager.get_tool("runtime_activity").fn(limit=10)
+    context_records = [
+        record for record in activity["records"] if record["tool"] == "vault_context"
+    ]
+
+    assert context_records
+    assert all(record["instruction_ids"] == [] for record in context_records)

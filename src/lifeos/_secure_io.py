@@ -11,8 +11,23 @@ class SecureIOError(Exception):
     message: str
 
 
+def _open_absolute_directory_secure(dir_path: Path, flags: int) -> int:
+    """Open an absolute directory path component-by-component without following symlinks."""
+    absolute = Path(os.path.abspath(dir_path))
+    current_fd = os.open(absolute.anchor or os.sep, flags)
+    try:
+        for component in absolute.parts[1:]:
+            next_fd = os.open(component, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except OSError:
+        os.close(current_fd)
+        raise
+
+
 def open_directory_secure(dir_path: Path, dir_fd: int | None = None) -> int:
-    """Securely open a directory, rejecting symlinks.
+    """Securely open a directory, rejecting symlinks in the entire traversed path.
     Returns a file descriptor for the directory.
     """
     path_str = str(dir_path) if dir_fd is None else dir_path.name
@@ -22,9 +37,12 @@ def open_directory_secure(dir_path: Path, dir_fd: int | None = None) -> int:
     if hasattr(os, "O_NOFOLLOW"):
         flags |= getattr(os, "O_NOFOLLOW")
 
+    supports_dir_fd = getattr(os, "open") in getattr(os, "supports_dir_fd", set())
     try:
-        if dir_fd is not None and getattr(os, "open") in getattr(os, "supports_dir_fd", set()):
+        if dir_fd is not None and supports_dir_fd:
             fd = os.open(path_str, flags, dir_fd=dir_fd)
+        elif dir_fd is None and supports_dir_fd:
+            fd = _open_absolute_directory_secure(dir_path, flags)
         else:
             fd = os.open(str(dir_path), flags)
     except OSError as e:

@@ -599,3 +599,46 @@ pure relocation may be recognized, but pending or approved proposals are never s
 retargeted; they require renewed review at the new path. Same ID with changed content remains
 stale, and missing, changed, or ambiguous identity blocks mutation. Create operations remain
 path-oriented because an intentionally absent target has no existing note identity to resolve.
+
+## DD-091: Home-node networking is authenticated transport over the shared MCP core
+
+Local `lifeos-mcp` STDIO remains a first-class deployment. The optional long-lived
+`lifeos serve` mode uses the same Python MCP/facade/business-rule core through stateless
+Streamable HTTP; network deployment does not create a second semantic API or move agent
+intelligence into LifeOS. The network transport deliberately exposes a narrower capability set:
+`proposal_approve` and `proposal_apply` are absent from the home-node MCP tool list, while local
+STDIO retains the full reviewed lifecycle surface. The canonical vault, proposal history,
+ownership/provenance, and active-node Git history retain the same authority in either transport.
+
+The network service fails closed by default. Direct startup binds to loopback. Any non-loopback
+bind requires an explicit Host allowlist, while operator-owned private LAN/VPN or authenticated
+TLS reverse-proxy boundaries protect traffic outside the host. Bearer credentials are deployment
+secrets supplied through an environment value or an environment-selected secret file; they are
+never canonical Markdown, activity data, or diagnostic response content. `/healthz` is bounded
+content-free liveness. Bearer-authenticated `/readyz` is deliberately policy-neutral: its 200/503
+result checks service storage authority without traversing protected Markdown or allowing
+protected note identity/content to influence network readiness. Detailed doctor, retrieval,
+coherence, ownership, provenance, hash, stale-write, and recovery checks remain at their existing
+operation-specific boundaries and fail closed when applicable.
+
+Service startup requires a real non-symlink `proposals/` directory with compatible process write
+authority. Proposal artifact publication revalidates that boundary at the central persistence
+seam and pins creation/writes to no-follow directory descriptors, so a synchronized or replaced
+path cannot redirect proposal Markdown into human-owned content or outside the configured vault.
+
+Each service process has one explicit stable actor identity. Authenticated MCP requests bind that
+identity to request-local authorization and to disposable runtime activity records; bearer
+credentials are never recorded. A remote request may use the ordinary exploration and
+proposal-building surface and may explicitly submit a guarded draft. Bearer possession never
+grants approval/application authority, and those forbidden tools are removed before dispatch so
+proposal state cannot be probed through an unauthorized lifecycle call. Trusted human/local
+authorization remains necessary before target Markdown is changed.
+
+Stateless HTTP session data and `.lifeos/` registry/index/cache/activity state remain disposable.
+The supported OCI deployment persists the canonical vault/Git view independently from rebuildable
+runtime state. Full validation deletes runtime state, performs a real authenticated MCP registry
+refresh, verifies rebuildable registry state is recreated, exercises `linux/amd64`, and separately
+builds the same image for `linux/arm64`. Home Assistant OS uses only a thin App/Supervisor
+packaging wrapper around that multi-arch image. The home node remains the single active LifeOS
+mutation authority required by DD-089; a phone/laptop MCP client is a transport consumer of that
+authority, not another writer.

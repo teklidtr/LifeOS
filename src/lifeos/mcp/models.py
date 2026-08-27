@@ -86,7 +86,7 @@ class RegistryRefreshMCPResult(TypedDict):
     modified: list[str]
     unchanged: list[str]
     deleted: list[str]
-    renamed: NotRequired[list[RegistryRenameMCPResult]]
+    renamed: NotRequired[list[RegistryRenameMCPResult] | None]
     proposals_indexed: int
 
 
@@ -199,6 +199,7 @@ class StudyLearningProposalMCPResult(TypedDict):
 class RuntimeActivityRecordMCPResult(TypedDict):
     timestamp: str
     tool: str
+    actor_id: NotRequired[str | None]
     focus_paths: list[str]
     instruction_ids: list[str]
     source_paths: list[str]

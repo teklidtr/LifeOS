@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import cast
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.facade.errors import ToolExecutionError
 from lifeos.facade.read_only import WikiSearchRequest, search_wiki
+from lifeos.mcp.activity_store import MCPActivityStore
 from lifeos.mcp.coherence_tools import build_coherence_tools
 from lifeos.mcp.exploration_tools import (
     _strict_tool,
@@ -33,7 +35,10 @@ from lifeos.retrieval.contracts import (
     reset_node_local_excluded_prefixes,
     reset_node_local_exclusion_predicates,
 )
-from lifeos.runtime import ActivityStore
+from lifeos.runtime.activity import (
+    push_activity_runtime_dir_fd,
+    reset_activity_runtime_dir_fd,
+)
 from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
 _POLICY_READ_OVERRIDES = frozenset(
@@ -64,8 +69,15 @@ def create_mcp_server(
     registry: Registry,
     authorizer: ConsequentialAuthorizer,
     runtime_dir: Path | None = None,
+    runtime_dir_fd: int | None = None,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    transport_security: TransportSecuritySettings | None = None,
+    stateless_http: bool = False,
+    json_response: bool = False,
+    excluded_core_tools: frozenset[str] = frozenset(),
 ) -> FastMCP:
-    """Compose the stable core MCP server with policy-aware exploration primitives."""
+    """Compose one MCP tool surface for local STDIO or authenticated network transport."""
     resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
 
     def runtime_scoped_invoke(operation: Callable[[], object]) -> object:
@@ -81,7 +93,9 @@ def create_mcp_server(
                     snapshot_prefix=runtime_prefix,
                 )
             except CoherenceError as error:
-                raise ToolExecutionError("Could not resolve configured runtime directory") from error
+                raise ToolExecutionError(
+                    "Could not resolve configured runtime directory"
+                ) from error
 
             def runtime_excluded(path: str) -> bool:
                 try:
@@ -102,13 +116,18 @@ def create_mcp_server(
 
         return _invoke_mcp_tool(scoped_operation)
 
-    core = create_core_mcp_server(
-        vault_root=vault_root,
-        registry=registry,
-        authorizer=authorizer,
-        runtime_dir=resolved_runtime_dir,
-    )
-    activity = ActivityStore(resolved_runtime_dir)
+    activity_runtime_token = push_activity_runtime_dir_fd(runtime_dir_fd)
+    try:
+        core = create_core_mcp_server(
+            vault_root=vault_root,
+            registry=registry,
+            authorizer=authorizer,
+            runtime_dir=resolved_runtime_dir,
+        )
+        activity = MCPActivityStore(resolved_runtime_dir, runtime_dir_fd=runtime_dir_fd)
+    finally:
+        reset_activity_runtime_dir_fd(activity_runtime_token)
+
     policy_reads = build_policy_read_tools(
         vault_root=vault_root,
         activity=activity,
@@ -161,10 +180,15 @@ def create_mcp_server(
     core_tools = [
         tool
         for tool in core._tool_manager.list_tools()
-        if tool.name not in _POLICY_READ_OVERRIDES
+        if tool.name not in _POLICY_READ_OVERRIDES and tool.name not in excluded_core_tools
     ]
     return FastMCP(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
         tools=[*core_tools, *policy_reads, *exploration, wiki_search, *coherence],
+        host=host,
+        port=port,
+        transport_security=transport_security,
+        stateless_http=stateless_http,
+        json_response=json_response,
     )

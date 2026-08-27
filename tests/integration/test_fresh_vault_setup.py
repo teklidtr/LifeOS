@@ -180,4 +180,4 @@ def test_setup_guide_contains_the_tested_vault_and_codex_contract() -> None:
     assert "--config /absolute/path/to/LifeOS-vault/lifeos.yml" in text
     assert "application repository's `AGENTS.md`" not in text
     assert "Until LIFEOS-1634" not in text
-    assert "mkdir -p" not in text
+    assert "mkdir -p ~/LifeOS-vault" not in text

@@ -595,6 +595,44 @@ states; LifeOS does not guess which copy is newest. Resolve the conflict in cano
 then refresh. See [Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) for the full
 operating model.
 
+## 5.5 Work through an always-on home node
+
+A network-connected agent on a phone, laptop, or tablet does **not** need a local copy of the
+vault when it talks to the supported home-node MCP endpoint. The canonical filesystem stays on
+the active node; the client receives only the bounded MCP results allowed by LifeOS retrieval
+policy and the authenticated service boundary.
+
+A normal remote session is:
+
+1. connect the MCP client to `https://<private-name>/mcp` (or a loopback/private HTTP endpoint
+   inside a trusted VPN boundary) and supply the configured bearer credential;
+2. explore with `vault_list`, `vault_search`, `vault_read_markdown`, `vault_read_many`,
+   `vault_links`, `wiki_search`, `vault_context`, and `vault_note_identity` as needed;
+3. create a bounded guarded draft through the same ingestion/proposal tools used by local
+   STDIO;
+4. call `proposal_submit` only when you explicitly want that draft moved to pending;
+5. review and approve/apply the pending proposal through a trusted local/human authorization
+   surface rather than asking the headless network service to do it.
+
+The service's configured `--actor-id` is stored as proposal submission attribution. Possession
+of the bearer token is intentionally **not** enough to authorize `proposal_approve` or
+`proposal_apply`; those remote calls fail closed. The home node therefore gives a remote agent
+useful read/draft/submit capability without turning a network credential into unrestricted
+canonical-write authority.
+
+If `/readyz` returns 503, treat the node as unavailable for consequential submission and inspect
+`lifeos doctor`/`lifeos status` on the node. Read-only exploration may still help diagnose the
+state, but do not work around readiness or coherence failures by starting a second LifeOS writer
+against another synchronized replica.
+
+This remote-agent workflow is distinct from offline human capture. An Obsidian phone can still
+create ordinary Markdown while disconnected and synchronize it later as described in Section
+5.4. A phone acting only as an MCP agent client can instead keep no vault copy at all. In both
+cases there is still one active LifeOS mutation authority for the canonical synchronized view.
+
+See [Setup & Installation → Run an always-on home node](04-setup-and-installation.md#415-run-an-always-on-home-node)
+for bearer-secret, container, VPN/TLS, ARM64, and Home Assistant Yellow configuration.
+
 ---
 
 [← Previous: Setup & Installation](04-setup-and-installation.md) · [Manual home](README.md) · [Next: Obsidian Desktop →](06-obsidian-desktop.md)

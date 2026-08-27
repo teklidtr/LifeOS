@@ -272,6 +272,7 @@ def build_policy_read_tools(
                     {
                         "timestamp": item.timestamp,
                         "tool": item.tool,
+                        "actor_id": item.actor_id,
                         "focus_paths": visible(item.focus_paths),
                         "instruction_ids": list(item.instruction_ids),
                         "source_paths": visible(item.source_paths),

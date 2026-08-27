@@ -2,10 +2,10 @@
 
 # 4. Setup & Installation Guide
 
-LifeOS is a local Python application and Markdown vault, not a hosted web
-service. The core system requires no external account. Agent-assisted ingestion
-uses an optional local MCP integration; LifeOS itself has no embedded model
-client or provider API-key configuration.
+LifeOS is a local/private Python application and Markdown vault, not a managed hosted
+service. The core system requires no external account. Agent-assisted ingestion uses optional
+MCP integration over local STDIO or an explicitly configured authenticated home-node
+transport; LifeOS itself has no embedded model client or provider API-key configuration.
 
 ## 4.1 Prerequisites
 
@@ -330,8 +330,9 @@ For another MCP-compatible client, configure the same executable and arguments d
   --actor-id your-trusted-identity
 ```
 
-Keep the server local and use STDIO transport. Do not expose it as an unauthenticated
-network service.
+For this local mode, keep the server on STDIO. Do not improvise an unauthenticated HTTP
+wrapper around `lifeos-mcp`; use the supported authenticated `lifeos serve` home-node mode in
+Section 4.15 when the MCP endpoint must be reachable over a network.
 
 The MCP server supplies universal LifeOS runtime instructions. `system/instructions.yml`
 supplies this vault's scoped behavioral instructions. The application repository's
@@ -365,10 +366,12 @@ Every proposal-producing ingestion tool still stops at draft. `proposal_submit`,
 `proposal_approve`, and `proposal_apply` require separate explicit lifecycle intent.
 
 For debugging, `runtime_activity` exposes recent disposable routing metadata such as tool
-names, focus/source paths, applied instruction IDs, proposal IDs, targets, and changed paths.
-Automatic ingestion refreshes appear as `ingestion_registry_preflight` activity records. It
-does **not** copy canonical Markdown bodies or flashcard answers into `.lifeos` activity
-logs.
+names, request actor IDs when available, focus/source paths, proposal IDs, targets, and changed
+paths. Historical instruction IDs are intentionally redacted from MCP diagnostics because a
+later diagnostic read cannot safely reconstruct the protected-scope intent under which an
+instruction may originally have applied. Automatic ingestion refreshes appear as
+`ingestion_registry_preflight` activity records. It does **not** copy bearer credentials,
+canonical Markdown bodies, or flashcard answers into `.lifeos` activity logs.
 
 ## 4.12 Build the semantic retrieval index
 
@@ -430,6 +433,189 @@ be proven to be the same note automatically.
 
 See [Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) before configuring a
 synchronized or mounted deployment.
+
+## 4.15 Run an always-on home node
+
+Use the home-node service when a phone, laptop, or tablet should reach one authoritative
+LifeOS node without storing a local vault copy. The node owns the filesystem view and uses the
+same deterministic MCP/facade/business-rule core as local STDIO, with a deliberately narrower
+network capability surface; agent intelligence still runs in the external client.
+
+### Direct service mode
+
+Install the MCP extra and check the selected vault first:
+
+```bash
+uv sync --extra mcp
+lifeos doctor --config /absolute/path/to/LifeOS-vault/lifeos.yml
+```
+
+Create a high-entropy bearer secret outside the vault. A file is preferable for a long-lived
+service because process launch configuration does not contain the secret value. The following
+`chmod 600` example is for a direct host process running as the same user who owns the file;
+the fixed-UID Compose deployment has a separate ownership contract below.
+
+```bash
+mkdir -p ~/.config/lifeos
+python -c 'import secrets; print(secrets.token_urlsafe(48))' \
+  > ~/.config/lifeos/home-node-token
+chmod 600 ~/.config/lifeos/home-node-token
+export LIFEOS_SERVICE_TOKEN_FILE="$HOME/.config/lifeos/home-node-token"
+```
+
+Set exactly one of `LIFEOS_SERVICE_TOKEN` or `LIFEOS_SERVICE_TOKEN_FILE`. The token must be at
+least 32 characters. Do not place it in canonical Markdown, `lifeos.yml`, Git, or a vault
+activity note.
+
+Start the service locally:
+
+```bash
+lifeos serve \
+  --config /absolute/path/to/LifeOS-vault/lifeos.yml \
+  --actor-id home-node
+```
+
+The service fails before accepting MCP traffic unless its process identity can read/write the
+canonical vault root and a real, non-symlink `proposals/` directory, and can use or create the
+configured runtime directory. Proposal publication rechecks the same proposal-root boundary
+with descriptor-relative, no-follow filesystem operations. This is deliberate: a node that can
+only read the vault, or whose proposal root can redirect writes, must not advertise a working
+remote draft/submit surface.
+
+The default bind is `127.0.0.1:8000`. The Streamable HTTP MCP endpoint is `/mcp`.
+`/healthz` is a public, content-free liveness probe. `/readyz` requires the same bearer
+credential as `/mcp`, but its 200/503 result is deliberately policy-neutral: it checks service
+storage authority and does not traverse protected Markdown or let protected note identity or
+content affect readiness. An unauthenticated `/readyz` request returns 401. Detailed doctor,
+retrieval-policy, proposal-coherence, ownership, provenance, hash, stale-write, and recovery
+checks remain operation-specific and continue to fail closed where relevant. Neither probe
+returns the bearer secret or vault content.
+
+A non-loopback bind is rejected unless you also supply at least one explicit Host allowlist:
+
+```bash
+lifeos serve \
+  --config /absolute/path/to/LifeOS-vault/lifeos.yml \
+  --actor-id home-node \
+  --host 0.0.0.0 \
+  --allowed-host 'lifeos.example.internal:*'
+```
+
+`--allowed-origin` configures the MCP SDK's Origin validation for transport security. It does
+**not** add CORS response headers or make this service a direct cross-origin browser endpoint.
+Use a non-browser MCP client, or place browser-specific integration behind an operator-owned
+authenticated gateway/reverse proxy that owns the required CORS policy.
+
+Treat network binding as only one layer of the boundary. Supported exposure patterns are a
+trusted private LAN, a VPN/overlay network, or an authenticated TLS reverse proxy. For traffic
+leaving a trusted host/network boundary, terminate TLS before forwarding to LifeOS. Do not
+publish port 8000 directly to the public Internet. LifeOS does not configure routers, VPNs, DNS,
+certificates, reverse proxies, or browser CORS for you.
+
+The configured `--actor-id` is the stable attribution for authenticated requests handled by
+that service process and is persisted with disposable `runtime_activity` records; bearer
+credentials are not. The initial headless contract permits an authenticated client to explore,
+create guarded draft proposals, and explicitly submit them. The home-node MCP tool list omits
+`proposal_approve` and `proposal_apply` entirely, so forbidden lifecycle operations are rejected
+at the transport capability boundary before proposal state is loaded or inspected. Local STDIO
+retains the full reviewed lifecycle surface. Review/approval/application therefore remains a
+trusted human/local path rather than turning possession of one network token into authority to
+rewrite canonical notes.
+
+### Docker / Compose
+
+The repository includes a generic Linux image and Compose deployment under
+`deploy/home-node/`. It is the preferred basis for a NAS, mini PC, Raspberry Pi-class server,
+or another OCI-capable host.
+
+```bash
+cd /absolute/path/to/lifeos-application/deploy/home-node
+cp .env.example .env
+```
+
+The generated `.env` is local deployment configuration and is ignored by the application
+repository. Edit it so `LIFEOS_VAULT_PATH` points to the canonical node vault and
+`LIFEOS_TOKEN_FILE` points to a token file outside that vault.
+
+The supported image runs as fixed unprivileged UID/GID `10001:10001`. The host vault must grant
+that identity read/write/execute access to the vault root and `proposals/`. Prefer a dedicated
+home-node vault replica. On a dedicated Linux node where changing ownership is appropriate, one
+simple preparation is:
+
+```bash
+sudo chown -R 10001:10001 /srv/lifeos/vault
+```
+
+For mounted/shared storage, use the storage provider's ownership or ACL mechanism instead of
+blindly changing another device's working copy. Service startup validates this write authority
+and exits with a configuration error rather than starting a read-only-looking node whose remote
+proposal workflow would fail later.
+
+Compose file-backed secrets preserve the host file's ownership and mode; they do not make an
+owner-only host token readable by the container's fixed service identity. Prepare the token so
+UID/GID `10001:10001` has read access **without** making it world-readable. On a dedicated Linux
+node, a simple owner-only setup is:
+
+```bash
+sudo install -d -o root -g root -m 0755 /srv/lifeos/secrets
+python -c 'import secrets; print(secrets.token_urlsafe(48))' \
+  | sudo tee /srv/lifeos/secrets/service-token >/dev/null
+sudo chown 10001:10001 /srv/lifeos/secrets/service-token
+sudo chmod 0400 /srv/lifeos/secrets/service-token
+```
+
+Set `LIFEOS_TOKEN_FILE=/srv/lifeos/secrets/service-token` in `.env`. On shared storage, use an
+equivalent ACL that grants UID 10001 read access to the token and traversal of its parent
+directories while keeping unrelated users out. Do not use `0444` or another world-readable mode
+as a convenience workaround.
+
+Then start the node:
+
+```bash
+docker compose up -d --build
+```
+
+Compose publishes only on host loopback by default. To make the node reachable through a
+private/VPN address, change **both** `LIFEOS_PUBLISH_ADDRESS` and `LIFEOS_ALLOWED_HOST` rather
+than replacing the allowlist with a wildcard. Keep TLS at the reverse proxy/VPN boundary when
+transport crosses an untrusted network.
+
+The vault bind mount, including canonical Markdown and its active-node Git history, persists
+across container replacement. A separate Docker volume is mounted at `/vault/.lifeos`, so
+registry/index/cache/runtime state can be discarded and rebuilt without deleting canonical
+vault content. The container runs as UID/GID `10001:10001`, drops Linux capabilities, uses a
+read-only root filesystem, and receives the bearer token through a mounted secret file whose
+host permissions must grant that service identity read access.
+
+The full-validation gate builds and exercises this container using an owner-only `0400` token
+owned by UID/GID `10001:10001`, verifies authenticated readiness, restart/runtime rebuild
+behavior, checks that non-runtime canonical/Git files remain unchanged by service restart, and
+separately builds the same Dockerfile for `linux/arm64`.
+
+### Home Assistant Yellow
+
+A Yellow running a normal container-capable Linux host can use the same OCI/Compose path.
+When the Yellow runs **Home Assistant OS**, use a thin Home Assistant App wrapper rather than
+putting Supervisor-specific code into LifeOS core. Home Assistant's current App format is
+container based and maps its `aarch64` architecture to Docker `linux/arm64`.
+
+The wrapper should stay deployment-only and contain, at minimum:
+
+- `config.yaml` declaring `arch: [aarch64]`, `startup: services`, a mapped TCP port for 8000,
+  and an `image:` reference to the same versioned multi-architecture LifeOS image;
+- a writable persistent `/data` area for App-owned configuration/secrets and an explicitly
+  mapped Home Assistant `share`/`addon_config` location for the canonical vault when that is
+  the chosen storage topology;
+- a tiny startup script that maps the selected vault path, secret file, actor ID, Host
+  allowlist, and port into the same `lifeos serve` command used everywhere else;
+- no Supervisor/Home Assistant API, privileged mode, host networking, Docker socket, or
+  embedded LLM permission unless a future task establishes a specific need.
+
+Home Assistant documents `/data` as persistent App storage, `ports` for explicit container
+port publication, `map` for allowed shared directories, and generic multi-arch `image` names
+in its App configuration reference. The wrapper must also arrange write permission for the
+LifeOS service identity on the mapped canonical vault. This thin wrapper is packaging around
+the generic image; it is not a second LifeOS runtime or synchronization protocol.
 
 ---
 

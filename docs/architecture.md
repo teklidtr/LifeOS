@@ -62,10 +62,11 @@ Agents interpret meaning:
 Agents do not silently promote interpretations into truth.
 
 LifeOS does not embed an ingestion model client or accept provider API keys. External
-agents connect through the local STDIO MCP adapter. Universal runtime behavior is advertised
-by the MCP server; vault-specific scoped behavior is loaded only from the allowlisted
-`system/instructions.yml`. Application `AGENTS.md` governs development and is not inherited by
-an MCP client.
+agents connect through the shared MCP runtime using either the local STDIO adapter or the
+explicitly configured authenticated home-node Streamable HTTP adapter. Universal runtime
+behavior is advertised by the MCP server; vault-specific scoped behavior is loaded only from
+the allowlisted `system/instructions.yml`. Application `AGENTS.md` governs development and is
+not inherited by an MCP client.
 
 A registered canonical Markdown source may come from `raw/`, `study/`, `journal/`,
 `experiments/`, `goals/`, or another ordinary vault area. Folder location supplies semantic
@@ -94,8 +95,9 @@ application. Every proposal-producing ingestion route stops at draft unless a se
 lifecycle transition is requested.
 
 Disposable `.lifeos/activity/` records bounded MCP routing metadata for debugging, such as tool
-names, paths, applicable instruction IDs, proposal IDs, operation counts, and changed paths. It
-is not canonical history and does not copy note bodies or flashcard answers.
+names, request actor IDs when available, paths, applicable instruction IDs, proposal IDs,
+operation counts, and changed paths. It is not canonical history and does not copy bearer
+credentials, note bodies, or flashcard answers.
 
 ### Human layer
 
@@ -410,3 +412,70 @@ and delayed edits are treated as observable filesystem state, not provider-speci
 When LifeOS cannot prove identity and version from the current canonical view it stops rather
 than guessing. See [Cross-Device Vault Coherence](cross-device-vault-coherence.md) and the
 [user workflow chapter](user-manual/16-cross-device-vault-coherence.md).
+
+## MCP deployment and always-on home node
+
+Deployment transport is an adapter around the same Python MCP/facade/business-rule core,
+not a second LifeOS API implementation. Network transport narrows capabilities rather than
+forking semantics:
+
+```text
+local MCP client                  remote MCP client
+       |                                 |
+     STDIO                    authenticated Streamable HTTP
+       |                                 |
+       +---------- shared MCP runtime ---+
+                         |
+                deterministic LifeOS core
+                         |
+        canonical vault + Git + disposable runtime
+```
+
+`lifeos-mcp` remains the first-class local STDIO entry point. `lifeos serve` is the explicit
+long-lived service entry point. The network mode uses stateless Streamable HTTP so MCP session
+memory is not canonical state; each authenticated HTTP request re-establishes the configured
+actor context before invoking the shared tool/facade core. The home-node tool surface omits
+`proposal_approve` and `proposal_apply` before dispatch; local STDIO retains the full lifecycle
+surface.
+
+The service has three HTTP boundaries:
+
+- `/mcp` requires a bearer token and then passes through MCP transport Host/origin protection;
+- `/healthz` is a public, content-free liveness probe;
+- `/readyz` requires the bearer token and reports policy-neutral service storage readiness.
+
+`/readyz` does not traverse protected Markdown and protected note identity/content cannot change
+its 200/503 result. Detailed doctor, retrieval-policy, coherence, ownership, provenance, hash,
+stale-write, and recovery checks remain at their operation-specific boundaries. The service
+requires a writable canonical vault, a real non-symlink `proposals/` directory, and usable
+runtime storage. Proposal artifact publication revalidates the proposal root and performs
+creation/writes relative to no-follow directory descriptors, so a path swap cannot redirect a
+draft into human-owned content or outside the vault.
+
+The bearer secret is deployment state, never canonical Markdown or normal activity output. It
+is supplied through `LIFEOS_SERVICE_TOKEN` or an environment-selected secret file, with exactly
+one source configured. The service process has one explicit stable `--actor-id`; authenticated
+request activity records that actor in disposable runtime metadata without recording the bearer
+secret. An authenticated remote client may explore, create guarded drafts, and explicitly submit
+a proposal. Approval and application remain trusted human/local capabilities, and forbidden
+network lifecycle tools cannot inspect proposal status or review digest because they are absent
+from the transport capability set.
+
+Network defaults fail closed. Direct service startup binds to loopback. Non-loopback binding
+requires an explicit Host allowlist, and the deployment guide requires a private LAN/VPN overlay
+or TLS-terminating authenticated reverse proxy rather than unauthenticated public Internet
+exposure. LifeOS does not own DNS, certificates, routers, VPN configuration, or a general sync
+transport.
+
+The generic OCI image is the supported deployment unit for Linux/NAS/Raspberry Pi-class nodes.
+The container keeps the canonical vault/Git view on a persistent writable mount while
+`.lifeos/` runtime state may live on a separate disposable/rebuildable volume. Full validation
+deletes runtime state, invokes an authenticated MCP `registry_refresh`, verifies registry state
+is actually recreated, exercises restart behavior, and builds the same image for `linux/arm64`.
+A Home Assistant Yellow running Home Assistant OS uses a thin Supervisor App wrapper around this
+multi-architecture image; Home Assistant-specific packaging does not enter LifeOS core.
+
+This service topology does not change DD-089: there is still one active LifeOS mutation
+authority for a canonical synchronized view. A remote client is a transport consumer of that
+authority, not an independent writer. See DD-091 and
+[Setup & Installation](user-manual/04-setup-and-installation.md#415-run-an-always-on-home-node).

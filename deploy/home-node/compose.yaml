@@ -1,0 +1,51 @@
+services:
+  lifeos:
+    build:
+      context: ../..
+      dockerfile: deploy/home-node/Dockerfile
+    restart: unless-stopped
+    init: true
+    # The supported image runs as 10001:10001. The mounted node vault must grant this
+    # identity read/write/execute access; `lifeos serve` validates that authority on startup.
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    ports:
+      - "${LIFEOS_PUBLISH_ADDRESS:-127.0.0.1}:${LIFEOS_PORT:-8000}:8000"
+    volumes:
+      - type: bind
+        source: ${LIFEOS_VAULT_PATH}
+        target: /vault
+      - type: volume
+        source: lifeos_runtime
+        target: /vault/.lifeos
+    # File-backed Compose secrets retain host ownership/mode. Prepare LIFEOS_TOKEN_FILE so
+    # UID/GID 10001:10001 can read it without making the bearer token world-readable.
+    secrets:
+      - lifeos_service_token
+    environment:
+      LIFEOS_SERVICE_TOKEN_FILE: /run/secrets/lifeos_service_token
+    command:
+      - serve
+      - --config
+      - /vault/lifeos.yml
+      - --actor-id
+      - ${LIFEOS_ACTOR_ID:-home-node}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --allowed-host
+      - ${LIFEOS_ALLOWED_HOST:-127.0.0.1:*}
+
+volumes:
+  lifeos_runtime:
+
+secrets:
+  lifeos_service_token:
+    file: ${LIFEOS_TOKEN_FILE}
