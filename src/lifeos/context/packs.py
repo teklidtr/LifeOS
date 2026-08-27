@@ -117,6 +117,7 @@ def _hybrid_sources(
     focus_paths: tuple[str, ...],
     path_filter: PathFilter | None,
     retrieval_scope: RetrievalScope | None,
+    retrieval_mode: str,
     embedding_provider: EmbeddingProvider | None,
     reranker: RerankingProvider | None,
     graph_hints: Mapping[str, float] | None,
@@ -124,6 +125,18 @@ def _hybrid_sources(
     from lifeos.retrieval import HybridRetriever, RetrievalError, RetrievalRequest, RetrievalScope
 
     scope = retrieval_scope or RetrievalScope()
+    if retrieval_mode == "external" and scope.allow_protected:
+        # HybridRetriever intentionally owns a local retrieval contract. Until its request model
+        # carries external disclosure mode directly, do not admit explicitly requested protected
+        # content into its candidate/provider path. Canonical lexical fallback can apply the
+        # existing external policy before any protected content is read.
+        return (
+            None,
+            None,
+            "Hybrid retrieval was disabled for explicit protected external scope; used "
+            "deterministic lexical fallback.",
+        )
+
     pinned = tuple(dict.fromkeys((*scope.pinned_paths, *focus_paths)))
     scope = replace(scope, pinned_paths=pinned)
     candidate_limit = min(100, max(limit * 4, limit + len(focus_paths) + 1))
@@ -180,12 +193,15 @@ def build_context_pack(
     path_filter: PathFilter | None = None,
     runtime_dir: Path | None = None,
     retrieval_scope: RetrievalScope | None = None,
+    retrieval_mode: str = "local",
     embedding_provider: EmbeddingProvider | None = None,
     reranker: RerankingProvider | None = None,
     graph_hints: Mapping[str, float] | None = None,
 ) -> ContextPack:
     if type(limit) is not int or limit <= 0:
         raise ContextSearchError("limit must be a positive integer")
+    if retrieval_mode not in {"local", "external"}:
+        raise ContextSearchError("retrieval_mode must be local or external")
     focused_results = focused_search_results(
         vault_root=vault_root,
         paths=focus_paths,
@@ -214,6 +230,7 @@ def build_context_pack(
             focus_paths=focus_paths,
             path_filter=path_filter,
             retrieval_scope=retrieval_scope,
+            retrieval_mode=retrieval_mode,
             embedding_provider=embedding_provider,
             reranker=reranker,
             graph_hints=graph_hints,
@@ -268,6 +285,8 @@ def build_context_pack(
         if limited:
             omissions.append(f"Results were limited to the top {limit} sources.")
 
+    if retrieval_scope is not None and not retrieval_scope.allow_protected:
+        omissions.append("Protected scopes were excluded from candidate selection by retrieval policy.")
     if retrieval_omission is not None:
         omissions.append(retrieval_omission)
     if hybrid_response is not None and hybrid is not None:
