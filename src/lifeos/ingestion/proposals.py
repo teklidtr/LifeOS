@@ -17,7 +17,6 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from lifeos._atomic_write import atomic_write_file_secure
 from lifeos._secure_io import SecureIOError, open_directory_secure
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import collect_scoped_identity_snapshot, runtime_exclusion_prefix
@@ -35,7 +34,6 @@ from lifeos.ingestion.provenance import (
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import ReplaceGeneratedFileV2, validate_patch_document
-from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.proposals.schema import ProposalSchemaError, validate_metadata
 from lifeos.proposals.target_identity import (
     ProposalTargetIdentityError,
@@ -304,7 +302,12 @@ def persist_study_learning_proposal(  # type: ignore[no-redef]
 
 
 def _secure_persist_proposal_documents(*, proposals_root: Path, documents: Any) -> Path:
-    """Publish proposal artifacts through one no-follow directory descriptor."""
+    """Publish proposal artifacts through one no-follow directory descriptor.
+
+    Publication callables are looked up through the exported core module so established
+    ``lifeos.ingestion.proposals.*`` monkeypatch seams remain effective after this wrapper
+    installs ``_core`` as the public module object.
+    """
     proposal_id = str(documents.proposal_id)
     if (
         not proposal_id
@@ -341,13 +344,13 @@ def _secure_persist_proposal_documents(*, proposals_root: Path, documents: Any) 
             flags |= getattr(os, "O_NOFOLLOW")
         proposal_fd = os.open(proposal_id, flags, dir_fd=proposals_fd)
 
-        atomic_write_file_secure(proposal_fd, "proposal.md", documents.proposal_markdown)
-        atomic_write_file_secure(proposal_fd, "patches.json", documents.patches_json)
-        review_json = build_review_snapshot_bytes_from_patches(
+        _core.atomic_write_file_secure(proposal_fd, "proposal.md", documents.proposal_markdown)
+        _core.atomic_write_file_secure(proposal_fd, "patches.json", documents.patches_json)
+        review_json = _core.build_review_snapshot_bytes_from_patches(
             vault_root=proposals_root.parent,
             patches_json=documents.patches_json,
         )
-        atomic_write_file_secure(proposal_fd, "review.json", review_json)
+        _core.atomic_write_file_secure(proposal_fd, "review.json", review_json)
         publication_complete = True
     except OSError as exc:
         raise _core.ProposalPublicationError(f"Failed to write proposal files: {exc}") from exc
