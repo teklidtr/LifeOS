@@ -15,12 +15,17 @@ registry and MCP activity stores use that pinned directory authority for their w
 rename, mount replacement, or symlink at the configured runtime pathname cannot redirect those
 writes into `wiki/`, `journal/`, `proposals/`, or another canonical subtree.
 
-Runtime entries are treated as disposable files rather than trusted paths. Before SQLite access,
-LifeOS rejects a multiply hard-linked `registry.db` entry so disposable registry state cannot
-share an inode with canonical Markdown. LifeOS also rejects special-file, symlink, and multiply
-hard-linked `activity/mcp.jsonl` entries instead of reading from or appending through them. If a
-registry or activity entry has been replaced or hard-linked unexpectedly, remove or rebuild that
-disposable runtime entry rather than trying to preserve it as canonical history.
+Runtime entries are treated as disposable files rather than trusted paths. The registry opens
+`registry.db` itself with no-follow descriptor-relative operations, verifies that the opened inode
+is a single-link regular file, and gives SQLite the pinned file descriptor rather than reopening
+the validated pathname. This closes the validation/open race even if another local process changes
+the runtime directory concurrently. Writable descriptor-bound registry connections use SQLite's
+in-memory journal because the registry is rebuildable disposable state; no `registry.db-journal`
+sidecar is trusted or required for canonical durability. LifeOS also rejects special-file,
+symlink, and multiply hard-linked `activity/mcp.jsonl` entries instead of reading from or appending
+through them. If a registry or activity entry has been replaced or hard-linked unexpectedly,
+remove or rebuild that disposable runtime entry rather than trying to preserve it as canonical
+history.
 
 `/readyz` also revalidates that the configured pathname still selects the directory inode that
 was pinned at startup. If the path is replaced, becomes a symlink, disappears, or selects a
@@ -32,12 +37,28 @@ The generic local STDIO deployment is unchanged. This descriptor-pinned runtime 
 to the long-lived Linux home-node service, where filesystem topology can change while the process
 remains alive.
 
+## Bounded authenticated request bodies
+
+`lifeos serve` accepts at most 1 MiB (1,048,576 bytes) in one authenticated non-probe HTTP request.
+A larger declared `Content-Length` is rejected with HTTP 413 before the request body is read. For
+streamed or chunked requests, the service counts bytes itself and returns 413 before MCP dispatch
+as soon as the same limit is exceeded. The downstream MCP application receives a request only
+after the complete body has been collected within this bound.
+
+The limit applies to proposal-building tool arguments as part of the same MCP JSON request, so one
+remote request cannot create an unbounded proposal payload in memory or on disk. Repeated abusive
+requests are an operator/network abuse concern and should additionally be controlled at the VPN,
+reverse proxy, or host firewall boundary when untrusted principals share access.
+
+`/healthz` and authenticated `/readyz` are service probes handled before MCP-body collection and do
+not require proposal-sized request bodies.
+
 ## Linux requirement
 
-The current home-node implementation binds SQLite registry access through the pinned directory
-descriptor using Linux `/proc/self/fd`. `lifeos serve` therefore fails closed at startup when that
-facility is unavailable. The supplied OCI/Compose deployment and the Home Assistant Yellow Linux
-path satisfy this requirement.
+The current home-node implementation binds SQLite registry access through pinned directory and
+file descriptors using Linux `/proc/self/fd`. `lifeos serve` therefore fails closed at startup when
+that facility is unavailable. The supplied OCI/Compose deployment and the Home Assistant Yellow
+Linux path satisfy this requirement.
 
 This Linux requirement is specific to the current always-on service implementation. Canonical
 Markdown remains portable and does not depend on `/proc` or SQLite.
