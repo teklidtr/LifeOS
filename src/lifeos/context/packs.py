@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from lifeos.context.instructions import ContextInstruction, load_instruction_report
 from lifeos.context.search import (
@@ -97,7 +97,7 @@ def _retrieval_filter(
                 path,
                 scope=scope,
                 policy=policy,
-                mode=retrieval_mode,
+                mode=cast(Literal["local", "external"], retrieval_mode),
             ).allowed
         except RetrievalError:
             return False
