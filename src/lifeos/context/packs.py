@@ -507,20 +507,20 @@ def _merge_hybrid_and_lexical(
     """Keep authoritative hybrid order, then preserve lexical-only routing candidates."""
     merged = list(hybrid)
     seen = set(focused_paths)
-    for item in hybrid:
-        seen.add(item.path)
-        seen.update(item.duplicate_paths)
-    for item in lexical:
-        if item.path in seen:
+    for hybrid_item in hybrid:
+        seen.add(hybrid_item.path)
+        seen.update(hybrid_item.duplicate_paths)
+    for lexical_item in lexical:
+        if lexical_item.path in seen:
             continue
         merged.append(
             _as_context_source(
-                item,
+                lexical_item,
                 retrieval_mode="lexical",
                 retrieval_reasons=("deterministic-lexical", "hybrid-augmentation"),
             )
         )
-        seen.add(item.path)
+        seen.add(lexical_item.path)
     return tuple(merged)
 
 
