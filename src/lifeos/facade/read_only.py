@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -28,6 +29,12 @@ if TYPE_CHECKING:
     from lifeos.retrieval.contracts import EmbeddingProvider, RerankingProvider
 
 RetrievalMode = Literal["local", "external"]
+_CONTEXT_EMBEDDING_PROVIDER: ContextVar[EmbeddingProvider | None] = ContextVar(
+    "lifeos_vault_context_embedding_provider", default=None
+)
+_CONTEXT_RERANKER: ContextVar[RerankingProvider | None] = ContextVar(
+    "lifeos_vault_context_reranker", default=None
+)
 
 READ_MARKDOWN_DESCRIPTOR = ToolDescriptor(
     name="vault.read_markdown",
@@ -50,6 +57,27 @@ VAULT_CONTEXT_DESCRIPTOR = ToolDescriptor(
     ),
     effect=ToolEffect.READ_ONLY,
 )
+
+
+def push_vault_context_providers(
+    *,
+    embedding_provider: EmbeddingProvider | None,
+    reranker: RerankingProvider | None,
+) -> tuple[Token[EmbeddingProvider | None], Token[RerankingProvider | None]]:
+    """Install provider-neutral retrieval dependencies for one runtime invocation context."""
+    return (
+        _CONTEXT_EMBEDDING_PROVIDER.set(embedding_provider),
+        _CONTEXT_RERANKER.set(reranker),
+    )
+
+
+def reset_vault_context_providers(
+    tokens: tuple[Token[EmbeddingProvider | None], Token[RerankingProvider | None]],
+) -> None:
+    """Restore provider-neutral retrieval dependencies after one runtime invocation."""
+    embedding_token, reranker_token = tokens
+    _CONTEXT_RERANKER.reset(reranker_token)
+    _CONTEXT_EMBEDDING_PROVIDER.reset(embedding_token)
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +254,12 @@ def get_vault_context(
 ) -> ContextPack:
     """Build inspectable, policy-aware context without granting mutation authority."""
     scope = RetrievalScope(allow_protected=request.allow_protected)
+    resolved_embedding_provider = (
+        embedding_provider
+        if embedding_provider is not None
+        else _CONTEXT_EMBEDDING_PROVIDER.get()
+    )
+    resolved_reranker = reranker if reranker is not None else _CONTEXT_RERANKER.get()
     try:
         return build_context_pack(
             vault_root=vault_root,
@@ -235,8 +269,8 @@ def get_vault_context(
             runtime_dir=runtime_dir or (vault_root / ".lifeos"),
             retrieval_scope=scope,
             retrieval_mode=request.mode,
-            embedding_provider=embedding_provider,
-            reranker=reranker,
+            embedding_provider=resolved_embedding_provider,
+            reranker=resolved_reranker,
         )
     except ContextSearchExecutionError as exc:
         raise ToolExecutionError(str(exc)) from exc
