@@ -66,11 +66,27 @@ def _as_context_source(
     )
 
 
-def _bounded_excerpt(text: str, *, width: int = 260) -> str:
+def _bounded_excerpt(
+    text: str,
+    *,
+    terms: tuple[str, ...] = (),
+    width: int = 260,
+) -> str:
+    """Return a bounded excerpt centered on visible matching evidence when possible."""
     collapsed = " ".join(text.split())
     if len(collapsed) <= width:
         return collapsed
-    return collapsed[:width].rstrip() + "…"
+    folded = collapsed.casefold()
+    offsets = [folded.find(term.casefold()) for term in terms if term]
+    offset = min((value for value in offsets if value >= 0), default=0)
+    start = max(0, offset - width // 3)
+    end = min(len(collapsed), start + width)
+    snippet = collapsed[start:end].strip()
+    if start:
+        snippet = "…" + snippet
+    if end < len(collapsed):
+        snippet += "…"
+    return snippet
 
 
 def _retrieval_filter(
@@ -107,32 +123,31 @@ def _retrieval_filter(
 
 def _hybrid_context_source(
     *,
-    vault_root: Path,
     item: RetrievalEvidence,
-    path_filter: PathFilter,
+    lexical: SearchResult | None,
 ) -> ContextSource:
-    # Re-read the selected canonical note through the same focused-source path used by explicit
-    # focus requests. This preserves the existing title/description contract and re-validates the
-    # current path before the indexed evidence is exposed as Context Pack output.
-    canonical = focused_search_results(
-        vault_root=vault_root,
-        paths=(item.path,),
-        path_filter=path_filter,
-    )[0]
     ranking = item.ranking.to_dict()
     reasons = tuple(
         key
         for key in ("exact", "lexical", "semantic", "metadata", "link", "graph", "rerank")
         if float(ranking.get(key, 0.0)) > 0.0
     )
+    matched = tuple(
+        dict.fromkeys((*item.matched_terms, *(lexical.matched_terms if lexical is not None else ())))
+    )
+    excerpt = (
+        lexical.excerpt
+        if lexical is not None and lexical.excerpt
+        else _bounded_excerpt(item.context_text, terms=matched)
+    )
     return ContextSource(
         path=item.path,
-        title=canonical.title,
-        description=canonical.description,
-        excerpt=_bounded_excerpt(item.context_text),
+        title=lexical.title if lexical is not None else item.title,
+        description=lexical.description if lexical is not None else "",
+        excerpt=excerpt,
         score=max(0, int(round(item.ranking.total * 1000))),
-        matched_terms=item.matched_terms,
-        score_evidence=(),
+        matched_terms=matched,
+        score_evidence=lexical.score_evidence if lexical is not None else (),
         retrieval_mode="hybrid",
         retrieval_reasons=reasons or ("hybrid-ranking",),
         ranking=tuple((key, float(value)) for key, value in ranking.items()),
@@ -145,74 +160,139 @@ def _hybrid_sources(
     vault_root: Path,
     runtime_dir: Path,
     question: str,
-    limit: int,
+    source_slots: int,
     focus_paths: tuple[str, ...],
-    path_filter: PathFilter,
+    caller_path_filter: PathFilter | None,
     retrieval_scope: RetrievalScope,
-    retrieval_mode: str,
     embedding_provider: EmbeddingProvider | None,
     reranker: RerankingProvider | None,
     graph_hints: Mapping[str, float] | None,
+    lexical_by_path: Mapping[str, SearchResult],
+    diagnostic_paths: frozenset[str],
 ) -> tuple[tuple[ContextSource, ...] | None, RetrievalResponse | None, str | None]:
+    """Collect note-distinct hybrid sources without weakening pre-candidate privacy."""
     from lifeos.retrieval import HybridRetriever, RetrievalError, RetrievalRequest
 
-    if retrieval_mode == "external" and retrieval_scope.allow_protected:
-        # HybridRetriever intentionally owns a local retrieval contract. Until its request model
-        # carries external disclosure mode directly, do not admit explicitly requested protected
-        # content into its candidate/provider path. Canonical lexical fallback applies the
-        # external policy before any protected content is read.
+    if source_slots <= 0:
+        return (), None, None
+    if caller_path_filter is not None:
+        # An arbitrary callable cannot be translated into RetrievalScope and therefore cannot be
+        # proven before hybrid ranking/provider disclosure. The lexical path applies it during
+        # traversal before content access.
         return (
             None,
             None,
-            "Hybrid retrieval was disabled for explicit protected external scope; used "
-            "deterministic lexical fallback.",
+            "Hybrid retrieval was disabled for caller-scoped path filtering; used deterministic "
+            "lexical fallback.",
+        )
+    if retrieval_scope.allow_protected:
+        # The derived index is built from default-deny sources, so an explicitly broadened
+        # protected request must use canonical policy-filtered lexical traversal rather than a
+        # healthy index that cannot contain the authorized protected notes.
+        return (
+            None,
+            None,
+            "Hybrid retrieval was disabled for explicit protected scope; used deterministic "
+            "lexical fallback.",
         )
 
     pinned = tuple(dict.fromkeys((*retrieval_scope.pinned_paths, *focus_paths)))
-    scope = replace(retrieval_scope, pinned_paths=pinned)
-    candidate_limit = min(100, max(limit * 4, limit + len(focus_paths) + 1))
-    try:
-        response = HybridRetriever(
-            vault_root=vault_root,
-            runtime_dir=runtime_dir,
-        ).search(
-            RetrievalRequest(
-                question,
-                scope=scope,
-                limit=candidate_limit,
-                context_budget=max(12_000, candidate_limit * 300),
-            ),
-            embedding_provider=embedding_provider,
-            reranker=reranker,
-            graph_hints=graph_hints,
-        )
-    except RetrievalError as exc:
-        if exc.code == "cancelled":
-            raise ContextSearchError("Hybrid retrieval was cancelled") from exc
-        return None, None, f"Hybrid retrieval was unavailable ({exc.code}); used deterministic lexical fallback."
-
-    # A stale or otherwise unhealthy index is derived state. Do not let it displace canonical
-    # lexical retrieval; use it only when the index is healthy and current.
-    if response.index_state != "healthy":
-        return (
-            None,
-            response,
-            f"Hybrid retrieval index was {response.index_state}; used deterministic lexical fallback.",
-        )
-
-    focused = set(focus_paths)
+    base_scope = replace(retrieval_scope, pinned_paths=pinned)
+    desired = source_slots + 1
     selected: list[ContextSource] = []
     seen: set[str] = set()
-    for item in response.results:
-        if item.path in focused or item.path in seen:
+    response_for_state: RetrievalResponse | None = None
+    last_result_paths: tuple[str, ...] = ()
+
+    # Hybrid retrieval ranks chunks. Context Packs rank notes, so if one long note consumes the
+    # first chunk window we retry with already represented paths excluded until enough distinct
+    # note paths are available or retrieval is exhausted. Most queries complete in one pass.
+    for _attempt in range(min(desired + 1, 22)):
+        excluded = tuple(
+            dict.fromkeys((*base_scope.excluded_paths, *focus_paths, *sorted(seen)))
+        )
+        scope = replace(base_scope, excluded_paths=excluded)
+        candidate_limit = min(100, max(16, desired * 4))
+        try:
+            response = HybridRetriever(
+                vault_root=vault_root,
+                runtime_dir=runtime_dir,
+            ).search(
+                RetrievalRequest(
+                    question,
+                    scope=scope,
+                    limit=candidate_limit,
+                    context_budget=max(12_000, candidate_limit * 300),
+                ),
+                embedding_provider=embedding_provider,
+                reranker=reranker,
+                graph_hints=graph_hints,
+            )
+        except RetrievalError as exc:
+            if exc.code == "cancelled":
+                raise ContextSearchError("Hybrid retrieval was cancelled") from exc
+            return (
+                None,
+                response_for_state,
+                f"Hybrid retrieval was unavailable ({exc.code}); used deterministic lexical fallback.",
+            )
+
+        if response_for_state is None:
+            response_for_state = response
+        if response.index_state != "healthy":
+            return (
+                None,
+                response,
+                f"Hybrid retrieval index was {response.index_state}; used deterministic lexical fallback.",
+            )
+
+        current_paths = tuple(item.path for item in response.results)
+        if not current_paths or current_paths == last_result_paths:
+            break
+        last_result_paths = current_paths
+        added = False
+        for item in response.results:
+            if item.path in focus_paths or item.path in seen:
+                continue
+            seen.add(item.path)
+            added = True
+            if item.path in diagnostic_paths:
+                continue
+            selected.append(
+                _hybrid_context_source(
+                    item=item,
+                    lexical=lexical_by_path.get(item.path),
+                )
+            )
+            if len(selected) >= desired:
+                return tuple(selected), response_for_state, None
+        if not added:
+            break
+
+    return tuple(selected), response_for_state, None
+
+
+def _merge_hybrid_and_lexical(
+    *,
+    hybrid: tuple[ContextSource, ...],
+    lexical: tuple[SearchResult, ...],
+    focused_paths: frozenset[str],
+) -> tuple[ContextSource, ...]:
+    """Keep authoritative hybrid order, then preserve lexical-only routing candidates."""
+    merged = list(hybrid)
+    seen = {item.path for item in hybrid} | set(focused_paths)
+    for item in lexical:
+        if item.path in seen:
             continue
-        if not path_filter(item.path):
-            continue
-        selected.append(
-            _hybrid_context_source(vault_root=vault_root, item=item, path_filter=path_filter)
+        merged.append(
+            _as_context_source(
+                item,
+                retrieval_mode="lexical",
+                retrieval_reasons=("deterministic-lexical", "hybrid-augmentation"),
+            )
         )
         seen.add(item.path)
-    return tuple(selected), response, None
+    return tuple(merged)
 
 
 def build_context_pack(
@@ -237,16 +317,25 @@ def build_context_pack(
         raise ContextSearchError("retrieval_mode must be local or external")
 
     scope = retrieval_scope or RetrievalScope()
-    effective_filter = _retrieval_filter(
+    candidate_filter = _retrieval_filter(
         vault_root=vault_root,
         scope=scope,
         retrieval_mode=retrieval_mode,
         path_filter=path_filter,
     )
+    # Instruction authority is separate from candidate scope narrowing. Only retrieval policy
+    # and disclosure mode constrain discovery of the allowlisted instruction file; applicability
+    # is then evaluated against the final selected sources.
+    instruction_filter = _retrieval_filter(
+        vault_root=vault_root,
+        scope=RetrievalScope(allow_protected=scope.allow_protected),
+        retrieval_mode=retrieval_mode,
+        path_filter=None,
+    )
     focused_results = focused_search_results(
         vault_root=vault_root,
         paths=focus_paths,
-        path_filter=effective_filter,
+        path_filter=candidate_filter,
     )
     if len(focused_results) > limit:
         raise ContextSearchError("focus_paths cannot exceed the context source limit")
@@ -259,53 +348,64 @@ def build_context_pack(
         for item in focused_results
     )
 
-    resolved_runtime_dir = runtime_dir or (vault_root / ".lifeos")
-    hybrid, hybrid_response, retrieval_omission = _hybrid_sources(
-        vault_root=vault_root,
-        runtime_dir=resolved_runtime_dir,
-        question=question,
-        limit=limit,
-        focus_paths=focus_paths,
-        path_filter=effective_filter,
-        retrieval_scope=scope,
-        retrieval_mode=retrieval_mode,
-        embedding_provider=embedding_provider,
-        reranker=reranker,
-        graph_hints=graph_hints,
-    )
-
-    search_diagnostics: tuple[DomainDiagnostic, ...] = ()
     remaining = max(0, limit - len(focused))
-    if hybrid is None:
+    search_diagnostics: tuple[DomainDiagnostic, ...] = ()
+    hybrid: tuple[ContextSource, ...] | None = () if remaining == 0 else None
+    hybrid_response: RetrievalResponse | None = None
+    retrieval_omission: str | None = None
+    lexical_results: tuple[SearchResult, ...] = ()
+
+    if remaining > 0:
         search_report = lexical_search_report(
             vault_root=vault_root,
             query=question,
             limit=limit + len(focused) + 1,
-            path_filter=effective_filter,
+            path_filter=candidate_filter,
         )
         search_diagnostics = search_report.diagnostics
-        focused_paths_set = {item.path for item in focused}
-        lexical = tuple(
+        lexical_results = search_report.results
+        lexical_by_path = {item.path: item for item in lexical_results}
+        diagnostic_paths = frozenset(item.source_path for item in search_diagnostics)
+        hybrid, hybrid_response, retrieval_omission = _hybrid_sources(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir or (vault_root / ".lifeos"),
+            question=question,
+            source_slots=remaining,
+            focus_paths=focus_paths,
+            caller_path_filter=path_filter,
+            retrieval_scope=scope,
+            embedding_provider=embedding_provider,
+            reranker=reranker,
+            graph_hints=graph_hints,
+            lexical_by_path=lexical_by_path,
+            diagnostic_paths=diagnostic_paths,
+        )
+
+    focused_paths_set = frozenset(item.path for item in focused)
+    if hybrid is None:
+        candidates = tuple(
             _as_context_source(
                 item,
                 retrieval_mode="lexical-fallback",
                 retrieval_reasons=("deterministic-lexical",),
             )
-            for item in search_report.results
+            for item in lexical_results
             if item.path not in focused_paths_set
         )
-        limited = len(lexical) > remaining
-        candidates = lexical
     else:
-        limited = len(hybrid) > remaining
-        candidates = hybrid
+        candidates = _merge_hybrid_and_lexical(
+            hybrid=hybrid,
+            lexical=lexical_results,
+            focused_paths=focused_paths_set,
+        )
 
+    limited = len(candidates) > remaining
     sources = (*focused, *candidates[:remaining])
     instruction_report = load_instruction_report(
         vault_root=vault_root,
         question=question,
         sources=sources,
-        path_filter=effective_filter,
+        path_filter=instruction_filter,
     )
     gaps: list[str] = []
     omissions: list[str] = []
@@ -343,6 +443,14 @@ def build_context_pack(
             omissions.append(
                 "Semantic retrieval was "
                 f"{hybrid_response.semantic_state}; hybrid ranking continued with local signals."
+            )
+        if reranker is not None and hybrid_response.rerank_state not in {
+            "available",
+            "not-requested",
+        }:
+            omissions.append(
+                "Reranking was "
+                f"{hybrid_response.rerank_state}; hybrid ranking continued without reranking."
             )
         if not hybrid_response.provider_disclosure.allowed:
             omissions.append(
