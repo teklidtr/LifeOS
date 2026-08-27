@@ -68,6 +68,14 @@ def test_service_storage_accepts_creatable_runtime_directory(tmp_path: Path) -> 
     validate_service_storage(config)
 
 
+def test_service_token_invalid_utf8_is_configuration_error(tmp_path: Path) -> None:
+    token_file = tmp_path / "service-token"
+    token_file.write_bytes(b"\xff" * 40)
+
+    with pytest.raises(ServiceConfigurationError, match="Could not read service token file"):
+        service.load_service_token({service.SERVICE_TOKEN_FILE_ENV: str(token_file)})
+
+
 def test_service_rejects_invalid_actor_without_starting_server(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
