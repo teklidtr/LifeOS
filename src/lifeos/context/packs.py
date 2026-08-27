@@ -73,11 +73,43 @@ def _bounded_excerpt(text: str, *, width: int = 260) -> str:
     return collapsed[:width].rstrip() + "…"
 
 
+def _retrieval_filter(
+    *,
+    vault_root: Path,
+    scope: RetrievalScope,
+    retrieval_mode: str,
+    path_filter: PathFilter | None,
+) -> PathFilter:
+    """Compose caller narrowing with the authoritative retrieval privacy policy."""
+    from lifeos.retrieval import RetrievalError, scope_decision
+    from lifeos.retrieval.policy import load_retrieval_policy
+
+    try:
+        policy = load_retrieval_policy(vault_root)
+    except RetrievalError as exc:
+        raise ContextSearchError("Retrieval policy is invalid") from exc
+
+    def allowed(path: str) -> bool:
+        if path_filter is not None and not path_filter(path):
+            return False
+        try:
+            return scope_decision(
+                path,
+                scope=scope,
+                policy=policy,
+                mode=retrieval_mode,
+            ).allowed
+        except RetrievalError:
+            return False
+
+    return allowed
+
+
 def _hybrid_context_source(
     *,
     vault_root: Path,
     item: RetrievalEvidence,
-    path_filter: PathFilter | None,
+    path_filter: PathFilter,
 ) -> ContextSource:
     # Re-read the selected canonical note through the same focused-source path used by explicit
     # focus requests. This preserves the existing title/description contract and re-validates the
@@ -115,21 +147,20 @@ def _hybrid_sources(
     question: str,
     limit: int,
     focus_paths: tuple[str, ...],
-    path_filter: PathFilter | None,
-    retrieval_scope: RetrievalScope | None,
+    path_filter: PathFilter,
+    retrieval_scope: RetrievalScope,
     retrieval_mode: str,
     embedding_provider: EmbeddingProvider | None,
     reranker: RerankingProvider | None,
     graph_hints: Mapping[str, float] | None,
 ) -> tuple[tuple[ContextSource, ...] | None, RetrievalResponse | None, str | None]:
-    from lifeos.retrieval import HybridRetriever, RetrievalError, RetrievalRequest, RetrievalScope
+    from lifeos.retrieval import HybridRetriever, RetrievalError, RetrievalRequest
 
-    scope = retrieval_scope or RetrievalScope()
-    if retrieval_mode == "external" and scope.allow_protected:
+    if retrieval_mode == "external" and retrieval_scope.allow_protected:
         # HybridRetriever intentionally owns a local retrieval contract. Until its request model
         # carries external disclosure mode directly, do not admit explicitly requested protected
-        # content into its candidate/provider path. Canonical lexical fallback can apply the
-        # existing external policy before any protected content is read.
+        # content into its candidate/provider path. Canonical lexical fallback applies the
+        # external policy before any protected content is read.
         return (
             None,
             None,
@@ -137,8 +168,8 @@ def _hybrid_sources(
             "deterministic lexical fallback.",
         )
 
-    pinned = tuple(dict.fromkeys((*scope.pinned_paths, *focus_paths)))
-    scope = replace(scope, pinned_paths=pinned)
+    pinned = tuple(dict.fromkeys((*retrieval_scope.pinned_paths, *focus_paths)))
+    scope = replace(retrieval_scope, pinned_paths=pinned)
     candidate_limit = min(100, max(limit * 4, limit + len(focus_paths) + 1))
     try:
         response = HybridRetriever(
@@ -175,7 +206,7 @@ def _hybrid_sources(
     for item in response.results:
         if item.path in focused or item.path in seen:
             continue
-        if path_filter is not None and not path_filter(item.path):
+        if not path_filter(item.path):
             continue
         selected.append(
             _hybrid_context_source(vault_root=vault_root, item=item, path_filter=path_filter)
@@ -198,14 +229,24 @@ def build_context_pack(
     reranker: RerankingProvider | None = None,
     graph_hints: Mapping[str, float] | None = None,
 ) -> ContextPack:
+    from lifeos.retrieval import RetrievalScope
+
     if type(limit) is not int or limit <= 0:
         raise ContextSearchError("limit must be a positive integer")
     if retrieval_mode not in {"local", "external"}:
         raise ContextSearchError("retrieval_mode must be local or external")
+
+    scope = retrieval_scope or RetrievalScope()
+    effective_filter = _retrieval_filter(
+        vault_root=vault_root,
+        scope=scope,
+        retrieval_mode=retrieval_mode,
+        path_filter=path_filter,
+    )
     focused_results = focused_search_results(
         vault_root=vault_root,
         paths=focus_paths,
-        path_filter=path_filter,
+        path_filter=effective_filter,
     )
     if len(focused_results) > limit:
         raise ContextSearchError("focus_paths cannot exceed the context source limit")
@@ -225,8 +266,8 @@ def build_context_pack(
         question=question,
         limit=limit,
         focus_paths=focus_paths,
-        path_filter=path_filter,
-        retrieval_scope=retrieval_scope,
+        path_filter=effective_filter,
+        retrieval_scope=scope,
         retrieval_mode=retrieval_mode,
         embedding_provider=embedding_provider,
         reranker=reranker,
@@ -240,7 +281,7 @@ def build_context_pack(
             vault_root=vault_root,
             query=question,
             limit=limit + len(focused) + 1,
-            path_filter=path_filter,
+            path_filter=effective_filter,
         )
         search_diagnostics = search_report.diagnostics
         focused_paths_set = {item.path for item in focused}
@@ -264,7 +305,7 @@ def build_context_pack(
         vault_root=vault_root,
         question=question,
         sources=sources,
-        path_filter=path_filter,
+        path_filter=effective_filter,
     )
     gaps: list[str] = []
     omissions: list[str] = []
@@ -282,7 +323,7 @@ def build_context_pack(
         if limited:
             omissions.append(f"Results were limited to the top {limit} sources.")
 
-    if retrieval_scope is not None and not retrieval_scope.allow_protected:
+    if not scope.allow_protected:
         omissions.append("Protected scopes were excluded from candidate selection by retrieval policy.")
     if retrieval_omission is not None:
         omissions.append(retrieval_omission)
