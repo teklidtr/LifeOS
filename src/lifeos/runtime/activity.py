@@ -18,11 +18,13 @@ _ACTIVITY_ACTOR: ContextVar[str | None] = ContextVar("lifeos_activity_actor", de
 _ACTIVITY_RUNTIME_DIR_FD: ContextVar[int | None] = ContextVar(
     "lifeos_activity_runtime_dir_fd", default=None
 )
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 _DIRECTORY_FLAGS = (
     os.O_RDONLY
     | getattr(os, "O_DIRECTORY", 0)
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
+    | _NONBLOCK
 )
 
 
@@ -87,6 +89,26 @@ class ActivityStore:
         except FileNotFoundError:
             return None
 
+    def _open_log_file(self, *, activity_fd: int | None, write: bool) -> int:
+        """Open the activity log without ever blocking on a special-file replacement."""
+        flags = (
+            getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | _NONBLOCK
+        )
+        if write:
+            flags |= os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        else:
+            flags |= os.O_RDONLY
+
+        if activity_fd is None:
+            if write:
+                return os.open(self.path, flags, 0o600)
+            return os.open(self.path, flags)
+        if write:
+            return os.open("mcp.jsonl", flags, 0o600, dir_fd=activity_fd)
+        return os.open("mcp.jsonl", flags, dir_fd=activity_fd)
+
     @staticmethod
     def _verify_regular_file(fd: int) -> None:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -125,28 +147,21 @@ class ActivityStore:
         try:
             if self._runtime_dir_fd is None:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                with self.path.open("a", encoding="utf-8") as handle:
-                    handle.write(
-                        json.dumps(asdict(record), sort_keys=True, ensure_ascii=False) + "\n"
-                    )
+                log_fd = self._open_log_file(activity_fd=None, write=True)
+                try:
+                    self._verify_regular_file(log_fd)
+                    with os.fdopen(log_fd, "a", encoding="utf-8", closefd=False) as handle:
+                        handle.write(
+                            json.dumps(asdict(record), sort_keys=True, ensure_ascii=False) + "\n"
+                        )
+                finally:
+                    os.close(log_fd)
             else:
                 activity_fd = self._open_activity_directory(create=True)
                 if activity_fd is None:
                     raise OSError("activity directory could not be opened")
                 try:
-                    flags = (
-                        os.O_WRONLY
-                        | os.O_APPEND
-                        | os.O_CREAT
-                        | getattr(os, "O_NOFOLLOW", 0)
-                        | getattr(os, "O_CLOEXEC", 0)
-                    )
-                    log_fd = os.open(
-                        "mcp.jsonl",
-                        flags,
-                        0o600,
-                        dir_fd=activity_fd,
-                    )
+                    log_fd = self._open_log_file(activity_fd=activity_fd, write=True)
                     try:
                         self._verify_regular_file(log_fd)
                         with os.fdopen(log_fd, "a", encoding="utf-8", closefd=False) as handle:
@@ -167,21 +182,23 @@ class ActivityStore:
             raise ValueError("limit must be an integer between 1 and 100")
         try:
             if self._runtime_dir_fd is None:
-                if not self.path.exists():
+                try:
+                    log_fd = self._open_log_file(activity_fd=None, write=False)
+                except FileNotFoundError:
                     return ()
-                lines = self.path.read_text(encoding="utf-8").splitlines()
+                try:
+                    self._verify_regular_file(log_fd)
+                    with os.fdopen(log_fd, "r", encoding="utf-8", closefd=False) as handle:
+                        lines = handle.read().splitlines()
+                finally:
+                    os.close(log_fd)
             else:
                 activity_fd = self._open_activity_directory(create=False)
                 if activity_fd is None:
                     return ()
                 try:
-                    flags = (
-                        os.O_RDONLY
-                        | getattr(os, "O_NOFOLLOW", 0)
-                        | getattr(os, "O_CLOEXEC", 0)
-                    )
                     try:
-                        log_fd = os.open("mcp.jsonl", flags, dir_fd=activity_fd)
+                        log_fd = self._open_log_file(activity_fd=activity_fd, write=False)
                     except FileNotFoundError:
                         return ()
                     try:
