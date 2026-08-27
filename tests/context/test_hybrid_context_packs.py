@@ -105,6 +105,16 @@ def test_context_pack_uses_hybrid_retrieval_and_keeps_focus_authoritative(tmp_pa
     assert "private/secret.md" not in {source.path for source in pack.sources}
 
 
+def test_build_context_pack_uses_default_lifeos_retrieval_runtime(tmp_path: Path) -> None:
+    vault, _runtime, _provider = _indexed_vault(tmp_path)
+
+    pack = build_context_pack(vault_root=vault, question="ATP", limit=3)
+
+    assert pack.sources
+    assert any(source.retrieval_mode == "hybrid" for source in pack.sources)
+    assert any("Semantic retrieval was not configured" in omission for omission in pack.omissions)
+
+
 def test_context_pack_hybrid_sources_are_deduplicated_and_budgeted_by_note(tmp_path: Path) -> None:
     vault, runtime, provider = _indexed_vault(tmp_path)
 
