@@ -11,6 +11,7 @@ from lifeos.facade.authorization import (
     ConsequentialAuthorizationRequest,
 )
 from lifeos.mcp.service import (
+    MAX_MCP_REQUEST_BYTES,
     AuthenticatedServiceApp,
     AuthenticatedSubmitAuthorizer,
     ServiceConfigurationError,
@@ -139,6 +140,114 @@ def test_authenticated_request_can_submit_but_not_approve() -> None:
     asyncio.run(app(_http_scope(token=token), receive, send))
 
     assert observed == ["remote-user"]
+    assert events[0]["status"] == 200
+
+
+def test_authenticated_request_rejects_declared_oversize_before_dispatch() -> None:
+    token = "t" * 32
+    called = False
+    receive_called = False
+
+    async def downstream(scope, receive, send) -> None:
+        nonlocal called
+        called = True
+
+    app = AuthenticatedServiceApp(
+        downstream,
+        token=token,
+        actor_id="remote-user",
+        readiness=FakeReadiness(),
+    )
+    scope = _http_scope(token=token)
+    scope["headers"].append(
+        (b"content-length", str(MAX_MCP_REQUEST_BYTES + 1).encode("ascii"))
+    )
+    events: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        nonlocal receive_called
+        receive_called = True
+        return {"type": "http.request", "body": b"x", "more_body": False}
+
+    async def send(event: dict[str, Any]) -> None:
+        events.append(event)
+
+    asyncio.run(app(scope, receive, send))
+
+    assert called is False
+    assert receive_called is False
+    assert events[0]["status"] == 413
+
+
+def test_authenticated_request_rejects_chunked_oversize_before_dispatch() -> None:
+    token = "t" * 32
+    called = False
+    chunks = [
+        {
+            "type": "http.request",
+            "body": b"x" * MAX_MCP_REQUEST_BYTES,
+            "more_body": True,
+        },
+        {"type": "http.request", "body": b"y", "more_body": False},
+    ]
+
+    async def downstream(scope, receive, send) -> None:
+        nonlocal called
+        called = True
+
+    app = AuthenticatedServiceApp(
+        downstream,
+        token=token,
+        actor_id="remote-user",
+        readiness=FakeReadiness(),
+    )
+    events: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return chunks.pop(0)
+
+    async def send(event: dict[str, Any]) -> None:
+        events.append(event)
+
+    asyncio.run(app(_http_scope(token=token), receive, send))
+
+    assert called is False
+    assert events[0]["status"] == 413
+
+
+def test_authenticated_request_replays_bounded_body_to_mcp_app() -> None:
+    token = "t" * 32
+    payload = b'{"jsonrpc":"2.0","method":"tools/list"}'
+    chunks = [
+        {"type": "http.request", "body": payload[:10], "more_body": True},
+        {"type": "http.request", "body": payload[10:], "more_body": False},
+    ]
+    observed: list[bytes] = []
+
+    async def downstream(scope, receive, send) -> None:
+        event = await receive()
+        observed.append(event["body"])
+        assert event["more_body"] is False
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    app = AuthenticatedServiceApp(
+        downstream,
+        token=token,
+        actor_id="remote-user",
+        readiness=FakeReadiness(),
+    )
+    events: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return chunks.pop(0)
+
+    async def send(event: dict[str, Any]) -> None:
+        events.append(event)
+
+    asyncio.run(app(_http_scope(token=token), receive, send))
+
+    assert observed == [payload]
     assert events[0]["status"] == 200
 
 
