@@ -22,8 +22,9 @@ the validated pathname. This closes the validation/open race even if another loc
 the runtime directory concurrently. Writable descriptor-bound registry connections use SQLite's
 in-memory journal because the registry is rebuildable disposable state; no `registry.db-journal`
 sidecar is trusted or required for canonical durability. LifeOS also rejects special-file,
-symlink, and multiply hard-linked `activity/mcp.jsonl` entries instead of reading from or appending
-through them. If a registry or activity entry has been replaced or hard-linked unexpectedly,
+symlink, multiply hard-linked, and oversized `activity/mcp.jsonl` entries instead of reading from
+or appending through them. If a registry or activity entry has been replaced, hard-linked, or
+grown beyond the bounded reader's 8 MiB limit unexpectedly,
 remove or rebuild that disposable runtime entry rather than trying to preserve it as canonical
 history.
 

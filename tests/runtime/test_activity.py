@@ -5,6 +5,7 @@ from threading import Event, Thread
 import pytest
 
 from lifeos.runtime import ActivityStore
+from lifeos.runtime.activity import MAX_ACTIVITY_LOG_BYTES
 
 
 def test_activity_store_records_only_routing_metadata(tmp_path: Path) -> None:
@@ -30,6 +31,28 @@ def test_activity_store_is_bounded_and_tolerates_missing_state(tmp_path: Path) -
     for index in range(3):
         store.append(tool=f"tool-{index}")
     assert [item.tool for item in store.read(limit=2)] == ["tool-1", "tool-2"]
+
+
+@pytest.mark.parametrize("descriptor_bound", [False, True])
+def test_activity_store_rejects_oversized_log_before_reading(
+    tmp_path: Path,
+    descriptor_bound: bool,
+) -> None:
+    runtime = tmp_path / ".lifeos"
+    runtime_fd: int | None = None
+    if descriptor_bound:
+        runtime.mkdir()
+        runtime_fd = os.open(runtime, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    store = ActivityStore(runtime, runtime_dir_fd=runtime_fd)
+    store.path.parent.mkdir(parents=True)
+    with store.path.open("wb") as handle:
+        handle.truncate(MAX_ACTIVITY_LOG_BYTES + 1)
+
+    try:
+        assert store.read() == ()
+    finally:
+        if runtime_fd is not None:
+            os.close(runtime_fd)
 
 
 def test_activity_store_write_failure_does_not_break_primary_operation(tmp_path: Path) -> None:
