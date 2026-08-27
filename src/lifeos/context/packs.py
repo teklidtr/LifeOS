@@ -323,6 +323,13 @@ def build_context_pack(
         if limited:
             omissions.append(f"Results were limited to the top {limit} sources.")
 
+    # Preserve the original omission ordering for compatibility, then append new retrieval
+    # capability/policy disclosures.
+    if not instruction_report.allowlisted_source_present:
+        omissions.append("No system/instructions.yml file was present.")
+    elif not instruction_report.instructions:
+        omissions.append("No validated instructions applied to this context pack.")
+
     if not scope.allow_protected:
         omissions.append("Protected scopes were excluded from candidate selection by retrieval policy.")
     if retrieval_omission is not None:
@@ -341,11 +348,6 @@ def build_context_pack(
             omissions.append(
                 "Provider disclosure was blocked by retrieval policy; local retrieval results were used."
             )
-
-    if not instruction_report.allowlisted_source_present:
-        omissions.append("No system/instructions.yml file was present.")
-    elif not instruction_report.instructions:
-        omissions.append("No validated instructions applied to this context pack.")
 
     diagnostics = tuple(
         sorted(
