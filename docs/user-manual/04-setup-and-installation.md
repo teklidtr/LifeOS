@@ -449,7 +449,9 @@ lifeos doctor --config /absolute/path/to/LifeOS-vault/lifeos.yml
 ```
 
 Create a high-entropy bearer secret outside the vault. A file is preferable for a long-lived
-service because process launch configuration does not contain the secret value:
+service because process launch configuration does not contain the secret value. The following
+`chmod 600` example is for a direct host process running as the same user who owns the file;
+the fixed-UID Compose deployment has a separate ownership contract below.
 
 ```bash
 mkdir -p ~/.config/lifeos
@@ -547,6 +549,24 @@ blindly changing another device's working copy. Service startup validates this w
 and exits with a configuration error rather than starting a read-only-looking node whose remote
 proposal workflow would fail later.
 
+Compose file-backed secrets preserve the host file's ownership and mode; they do not make an
+owner-only host token readable by the container's fixed service identity. Prepare the token so
+UID/GID `10001:10001` has read access **without** making it world-readable. On a dedicated Linux
+node, a simple owner-only setup is:
+
+```bash
+sudo install -d -o root -g root -m 0755 /srv/lifeos/secrets
+python -c 'import secrets; print(secrets.token_urlsafe(48))' \
+  | sudo tee /srv/lifeos/secrets/service-token >/dev/null
+sudo chown 10001:10001 /srv/lifeos/secrets/service-token
+sudo chmod 0400 /srv/lifeos/secrets/service-token
+```
+
+Set `LIFEOS_TOKEN_FILE=/srv/lifeos/secrets/service-token` in `.env`. On shared storage, use an
+equivalent ACL that grants UID 10001 read access to the token and traversal of its parent
+directories while keeping unrelated users out. Do not use `0444` or another world-readable mode
+as a convenience workaround.
+
 Then start the node:
 
 ```bash
@@ -562,11 +582,13 @@ The vault bind mount, including canonical Markdown and its active-node Git histo
 across container replacement. A separate Docker volume is mounted at `/vault/.lifeos`, so
 registry/index/cache/runtime state can be discarded and rebuilt without deleting canonical
 vault content. The container runs as UID/GID `10001:10001`, drops Linux capabilities, uses a
-read-only root filesystem, and receives the bearer token through a mounted secret file.
+read-only root filesystem, and receives the bearer token through a mounted secret file whose
+host permissions must grant that service identity read access.
 
-The full-validation gate builds and exercises this container, verifies authenticated readiness,
-restart/runtime rebuild behavior, checks that non-runtime canonical/Git files remain unchanged by
-service restart, and separately builds the same Dockerfile for `linux/arm64`.
+The full-validation gate builds and exercises this container using an owner-only `0400` token
+owned by UID/GID `10001:10001`, verifies authenticated readiness, restart/runtime rebuild
+behavior, checks that non-runtime canonical/Git files remain unchanged by service restart, and
+separately builds the same Dockerfile for `linux/arm64`.
 
 ### Home Assistant Yellow
 
