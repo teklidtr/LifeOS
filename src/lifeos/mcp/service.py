@@ -32,6 +32,7 @@ from lifeos.runtime.authority import RuntimeAuthorityError, RuntimeDirectoryAuth
 
 SERVICE_TOKEN_ENV = "LIFEOS_SERVICE_TOKEN"
 SERVICE_TOKEN_FILE_ENV = "LIFEOS_SERVICE_TOKEN_FILE"
+MAX_MCP_REQUEST_BYTES = 1_048_576
 _MIN_TOKEN_LENGTH = 32
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _REMOTE_ACTOR: ContextVar[str | None] = ContextVar("lifeos_remote_actor", default=None)
@@ -40,6 +41,10 @@ logger = logging.getLogger(__name__)
 
 class ServiceConfigurationError(RuntimeError):
     """Raised when home-node service configuration is unsafe or incomplete."""
+
+
+class _RequestBodyTooLarge(RuntimeError):
+    """Raised when an authenticated HTTP request exceeds the service body budget."""
 
 
 class ReadinessProbe(Protocol):
@@ -218,10 +223,30 @@ class AuthenticatedServiceApp:
             )
             return
 
+        declared_length = _content_length(scope)
+        if declared_length is not None and declared_length > MAX_MCP_REQUEST_BYTES:
+            await _send_json(send, 413, {"error": "request-too-large"})
+            return
+
+        try:
+            body = await _read_bounded_request_body(receive, limit=MAX_MCP_REQUEST_BYTES)
+        except _RequestBodyTooLarge:
+            await _send_json(send, 413, {"error": "request-too-large"})
+            return
+
+        replayed = False
+
+        async def bounded_receive() -> dict[str, Any]:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.request", "body": b"", "more_body": False}
+
         actor_token = _REMOTE_ACTOR.set(self._actor_id)
         activity_actor_token = push_activity_actor(self._actor_id)
         try:
-            await self._app(scope, receive, send)
+            await self._app(scope, bounded_receive, send)
         finally:
             reset_activity_actor(activity_actor_token)
             _REMOTE_ACTOR.reset(actor_token)
@@ -292,6 +317,36 @@ def _request_has_token(scope: Scope, expected_token: str) -> bool:
     except (UnicodeDecodeError, ValueError):
         return False
     return scheme.lower() == "bearer" and hmac.compare_digest(candidate, expected_token)
+
+
+def _content_length(scope: Scope) -> int | None:
+    for key, value in scope.get("headers", []):
+        if key.lower() != b"content-length":
+            continue
+        try:
+            parsed = int(value.decode("ascii"))
+        except (UnicodeDecodeError, ValueError):
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+async def _read_bounded_request_body(receive: Receive, *, limit: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        event = await receive()
+        if event.get("type") == "http.disconnect":
+            return b"".join(chunks)
+        if event.get("type") != "http.request":
+            continue
+        chunk = bytes(event.get("body", b""))
+        total += len(chunk)
+        if total > limit:
+            raise _RequestBodyTooLarge
+        chunks.append(chunk)
+        if not event.get("more_body", False):
+            return b"".join(chunks)
 
 
 async def _send_json(
