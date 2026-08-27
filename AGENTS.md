@@ -33,14 +33,15 @@ tests or modifies that runtime contract. Filename alone does not grant authority
 
 ## Implementation workflow
 
-1. Select exactly one task from `tasks/ready/`.
-2. Move it to `tasks/in-progress/`.
-3. Inspect existing code and tests.
-4. Implement only the stated scope.
-5. Review documentation impact. Update every affected user manual, architecture, design-decision, setup, operations, or other authoritative document in the same PR. If no documentation is affected, record a concrete reason in the task's `# Documentation impact` section.
-6. Run all listed validation.
-7. Record discovered work as separate backlog tasks.
-8. Move the task to `tasks/completed/` only when all criteria pass, including documentation impact.
+1. If `tasks/ready/` contains no task files, promote exactly one eligible task from `tasks/backlog/` to `tasks/ready/` before selecting work. A backlog task is eligible only when its task contract is complete enough to implement without inventing scope, every task listed in `depends_on` is already in `tasks/completed/`, and no explicit current-user instruction or repository rule requires it to remain in backlog. Move the file and change its frontmatter `status` from `backlog` to `ready`. If multiple backlog tasks are eligible, promote exactly one; explicit current-user priority takes precedence.
+2. Select exactly one task from `tasks/ready/`. Never implement a task directly from `tasks/backlog/`.
+3. Move it to `tasks/in-progress/` and update its frontmatter `status` to `in-progress`.
+4. Inspect existing code and tests.
+5. Implement only the stated scope.
+6. Review documentation impact. Update every affected user manual, architecture, design-decision, setup, operations, or other authoritative document in the same PR. If no documentation is affected, record a concrete reason in the task's `# Documentation impact` section.
+7. Run all listed validation.
+8. Record discovered work as separate backlog tasks.
+9. Move the task to `tasks/completed/` only when all criteria pass, including documentation impact, and update its frontmatter `status` to `completed`.
 
 Do not opportunistically implement neighboring subsystems.
 
