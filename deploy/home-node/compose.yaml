@@ -24,6 +24,8 @@ services:
       - type: volume
         source: lifeos_runtime
         target: /vault/.lifeos
+    # File-backed Compose secrets retain host ownership/mode. Prepare LIFEOS_TOKEN_FILE so
+    # UID/GID 10001:10001 can read it without making the bearer token world-readable.
     secrets:
       - lifeos_service_token
     environment:
