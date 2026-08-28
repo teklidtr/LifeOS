@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1646
 title: Prove registry disposability cannot bypass proposal safety
-status: in-progress
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1638
@@ -91,25 +91,25 @@ canonical state itself is deliberately changed through its supported workflow.
 
 # Acceptance criteria
 
-- [ ] A stale human-target proposal is refused before registry deletion and remains refused after
+- [x] A stale human-target proposal is refused before registry deletion and remains refused after
       registry deletion, with the current canonical target unchanged.
-- [ ] The stale human-target case is also covered after supported registry initialization/refresh,
+- [x] The stale human-target case is also covered after supported registry initialization/refresh,
       proving rebuild does not grant additional mutation authority.
-- [ ] A generated-target ownership/hash conflict is refused before registry deletion and remains
+- [x] A generated-target ownership/hash conflict is refused before registry deletion and remains
       refused after deletion/rebuild, with both target bytes and canonical ownership manifest
       unchanged.
-- [ ] At least one canonical proposal lifecycle/history case proves registry deletion/rebuild cannot
+- [x] At least one canonical proposal lifecycle/history case proves registry deletion/rebuild cannot
       reset proposal state or enable duplicate/otherwise illegal application.
-- [ ] Where the public/user-facing facade has a distinct acceptance path, regression coverage proves
+- [x] Where the public/user-facing facade has a distinct acceptance path, regression coverage proves
       that path preserves the same invariant rather than relying only on a lower-level unit test.
-- [ ] Failed attempts do not persist a false applied state, rewrite canonical targets, or repair
+- [x] Failed attempts do not persist a false applied state, rewrite canonical targets, or repair
       ownership from disposable registry facts.
-- [ ] Tests explicitly demonstrate that canonical proposal artifacts, reviewed hashes/digests,
+- [x] Tests explicitly demonstrate that canonical proposal artifacts, reviewed hashes/digests,
       current target state, and canonical generated ownership remain authoritative after registry
       loss.
-- [ ] Any production fix required by a failing regression is centralized at the shared validation or
+- [x] Any production fix required by a failing regression is centralized at the shared validation or
       application boundary and does not make registry state authoritative.
-- [ ] Existing registry refresh/rebuild behavior remains compatible and the full test suite passes.
+- [x] Existing registry refresh/rebuild behavior remains compatible and the full test suite passes.
 
 # Documentation impact
 
