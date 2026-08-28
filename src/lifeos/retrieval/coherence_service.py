@@ -277,7 +277,23 @@ class RetrievalIndexService(_service.RetrievalIndexService):
                 runtime_dir=self.runtime_dir,
                 snapshot_prefix=runtime_prefix,
             )
-            entries = scan_vault(self.vault_root)
+            default_scope = RetrievalScope()
+
+            def allowed_path(path: str) -> bool:
+                if path == "conversations" or path.startswith("conversations/"):
+                    return False
+                if path == "proposals" or path.startswith("proposals/"):
+                    return False
+                if runtime_excluded(path):
+                    return False
+                return scope_decision(
+                    path,
+                    scope=default_scope,
+                    policy=self.policy,
+                    mode="local",
+                ).allowed
+
+            entries = scan_vault(self.vault_root, path_filter=allowed_path)
         except (CoherenceError, ScannerError) as exc:
             raise RetrievalError("source_unavailable", str(exc)) from exc
 
@@ -286,21 +302,11 @@ class RetrievalIndexService(_service.RetrievalIndexService):
             if entry.file_type != ".md":
                 continue
             path = entry.path.as_posix()
-            if path.startswith("conversations/") or path.startswith("proposals/"):
-                continue
             try:
-                if runtime_excluded(path):
+                if not allowed_path(path):
                     continue
             except CoherenceError as exc:
                 raise RetrievalError("source_unavailable", str(exc)) from exc
-            decision = scope_decision(
-                path,
-                scope=RetrievalScope(),
-                policy=self.policy,
-                mode="local",
-            )
-            if not decision.allowed:
-                continue
             try:
                 sources.append(read_vault_markdown(self.vault_root, path))
             except VaultAccessError as exc:
