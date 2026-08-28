@@ -141,10 +141,15 @@ The recovery section distinguishes three layers:
 
 1. **Canonical Git coverage.** LifeOS checks whether the configured vault is
    covered by Git, whether canonical history has any commit, the latest commit
-   that actually touched the configured vault, and current staged, modified,
-   deleted, untracked, or ignored canonical paths. Staging is not a substitute
-   for a commit. An old commit timestamp is informational by itself; a clean vault
-   can remain fully represented by an old commit.
+   that actually touched the configured vault, whether committed canonical tree
+   entries are ordinary locally available blob objects, and current staged,
+   modified, deleted, untracked, or ignored canonical paths. Missing local blob
+   objects, gitlinks, or symlink-style committed entries are reported through
+   `recovery.git.canonical_objects` rather than counted as recoverable canonical
+   coverage. Canonical paths marked `assume-unchanged` or `skip-worktree` make
+   working-tree cleanliness **unknown** until those flags are cleared. Staging is
+   not a substitute for a commit. An old commit timestamp is informational by
+   itself; a clean vault can remain fully represented by an old commit.
 2. **Independent backup/snapshot evidence.** Local Git history can recover
    committed logical versions, but it can disappear with the same disk. A Git
    remote name or remote-tracking ref does not prove that an off-device copy is
@@ -159,8 +164,12 @@ The recovery section distinguishes three layers:
    doctor warning by committing `.lifeos/`.
 
 Typical actionable Git warnings name only the relative paths needed to fix the
-problem. The doctor does not copy note bodies or secrets into recovery output and
-does not commit, push, restore, scan, repair, or create backups for you.
+problem. Git repository inspection failures are reported as **unknown** rather
+than being confused with a vault that has no repository. Recovery queries disable
+Git features that can execute configured filesystem monitors or content filters,
+strip inherited repository-selection variables, and avoid lazy object fetching.
+The doctor does not copy note bodies or secrets into recovery output and does not
+commit, push, restore, scan, repair, or create backups for you.
 
 ## Safe upgrade
 
