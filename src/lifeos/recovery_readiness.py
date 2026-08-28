@@ -86,12 +86,12 @@ def _run_git(
     return result
 
 
-def _decode_path(raw: bytes) -> str:
-    return raw.decode("utf-8", errors="surrogateescape")
-
-
 def _nul_paths(raw: bytes) -> tuple[str, ...]:
-    return tuple(_decode_path(item) for item in raw.split(b"\0") if item)
+    return tuple(
+        item.decode("utf-8", errors="surrogateescape")
+        for item in raw.split(b"\0")
+        if item
+    )
 
 
 def _runtime_relative_prefix(config: LifeOSConfig) -> tuple[str, ...] | None:
@@ -99,9 +99,7 @@ def _runtime_relative_prefix(config: LifeOSConfig) -> tuple[str, ...] | None:
         relative = config.runtime_dir.relative_to(config.vault_root)
     except ValueError:
         return None
-    if not relative.parts:
-        return None
-    return tuple(relative.parts)
+    return tuple(relative.parts) or None
 
 
 def _canonical_vault_path(
@@ -124,9 +122,7 @@ def _canonical_vault_path(
         return None
     if any(part.startswith(".") or part == "__pycache__" for part in relative_parts):
         return None
-    if runtime_prefix is not None and (
-        relative_parts[: len(runtime_prefix)] == runtime_prefix
-    ):
+    if runtime_prefix is not None and relative_parts[: len(runtime_prefix)] == runtime_prefix:
         return None
     return PurePosixPath(*relative_parts).as_posix()
 
@@ -137,23 +133,21 @@ def _filter_canonical_paths(
     vault_repo_prefix: tuple[str, ...],
     runtime_prefix: tuple[str, ...] | None,
 ) -> tuple[str, ...]:
-    canonical = {
-        candidate
-        for path in paths
-        if (
-            candidate := _canonical_vault_path(
-                path,
-                vault_repo_prefix=vault_repo_prefix,
-                runtime_prefix=runtime_prefix,
-            )
+    canonical: set[str] = set()
+    for path in paths:
+        candidate = _canonical_vault_path(
+            path,
+            vault_repo_prefix=vault_repo_prefix,
+            runtime_prefix=runtime_prefix,
         )
-        is not None
-    }
+        if candidate is not None:
+            canonical.add(candidate)
     return tuple(sorted(canonical))
 
 
 def _vault_repo_context(
-    git_executable: str, vault_root: Path
+    git_executable: str,
+    vault_root: Path,
 ) -> tuple[Path, tuple[str, ...], str] | None:
     result = _run_git(
         git_executable,
@@ -184,11 +178,7 @@ def _git_paths(
     vault_repo_prefix: tuple[str, ...],
     runtime_prefix: tuple[str, ...] | None,
 ) -> tuple[str, ...]:
-    result = _run_git(
-        git_executable,
-        cwd=repository_root,
-        arguments=arguments,
-    )
+    result = _run_git(git_executable, cwd=repository_root, arguments=arguments)
     return _filter_canonical_paths(
         _nul_paths(result.stdout),
         vault_repo_prefix=vault_repo_prefix,
@@ -241,8 +231,7 @@ def _latest_canonical_commit(
         cwd=repository_root,
         arguments=("rev-list", "HEAD", "--", pathspec),
     )
-    revisions = revision_result.stdout.decode("ascii", errors="strict").splitlines()
-    for sha in revisions:
+    for sha in revision_result.stdout.decode("ascii", errors="strict").splitlines():
         changed = _git_paths(
             git_executable,
             repository_root=repository_root,
@@ -392,6 +381,30 @@ def _runtime_diagnostic(config: LifeOSConfig) -> RecoveryDiagnostic:
     )
 
 
+def _fallback_report(
+    config: LifeOSConfig,
+    git_diagnostics: tuple[RecoveryDiagnostic, ...],
+    *,
+    repository_root: Path | None = None,
+) -> RecoveryReport:
+    return RecoveryReport(
+        diagnostics=(
+            *git_diagnostics,
+            _external_backup_diagnostic(),
+            _runtime_diagnostic(config),
+        ),
+        repository_root=str(repository_root) if repository_root is not None else None,
+        last_canonical_commit=None,
+        committed_canonical_count=0,
+        uncommitted_paths=(),
+        staged_paths=(),
+        unstaged_paths=(),
+        deleted_paths=(),
+        untracked_paths=(),
+        ignored_paths=(),
+    )
+
+
 def collect_recovery_readiness(
     config: LifeOSConfig,
     *,
@@ -400,30 +413,17 @@ def collect_recovery_readiness(
     """Collect structural recovery evidence without reading canonical file contents or mutating Git."""
     git_executable = shutil.which("git")
     if git_executable is None:
-        diagnostics = (
-            *_unknown_git_diagnostics("Git is unavailable, so local canonical history is unknown."),
-            _external_backup_diagnostic(),
-            _runtime_diagnostic(config),
+        return _fallback_report(
+            config,
+            _unknown_git_diagnostics("Git is unavailable, so local canonical history is unknown."),
         )
-        return RecoveryReport(diagnostics, None, None, 0, (), (), (), (), (), ())
 
     try:
         context = _vault_repo_context(git_executable, config.vault_root)
     except RecoveryGitError as error:
-        diagnostics = (
-            *_unknown_git_diagnostics(str(error)),
-            _external_backup_diagnostic(),
-            _runtime_diagnostic(config),
-        )
-        return RecoveryReport(diagnostics, None, None, 0, (), (), (), (), (), ())
-
+        return _fallback_report(config, _unknown_git_diagnostics(str(error)))
     if context is None:
-        diagnostics = (
-            *_non_repository_diagnostics(),
-            _external_backup_diagnostic(),
-            _runtime_diagnostic(config),
-        )
-        return RecoveryReport(diagnostics, None, None, 0, (), (), (), (), (), ())
+        return _fallback_report(config, _non_repository_diagnostics())
 
     repository_root, vault_repo_prefix, pathspec = context
     runtime_prefix = _runtime_relative_prefix(config)
@@ -488,26 +488,14 @@ def collect_recovery_readiness(
             clock_fn=clock_fn,
         )
     except RecoveryGitError as error:
-        diagnostics = (
-            *_unknown_git_diagnostics(str(error)),
-            _external_backup_diagnostic(),
-            _runtime_diagnostic(config),
-        )
-        return RecoveryReport(
-            diagnostics,
-            str(repository_root),
-            None,
-            0,
-            (),
-            (),
-            (),
-            (),
-            (),
-            (),
+        return _fallback_report(
+            config,
+            _unknown_git_diagnostics(str(error)),
+            repository_root=repository_root,
         )
 
     uncommitted_paths = tuple(sorted(set(staged_paths) | set(unstaged_paths) | set(deleted_paths)))
-    diagnostics: list[RecoveryDiagnostic] = [
+    diagnostic_items: list[RecoveryDiagnostic] = [
         RecoveryDiagnostic(
             "recovery.git.repository",
             "pass",
@@ -516,7 +504,7 @@ def collect_recovery_readiness(
         )
     ]
     if not head_exists:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.last_canonical_commit",
                 "failure",
@@ -526,7 +514,7 @@ def collect_recovery_readiness(
             )
         )
     elif last_commit is None:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.last_canonical_commit",
                 "failure",
@@ -536,7 +524,7 @@ def collect_recovery_readiness(
             )
         )
     else:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.last_canonical_commit",
                 "info",
@@ -549,7 +537,7 @@ def collect_recovery_readiness(
         )
 
     if uncommitted_paths:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.uncommitted_canonical",
                 "warning",
@@ -563,7 +551,7 @@ def collect_recovery_readiness(
             )
         )
     else:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.uncommitted_canonical",
                 "pass",
@@ -573,7 +561,7 @@ def collect_recovery_readiness(
         )
 
     if untracked_paths:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.untracked_canonical",
                 "warning",
@@ -584,7 +572,7 @@ def collect_recovery_readiness(
             )
         )
     else:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.untracked_canonical",
                 "pass",
@@ -594,7 +582,7 @@ def collect_recovery_readiness(
         )
 
     if ignored_paths:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.ignored_canonical",
                 "warning",
@@ -608,7 +596,7 @@ def collect_recovery_readiness(
             )
         )
     else:
-        diagnostics.append(
+        diagnostic_items.append(
             RecoveryDiagnostic(
                 "recovery.git.ignored_canonical",
                 "pass",
@@ -617,9 +605,9 @@ def collect_recovery_readiness(
             )
         )
 
-    diagnostics.extend((_external_backup_diagnostic(), _runtime_diagnostic(config)))
+    diagnostic_items.extend((_external_backup_diagnostic(), _runtime_diagnostic(config)))
     return RecoveryReport(
-        diagnostics=tuple(diagnostics),
+        diagnostics=tuple(diagnostic_items),
         repository_root=str(repository_root),
         last_canonical_commit=last_commit,
         committed_canonical_count=len(committed_paths),
