@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
+import stat
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
@@ -18,6 +20,13 @@ from lifeos.runtime_scope import build_runtime_exclusion_matcher
 RecoveryStatus = Literal["pass", "warning", "failure", "info", "unknown"]
 RecoverySeverity = Literal["info", "warning", "error"]
 PathExclusion = Callable[[str], bool]
+
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
 
 _GIT_ENVIRONMENT_SELECTION_KEYS = frozenset(
     {
@@ -82,6 +91,19 @@ class RecoveryReport:
     unrecoverable_committed_paths: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _IndexEntryMetadata:
+    """Filesystem metadata cached in one stage-zero Git index entry."""
+
+    repo_path: str
+    mode: int
+    ctime_ns: int
+    mtime_ns: int
+    device: int
+    inode: int
+    size_bytes: int
+
+
 class RecoveryGitError(RuntimeError):
     """Raised when read-only Git metadata cannot be queried deterministically."""
 
@@ -93,7 +115,13 @@ def _utc_now() -> datetime:
 def _git_environment() -> dict[str, str]:
     env = os.environ.copy()
     for name in tuple(env):
-        if name in _GIT_ENVIRONMENT_SELECTION_KEYS or name.startswith("GIT_TRACE"):
+        if (
+            name in _GIT_ENVIRONMENT_SELECTION_KEYS
+            or name.startswith("GIT_TRACE")
+            or name == "GIT_CONFIG_COUNT"
+            or name.startswith("GIT_CONFIG_KEY_")
+            or name.startswith("GIT_CONFIG_VALUE_")
+        ):
             env.pop(name, None)
     env["GIT_OPTIONAL_LOCKS"] = "0"
     env["GIT_LITERAL_PATHSPECS"] = "1"
@@ -113,9 +141,7 @@ def _result_error(
 ) -> RecoveryGitError:
     detail = result.stderr.decode("utf-8", errors="replace").strip()
     suffix = f": {detail}" if detail else ""
-    return RecoveryGitError(
-        f"{operation} failed with exit code {result.returncode}{suffix}"
-    )
+    return RecoveryGitError(f"{operation} failed with exit code {result.returncode}{suffix}")
 
 
 def _run_git(
@@ -400,6 +426,189 @@ def _index_flagged_paths(
     )
 
 
+def _debug_line(raw: bytes, cursor: int) -> tuple[bytes, int]:
+    line_end = raw.find(b"\n", cursor)
+    if line_end < 0:
+        raise RecoveryGitError("Git index metadata query returned truncated output")
+    return raw[cursor:line_end], line_end + 1
+
+
+def _parse_index_time(line: bytes, prefix: bytes) -> int:
+    if not line.startswith(prefix):
+        raise RecoveryGitError("Git index metadata query returned malformed timestamps")
+    parts = line[len(prefix) :].split(b":", 1)
+    if len(parts) != 2:
+        raise RecoveryGitError("Git index metadata query returned malformed timestamps")
+    try:
+        seconds = int(parts[0], 10)
+        nanoseconds = int(parts[1], 10)
+    except ValueError as error:
+        raise RecoveryGitError("Git index metadata query returned malformed timestamps") from error
+    return seconds * 1_000_000_000 + nanoseconds
+
+
+def _parse_index_pair(
+    line: bytes,
+    *,
+    prefix: bytes,
+    separator: bytes,
+    second_prefix: bytes,
+) -> tuple[int, int]:
+    if not line.startswith(prefix):
+        raise RecoveryGitError("Git index metadata query returned malformed stat data")
+    left, found, right = line[len(prefix) :].partition(separator)
+    if found != separator or not right.startswith(second_prefix):
+        raise RecoveryGitError("Git index metadata query returned malformed stat data")
+    try:
+        return int(left, 10), int(right[len(second_prefix) :], 10)
+    except ValueError as error:
+        raise RecoveryGitError("Git index metadata query returned malformed stat data") from error
+
+
+def _parse_index_entries(raw: bytes) -> tuple[_IndexEntryMetadata, ...]:
+    entries: list[_IndexEntryMetadata] = []
+    cursor = 0
+    while cursor < len(raw):
+        nul = raw.find(b"\0", cursor)
+        if nul < 0:
+            raise RecoveryGitError("Git index metadata query returned malformed path data")
+        header = raw[cursor:nul]
+        cursor = nul + 1
+        ctime_line, cursor = _debug_line(raw, cursor)
+        mtime_line, cursor = _debug_line(raw, cursor)
+        device_line, cursor = _debug_line(raw, cursor)
+        uid_line, cursor = _debug_line(raw, cursor)
+        size_line, cursor = _debug_line(raw, cursor)
+
+        metadata, separator, raw_path = header.partition(b"\t")
+        fields = metadata.split()
+        if separator != b"\t" or len(fields) != 3:
+            raise RecoveryGitError("Git index metadata query returned malformed entry data")
+        raw_mode, _object_id, raw_stage = fields
+        try:
+            mode = int(raw_mode, 8)
+            stage = int(raw_stage, 10)
+        except ValueError as error:
+            raise RecoveryGitError("Git index metadata query returned malformed entry data") from error
+        if stage != 0:
+            raise RecoveryGitError("Git index contains unmerged entries")
+
+        ctime_ns = _parse_index_time(ctime_line, b"  ctime: ")
+        mtime_ns = _parse_index_time(mtime_line, b"  mtime: ")
+        device, inode = _parse_index_pair(
+            device_line,
+            prefix=b"  dev: ",
+            separator=b"\t",
+            second_prefix=b"ino: ",
+        )
+        if not uid_line.startswith(b"  uid: "):
+            raise RecoveryGitError("Git index metadata query returned malformed stat data")
+        size, _flags = _parse_index_pair(
+            size_line,
+            prefix=b"  size: ",
+            separator=b"\t",
+            second_prefix=b"flags: ",
+        )
+        entries.append(
+            _IndexEntryMetadata(
+                repo_path=raw_path.decode("utf-8", errors="surrogateescape"),
+                mode=mode,
+                ctime_ns=ctime_ns,
+                mtime_ns=mtime_ns,
+                device=device,
+                inode=inode,
+                size_bytes=size,
+            )
+        )
+    return tuple(entries)
+
+
+def _safe_lstat_vault_path(vault_root: Path, relative_path: str) -> os.stat_result | None:
+    pure = PurePosixPath(relative_path)
+    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+        raise RecoveryGitError("Canonical Git path escaped the configured vault")
+    opened: list[int] = []
+    try:
+        try:
+            current_fd = os.open(vault_root, _DIRECTORY_FLAGS)
+        except OSError as error:
+            raise RecoveryGitError("Could not inspect the configured vault root") from error
+        opened.append(current_fd)
+        for part in pure.parts[:-1]:
+            try:
+                next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            except FileNotFoundError:
+                return None
+            except OSError as error:
+                if error.errno in {errno.ELOOP, errno.ENOTDIR}:
+                    raise RecoveryGitError(
+                        "Canonical working-tree metadata traverses an unsafe parent entry"
+                    ) from error
+                raise RecoveryGitError(
+                    "Could not inspect canonical working-tree metadata"
+                ) from error
+            opened.append(next_fd)
+            current_fd = next_fd
+        try:
+            return os.stat(pure.parts[-1], dir_fd=current_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise RecoveryGitError("Could not inspect canonical working-tree metadata") from error
+    finally:
+        for fd in reversed(opened):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _index_metadata_changed(entry: _IndexEntryMetadata, observed: os.stat_result) -> bool:
+    if entry.mode not in {0o100644, 0o100755} or not stat.S_ISREG(observed.st_mode):
+        return True
+    if entry.size_bytes != observed.st_size:
+        return True
+    if entry.mtime_ns != observed.st_mtime_ns or entry.ctime_ns != observed.st_ctime_ns:
+        return True
+    if entry.device and entry.device != (observed.st_dev & 0xFFFFFFFF):
+        return True
+    if entry.inode and entry.inode != (observed.st_ino & 0xFFFFFFFF):
+        return True
+    return False
+
+
+def _working_tree_state(
+    git_executable: str,
+    *,
+    repository_root: Path,
+    vault_root: Path,
+    pathspec: str,
+    vault_repo_prefix: tuple[str, ...],
+    runtime_excluded: PathExclusion,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    result = _run_git(
+        git_executable,
+        cwd=repository_root,
+        arguments=("ls-files", "--stage", "--debug", "-z", "--", pathspec),
+    )
+    modified: set[str] = set()
+    deleted: set[str] = set()
+    for entry in _parse_index_entries(result.stdout):
+        canonical = _canonical_vault_path(
+            entry.repo_path,
+            vault_repo_prefix=vault_repo_prefix,
+            runtime_excluded=runtime_excluded,
+        )
+        if canonical is None:
+            continue
+        observed = _safe_lstat_vault_path(vault_root, canonical)
+        if observed is None:
+            deleted.add(canonical)
+        elif _index_metadata_changed(entry, observed):
+            modified.add(canonical)
+    return tuple(sorted(modified)), tuple(sorted(deleted))
+
+
 def _latest_canonical_commit(
     git_executable: str,
     *,
@@ -454,7 +663,10 @@ def _latest_canonical_commit(
         now = clock_fn()
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
-        age_seconds = max(0.0, (now.astimezone(timezone.utc) - committed).total_seconds())
+        age_seconds = max(
+            0.0,
+            (now.astimezone(timezone.utc) - committed.astimezone(timezone.utc)).total_seconds(),
+        )
         return CanonicalCommitEvidence(
             sha=sha,
             committed_at=committed_at,
@@ -653,25 +865,11 @@ def collect_recovery_readiness(
             vault_repo_prefix=vault_repo_prefix,
             runtime_excluded=runtime_excluded,
         )
-        unstaged_paths = _git_paths(
+        unstaged_paths, deleted_paths = _working_tree_state(
             git_executable,
             repository_root=repository_root,
-            arguments=(
-                "diff-files",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--name-only",
-                "-z",
-                "--",
-                pathspec,
-            ),
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
-        )
-        deleted_paths = _git_paths(
-            git_executable,
-            repository_root=repository_root,
-            arguments=("ls-files", "--deleted", "-z", "--", pathspec),
+            vault_root=config.vault_root,
+            pathspec=pathspec,
             vault_repo_prefix=vault_repo_prefix,
             runtime_excluded=runtime_excluded,
         )
