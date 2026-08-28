@@ -71,11 +71,11 @@ class _RecordingReranker:
         cancellation.checkpoint()
         self.calls.append(sum(len(item.text) for item in candidates))
         if self.fail_on_call is not None and len(self.calls) == self.fail_on_call:
-            raise ProviderError("timeout", "deterministic second-pass failure")
+            raise ProviderError("timeout", "deterministic reranker failure")
         return tuple(RerankResult(item.evidence_id, item.base_score) for item in candidates)
 
 
-def test_external_reranker_disclosure_budget_is_not_reopened_across_retries(
+def test_external_reranker_disclosure_budget_is_bounded_in_single_pass(
     tmp_path: Path,
 ) -> None:
     vault, runtime = _chunk_heavy_vault(tmp_path)
@@ -98,7 +98,7 @@ def test_external_reranker_disclosure_budget_is_not_reopened_across_retries(
     assert {source.path for source in pack.sources} == {"wiki/long.md", "wiki/short.md"}
     assert len(reranker.calls) == 1
     assert reranker.calls[0] <= 80_000
-    assert any("limited to the first hybrid pass" in item for item in pack.omissions)
+    assert not any("hybrid pass" in item for item in pack.omissions)
 
 
 def test_metadata_scope_is_honored_by_lexical_fallback(tmp_path: Path) -> None:
@@ -160,10 +160,10 @@ def test_metadata_scope_blocks_lexical_augmentation_on_healthy_index(tmp_path: P
     assert [source.path for source in pack.sources] == ["wiki/allowed.md"]
 
 
-def test_later_retry_degradation_is_reported(tmp_path: Path) -> None:
+def test_single_pass_reranker_degradation_is_reported(tmp_path: Path) -> None:
     vault, runtime = _chunk_heavy_vault(tmp_path)
     RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
-    reranker = _RecordingReranker(local_only=True, fail_on_call=2)
+    reranker = _RecordingReranker(local_only=True, fail_on_call=1)
 
     pack = build_context_pack(
         vault_root=vault,
@@ -173,7 +173,7 @@ def test_later_retry_degradation_is_reported(tmp_path: Path) -> None:
         reranker=reranker,
     )
 
-    assert len(reranker.calls) >= 2
+    assert len(reranker.calls) == 1
     assert any("Reranking was timeout" in item for item in pack.omissions)
 
 
