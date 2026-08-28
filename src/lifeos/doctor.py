@@ -20,6 +20,12 @@ from lifeos.coherence import (
 )
 from lifeos.coherence_scoped import collect_scoped_identity_snapshot
 from lifeos.config import LifeOSConfig
+from lifeos.recovery_readiness import (
+    RecoveryReport,
+    collect_recovery_readiness,
+    format_recovery_text,
+    recovery_report_to_dict,
+)
 from lifeos.registry import Registry
 from lifeos.status import StatusResult, collect_status, serialize_status_json
 
@@ -47,6 +53,7 @@ class DoctorResult:
     ready: bool
     exit_code: int
     findings: tuple[DoctorFinding, ...]
+    recovery: RecoveryReport
     vault_status: StatusResult
     topology: VaultTopology
     identity_note_count: int
@@ -231,6 +238,7 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
     """Collect readiness without repairing or mutating application, vault, or client state."""
     registry = Registry(config.runtime_dir / "registry.db")
     vault_status = collect_status(config, registry)
+    recovery = collect_recovery_readiness(config)
     mcp_findings, mcp_command = _mcp_findings(config_path)
     topology = describe_topology(config)
     coherence_findings: tuple[DoctorFinding, ...]
@@ -292,6 +300,7 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
         ready=not blocked,
         exit_code=1 if blocked else 0,
         findings=findings,
+        recovery=recovery,
         vault_status=vault_status,
         topology=topology,
         identity_note_count=identity_note_count,
@@ -332,6 +341,7 @@ def format_doctor_text(result: DoctorResult) -> str:
         if finding.next_action:
             lines.append(f"    next: {finding.next_action}")
 
+    lines.extend(["", *format_recovery_text(result.recovery)])
     lines.extend(["", f"Vault health: {result.vault_status.overall_state}"])
     for check in result.vault_status.checks:
         lines.append(
@@ -359,6 +369,7 @@ def serialize_doctor_json(result: DoctorResult) -> str:
             "vault_root": result.vault_root,
         },
         "findings": [asdict(finding) for finding in result.findings],
+        "recovery": recovery_report_to_dict(result.recovery),
         "vault": json.loads(serialize_status_json(result.vault_status)),
         "coherence": {
             "topology": result.topology.to_dict(),
