@@ -13,7 +13,9 @@ from lifeos.facade.authorization import (
     ConsequentialAuthorizationRequest,
 )
 from lifeos.facade.consequential_tools import (
+    AcceptProposalRequest,
     ApplyProposalRequest,
+    accept_proposal_tool,
     apply_proposal_tool,
 )
 from lifeos.facade.errors import ToolConflictError, ToolExecutionError
@@ -150,7 +152,7 @@ def _delete_registry_files(registry_path: Path) -> None:
         candidate.unlink(missing_ok=True)
 
 
-def _assert_apply_refused_without_writes(
+def _assert_refused_without_writes(
     *,
     vault_root: Path,
     target_path: Path,
@@ -158,24 +160,35 @@ def _assert_apply_refused_without_writes(
     ownership_path: Path,
     expected_ownership: bytes,
     proposal_path: Path,
-    expected_status: str = "approved",
+    facade: str = "apply",
+    error_fragment: str = "Preflight failed",
 ) -> None:
-    with pytest.raises(ToolExecutionError, match="Preflight failed"):
-        apply_proposal_tool(
-            vault_root=vault_root,
-            request=ApplyProposalRequest(PROPOSAL_ID),
-            authorizer=AllowingAuthorizer(),
-            clock_fn=_clock,
-        )
+    authorizer = AllowingAuthorizer()
+    with pytest.raises(ToolExecutionError, match=error_fragment):
+        if facade == "accept":
+            accept_proposal_tool(
+                vault_root=vault_root,
+                request=AcceptProposalRequest(PROPOSAL_ID),
+                authorizer=authorizer,
+                clock_fn=_clock,
+            )
+        else:
+            apply_proposal_tool(
+                vault_root=vault_root,
+                request=ApplyProposalRequest(PROPOSAL_ID),
+                authorizer=authorizer,
+                clock_fn=_clock,
+            )
 
+    assert len(authorizer.requests) == 1
     assert target_path.read_bytes() == expected_target
     assert ownership_path.read_bytes() == expected_ownership
     proposal_text = proposal_path.read_text(encoding="utf-8")
-    assert f"status: {expected_status}" in proposal_text
+    assert "status: approved" in proposal_text
     assert "status: applied" not in proposal_text
 
 
-def test_stale_human_target_stays_refused_after_registry_deletion_and_rebuild(
+def test_stale_human_target_stays_refused_through_apply_and_accept_after_registry_loss(
     tmp_path: Path,
 ) -> None:
     vault_root = tmp_path / "vault"
@@ -208,7 +221,7 @@ def test_stale_human_target_stays_refused_after_registry_deletion_and_rebuild(
     target.write_bytes(concurrent)
     ownership_bytes = ownership_path.read_bytes()
 
-    _assert_apply_refused_without_writes(
+    _assert_refused_without_writes(
         vault_root=vault_root,
         target_path=target,
         expected_target=concurrent,
@@ -219,25 +232,27 @@ def test_stale_human_target_stays_refused_after_registry_deletion_and_rebuild(
 
     _delete_registry_files(registry_path)
     assert not registry_path.exists()
-    _assert_apply_refused_without_writes(
+    _assert_refused_without_writes(
         vault_root=vault_root,
         target_path=target,
         expected_target=concurrent,
         ownership_path=ownership_path,
         expected_ownership=ownership_bytes,
         proposal_path=proposal_path,
+        facade="accept",
     )
 
     rebuilt = Registry(registry_path)
     refresh_registry(vault_root=vault_root, registry=rebuilt)
     assert registry_path.exists()
-    _assert_apply_refused_without_writes(
+    _assert_refused_without_writes(
         vault_root=vault_root,
         target_path=target,
         expected_target=concurrent,
         ownership_path=ownership_path,
         expected_ownership=ownership_bytes,
         proposal_path=proposal_path,
+        facade="accept",
     )
 
 
@@ -277,38 +292,45 @@ def test_generated_ownership_conflict_stays_refused_after_registry_loss_and_rebu
     proposal_path = proposal_dir / "proposal.md"
     registry_path, _registry = _initialize_git_and_registry(vault_root)
 
-    externally_modified = b"# Generated\nmodified outside LifeOS\n"
-    target.write_bytes(externally_modified)
+    ownership = json.loads(ownership_path.read_text(encoding="utf-8"))
+    ownership["owned_files"]["wiki/generated.md"]["generator_id"] = "gen-2"
+    ownership_path.write_text(
+        json.dumps(ownership, sort_keys=True),
+        encoding="utf-8",
+    )
     ownership_bytes = ownership_path.read_bytes()
 
-    _assert_apply_refused_without_writes(
+    _assert_refused_without_writes(
         vault_root=vault_root,
         target_path=target,
-        expected_target=externally_modified,
+        expected_target=original,
         ownership_path=ownership_path,
         expected_ownership=ownership_bytes,
         proposal_path=proposal_path,
+        error_fragment="Generator identity mismatch",
     )
 
     _delete_registry_files(registry_path)
-    _assert_apply_refused_without_writes(
+    _assert_refused_without_writes(
         vault_root=vault_root,
         target_path=target,
-        expected_target=externally_modified,
+        expected_target=original,
         ownership_path=ownership_path,
         expected_ownership=ownership_bytes,
         proposal_path=proposal_path,
+        error_fragment="Generator identity mismatch",
     )
 
     rebuilt = Registry(registry_path)
     refresh_registry(vault_root=vault_root, registry=rebuilt)
-    _assert_apply_refused_without_writes(
+    _assert_refused_without_writes(
         vault_root=vault_root,
         target_path=target,
-        expected_target=externally_modified,
+        expected_target=original,
         ownership_path=ownership_path,
         expected_ownership=ownership_bytes,
         proposal_path=proposal_path,
+        error_fragment="Generator identity mismatch",
     )
 
 
