@@ -124,6 +124,44 @@ The production `main.js` is a bundled CommonJS Obsidian entry point. Files under
 plugin loads but reports **Unavailable**, the plugin bundle is working; correct
 the Python executable or `lifeos.yml` path in LifeOS Settings.
 
+## Check recovery readiness with `lifeos doctor`
+
+`lifeos doctor` is a read-only diagnostic. From the vault directory, run:
+
+```bash
+uv run lifeos doctor --config lifeos.yml
+```
+
+Use `--json` when another UI or script needs stable diagnostic IDs, statuses,
+severities, remediation, and exposed relative paths. Recovery diagnostics are
+reported separately from ordinary application readiness, so a vault may be
+usable while still having a recovery warning.
+
+The recovery section distinguishes three layers:
+
+1. **Canonical Git coverage.** LifeOS checks whether the configured vault is
+   covered by Git, whether canonical history has any commit, the latest commit
+   that actually touched the configured vault, and current staged, modified,
+   deleted, untracked, or ignored canonical paths. Staging is not a substitute
+   for a commit. An old commit timestamp is informational by itself; a clean vault
+   can remain fully represented by an old commit.
+2. **Independent backup/snapshot evidence.** Local Git history can recover
+   committed logical versions, but it can disappear with the same disk. A Git
+   remote name or remote-tracking ref does not prove that an off-device copy is
+   current. The initial provider-neutral doctor therefore reports
+   `recovery.backup.external` as **unknown / not verified** unless LifeOS has
+   deterministic evidence. Unknown means LifeOS cannot prove the backup state; it
+   does not mean that your backup system is absent or broken.
+3. **Disposable runtime.** `.lifeos/registry.db`, activity logs, indexes,
+   graph/export generations, caches, and other derived runtime state are not
+   canonical recovery material. Their absence from Git is not a recovery gap.
+   Restore canonical files first, then rebuild the runtime state. Do not solve a
+   doctor warning by committing `.lifeos/`.
+
+Typical actionable Git warnings name only the relative paths needed to fix the
+problem. The doctor does not copy note bodies or secrets into recovery output and
+does not commit, push, restore, scan, repair, or create backups for you.
+
 ## Safe upgrade
 
 1. Commit or back up the Markdown vault.
