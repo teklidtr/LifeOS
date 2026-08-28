@@ -72,6 +72,19 @@ the disposable **file and proposal indexes**. They initialize the registry schem
 when necessary, reconcile file observations, and rebuild proposal index rows. They
 do not change canonical Markdown or generated ownership.
 
+## Mutation authority after registry loss
+
+Deleting, reinitializing, or rebuilding `.lifeos/registry.db` cannot increase
+proposal or application authority. Proposal lifecycle state, reviewed proposal
+content and digests, current target bytes and hashes, and generated ownership in
+`system/generated-ownership.json` remain authoritative outside SQLite.
+
+A stale or conflicting proposal therefore remains stale or conflicting when the
+registry is absent and after a supported refresh rebuilds its indexes. Rebuilding
+the proposal index derives lifecycle status from canonical proposal artifacts; it
+does not reset terminal history, repair ownership, rewrite targets, or turn
+registry observations into authorization for a canonical write.
+
 Provenance indexing is a separate deterministic registry operation exposed in
 Python as `refresh_provenance_index()`. It scans Git-tracked canonical Markdown,
 parses `lifeos_provenance`, and derives one `provenance_documents` row plus one
