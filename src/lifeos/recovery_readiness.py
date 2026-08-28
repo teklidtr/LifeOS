@@ -75,6 +75,11 @@ def _run_git(
     env = os.environ.copy()
     env["GIT_OPTIONAL_LOCKS"] = "0"
     env["GIT_LITERAL_PATHSPECS"] = "1"
+    env["GIT_NO_LAZY_FETCH"] = "1"
+    env["GIT_PAGER"] = ""
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "core.fsmonitor"
+    env["GIT_CONFIG_VALUE_0"] = "false"
     try:
         result = subprocess.run(
             [git_executable, *arguments],
