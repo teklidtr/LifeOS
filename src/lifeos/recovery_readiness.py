@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from collections.abc import Callable, Sequence
@@ -10,10 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
+from lifeos.coherence import CoherenceError
 from lifeos.config import LifeOSConfig
+from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
 RecoveryStatus = Literal["pass", "warning", "failure", "info", "unknown"]
 RecoverySeverity = Literal["info", "warning", "error"]
+PathExclusion = Callable[[str], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +72,8 @@ def _run_git(
     arguments: Sequence[str],
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
+    env = os.environ.copy()
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         result = subprocess.run(
             [git_executable, *arguments],
@@ -75,6 +81,7 @@ def _run_git(
             shell=False,
             check=False,
             capture_output=True,
+            env=env,
         )
     except OSError as error:
         raise RecoveryGitError(f"Could not execute Git: {error}") from error
@@ -94,19 +101,29 @@ def _nul_paths(raw: bytes) -> tuple[str, ...]:
     )
 
 
-def _runtime_relative_prefix(config: LifeOSConfig) -> tuple[str, ...] | None:
+def _runtime_snapshot_prefix(config: LifeOSConfig) -> str | None:
     try:
         relative = config.runtime_dir.relative_to(config.vault_root)
     except ValueError:
         return None
-    return tuple(relative.parts) or None
+    if not relative.parts:
+        return None
+    return f"{relative.as_posix().rstrip('/')}/"
+
+
+def _runtime_exclusion_matcher(config: LifeOSConfig) -> PathExclusion:
+    return build_runtime_exclusion_matcher(
+        config.vault_root,
+        runtime_dir=config.runtime_dir,
+        snapshot_prefix=_runtime_snapshot_prefix(config),
+    )
 
 
 def _canonical_vault_path(
     repo_path: str,
     *,
     vault_repo_prefix: tuple[str, ...],
-    runtime_prefix: tuple[str, ...] | None,
+    runtime_excluded: PathExclusion,
 ) -> str | None:
     pure = PurePosixPath(repo_path)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
@@ -122,23 +139,27 @@ def _canonical_vault_path(
         return None
     if any(part.startswith(".") or part == "__pycache__" for part in relative_parts):
         return None
-    if runtime_prefix is not None and relative_parts[: len(runtime_prefix)] == runtime_prefix:
-        return None
-    return PurePosixPath(*relative_parts).as_posix()
+    relative_path = PurePosixPath(*relative_parts).as_posix()
+    try:
+        if runtime_excluded(relative_path):
+            return None
+    except CoherenceError as error:
+        raise RecoveryGitError("Could not verify configured runtime exclusion") from error
+    return relative_path
 
 
 def _filter_canonical_paths(
     paths: Sequence[str],
     *,
     vault_repo_prefix: tuple[str, ...],
-    runtime_prefix: tuple[str, ...] | None,
+    runtime_excluded: PathExclusion,
 ) -> tuple[str, ...]:
     canonical: set[str] = set()
     for path in paths:
         candidate = _canonical_vault_path(
             path,
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
         )
         if candidate is not None:
             canonical.add(candidate)
@@ -176,13 +197,13 @@ def _git_paths(
     repository_root: Path,
     arguments: Sequence[str],
     vault_repo_prefix: tuple[str, ...],
-    runtime_prefix: tuple[str, ...] | None,
+    runtime_excluded: PathExclusion,
 ) -> tuple[str, ...]:
     result = _run_git(git_executable, cwd=repository_root, arguments=arguments)
     return _filter_canonical_paths(
         _nul_paths(result.stdout),
         vault_repo_prefix=vault_repo_prefix,
-        runtime_prefix=runtime_prefix,
+        runtime_excluded=runtime_excluded,
     )
 
 
@@ -202,7 +223,7 @@ def _committed_canonical_paths(
     repository_root: Path,
     pathspec: str,
     vault_repo_prefix: tuple[str, ...],
-    runtime_prefix: tuple[str, ...] | None,
+    runtime_excluded: PathExclusion,
 ) -> tuple[str, ...]:
     if not _head_exists(git_executable, repository_root):
         return ()
@@ -211,7 +232,7 @@ def _committed_canonical_paths(
         repository_root=repository_root,
         arguments=("ls-tree", "-r", "--name-only", "-z", "HEAD", "--", pathspec),
         vault_repo_prefix=vault_repo_prefix,
-        runtime_prefix=runtime_prefix,
+        runtime_excluded=runtime_excluded,
     )
 
 
@@ -221,7 +242,7 @@ def _latest_canonical_commit(
     repository_root: Path,
     pathspec: str,
     vault_repo_prefix: tuple[str, ...],
-    runtime_prefix: tuple[str, ...] | None,
+    runtime_excluded: PathExclusion,
     clock_fn: Callable[[], datetime],
 ) -> CanonicalCommitEvidence | None:
     if not _head_exists(git_executable, repository_root):
@@ -248,7 +269,7 @@ def _latest_canonical_commit(
                 pathspec,
             ),
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
         )
         if not changed:
             continue
@@ -426,7 +447,7 @@ def collect_recovery_readiness(
         return _fallback_report(config, _non_repository_diagnostics())
 
     repository_root, vault_repo_prefix, pathspec = context
-    runtime_prefix = _runtime_relative_prefix(config)
+    runtime_excluded = _runtime_exclusion_matcher(config)
     try:
         head_exists = _head_exists(git_executable, repository_root)
         committed_paths = _committed_canonical_paths(
@@ -434,35 +455,35 @@ def collect_recovery_readiness(
             repository_root=repository_root,
             pathspec=pathspec,
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
         )
         staged_paths = _git_paths(
             git_executable,
             repository_root=repository_root,
             arguments=("diff", "--cached", "--name-only", "-z", "--", pathspec),
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
         )
         unstaged_paths = _git_paths(
             git_executable,
             repository_root=repository_root,
             arguments=("diff", "--name-only", "-z", "--", pathspec),
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
         )
         deleted_paths = _git_paths(
             git_executable,
             repository_root=repository_root,
             arguments=("ls-files", "--deleted", "-z", "--", pathspec),
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
         )
         untracked_paths = _git_paths(
             git_executable,
             repository_root=repository_root,
             arguments=("ls-files", "--others", "--exclude-standard", "-z", "--", pathspec),
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
         )
         ignored_paths = _git_paths(
             git_executable,
@@ -477,14 +498,14 @@ def collect_recovery_readiness(
                 pathspec,
             ),
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
         )
         last_commit = _latest_canonical_commit(
             git_executable,
             repository_root=repository_root,
             pathspec=pathspec,
             vault_repo_prefix=vault_repo_prefix,
-            runtime_prefix=runtime_prefix,
+            runtime_excluded=runtime_excluded,
             clock_fn=clock_fn,
         )
     except RecoveryGitError as error:
