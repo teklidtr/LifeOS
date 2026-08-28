@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import lifeos.context.search as context_search
+import lifeos.scanner as scanner
 from lifeos.context import build_context_pack
 from lifeos.retrieval import (
     CancellationToken,
@@ -214,3 +215,38 @@ def test_description_routing_candidate_is_ranked_before_final_truncation(tmp_pat
 
     assert [source.path for source in pack.sources] == ["wiki/routing.md"]
     assert pack.sources[0].retrieval_mode == "lexical"
+
+
+def test_hybrid_health_prunes_protected_subtree_before_metadata_access(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    vault = tmp_path / "vault"
+    runtime = vault / ".lifeos"
+    vault.mkdir()
+    _write(vault, "wiki/public.md", "---\ntitle: Public\n---\nATP public evidence.")
+    RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
+
+    # Add protected canonical state after the index snapshot. Health must prune the subtree before
+    # child symlink/stat checks rather than enumerate it and filter the resulting path afterward.
+    _write(vault, "private/secret.md", "---\ntitle: Secret\n---\nATP private evidence.")
+    original_is_symlink = scanner.Path.is_symlink
+
+    def guarded_is_symlink(path: Path) -> bool:
+        try:
+            relative = path.relative_to(vault).as_posix()
+        except ValueError:
+            return original_is_symlink(path)
+        if relative == "private" or relative.startswith("private/"):
+            raise AssertionError("protected subtree metadata was accessed during retrieval health")
+        return original_is_symlink(path)
+
+    monkeypatch.setattr(scanner.Path, "is_symlink", guarded_is_symlink)
+
+    pack = build_context_pack(
+        vault_root=vault,
+        runtime_dir=runtime,
+        question="ATP public",
+    )
+
+    assert [source.path for source in pack.sources] == ["wiki/public.md"]
