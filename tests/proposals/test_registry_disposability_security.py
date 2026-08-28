@@ -16,7 +16,7 @@ from lifeos.facade.consequential_tools import (
     ApplyProposalRequest,
     apply_proposal_tool,
 )
-from lifeos.facade.errors import ToolConflictError
+from lifeos.facade.errors import ToolConflictError, ToolExecutionError
 from lifeos.facade.registry_tools import refresh_registry
 from lifeos.proposals.lifecycle import compute_review_digest, serialize_proposal_markdown
 from lifeos.proposals.loader import load_proposal_directory
@@ -160,7 +160,7 @@ def _assert_apply_refused_without_writes(
     proposal_path: Path,
     expected_status: str = "approved",
 ) -> None:
-    with pytest.raises(ToolConflictError):
+    with pytest.raises(ToolExecutionError, match="Preflight failed"):
         apply_proposal_tool(
             vault_root=vault_root,
             request=ApplyProposalRequest(PROPOSAL_ID),
