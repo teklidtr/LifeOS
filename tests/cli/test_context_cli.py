@@ -55,7 +55,11 @@ def test_context_build_uses_configured_retrieval_runtime(
         "ATP production depends on cellular energy pathways.\n",
         encoding="utf-8",
     )
-    runtime = tmp_path / ".lifeos"
+    runtime = tmp_path / "external-runtime"
+    (tmp_path / "lifeos.yml").write_text(
+        f"vault_root: {vault}\nruntime_dir: {runtime}\n",
+        encoding="utf-8",
+    )
     RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
 
     result = main(["context", "build", "ATP production", "--json"])
