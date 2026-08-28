@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1646
 title: Prove registry disposability cannot bypass proposal safety
-status: ready
+status: in-progress
 phase: 16
 depends_on:
   - LIFEOS-1638
