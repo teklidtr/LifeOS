@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1647
 title: Add recovery-readiness doctor diagnostics for canonical vault data
-status: ready
+status: in-progress
 phase: 16
 depends_on: []
 risk: medium
