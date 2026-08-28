@@ -180,7 +180,7 @@ def test_build_context_pack_uses_default_lifeos_retrieval_runtime(tmp_path: Path
     assert any("Semantic retrieval was not configured" in omission for omission in pack.omissions)
 
 
-def test_context_pack_hybrid_sources_are_deduplicated_and_budgeted_by_note(tmp_path: Path) -> None:
+def test_context_pack_duplicate_evidence_does_not_create_false_budget_omission(tmp_path: Path) -> None:
     vault, runtime, provider = _indexed_vault(tmp_path)
 
     pack = build_context_pack(
@@ -193,7 +193,8 @@ def test_context_pack_hybrid_sources_are_deduplicated_and_budgeted_by_note(tmp_p
 
     assert len(pack.sources) == 1
     assert pack.sources[0].retrieval_mode == "hybrid"
-    assert "Results were limited to the top 1 sources." in pack.omissions
+    assert "wiki/duplicate.md" in pack.sources[0].duplicate_paths
+    assert "Results were limited to the top 1 sources." not in pack.omissions
 
 
 def test_long_note_chunks_do_not_starve_other_matching_notes(tmp_path: Path) -> None:
