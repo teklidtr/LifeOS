@@ -79,10 +79,14 @@ READ_MARKDOWN_MCP_DESCRIPTION = (
     "include a protected scope; the path must also be externally allowlisted by policy."
 )
 VAULT_CONTEXT_MCP_DESCRIPTION = (
-    f"{VAULT_CONTEXT_DESCRIPTOR.description} Focused, lexical, and instruction sources are "
-    "filtered for external disclosure by retrieval policy before content access. Set "
-    "allow_protected only when the user explicitly asks to include a protected scope and policy "
-    "also permits external disclosure."
+    f"{VAULT_CONTEXT_DESCRIPTOR.description} Explicit focus paths remain first, then a healthy "
+    "hybrid retrieval index may contribute lexical, semantic, metadata, link, graph, and rerank "
+    "signals; unavailable or stale derived state falls back to deterministic lexical retrieval. "
+    "Each source includes bounded retrieval mode/reason metadata. Sources are filtered for "
+    "external disclosure by retrieval policy before exposure. Set allow_protected only when the "
+    "user explicitly asks to include a protected scope and policy also permits external "
+    "disclosure. The resulting pack is an initial map; continue with list/search/read/link tools "
+    "when more evidence is useful."
 )
 RUNTIME_ACTIVITY_MCP_DESCRIPTION = (
     "Read recent disposable MCP routing/activity metadata for debugging. Path fields are "
@@ -160,6 +164,7 @@ def build_policy_read_tools(
     vault_root: Path,
     activity: ActivityStore,
     invoke: Invoke,
+    runtime_dir: Path | None = None,
 ) -> tuple[Tool, ...]:
     """Build policy-aware replacements for legacy composed read tools."""
 
@@ -202,7 +207,11 @@ def build_policy_read_tools(
                     mode="external",
                 )
             )
-            pack = get_vault_context(vault_root=vault_root, request=request)
+            pack = get_vault_context(
+                vault_root=vault_root,
+                request=request,
+                runtime_dir=runtime_dir,
+            )
             activity.append(
                 tool="vault_context",
                 focus_paths=list(focus_paths or ()),
@@ -230,6 +239,10 @@ def build_policy_read_tools(
                         "description": item.description,
                         "excerpt": item.excerpt,
                         "score": item.score,
+                        "retrieval_mode": item.retrieval_mode,
+                        "retrieval_reasons": list(item.retrieval_reasons),
+                        "ranking": {key: value for key, value in item.ranking},
+                        "duplicate_paths": list(item.duplicate_paths),
                     }
                     for item in pack.sources
                 ],

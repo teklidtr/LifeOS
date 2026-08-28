@@ -95,6 +95,7 @@ class HybridRetriever(_BaseHybridRetriever):
         reranker: RerankingProvider | None = None,
         graph_hints: Mapping[str, float] | None = None,
         cancellation: CancellationToken | None = None,
+        distinct_paths: bool = False,
     ) -> RetrievalResponse:
         stale_token = _STALE_QUERY_PATHS.set(frozenset())
         health_token = _QUERY_HEALTH.set(None)
@@ -125,6 +126,7 @@ class HybridRetriever(_BaseHybridRetriever):
                 reranker=reranker,
                 graph_hints=graph_hints,
                 cancellation=cancellation,
+                distinct_paths=distinct_paths,
             )
         finally:
             _IDENTITY_CAPTURE.reset(capture_token)
@@ -279,9 +281,13 @@ class HybridRetriever(_BaseHybridRetriever):
         selected = set(request.scope.paths) | set(request.scope.pinned_paths)
         provisional_links = _base_search._link_scores(scoped_chunks, selected)
         support_paths = selected | set(provisional_links)
-        candidate_paths = {document.path for _chunk, document, _components, _matched in candidates}
+        candidate_paths = {
+            document.path for _chunk, document, _components, _matched in candidates
+        }
         paths_to_authorize = candidate_paths | support_paths
-        documents_by_path = {document.path: document for _chunk, document in scoped_items}
+        documents_by_path = {
+            document.path: document for _chunk, document in scoped_items
+        }
 
         authorized_paths: set[str] = set()
         captured = _IDENTITY_CAPTURE.get()
@@ -348,7 +354,9 @@ class HybridRetriever(_BaseHybridRetriever):
         return candidate
 
 
-def _with_stable_id(item: RetrievalEvidence, stable_id: str | None) -> StableRetrievalEvidence:
+def _with_stable_id(
+    item: RetrievalEvidence, stable_id: str | None
+) -> StableRetrievalEvidence:
     return StableRetrievalEvidence(
         evidence_id=item.evidence_id,
         chunk_id=item.chunk_id,

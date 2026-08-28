@@ -9,6 +9,7 @@ from lifeos.context.instructions import (
 )
 from lifeos.context.packs import (
     ContextPack,
+    ContextSource,
     build_context_pack,
     format_context_pack,
     serialize_context_pack,
@@ -30,6 +31,7 @@ __all__ = [
     "ContextPack",
     "ContextSearchError",
     "ContextSearchExecutionError",
+    "ContextSource",
     "InstructionAuthority",
     "InstructionReport",
     "InstructionScope",

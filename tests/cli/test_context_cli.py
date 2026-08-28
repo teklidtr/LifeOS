@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from lifeos.cli import main
+from lifeos.retrieval import RetrievalIndexService
 
 
 def _configure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -39,6 +40,40 @@ def test_context_build_json_outputs_sources(
     assert captured.err == ""
     payload = json.loads(captured.out)
     assert payload["sources"][0]["path"] == "wiki/sleep.md"
+
+
+def test_context_build_uses_configured_retrieval_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = _configure(tmp_path, monkeypatch)
+    wiki = vault / "wiki"
+    wiki.mkdir()
+    (wiki / "energy.md").write_text(
+        "---\nid: energy\ntitle: Energy\ndescription: Cellular energy.\n---\n"
+        "ATP production depends on cellular energy pathways.\n",
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "external-runtime"
+    (tmp_path / "lifeos.yml").write_text(
+        f"vault_root: {vault}\nruntime_dir: {runtime}\n",
+        encoding="utf-8",
+    )
+    RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
+
+    result = main(["context", "build", "ATP production", "--json"])
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["sources"][0]["path"] == "wiki/energy.md"
+    assert payload["sources"][0]["retrieval_mode"] == "hybrid"
+    assert any(
+        "Semantic retrieval was not configured" in omission
+        for omission in payload["omissions"]
+    )
 
 
 def test_context_build_rejects_invalid_limit(

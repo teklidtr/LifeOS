@@ -127,8 +127,13 @@ and near-term work concrete.
    has been edited.
 4. When personal goals, study purpose, path-scoped instructions, or nearby vault
    state may affect interpretation, the agent calls `vault_context` with the
-   source as a focus path. It then searches and reads relevant existing wiki
-   knowledge.
+   source as a focus path. That focus source is kept first. LifeOS fills the
+   remaining bounded source slots with the shared hybrid retrieval subsystem when
+   its disposable index is healthy, or deterministic lexical fallback when the
+   index is unavailable or stale. The agent may then continue with
+   `vault_list`, `vault_search`, `vault_read_markdown`, `vault_read_many`,
+   `vault_links`, and the deliberately lexical `wiki_search` operation to inspect
+   whatever the initial map suggests.
 5. The agent may propose no durable change, or call
    `ingestion_evolve_wiki_proposal` for 1..12 coordinated wiki creates and
    exact-section updates. Immediately before source and target verification,
@@ -145,6 +150,14 @@ and near-term work concrete.
    and self-study need not optimize for the same facts.
 7. Review the resulting draft proposal. Ingestion does not submit, approve, or
    apply it.
+
+`vault_context` is an initial context map, not a one-shot answer, crawl, or ingest
+command. Its MCP request remains provider-neutral: the agent asks with the
+question, focus paths, and limit rather than naming an embedding provider or
+vector store. Source results may include bounded retrieval mode/reason/ranking
+metadata so the selection is inspectable without exposing hidden model
+reasoning. Applicable `system/instructions.yml` rules are computed for the final
+selected source set and remain separate from mutation authority.
 
 `lifeos scan` and MCP `registry_refresh` remain supported explicit maintenance
 operations when you want derived indexes refreshed outside proposal-building
@@ -298,9 +311,18 @@ lifeos context build \
   --focus-path study/driving-licence/intersections.md
 ```
 
-The MCP `vault_context` tool provides the same kind of bounded pre-reasoning
-context to a connected agent. Review evidence gaps and omissions before trusting
-the answer.
+Treat the result as a starting map. Explicit focus paths stay first; a healthy
+retrieval index can enrich the remaining slots with the shared hybrid ranking
+signals, while missing or stale derived state falls back to canonical lexical
+search and records that degradation in omissions. If the map is sparse,
+truncated, or points to another area, continue exploring rather than assuming the
+first pack is the final evidence set.
+
+The MCP `vault_context` tool provides the same bounded behavior to a connected
+agent without requiring provider-specific arguments. The agent can follow the
+map with `vault_list`, `vault_search`, `vault_read_markdown`, `vault_read_many`,
+`vault_links`, and `wiki_search`. Review retrieval reasons, evidence gaps, and
+omissions before trusting a conclusion.
 
 ## Evening
 
@@ -478,7 +500,10 @@ uv run lifeos context build \
   "What evidence is missing from my current cell biology understanding?"
 ```
 
-Use evidence gaps to decide what to read or test next.
+Use evidence gaps and omissions to decide what to read or test next. A Context
+Pack is intentionally bounded, so an agent may follow promising paths with the
+separate list/search/read/link operations rather than treating the first result
+set as a deterministic final crawl.
 
 ### 8. Review AI proposals
 
@@ -606,8 +631,9 @@ A normal remote session is:
 
 1. connect the MCP client to `https://<private-name>/mcp` (or a loopback/private HTTP endpoint
    inside a trusted VPN boundary) and supply the configured bearer credential;
-2. explore with `vault_list`, `vault_search`, `vault_read_markdown`, `vault_read_many`,
-   `vault_links`, `wiki_search`, `vault_context`, and `vault_note_identity` as needed;
+2. start with `vault_context` when a bounded map would help, then explore iteratively with
+   `vault_list`, `vault_search`, `vault_read_markdown`, `vault_read_many`, `vault_links`,
+   `wiki_search`, and `vault_note_identity` as needed;
 3. create a bounded guarded draft through the same ingestion/proposal tools used by local
    STDIO;
 4. call `proposal_submit` only when you explicitly want that draft moved to pending;

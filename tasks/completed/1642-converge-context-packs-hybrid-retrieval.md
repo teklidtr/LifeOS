@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1642
 title: Converge Context Packs with hybrid semantic retrieval
-status: backlog
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1639

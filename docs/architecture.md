@@ -72,7 +72,10 @@ A registered canonical Markdown source may come from `raw/`, `study/`, `journal/
 `experiments/`, `goals/`, or another ordinary vault area. Folder location supplies semantic
 context rather than permission to reason. When situational context matters, `vault_context`
 combines explicit focus paths, applicable vault instructions, and bounded relevant canonical
-Markdown before the agent chooses mutations. The external agent can then search `wiki/`, read
+Markdown before the agent chooses mutations. A healthy disposable retrieval index supplies the
+existing hybrid exact/lexical, semantic when configured, metadata, link, graph, pin, and rerank
+signals; missing or stale derived state falls back to canonical deterministic lexical retrieval.
+The external agent can then continue with list/search/read/link operations, search `wiki/`, read
 relevant existing notes, and decide whether a source warrants zero durable changes or a bounded
 set of 1..12 distinct creates and exact-section updates. Folder organization beneath `wiki/` is
 agent-selected and may evolve over time; LifeOS does not prescribe an entity/concept/source/
@@ -201,10 +204,33 @@ Graphify supplies paths, communities, bridge nodes, and visualization. LifeOS co
 
 ## Context packs
 
-A context pack assembles applicable vault instructions, the question, explicit focus paths,
-bounded relevant canonical excerpts, evidence gaps, diagnostics, and omissions. Explicit focus
-paths are included even when lexical retrieval would not select them, so path/domain instruction
-applicability remains inspectable. A context pack grants no mutation authority.
+A Context Pack is the bounded context-management layer above the authoritative retrieval
+subsystem. It assembles the question, validated explicit focus paths, applicable vault
+instructions, bounded canonical excerpts, evidence gaps, diagnostics, omissions, and bounded
+retrieval provenance. Explicit focus paths are placed first and remain present even when hybrid
+ranking would prefer other notes; they still pass normal vault safety and privacy validation.
+Instruction applicability is evaluated against the final selected source set and grants no
+mutation authority.
+
+When `.lifeos/retrieval/` is healthy, remaining source slots reuse the existing hybrid exact,
+lexical, semantic when configured, metadata, link, optional graph, pin, rerank, deduplication,
+and deterministic-ordering contracts. Context Packs do not own a parallel embedding index or
+RAG stack. Machine-readable source metadata may expose retrieval mode, contributing signal
+names, numeric ranking components, and duplicate paths. Those fields explain retrieval evidence
+without storing or returning hidden model reasoning.
+
+Retrieval state is disposable rather than authoritative. Missing, stale, corrupt, incompatible,
+or otherwise unavailable index state causes Context Pack construction to use canonical
+deterministic lexical fallback and report the degraded capability in omissions. A healthy index
+without a semantic query provider still uses local hybrid signals and reports the absent semantic
+capability. Protected scopes remain default-deny. Explicit protected external MCP requests use
+the canonical policy-filtered lexical path until hybrid requests themselves carry external
+provider-disclosure mode.
+
+`vault_context` is therefore an initial map, not a final crawl, answer generator, or ingestion
+operation. Agents can continue iteratively with `vault_list`, `vault_search`,
+`vault_read_markdown`, `vault_read_many`, `vault_links`, and the deliberately lexical
+`wiki_search` primitive. A context pack grants no mutation authority.
 
 ## Optional exports
 
@@ -317,6 +343,12 @@ exposes that stable ID beside the note's current path so agents do not mistake t
 filesystem address for permanent identity. No-provider mode retains all local
 non-vector signals.
 
+The same hybrid/index/provider subsystem supplies Context Pack candidate selection; Context
+Packs add focus-path precedence, final-source instruction routing, bounded gaps/omissions, and
+MCP-facing retrieval provenance rather than creating another semantic index. `wiki_search`
+remains intentionally lexical so an agent can compose exact durable-wiki discovery with the
+initial Context Pack and subsequent explicit reads.
+
 Knowledge conversations are canonical Markdown under `conversations/YYYY/`.
 Their managed block stores scope, turns, evidence fingerprints, validated
 citations, branch lineage, provider disclosure, and lifecycle state. Human-owned
@@ -344,7 +376,7 @@ notes, reminders, or calendar-like structures use the shared proposal engine.
 
 The bridge exposes typed `experiment.*` capabilities, while the Obsidian plugin
 remains a thin graphical client for design, tracking, analysis, evidence, history,
-proposals, migration, and recovery. Local creation, tracking, analysis, and review
+proposals, migration, recovery, and visualization models. Local creation, tracking, analysis, and review
 integration require no model. Optional assistance uses provider-neutral contracts
 and bounded, inspectable source selection. See
 [Personal Experiment Architecture](personal-experiment-architecture.md) and

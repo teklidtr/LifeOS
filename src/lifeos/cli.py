@@ -516,6 +516,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             config = load_config(Path("lifeos.yml"))
             pack = build_context_pack(
                 vault_root=config.vault_root,
+                runtime_dir=config.runtime_dir,
                 question=args.question,
                 limit=args.limit,
                 focus_paths=tuple(args.focus_path),

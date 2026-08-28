@@ -132,8 +132,15 @@ def lexical_search_report(
     limit: int = 8,
     path_prefix: str | None = None,
     path_filter: PathFilter | None = None,
+    traversal_filter: PathFilter | None = None,
 ) -> SearchReport:
-    """Search Markdown by exact tokens and report parser omissions deterministically."""
+    """Search Markdown by exact tokens and report parser omissions deterministically.
+
+    ``traversal_filter`` controls which directory/file paths the walker may enumerate, while
+    ``path_filter`` remains the final authorization check applied before a Markdown file is read.
+    Existing callers that provide only ``path_filter`` retain the historical behavior of using
+    that predicate for both traversal and leaf authorization.
+    """
     if not isinstance(vault_root, Path):
         raise ContextSearchError("vault_root must be a Path")
     if not isinstance(query, str) or not query.strip():
@@ -150,6 +157,8 @@ def lexical_search_report(
         normalized_prefix = None
     if path_filter is not None and not callable(path_filter):
         raise ContextSearchError("path_filter must be callable or None")
+    if traversal_filter is not None and not callable(traversal_filter):
+        raise ContextSearchError("traversal_filter must be callable or None")
 
     terms = lexical_terms(query)
     if not terms:
@@ -163,6 +172,7 @@ def lexical_search_report(
             vault_root=vault_root,
             normalized_prefix=normalized_prefix,
             path_filter=path_filter,
+            traversal_filter=traversal_filter,
         )
     except VaultAccessError as exc:
         raise ContextSearchExecutionError(str(exc)) from exc
@@ -223,14 +233,16 @@ def _search_sources(
     vault_root: Path,
     normalized_prefix: str | None,
     path_filter: PathFilter | None,
+    traversal_filter: PathFilter | None,
 ) -> tuple[VaultMarkdownFile, ...]:
-    if normalized_prefix is None and path_filter is None:
+    if normalized_prefix is None and path_filter is None and traversal_filter is None:
         return iter_vault_markdown(vault_root)
 
     prefix = normalized_prefix.rstrip("/") if normalized_prefix is not None else None
+    walker_filter = traversal_filter or path_filter
 
-    def traversal_filter(path: str) -> bool:
-        if path_filter is not None and not path_filter(path):
+    def allowed_for_traversal(path: str) -> bool:
+        if walker_filter is not None and not walker_filter(path):
             return False
         if prefix is None:
             return True
@@ -241,8 +253,11 @@ def _search_sources(
             or prefix.startswith(candidate + "/")
         )
 
-    paths = iter_vault_markdown_paths(vault_root, path_filter=traversal_filter)
-    return tuple(read_vault_markdown(vault_root, relative) for relative in paths)
+    paths = iter_vault_markdown_paths(vault_root, path_filter=allowed_for_traversal)
+    authorized_paths = (
+        relative for relative in paths if path_filter is None or path_filter(relative)
+    )
+    return tuple(read_vault_markdown(vault_root, relative) for relative in authorized_paths)
 
 
 def focused_search_results(

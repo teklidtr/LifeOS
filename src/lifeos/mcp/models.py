@@ -169,6 +169,10 @@ class VaultContextSourceMCPResult(TypedDict):
     description: str
     excerpt: str
     score: int
+    retrieval_mode: NotRequired[str]
+    retrieval_reasons: NotRequired[list[str]]
+    ranking: NotRequired[dict[str, float]]
+    duplicate_paths: NotRequired[list[str]]
 
 
 class VaultContextDiagnosticMCPResult(TypedDict):

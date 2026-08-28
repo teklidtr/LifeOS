@@ -200,10 +200,13 @@ before consequential work continues.
 
 ### What it is
 
-A context pack retrieves relevant canonical notes for a question and explains
-why they matched. An explicit focus path can also force the current source or note
-into the pack even when its words do not match the question strongly enough for
-lexical retrieval.
+A Context Pack is a bounded starting map for a question. Explicit focus paths are
+validated and placed first, so the source you are actively working with does not
+disappear merely because another note ranks more highly. The remaining slots use
+the existing hybrid retrieval subsystem when its disposable index is healthy.
+That ranking may combine exact/lexical matches, semantic similarity when a query
+provider is configured, metadata, links, optional graph hints, pins, reranking,
+and duplicate suppression.
 
 ```bash
 lifeos context build \
@@ -217,23 +220,43 @@ lifeos context build \
 ```
 
 The result may contain applicable instructions, explicitly focused sources,
-other matching canonical notes, score evidence, excerpts, parser diagnostics,
-evidence gaps, and omissions. `vault_context` exposes the same bounded
-pre-reasoning context to an MCP-connected agent; it does not ingest or mutate
-anything by itself.
+other relevant canonical notes, excerpts, parser diagnostics, evidence gaps, and
+omissions. Sources also carry bounded retrieval provenance such as
+`retrieval_mode`, contributing retrieval-signal names, numeric ranking
+components, and duplicate paths when those values are available. This explains
+why deterministic retrieval selected evidence; it is not hidden model reasoning.
+
+A missing, stale, corrupt, incompatible, or otherwise unavailable retrieval index
+does not make `vault_context` unusable. LifeOS falls back to canonical
+deterministic lexical retrieval and records the degraded capability in
+`omissions`. A healthy index can still use its local non-vector signals when no
+semantic query provider is configured. Protected scopes remain subject to the
+same retrieval policy and default-deny behavior.
+
+`vault_context` exposes this behavior to an MCP-connected agent without adding a
+provider name, model name, or vector configuration to the tool request. It is
+read-only and does not ingest or mutate anything by itself.
 
 ### How it connects
 
-Context packs combine:
+Context Packs combine:
 
-- Markdown metadata;
-- note contents;
-- typed instructions from `system/instructions.yml`;
-- deterministic token-aware lexical scoring;
-- source-level diagnostics.
+- explicit focus-path precedence;
+- the authoritative hybrid retrieval/index subsystem when healthy;
+- deterministic lexical fallback over canonical Markdown;
+- Markdown metadata and note contents;
+- typed instructions from `system/instructions.yml`, evaluated against the final
+  selected source set;
+- source-level diagnostics, evidence gaps, omissions, and bounded retrieval
+  explanation metadata.
 
 They provide bounded evidence for an AI agent or human review without loading
-the entire vault.
+the entire vault. They are deliberately not a one-shot crawl or answer engine.
+After receiving the initial map, an agent can continue with `vault_list`,
+`vault_search`, `vault_read_markdown`, `vault_read_many`, `vault_links`, or the
+separate `wiki_search` operation. `wiki_search` intentionally remains a lexical
+primitive so exact durable-wiki discovery stays composable with hybrid context
+selection.
 
 Example instruction file:
 
@@ -255,7 +278,8 @@ instructions:
 ```
 
 Only the allowlisted `system/instructions.yml` file grants routed instruction
-authority.
+authority. Retrieval ranking does not turn an instruction into mutation
+permission.
 
 ## 3.7 Study and flashcards
 
@@ -410,9 +434,11 @@ For a context-sensitive source, the preferred agent flow is:
 
 ```text
 vault_read_markdown on the source
-  → vault_context when goals, instructions, or nearby vault state may change
-    how the source should be interpreted
-  → wiki_search
+  → vault_context for an initial bounded context map when goals, instructions,
+    or nearby vault state may change how the source should be interpreted
+  → optionally continue agent-led exploration with vault_list, vault_search,
+    vault_read_many, vault_links, or additional vault_read_markdown calls
+  → wiki_search for exact/lexical durable-wiki discovery
   → vault_read_markdown on relevant wiki hits
   → agent decides whether durable knowledge should change
   → if no durable change is worthwhile: stop with no proposal
@@ -424,8 +450,11 @@ vault_read_markdown on the source
 ```
 
 `vault_context` is a read-only pre-reasoning tool, not an ingestion command. It
-combines explicit focus paths with applicable `system/instructions.yml` rules and
-relevant canonical context. `registry_refresh` remains available as an explicit
+keeps explicit focus paths first, may use the shared hybrid retrieval subsystem,
+falls back safely to deterministic lexical retrieval when derived state is not
+healthy, and applies `system/instructions.yml` rules to the final selected source
+set. The returned map does not decide what matters next. The external agent owns
+that iterative choice. `registry_refresh` remains available as an explicit
 maintenance operation outside this normal ingestion loop.
 
 For a `study/` source, the agent may instead use
@@ -553,13 +582,17 @@ Three instruction layers stay separate:
 The preferred runtime surfaces include `registry_refresh`,
 `vault_read_markdown`, `vault_context`, `wiki_search`,
 `ingestion_evolve_wiki_proposal`, `study_evolve_learning_proposal`, and the
-explicit proposal lifecycle tools. `registry_refresh` is available for explicit
-maintenance, while proposal-building ingestion performs its own automatic
-preflight refresh. `runtime_activity` is a read-only diagnostic surface that
-reports recent MCP routing metadata such as tool names, paths, instruction IDs,
-proposal IDs, and changed paths without copying canonical note bodies or
-flashcard answers into the activity log. This makes “what did the MCP server do?”
-inspectable without coupling a client to `.lifeos/`'s internal file format.
+explicit proposal lifecycle tools. `vault_context(question, focus_paths, limit)`
+remains provider-neutral: the caller does not supply an embedding provider or
+vector-store setting. Its source payload may add retrieval-mode/reason/ranking
+metadata while preserving the same tool name and bounded request shape.
+`registry_refresh` is available for explicit maintenance, while proposal-building
+ingestion performs its own automatic preflight refresh. `runtime_activity` is a
+read-only diagnostic surface that reports recent MCP routing metadata such as tool
+names, paths, instruction IDs, proposal IDs, and changed paths without copying
+canonical note bodies or flashcard answers into the activity log. This makes
+“what did the MCP server do?” inspectable without coupling a client to `.lifeos/`'s
+internal file format.
 
 All ingestion paths stop at the resulting draft unless the user separately asks
 for submission, approval, or application. Orphaned ownership, generator mismatch,
@@ -646,14 +679,19 @@ be rebuilt from Markdown after `.lifeos/` is removed. See
 
 An evidence-first Obsidian workspace combines exact, lexical, semantic, metadata,
 link, and optional graph retrieval. Saved conversations are canonical Markdown;
-chunks, embeddings, and ranking state are disposable.
+chunks, embeddings, and ranking state are disposable. The same retrieval/index
+subsystem now supplies Context Pack candidate selection rather than a separate
+Context Pack vector or RAG implementation.
 
 ### How it connects
 
 The Python bridge enforces scope and privacy policy, exposes ranking components,
 validates citations, detects changed evidence, and creates proposal previews for
 reviewed conversation outcomes. Missing providers degrade to local retrieval, and
-removing `.lifeos/retrieval/` triggers a rebuild rather than knowledge loss. See
+removing `.lifeos/retrieval/` triggers a rebuild rather than knowledge loss.
+Context Packs add focus-path precedence and instruction routing on top of these
+retrieval contracts, while `wiki_search` remains an explicit lexical exploration
+primitive. See
 [Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md).
 
 

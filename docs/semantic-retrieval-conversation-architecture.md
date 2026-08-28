@@ -2,7 +2,9 @@
 
 ## Status
 
-Shipped in Phase 14 through `LIFEOS-1400` to `LIFEOS-1411`.
+Shipped in Phase 14 through `LIFEOS-1400` to `LIFEOS-1411`, with the existing
+Context Pack surface converged onto the same retrieval subsystem in Phase 16 by
+`LIFEOS-1642`.
 
 ## Purpose
 
@@ -120,6 +122,45 @@ passages are suppressed by normalized-content fingerprint. Result count and
 context budget are bounded. Equal scores are ordered deterministically by path,
 heading, line, and chunk identity.
 
+## Context Packs over hybrid retrieval
+
+`ContextPack` and the MCP `vault_context` tool are the bounded context-management
+layer over this authoritative retrieval subsystem. They do not own another vector
+store, embedding abstraction, or ranking implementation. Explicit `focus_paths`
+are validated and placed first; remaining source slots are filled from healthy
+hybrid retrieval using the existing exact, lexical, semantic, metadata, link,
+graph, deduplication, privacy, and deterministic-ordering contracts.
+
+A Context Pack exposes only bounded retrieval provenance: source path and excerpt,
+retrieval mode, contributing ranking-signal names, numeric ranking components, and
+duplicate paths. This is an explanation of deterministic retrieval evidence, not
+hidden model reasoning. Applicable `system/instructions.yml` rules are evaluated
+after the final source set is selected and remain separate from both ranking and
+mutation authority.
+
+The retrieval index is disposable. If it is missing, stale, corrupt, incompatible,
+or otherwise unavailable, Context Pack construction returns to canonical
+deterministic lexical search and records the degraded capability in `omissions`
+instead of treating derived state as authoritative. A healthy index without a
+semantic query provider still contributes local exact/lexical, metadata, link,
+graph, and pin signals and reports that semantic retrieval was not configured.
+For an explicitly protected external MCP scope, Context Packs conservatively use
+the canonical lexical path until the hybrid request contract itself carries
+external-disclosure mode, preventing protected content from entering a local-mode
+hybrid candidate/provider path.
+
+`wiki_search` deliberately remains a separate lexical primitive. It is useful for
+exact, composable durable-wiki discovery after an initial Context Pack and does
+not need to become a second wrapper around hybrid retrieval merely for API
+uniformity.
+
+A Context Pack is a starting map, not a crawl or answer-generation pipeline. The
+external agent remains responsible for deciding whether to continue with
+`vault_list`, `vault_search`, `vault_read_markdown`, `vault_read_many`,
+`vault_links`, `wiki_search`, or other bounded exploration operations. This keeps
+LIFEOS-1639 composability intact and leaves interpretation outside the retrieval
+engine.
+
 ## Conversation workspace
 
 The Obsidian workspace is evidence-first, not a generic chat panel. It includes:
@@ -187,4 +228,6 @@ stored in canonical artifacts.
 Phase 14 is decomposed into `LIFEOS-1400` through `LIFEOS-1411`: architecture,
 contracts, structural index, synchronization, hybrid retrieval, conversation
 artifacts, grounding, proposals, bridge, Obsidian workspace, recovery/privacy, and
-release validation.
+release validation. `LIFEOS-1642` later reuses that shipped subsystem for the
+pre-existing Context Pack/MCP context surface rather than creating a parallel RAG
+layer.

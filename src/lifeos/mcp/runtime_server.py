@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -13,7 +13,12 @@ from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.facade.errors import ToolExecutionError
-from lifeos.facade.read_only import WikiSearchRequest, search_wiki
+from lifeos.facade.read_only import (
+    WikiSearchRequest,
+    push_vault_context_providers,
+    reset_vault_context_providers,
+    search_wiki,
+)
 from lifeos.mcp.activity_store import MCPActivityStore
 from lifeos.mcp.coherence_tools import build_coherence_tools
 from lifeos.mcp.exploration_tools import (
@@ -40,6 +45,9 @@ from lifeos.runtime.activity import (
     reset_activity_runtime_dir_fd,
 )
 from lifeos.runtime_scope import build_runtime_exclusion_matcher
+
+if TYPE_CHECKING:
+    from lifeos.retrieval.contracts import EmbeddingProvider, RerankingProvider
 
 _POLICY_READ_OVERRIDES = frozenset(
     {"vault_read_markdown", "wiki_search", "vault_context", "runtime_activity"}
@@ -70,6 +78,8 @@ def create_mcp_server(
     authorizer: ConsequentialAuthorizer,
     runtime_dir: Path | None = None,
     runtime_dir_fd: int | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+    reranker: RerankingProvider | None = None,
     host: str = "127.0.0.1",
     port: int = 8000,
     transport_security: TransportSecuritySettings | None = None,
@@ -108,9 +118,14 @@ def create_mcp_server(
             runtime_exclusions = (runtime_prefix,) if runtime_prefix is not None else ()
             prefix_token = push_node_local_excluded_prefixes(runtime_exclusions)
             predicate_token = push_node_local_exclusion_predicates((runtime_excluded,))
+            provider_tokens = push_vault_context_providers(
+                embedding_provider=embedding_provider,
+                reranker=reranker,
+            )
             try:
                 return operation()
             finally:
+                reset_vault_context_providers(provider_tokens)
                 reset_node_local_exclusion_predicates(predicate_token)
                 reset_node_local_excluded_prefixes(prefix_token)
 
@@ -132,6 +147,7 @@ def create_mcp_server(
         vault_root=vault_root,
         activity=activity,
         invoke=runtime_scoped_invoke,
+        runtime_dir=resolved_runtime_dir,
     )
     exploration = build_exploration_tools(
         vault_root=vault_root,
