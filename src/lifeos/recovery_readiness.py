@@ -74,6 +74,7 @@ def _run_git(
 ) -> subprocess.CompletedProcess[bytes]:
     env = os.environ.copy()
     env["GIT_OPTIONAL_LOCKS"] = "0"
+    env["GIT_LITERAL_PATHSPECS"] = "1"
     try:
         result = subprocess.run(
             [git_executable, *arguments],
