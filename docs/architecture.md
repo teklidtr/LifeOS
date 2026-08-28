@@ -247,7 +247,6 @@ action for the remaining draft-to-applied lifecycle. One digest-bound confirmati
 that exact reviewed content; Python still persists each lifecycle transition, reloads and
 rechecks the digest between transitions, and runs full application-time target validation.
 See [Obsidian Desktop Architecture](obsidian-desktop-architecture.md).
-
 ## Adaptive feedback release architecture
 
 Adaptive planning is shipped as a bounded layer above the baseline planner.
@@ -498,7 +497,6 @@ requires an explicit Host allowlist, and the deployment guide requires a private
 or TLS-terminating authenticated reverse proxy rather than unauthenticated public Internet
 exposure. LifeOS does not own DNS, certificates, routers, VPN configuration, or a general sync
 transport.
-
 The generic OCI image is the supported deployment unit for Linux/NAS/Raspberry Pi-class nodes.
 The container keeps the canonical vault/Git view on a persistent writable mount while
 `.lifeos/` runtime state may live on a separate disposable/rebuildable volume. Full validation
@@ -511,3 +509,35 @@ This service topology does not change DD-089: there is still one active LifeOS m
 authority for a canonical synchronized view. A remote client is a transport consumer of that
 authority, not an independent writer. See DD-091 and
 [Setup & Installation](user-manual/04-setup-and-installation.md#415-run-an-always-on-home-node).
+
+## Recovery-readiness diagnostics
+
+`lifeos doctor` exposes recovery evidence as a deterministic, read-only layer. It does not
+commit, push, restore, scan, repair, or create a backup. Recovery diagnostics operate on path,
+filesystem, and Git metadata and do not need canonical note bodies to determine coverage.
+
+Recovery has three independent evidence classes:
+
+- **Canonical Git coverage** reports whether the configured vault is inside a Git repository,
+  whether committed canonical history exists, the latest commit that actually affected the
+  configured vault, and current staged, modified, deleted, untracked, or ignored canonical
+  paths. Git queries are path-scoped so unrelated changes in a parent repository do not become
+  LifeOS recovery evidence. Staging remains uncommitted state. Commit age is informational and
+  is not itself a failure when current canonical state is fully represented by history.
+- **External backup/snapshot evidence** remains provider-neutral. Local commits, configured Git
+  remotes, and remote-tracking refs do not prove an independent current copy. When LifeOS lacks
+  deterministic evidence, `recovery.backup.external` is `unknown` rather than `pass`; the doctor
+  does not manufacture certainty about third-party backup state.
+- **Disposable runtime** explicitly records that `.lifeos/` registry, activity, index,
+  graph/export, cache, processing, and similar derived state is rebuildable. Runtime paths are
+  excluded from canonical Git-gap warnings and are never recommended for committing as a
+  recovery fix.
+
+The JSON recovery section carries stable diagnostic IDs, status, severity, summary, optional
+remediation, and only the relative exposed paths needed to fix a local gap. The initial IDs are
+`recovery.git.repository`, `recovery.git.last_canonical_commit`,
+`recovery.git.uncommitted_canonical`, `recovery.git.untracked_canonical`,
+`recovery.git.ignored_canonical`, `recovery.backup.external`, and
+`recovery.runtime.disposable`. Operational doctor readiness remains separate from this recovery
+evidence so advisory recovery gaps do not silently redefine whether the local LifeOS application
+can run.
