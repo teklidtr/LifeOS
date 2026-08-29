@@ -24,6 +24,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from lifeos import _recovery_readiness_base as _base
+from lifeos._recovery_readiness_base import (
+    RecoveryReport,
+    format_recovery_text,
+    recovery_report_to_dict,
+)
+from lifeos.coherence import CoherenceError
+from lifeos.retrieval.contracts import RetrievalError, scope_decision
 
 
 @dataclass(slots=True)
@@ -365,13 +372,13 @@ def _scope_filter_call(self: Any, path: str) -> bool:
         if self.case_insensitive and _base._casefold_denied(path, self.policy, self.request):
             self.incomplete = True
             return True
-        decision = _base.scope_decision(
+        decision = scope_decision(
             path,
             scope=self.request,
             policy=self.policy,
             mode="local",
         )
-    except (_base.CoherenceError, _base.RetrievalError) as exc:
+    except (CoherenceError, RetrievalError) as exc:
         raise _base.RecoveryGitError("Could not verify canonical recovery scope") from exc
     if not decision.allowed:
         self.incomplete = True
@@ -573,14 +580,14 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
         sandbox.close()
 
 
-_base._run_git = _run_git
-_base._run_git_presence = _run_git_presence
-_base._ScopeFilter.__call__ = _scope_filter_call
-_base._authorized_git_pathspecs = _authorized_git_pathspecs
-_base._snapshot_entry_for_index_path = _snapshot_entry_for_index_path
-_base._compare_index_entry = _compare_index_entry
-_base._latest_commit = _latest_commit
-_base._reject_repository_config_includes = _reject_repository_config_includes
+setattr(_base, "_run_git", _run_git)
+setattr(_base, "_run_git_presence", _run_git_presence)
+setattr(_base._ScopeFilter, "__call__", _scope_filter_call)
+setattr(_base, "_authorized_git_pathspecs", _authorized_git_pathspecs)
+setattr(_base, "_snapshot_entry_for_index_path", _snapshot_entry_for_index_path)
+setattr(_base, "_compare_index_entry", _compare_index_entry)
+setattr(_base, "_latest_commit", _latest_commit)
+setattr(_base, "_reject_repository_config_includes", _reject_repository_config_includes)
 
 for _name in dir(_base):
     if not _name.startswith("__") and _name not in globals():
