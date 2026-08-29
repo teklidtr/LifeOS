@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 import subprocess
 import unicodedata
@@ -43,7 +42,9 @@ def _commit_all(repository: Path, message: str) -> str:
     return _git(repository, "rev-parse", "HEAD").stdout.strip()
 
 
-def _diagnostics(report: recovery_readiness.RecoveryReport) -> dict[str, recovery_readiness.RecoveryDiagnostic]:
+def _diagnostics(
+    report: recovery_readiness.RecoveryReport,
+) -> dict[str, recovery_readiness.RecoveryDiagnostic]:
     return {item.id: item for item in report.diagnostics}
 
 
