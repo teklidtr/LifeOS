@@ -16,7 +16,7 @@ from typing import Literal
 
 from lifeos.coherence import CoherenceError
 from lifeos.config import LifeOSConfig
-from lifeos.retrieval.contracts import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.contracts import RetrievalError, RetrievalPolicy, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
@@ -24,14 +24,8 @@ RecoveryStatus = Literal["pass", "warning", "failure", "info", "unknown"]
 RecoverySeverity = Literal["info", "warning", "error"]
 PathExclusion = Callable[[str], bool]
 
-_DIRECTORY_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_DIRECTORY", 0)
-    | getattr(os, "O_NOFOLLOW", 0)
-    | getattr(os, "O_CLOEXEC", 0)
-)
-
-_GIT_ENVIRONMENT_SELECTION_KEYS = frozenset(
+_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+_GIT_ENV_KEYS = frozenset(
     {
         "GIT_ALTERNATE_OBJECT_DIRECTORIES",
         "GIT_CEILING_DIRECTORIES",
@@ -57,8 +51,6 @@ _GIT_ENVIRONMENT_SELECTION_KEYS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class RecoveryDiagnostic:
-    """One stable, privacy-conscious recovery diagnostic."""
-
     id: str
     status: RecoveryStatus
     severity: RecoverySeverity
@@ -69,8 +61,6 @@ class RecoveryDiagnostic:
 
 @dataclass(frozen=True, slots=True)
 class CanonicalCommitEvidence:
-    """Metadata for the latest commit that actually touched canonical vault data."""
-
     sha: str
     committed_at: str
     age_days: int
@@ -78,8 +68,6 @@ class CanonicalCommitEvidence:
 
 @dataclass(frozen=True, slots=True)
 class RecoveryReport:
-    """Deterministic recovery evidence without canonical note contents."""
-
     diagnostics: tuple[RecoveryDiagnostic, ...]
     repository_root: str | None
     last_canonical_commit: CanonicalCommitEvidence | None
@@ -91,24 +79,48 @@ class RecoveryReport:
     untracked_paths: tuple[str, ...]
     ignored_paths: tuple[str, ...]
     index_flagged_paths: tuple[str, ...]
+    working_tree_uncertain_paths: tuple[str, ...]
     unrecoverable_committed_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class _IndexEntryMetadata:
-    """Filesystem metadata cached in one stage-zero Git index entry."""
-
-    repo_path: str
+class _IndexEntry:
+    path: str
     mode: int
     ctime_ns: int
     mtime_ns: int
     device: int
     inode: int
-    size_bytes: int
+    size: int
+
+
+@dataclass(slots=True)
+class _ScopeFilter:
+    runtime: PathExclusion
+    policy: RetrievalPolicy
+    request: RetrievalScope
+    incomplete: bool = False
+
+    def __call__(self, path: str) -> bool:
+        try:
+            if self.runtime(path):
+                return True
+            allowed = scope_decision(
+                path,
+                scope=self.request,
+                policy=self.policy,
+                mode="local",
+            ).allowed
+        except (CoherenceError, RetrievalError) as exc:
+            raise RecoveryGitError("Could not verify canonical recovery scope") from exc
+        if not allowed:
+            self.incomplete = True
+            return True
+        return False
 
 
 class RecoveryGitError(RuntimeError):
-    """Raised when read-only Git metadata cannot be queried deterministically."""
+    pass
 
 
 def _utc_now() -> datetime:
@@ -117,34 +129,26 @@ def _utc_now() -> datetime:
 
 def _git_environment() -> dict[str, str]:
     env = os.environ.copy()
-    for name in tuple(env):
+    for key in tuple(env):
         if (
-            name in _GIT_ENVIRONMENT_SELECTION_KEYS
-            or name.startswith("GIT_TRACE")
-            or name == "GIT_CONFIG_COUNT"
-            or name.startswith("GIT_CONFIG_KEY_")
-            or name.startswith("GIT_CONFIG_VALUE_")
+            key in _GIT_ENV_KEYS
+            or key.startswith("GIT_TRACE")
+            or key == "GIT_CONFIG_COUNT"
+            or key.startswith("GIT_CONFIG_KEY_")
+            or key.startswith("GIT_CONFIG_VALUE_")
         ):
-            env.pop(name, None)
-    env["GIT_OPTIONAL_LOCKS"] = "0"
-    env["GIT_LITERAL_PATHSPECS"] = "1"
-    env["GIT_NO_LAZY_FETCH"] = "1"
-    env["GIT_NO_REPLACE_OBJECTS"] = "1"
-    env["GIT_PAGER"] = ""
-    env["GIT_CONFIG_COUNT"] = "1"
-    env["GIT_CONFIG_KEY_0"] = "core.fsmonitor"
-    env["GIT_CONFIG_VALUE_0"] = "false"
+            env.pop(key, None)
+    env.update(
+        GIT_OPTIONAL_LOCKS="0",
+        GIT_LITERAL_PATHSPECS="1",
+        GIT_NO_LAZY_FETCH="1",
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_PAGER="",
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0="core.fsmonitor",
+        GIT_CONFIG_VALUE_0="false",
+    )
     return env
-
-
-def _result_error(
-    result: subprocess.CompletedProcess[bytes],
-    *,
-    operation: str,
-) -> RecoveryGitError:
-    detail = result.stderr.decode("utf-8", errors="replace").strip()
-    suffix = f": {detail}" if detail else ""
-    return RecoveryGitError(f"{operation} failed with exit code {result.returncode}{suffix}")
 
 
 def _run_git(
@@ -165,116 +169,92 @@ def _run_git(
             env=_git_environment(),
             input=input_bytes,
         )
-    except OSError as error:
-        raise RecoveryGitError(f"Could not execute Git: {error}") from error
-    if check and result.returncode != 0:
-        raise _result_error(result, operation="Git metadata query")
+    except OSError as exc:
+        raise RecoveryGitError(f"Could not execute Git: {exc}") from exc
+    if check and result.returncode:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RecoveryGitError(
+            f"Git metadata query failed with exit code {result.returncode}{suffix}"
+        )
     return result
+
+
+def _runtime_filter(config: LifeOSConfig) -> PathExclusion:
+    try:
+        relative = config.runtime_dir.relative_to(config.vault_root)
+        prefix = f"{relative.as_posix().rstrip('/')}/" if relative.parts else None
+    except ValueError:
+        prefix = None
+    return build_runtime_exclusion_matcher(
+        config.vault_root,
+        runtime_dir=config.runtime_dir,
+        snapshot_prefix=prefix,
+    )
+
+
+def _scope_filter(config: LifeOSConfig) -> _ScopeFilter:
+    try:
+        runtime = _runtime_filter(config)
+        policy = load_retrieval_policy(config.vault_root)
+    except (CoherenceError, RetrievalError) as exc:
+        raise RecoveryGitError("Could not load recovery scope policy safely") from exc
+    return _ScopeFilter(runtime, policy, RetrievalScope())
+
+
+def _canonical_path(
+    path: str,
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
+) -> str | None:
+    pure = PurePosixPath(path)
+    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+        return None
+    parts = pure.parts
+    if prefix:
+        if parts[: len(prefix)] != prefix:
+            return None
+        parts = parts[len(prefix) :]
+    if not parts or "__pycache__" in parts:
+        return None
+    relative = PurePosixPath(*parts).as_posix()
+    if excluded(relative):
+        return None
+    return relative
+
+
+def _filter_paths(
+    paths: Sequence[str],
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
+) -> tuple[str, ...]:
+    output = {_canonical_path(path, prefix, excluded) for path in paths}
+    return tuple(sorted(path for path in output if path is not None))
 
 
 def _nul_paths(raw: bytes) -> tuple[str, ...]:
     return tuple(
-        item.decode("utf-8", errors="surrogateescape")
-        for item in raw.split(b"\0")
-        if item
+        part.decode("utf-8", errors="surrogateescape")
+        for part in raw.split(b"\0")
+        if part
     )
 
 
-def _runtime_snapshot_prefix(config: LifeOSConfig) -> str | None:
-    try:
-        relative = config.runtime_dir.relative_to(config.vault_root)
-    except ValueError:
-        return None
-    if not relative.parts:
-        return None
-    return f"{relative.as_posix().rstrip('/')}/"
-
-
-def _runtime_exclusion_matcher(config: LifeOSConfig) -> PathExclusion:
-    return build_runtime_exclusion_matcher(
-        config.vault_root,
-        runtime_dir=config.runtime_dir,
-        snapshot_prefix=_runtime_snapshot_prefix(config),
-    )
-
-
-def _canonical_exclusion_matcher(config: LifeOSConfig) -> PathExclusion:
-    """Combine disposable runtime and default-deny retrieval privacy policy for path exposure."""
-    runtime_excluded = _runtime_exclusion_matcher(config)
-    try:
-        policy = load_retrieval_policy(config.vault_root)
-    except RetrievalError as error:
-        raise RecoveryGitError("Could not load retrieval policy safely") from error
-    scope = RetrievalScope()
-
-    def excluded(path: str) -> bool:
-        try:
-            if runtime_excluded(path):
-                return True
-            return not scope_decision(
-                path,
-                scope=scope,
-                policy=policy,
-                mode="local",
-            ).allowed
-        except (CoherenceError, RetrievalError) as error:
-            raise RecoveryGitError("Could not verify canonical recovery scope") from error
-
-    return excluded
-
-
-def _canonical_vault_path(
-    repo_path: str,
-    *,
-    vault_repo_prefix: tuple[str, ...],
-    runtime_excluded: PathExclusion,
-) -> str | None:
-    pure = PurePosixPath(repo_path)
-    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
-        return None
-    repo_parts = pure.parts
-    if vault_repo_prefix:
-        if repo_parts[: len(vault_repo_prefix)] != vault_repo_prefix:
-            return None
-        relative_parts = repo_parts[len(vault_repo_prefix) :]
-    else:
-        relative_parts = repo_parts
-    if not relative_parts:
-        return None
-    if any(part == "__pycache__" for part in relative_parts):
-        return None
-    relative_path = PurePosixPath(*relative_parts).as_posix()
-    try:
-        if runtime_excluded(relative_path):
-            return None
-    except CoherenceError as error:
-        raise RecoveryGitError("Could not verify canonical recovery scope") from error
-    return relative_path
-
-
-def _filter_canonical_paths(
-    paths: Sequence[str],
-    *,
-    vault_repo_prefix: tuple[str, ...],
-    runtime_excluded: PathExclusion,
+def _git_paths(
+    git: str,
+    root: Path,
+    args: Sequence[str],
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
 ) -> tuple[str, ...]:
-    canonical: set[str] = set()
-    for path in paths:
-        candidate = _canonical_vault_path(
-            path,
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
-        )
-        if candidate is not None:
-            canonical.add(candidate)
-    return tuple(sorted(canonical))
+    result = _run_git(git, cwd=root, arguments=args)
+    return _filter_paths(_nul_paths(result.stdout), prefix, excluded)
 
 
-def _git_marker_exists(vault_root: Path) -> bool:
-    for directory in (vault_root, *vault_root.parents):
-        marker = directory / ".git"
+def _git_marker_exists(vault: Path) -> bool:
+    for directory in (vault, *vault.parents):
         try:
-            os.lstat(marker)
+            os.lstat(directory / ".git")
         except FileNotFoundError:
             continue
         except OSError:
@@ -283,333 +263,253 @@ def _git_marker_exists(vault_root: Path) -> bool:
     return False
 
 
-def _vault_repo_context(
-    git_executable: str,
-    vault_root: Path,
-) -> tuple[Path, tuple[str, ...], str] | None:
+def _repo_context(git: str, vault: Path) -> tuple[Path, tuple[str, ...], str] | None:
     result = _run_git(
-        git_executable,
-        cwd=vault_root,
+        git,
+        cwd=vault,
         arguments=("rev-parse", "--show-toplevel"),
         check=False,
     )
-    if result.returncode != 0:
-        if _git_marker_exists(vault_root):
-            raise _result_error(result, operation="Git repository discovery")
+    if result.returncode:
+        if _git_marker_exists(vault):
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            raise RecoveryGitError(
+                f"Git repository discovery failed: {detail or result.returncode}"
+            )
         return None
-    raw_root = result.stdout.decode("utf-8", errors="surrogateescape").strip()
-    if not raw_root:
-        raise RecoveryGitError("Git repository discovery returned an empty repository root")
-    repository_root = Path(raw_root).resolve(strict=False)
+    root = Path(
+        result.stdout.decode("utf-8", errors="surrogateescape").strip()
+    ).resolve(strict=False)
     try:
-        vault_relative = vault_root.relative_to(repository_root)
-    except ValueError as error:
-        raise RecoveryGitError("Git repository root does not contain the configured vault") from error
-    prefix = tuple(vault_relative.parts)
-    pathspec = vault_relative.as_posix() if prefix else "."
-    return repository_root, prefix, pathspec
+        relative = vault.relative_to(root)
+    except ValueError as exc:
+        raise RecoveryGitError(
+            "Git repository root does not contain the configured vault"
+        ) from exc
+    prefix = tuple(relative.parts)
+    return root, prefix, relative.as_posix() if prefix else "."
 
 
-def _git_paths(
-    git_executable: str,
-    *,
-    repository_root: Path,
-    arguments: Sequence[str],
-    vault_repo_prefix: tuple[str, ...],
-    runtime_excluded: PathExclusion,
-) -> tuple[str, ...]:
-    result = _run_git(git_executable, cwd=repository_root, arguments=arguments)
-    return _filter_canonical_paths(
-        _nul_paths(result.stdout),
-        vault_repo_prefix=vault_repo_prefix,
-        runtime_excluded=runtime_excluded,
-    )
-
-
-def _head_exists(git_executable: str, repository_root: Path) -> bool:
+def _head_exists(git: str, root: Path) -> bool:
     result = _run_git(
-        git_executable,
-        cwd=repository_root,
+        git,
+        cwd=root,
         arguments=("rev-parse", "--verify", "HEAD"),
         check=False,
     )
     return result.returncode == 0
 
 
-def _blob_payload_readable(
-    git_executable: str,
-    *,
-    repository_root: Path,
-    object_id: str,
-) -> bool:
-    """Force Git to inflate a committed blob without exposing its payload to Python or the terminal."""
+def _blob_matches_oid(git: str, root: Path, oid: str) -> bool:
     try:
-        result = subprocess.run(
-            [git_executable, "cat-file", "blob", object_id],
-            cwd=repository_root,
+        oid.encode("ascii")
+        producer = subprocess.Popen(
+            [git, "cat-file", "blob", oid],
+            cwd=root,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=_git_environment(),
+        )
+    except UnicodeEncodeError as exc:
+        raise RecoveryGitError("Git returned a non-ASCII object identifier") from exc
+    except OSError as exc:
+        raise RecoveryGitError(f"Could not execute Git: {exc}") from exc
+    if producer.stdout is None:
+        producer.kill()
+        producer.wait()
+        raise RecoveryGitError("Could not verify Git blob payload")
+    try:
+        verifier = subprocess.run(
+            [git, "hash-object", "--stdin"],
+            cwd=root,
             shell=False,
             check=False,
-            stdout=subprocess.DEVNULL,
+            stdin=producer.stdout,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=_git_environment(),
         )
-    except OSError as error:
-        raise RecoveryGitError(f"Could not execute Git: {error}") from error
-    return result.returncode == 0
-
-
-def _available_blob_oids(
-    git_executable: str,
-    *,
-    repository_root: Path,
-    object_ids: Sequence[str],
-) -> frozenset[str]:
-    unique = tuple(sorted(set(object_ids)))
-    if not unique:
-        return frozenset()
+    except OSError as exc:
+        producer.kill()
+        producer.wait()
+        raise RecoveryGitError(f"Could not execute Git: {exc}") from exc
+    finally:
+        producer.stdout.close()
+    if producer.wait() or verifier.returncode:
+        return False
     try:
-        payload = "".join(f"{object_id}\n" for object_id in unique).encode("ascii")
-    except UnicodeEncodeError as error:
-        raise RecoveryGitError("Git returned a non-ASCII object identifier") from error
-    result = _run_git(
-        git_executable,
-        cwd=repository_root,
-        arguments=("cat-file", "--batch-check=%(objectname) %(objecttype)"),
-        input_bytes=payload,
-    )
-    lines = result.stdout.splitlines()
-    if len(lines) != len(unique):
-        raise RecoveryGitError("Git object verification returned an unexpected result count")
-    available: set[str] = set()
-    for expected, line in zip(unique, lines, strict=True):
-        parts = line.split()
-        if len(parts) != 2:
-            raise RecoveryGitError("Git object verification returned malformed output")
-        observed = parts[0].decode("ascii", errors="strict")
-        if observed != expected:
-            raise RecoveryGitError("Git object verification returned an unexpected object")
-        if parts[1] == b"blob":
-            if _blob_payload_readable(
-                git_executable,
-                repository_root=repository_root,
-                object_id=expected,
-            ):
-                available.add(expected)
-        elif parts[1] != b"missing":
-            raise RecoveryGitError("Git tree entry did not resolve to a blob object")
-    return frozenset(available)
+        return verifier.stdout.decode("ascii", errors="strict").strip() == oid
+    except UnicodeDecodeError as exc:
+        raise RecoveryGitError("Git returned a non-ASCII object identifier") from exc
 
 
-def _committed_canonical_coverage(
-    git_executable: str,
-    *,
-    repository_root: Path,
+def _committed_coverage(
+    git: str,
+    root: Path,
     pathspec: str,
-    vault_repo_prefix: tuple[str, ...],
-    runtime_excluded: PathExclusion,
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    if not _head_exists(git_executable, repository_root):
+    if not _head_exists(git, root):
         return (), ()
-    result = _run_git(
-        git_executable,
-        cwd=repository_root,
+    raw = _run_git(
+        git,
+        cwd=root,
         arguments=("ls-tree", "-r", "-z", "HEAD", "--", pathspec),
-    )
-    regular_entries: list[tuple[str, str]] = []
+    ).stdout
+    entries: list[tuple[str, str]] = []
     gaps: set[str] = set()
-    for record in (item for item in result.stdout.split(b"\0") if item):
-        metadata, separator, raw_path = record.partition(b"\t")
-        fields = metadata.split()
-        if separator != b"\t" or len(fields) != 3:
+    for record in (part for part in raw.split(b"\0") if part):
+        meta, tab, raw_path = record.partition(b"\t")
+        fields = meta.split()
+        if tab != b"\t" or len(fields) != 3:
             raise RecoveryGitError("Git tree query returned malformed output")
-        mode, object_type, raw_object_id = fields
-        path = raw_path.decode("utf-8", errors="surrogateescape")
-        canonical = _canonical_vault_path(
-            path,
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
+        mode, obj_type, raw_oid = fields
+        canonical = _canonical_path(
+            raw_path.decode("utf-8", errors="surrogateescape"),
+            prefix,
+            excluded,
         )
         if canonical is None:
             continue
-        if object_type != b"blob" or not mode.startswith(b"100"):
+        if obj_type != b"blob" or not mode.startswith(b"100"):
             gaps.add(canonical)
             continue
         try:
-            object_id = raw_object_id.decode("ascii", errors="strict")
-        except UnicodeDecodeError as error:
-            raise RecoveryGitError("Git returned a non-ASCII object identifier") from error
-        regular_entries.append((canonical, object_id))
-
-    available = _available_blob_oids(
-        git_executable,
-        repository_root=repository_root,
-        object_ids=tuple(object_id for _, object_id in regular_entries),
-    )
-    covered: set[str] = set()
-    for path, object_id in regular_entries:
-        if object_id in available:
-            covered.add(path)
-        else:
-            gaps.add(path)
+            entries.append((canonical, raw_oid.decode("ascii", errors="strict")))
+        except UnicodeDecodeError as exc:
+            raise RecoveryGitError("Git returned a non-ASCII object identifier") from exc
+    availability = {oid: _blob_matches_oid(git, root, oid) for _, oid in entries}
+    covered = {path for path, oid in entries if availability[oid]}
+    gaps.update(path for path, oid in entries if not availability[oid])
     return tuple(sorted(covered)), tuple(sorted(gaps))
 
 
-def _index_flagged_paths(
-    git_executable: str,
-    *,
-    repository_root: Path,
+def _index_flags(
+    git: str,
+    root: Path,
     pathspec: str,
-    vault_repo_prefix: tuple[str, ...],
-    runtime_excluded: PathExclusion,
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
 ) -> tuple[str, ...]:
-    result = _run_git(
-        git_executable,
-        cwd=repository_root,
+    raw = _run_git(
+        git,
+        cwd=root,
         arguments=("ls-files", "-v", "-z", "--", pathspec),
-    )
+    ).stdout
     paths: list[str] = []
-    for record in (item for item in result.stdout.split(b"\0") if item):
+    for record in (part for part in raw.split(b"\0") if part):
         if len(record) < 3 or record[1:2] != b" ":
             raise RecoveryGitError("Git index flag query returned malformed output")
         tag = chr(record[0])
         if tag == "S" or tag.islower():
             paths.append(record[2:].decode("utf-8", errors="surrogateescape"))
-    return _filter_canonical_paths(
-        paths,
-        vault_repo_prefix=vault_repo_prefix,
-        runtime_excluded=runtime_excluded,
-    )
+    return _filter_paths(paths, prefix, excluded)
 
 
 def _debug_line(raw: bytes, cursor: int) -> tuple[bytes, int]:
-    line_end = raw.find(b"\n", cursor)
-    if line_end < 0:
+    end = raw.find(b"\n", cursor)
+    if end < 0:
         raise RecoveryGitError("Git index metadata query returned truncated output")
-    return raw[cursor:line_end], line_end + 1
+    return raw[cursor:end], end + 1
 
 
-def _parse_index_time(line: bytes, prefix: bytes) -> int:
+def _time(line: bytes, prefix: bytes) -> int:
     if not line.startswith(prefix):
         raise RecoveryGitError("Git index metadata query returned malformed timestamps")
-    parts = line[len(prefix) :].split(b":", 1)
-    if len(parts) != 2:
-        raise RecoveryGitError("Git index metadata query returned malformed timestamps")
+    values = line[len(prefix) :].split(b":", 1)
     try:
-        seconds = int(parts[0], 10)
-        nanoseconds = int(parts[1], 10)
-    except ValueError as error:
-        raise RecoveryGitError("Git index metadata query returned malformed timestamps") from error
-    return seconds * 1_000_000_000 + nanoseconds
+        return int(values[0]) * 1_000_000_000 + int(values[1])
+    except (IndexError, ValueError) as exc:
+        raise RecoveryGitError(
+            "Git index metadata query returned malformed timestamps"
+        ) from exc
 
 
-def _parse_index_pair(
-    line: bytes,
-    *,
-    prefix: bytes,
-    separator: bytes,
-    second_prefix: bytes,
-) -> tuple[int, int]:
+def _pair(line: bytes, prefix: bytes, second: bytes) -> tuple[int, int]:
     if not line.startswith(prefix):
         raise RecoveryGitError("Git index metadata query returned malformed stat data")
-    left, found, right = line[len(prefix) :].partition(separator)
-    if found != separator or not right.startswith(second_prefix):
+    left, tab, right = line[len(prefix) :].partition(b"\t")
+    if tab != b"\t" or not right.startswith(second):
         raise RecoveryGitError("Git index metadata query returned malformed stat data")
     try:
-        return int(left, 10), int(right[len(second_prefix) :], 10)
-    except ValueError as error:
-        raise RecoveryGitError("Git index metadata query returned malformed stat data") from error
+        return int(left), int(right[len(second) :])
+    except ValueError as exc:
+        raise RecoveryGitError(
+            "Git index metadata query returned malformed stat data"
+        ) from exc
 
 
-def _parse_index_entries(raw: bytes) -> tuple[_IndexEntryMetadata, ...]:
-    entries: list[_IndexEntryMetadata] = []
+def _index_entries(raw: bytes) -> tuple[_IndexEntry, ...]:
+    entries: list[_IndexEntry] = []
     cursor = 0
     while cursor < len(raw):
-        nul = raw.find(b"\0", cursor)
-        if nul < 0:
+        end = raw.find(b"\0", cursor)
+        if end < 0:
             raise RecoveryGitError("Git index metadata query returned malformed path data")
-        header = raw[cursor:nul]
-        cursor = nul + 1
-        ctime_line, cursor = _debug_line(raw, cursor)
-        mtime_line, cursor = _debug_line(raw, cursor)
-        device_line, cursor = _debug_line(raw, cursor)
-        uid_line, cursor = _debug_line(raw, cursor)
-        size_line, cursor = _debug_line(raw, cursor)
-
-        metadata, separator, raw_path = header.partition(b"\t")
-        fields = metadata.split()
-        if separator != b"\t" or len(fields) != 3:
+        header, cursor = raw[cursor:end], end + 1
+        ctime, cursor = _debug_line(raw, cursor)
+        mtime, cursor = _debug_line(raw, cursor)
+        device, cursor = _debug_line(raw, cursor)
+        uid, cursor = _debug_line(raw, cursor)
+        size, cursor = _debug_line(raw, cursor)
+        meta, tab, raw_path = header.partition(b"\t")
+        fields = meta.split()
+        if tab != b"\t" or len(fields) != 3 or not uid.startswith(b"  uid: "):
             raise RecoveryGitError("Git index metadata query returned malformed entry data")
-        raw_mode, _object_id, raw_stage = fields
         try:
-            mode = int(raw_mode, 8)
-            stage = int(raw_stage, 10)
-        except ValueError as error:
-            raise RecoveryGitError("Git index metadata query returned malformed entry data") from error
-        if stage != 0:
+            mode, stage = int(fields[0], 8), int(fields[2])
+        except ValueError as exc:
+            raise RecoveryGitError(
+                "Git index metadata query returned malformed entry data"
+            ) from exc
+        if stage:
             raise RecoveryGitError("Git index contains unmerged entries")
-
-        ctime_ns = _parse_index_time(ctime_line, b"  ctime: ")
-        mtime_ns = _parse_index_time(mtime_line, b"  mtime: ")
-        device, inode = _parse_index_pair(
-            device_line,
-            prefix=b"  dev: ",
-            separator=b"\t",
-            second_prefix=b"ino: ",
-        )
-        if not uid_line.startswith(b"  uid: "):
-            raise RecoveryGitError("Git index metadata query returned malformed stat data")
-        size, _flags = _parse_index_pair(
-            size_line,
-            prefix=b"  size: ",
-            separator=b"\t",
-            second_prefix=b"flags: ",
-        )
+        dev, ino = _pair(device, b"  dev: ", b"ino: ")
+        length, _ = _pair(size, b"  size: ", b"flags: ")
         entries.append(
-            _IndexEntryMetadata(
-                repo_path=raw_path.decode("utf-8", errors="surrogateescape"),
-                mode=mode,
-                ctime_ns=ctime_ns,
-                mtime_ns=mtime_ns,
-                device=device,
-                inode=inode,
-                size_bytes=size,
+            _IndexEntry(
+                raw_path.decode("utf-8", errors="surrogateescape"),
+                mode,
+                _time(ctime, b"  ctime: "),
+                _time(mtime, b"  mtime: "),
+                dev,
+                ino,
+                length,
             )
         )
     return tuple(entries)
 
 
-def _safe_lstat_vault_path(vault_root: Path, relative_path: str) -> os.stat_result | None:
-    pure = PurePosixPath(relative_path)
+def _lstat(vault: Path, relative: str) -> os.stat_result | None:
+    pure = PurePosixPath(relative)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         raise RecoveryGitError("Canonical Git path escaped the configured vault")
     opened: list[int] = []
     try:
-        try:
-            current_fd = os.open(vault_root, _DIRECTORY_FLAGS)
-        except OSError as error:
-            raise RecoveryGitError("Could not inspect the configured vault root") from error
-        opened.append(current_fd)
+        current = os.open(vault, _DIR_FLAGS)
+        opened.append(current)
         for part in pure.parts[:-1]:
             try:
-                next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+                current = os.open(part, _DIR_FLAGS, dir_fd=current)
+                opened.append(current)
             except FileNotFoundError:
                 return None
-            except OSError as error:
-                if error.errno in {errno.ELOOP, errno.ENOTDIR}:
+            except OSError as exc:
+                if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
                     raise RecoveryGitError(
                         "Canonical working-tree metadata traverses an unsafe parent entry"
-                    ) from error
+                    ) from exc
                 raise RecoveryGitError(
                     "Could not inspect canonical working-tree metadata"
-                ) from error
-            opened.append(next_fd)
-            current_fd = next_fd
+                ) from exc
         try:
-            return os.stat(pure.parts[-1], dir_fd=current_fd, follow_symlinks=False)
+            return os.stat(pure.parts[-1], dir_fd=current, follow_symlinks=False)
         except FileNotFoundError:
             return None
-        except OSError as error:
-            raise RecoveryGitError("Could not inspect canonical working-tree metadata") from error
+    except OSError as exc:
+        raise RecoveryGitError("Could not inspect canonical working-tree metadata") from exc
     finally:
         for fd in reversed(opened):
             try:
@@ -618,73 +518,66 @@ def _safe_lstat_vault_path(vault_root: Path, relative_path: str) -> os.stat_resu
                 pass
 
 
-def _index_metadata_changed(entry: _IndexEntryMetadata, observed: os.stat_result) -> bool:
-    if entry.mode not in {0o100644, 0o100755} or not stat.S_ISREG(observed.st_mode):
-        return True
-    if entry.size_bytes != observed.st_size:
-        return True
-    if entry.mtime_ns != observed.st_mtime_ns or entry.ctime_ns != observed.st_ctime_ns:
-        return True
-    if entry.device and entry.device != (observed.st_dev & 0xFFFFFFFF):
-        return True
-    if entry.inode and entry.inode != (observed.st_ino & 0xFFFFFFFF):
-        return True
-    return False
-
-
-def _working_tree_state(
-    git_executable: str,
-    *,
-    repository_root: Path,
-    vault_root: Path,
+def _worktree(
+    git: str,
+    root: Path,
+    vault: Path,
     pathspec: str,
-    vault_repo_prefix: tuple[str, ...],
-    runtime_excluded: PathExclusion,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    result = _run_git(
-        git_executable,
-        cwd=repository_root,
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    raw = _run_git(
+        git,
+        cwd=root,
         arguments=("ls-files", "--stage", "--debug", "-z", "--", pathspec),
-    )
+    ).stdout
     modified: set[str] = set()
     deleted: set[str] = set()
-    for entry in _parse_index_entries(result.stdout):
-        canonical = _canonical_vault_path(
-            entry.repo_path,
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
-        )
-        if canonical is None:
+    uncertain: set[str] = set()
+    for entry in _index_entries(raw):
+        path = _canonical_path(entry.path, prefix, excluded)
+        if path is None:
             continue
-        observed = _safe_lstat_vault_path(vault_root, canonical)
+        observed = _lstat(vault, path)
         if observed is None:
-            deleted.add(canonical)
-        elif _index_metadata_changed(entry, observed):
-            modified.add(canonical)
-    return tuple(sorted(modified)), tuple(sorted(deleted))
+            deleted.add(path)
+            continue
+        if entry.mode not in {0o100644, 0o100755} or not stat.S_ISREG(observed.st_mode):
+            modified.add(path)
+            continue
+        if entry.size != observed.st_size:
+            modified.add(path)
+            continue
+        if (
+            entry.mtime_ns != observed.st_mtime_ns
+            or entry.ctime_ns != observed.st_ctime_ns
+            or (entry.device and entry.device != (observed.st_dev & 0xFFFFFFFF))
+            or (entry.inode and entry.inode != (observed.st_ino & 0xFFFFFFFF))
+        ):
+            uncertain.add(path)
+    return tuple(sorted(modified)), tuple(sorted(deleted)), tuple(sorted(uncertain))
 
 
-def _latest_canonical_commit(
-    git_executable: str,
-    *,
-    repository_root: Path,
+def _latest_commit(
+    git: str,
+    root: Path,
     pathspec: str,
-    vault_repo_prefix: tuple[str, ...],
-    runtime_excluded: PathExclusion,
-    clock_fn: Callable[[], datetime],
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
+    clock: Callable[[], datetime],
 ) -> CanonicalCommitEvidence | None:
-    if not _head_exists(git_executable, repository_root):
+    if not _head_exists(git, root):
         return None
-    revision_result = _run_git(
-        git_executable,
-        cwd=repository_root,
+    revisions = _run_git(
+        git,
+        cwd=root,
         arguments=("rev-list", "HEAD", "--", pathspec),
-    )
-    for sha in revision_result.stdout.decode("ascii", errors="strict").splitlines():
+    ).stdout
+    for sha in revisions.decode("ascii", errors="strict").splitlines():
         changed = _git_paths(
-            git_executable,
-            repository_root=repository_root,
-            arguments=(
+            git,
+            root,
+            (
                 "diff-tree",
                 "--no-ext-diff",
                 "--no-textconv",
@@ -698,72 +591,79 @@ def _latest_canonical_commit(
                 "--",
                 pathspec,
             ),
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
+            prefix,
+            excluded,
         )
         if not changed:
             continue
-        timestamp_result = _run_git(
-            git_executable,
-            cwd=repository_root,
+        stamp = _run_git(
+            git,
+            cwd=root,
             arguments=("show", "-s", "--format=%cI", sha),
-        )
-        committed_at = timestamp_result.stdout.decode("ascii", errors="strict").strip()
+        ).stdout.decode("ascii", errors="strict").strip()
         try:
-            committed = datetime.fromisoformat(committed_at.replace("Z", "+00:00"))
-        except ValueError as error:
-            raise RecoveryGitError("Git returned an invalid commit timestamp") from error
+            committed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise RecoveryGitError("Git returned an invalid commit timestamp") from exc
         if committed.tzinfo is None:
             committed = committed.replace(tzinfo=timezone.utc)
-        now = clock_fn()
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
-        age_seconds = max(
+        now = clock()
+        now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        age = max(
             0.0,
-            (now.astimezone(timezone.utc) - committed.astimezone(timezone.utc)).total_seconds(),
+            (
+                now.astimezone(timezone.utc) - committed.astimezone(timezone.utc)
+            ).total_seconds(),
         )
-        return CanonicalCommitEvidence(
-            sha=sha,
-            committed_at=committed_at,
-            age_days=int(age_seconds // 86_400),
-        )
+        return CanonicalCommitEvidence(sha, stamp, int(age // 86_400))
     return None
 
 
-def _unknown_git_diagnostics(summary: str) -> tuple[RecoveryDiagnostic, ...]:
+def _diag(
+    id_: str,
+    status: RecoveryStatus,
+    severity: RecoverySeverity,
+    summary: str,
+    remediation: str | None = None,
+    paths: tuple[str, ...] = (),
+) -> RecoveryDiagnostic:
+    return RecoveryDiagnostic(id_, status, severity, summary, remediation, paths)
+
+
+def _git_unknown(summary: str) -> tuple[RecoveryDiagnostic, ...]:
     return (
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.repository",
             "unknown",
             "error",
             summary,
             "Verify Git repository ownership, permissions, and metadata, then retry the doctor.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.last_canonical_commit",
             "unknown",
             "warning",
             "Canonical commit history could not be verified.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.canonical_objects",
             "unknown",
             "warning",
             "Local recoverability of committed canonical blobs could not be verified.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.uncommitted_canonical",
             "unknown",
             "warning",
             "Uncommitted canonical changes could not be verified.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.untracked_canonical",
             "unknown",
             "warning",
             "Untracked canonical files could not be verified.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.ignored_canonical",
             "unknown",
             "warning",
@@ -772,40 +672,40 @@ def _unknown_git_diagnostics(summary: str) -> tuple[RecoveryDiagnostic, ...]:
     )
 
 
-def _non_repository_diagnostics() -> tuple[RecoveryDiagnostic, ...]:
+def _no_repo() -> tuple[RecoveryDiagnostic, ...]:
     return (
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.repository",
             "failure",
             "error",
             "The configured vault is not covered by a Git repository.",
             "Initialize version history for the canonical vault and commit the intended durable files.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.last_canonical_commit",
             "unknown",
             "warning",
             "No canonical commit can exist until the vault is covered by Git history.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.canonical_objects",
             "unknown",
             "warning",
             "No committed canonical blobs can be verified without a Git repository.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.uncommitted_canonical",
             "unknown",
             "warning",
             "Uncommitted canonical coverage cannot be classified without a Git repository.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.untracked_canonical",
             "unknown",
             "warning",
             "Untracked canonical coverage cannot be classified without a Git repository.",
         ),
-        RecoveryDiagnostic(
+        _diag(
             "recovery.git.ignored_canonical",
             "unknown",
             "warning",
@@ -814,8 +714,8 @@ def _non_repository_diagnostics() -> tuple[RecoveryDiagnostic, ...]:
     )
 
 
-def _external_backup_diagnostic() -> RecoveryDiagnostic:
-    return RecoveryDiagnostic(
+def _external() -> RecoveryDiagnostic:
+    return _diag(
         "recovery.backup.external",
         "unknown",
         "warning",
@@ -830,46 +730,46 @@ def _external_backup_diagnostic() -> RecoveryDiagnostic:
     )
 
 
-def _runtime_diagnostic(config: LifeOSConfig) -> RecoveryDiagnostic:
+def _runtime(config: LifeOSConfig) -> RecoveryDiagnostic:
     try:
-        runtime_display = config.runtime_dir.relative_to(config.vault_root).as_posix()
+        display = config.runtime_dir.relative_to(config.vault_root).as_posix()
     except ValueError:
-        runtime_display = "<external-runtime>"
-    return RecoveryDiagnostic(
+        display = "<external-runtime>"
+    return _diag(
         "recovery.runtime.disposable",
         "info",
         "info",
-        (
-            f"Disposable runtime state at {runtime_display} is rebuildable and is not canonical "
-            "recovery material."
-        ),
+        f"Disposable runtime state at {display} is rebuildable and is not canonical recovery material.",
         "Restore canonical vault data first, then rebuild or recreate derived runtime state.",
     )
 
 
-def _fallback_report(
+def _fallback(
     config: LifeOSConfig,
-    git_diagnostics: tuple[RecoveryDiagnostic, ...],
-    *,
-    repository_root: Path | None = None,
+    items: tuple[RecoveryDiagnostic, ...],
+    root: Path | None = None,
 ) -> RecoveryReport:
     return RecoveryReport(
-        diagnostics=(
-            *git_diagnostics,
-            _external_backup_diagnostic(),
-            _runtime_diagnostic(config),
-        ),
-        repository_root=str(repository_root) if repository_root is not None else None,
-        last_canonical_commit=None,
-        committed_canonical_count=0,
-        uncommitted_paths=(),
-        staged_paths=(),
-        unstaged_paths=(),
-        deleted_paths=(),
-        untracked_paths=(),
-        ignored_paths=(),
-        index_flagged_paths=(),
-        unrecoverable_committed_paths=(),
+        (*items, _external(), _runtime(config)),
+        str(root) if root else None,
+        None,
+        0,
+        (),
+        (),
+        (),
+        (),
+        (),
+        (),
+        (),
+        (),
+        (),
+    )
+
+
+def _incomplete(subject: str) -> str:
+    return (
+        f"{subject} is incomplete because protected or policy-excluded canonical scope was not "
+        "inspected or exposed."
     )
 
 
@@ -878,36 +778,27 @@ def collect_recovery_readiness(
     *,
     clock_fn: Callable[[], datetime] = _utc_now,
 ) -> RecoveryReport:
-    """Collect structural recovery evidence without reading canonical file contents or mutating Git."""
-    git_executable = shutil.which("git")
-    if git_executable is None:
-        return _fallback_report(
+    git = shutil.which("git")
+    if git is None:
+        return _fallback(
             config,
-            _unknown_git_diagnostics("Git is unavailable, so local canonical history is unknown."),
+            _git_unknown("Git is unavailable, so local canonical history is unknown."),
         )
-
     try:
-        context = _vault_repo_context(git_executable, config.vault_root)
-    except RecoveryGitError as error:
-        return _fallback_report(config, _unknown_git_diagnostics(str(error)))
+        context = _repo_context(git, config.vault_root)
+    except RecoveryGitError as exc:
+        return _fallback(config, _git_unknown(str(exc)))
     if context is None:
-        return _fallback_report(config, _non_repository_diagnostics())
-
-    repository_root, vault_repo_prefix, pathspec = context
+        return _fallback(config, _no_repo())
+    root, prefix, pathspec = context
     try:
-        runtime_excluded = _canonical_exclusion_matcher(config)
-        head_exists = _head_exists(git_executable, repository_root)
-        committed_paths, unrecoverable_paths = _committed_canonical_coverage(
-            git_executable,
-            repository_root=repository_root,
-            pathspec=pathspec,
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
-        )
-        staged_paths = _git_paths(
-            git_executable,
-            repository_root=repository_root,
-            arguments=(
+        scope = _scope_filter(config)
+        head = _head_exists(git, root)
+        committed, unrecoverable = _committed_coverage(git, root, pathspec, prefix, scope)
+        staged = _git_paths(
+            git,
+            root,
+            (
                 "diff",
                 "--cached",
                 "--no-ext-diff",
@@ -917,28 +808,28 @@ def collect_recovery_readiness(
                 "--",
                 pathspec,
             ),
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
+            prefix,
+            scope,
         )
-        unstaged_paths, deleted_paths = _working_tree_state(
-            git_executable,
-            repository_root=repository_root,
-            vault_root=config.vault_root,
-            pathspec=pathspec,
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
+        unstaged, deleted, uncertain = _worktree(
+            git,
+            root,
+            config.vault_root,
+            pathspec,
+            prefix,
+            scope,
         )
-        untracked_paths = _git_paths(
-            git_executable,
-            repository_root=repository_root,
-            arguments=("ls-files", "--others", "--exclude-standard", "-z", "--", pathspec),
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
+        untracked = _git_paths(
+            git,
+            root,
+            ("ls-files", "--others", "--exclude-standard", "-z", "--", pathspec),
+            prefix,
+            scope,
         )
-        ignored_paths = _git_paths(
-            git_executable,
-            repository_root=repository_root,
-            arguments=(
+        ignored = _git_paths(
+            git,
+            root,
+            (
                 "ls-files",
                 "--others",
                 "--ignored",
@@ -947,53 +838,54 @@ def collect_recovery_readiness(
                 "--",
                 pathspec,
             ),
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
+            prefix,
+            scope,
         )
-        index_flagged_paths = _index_flagged_paths(
-            git_executable,
-            repository_root=repository_root,
-            pathspec=pathspec,
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
-        )
-        last_commit = _latest_canonical_commit(
-            git_executable,
-            repository_root=repository_root,
-            pathspec=pathspec,
-            vault_repo_prefix=vault_repo_prefix,
-            runtime_excluded=runtime_excluded,
-            clock_fn=clock_fn,
-        )
-    except RecoveryGitError as error:
-        return _fallback_report(
-            config,
-            _unknown_git_diagnostics(str(error)),
-            repository_root=repository_root,
-        )
+        flags = _index_flags(git, root, pathspec, prefix, scope)
+        last = _latest_commit(git, root, pathspec, prefix, scope, clock_fn)
+    except RecoveryGitError as exc:
+        return _fallback(config, _git_unknown(str(exc)), root)
 
-    uncommitted_paths = tuple(sorted(set(staged_paths) | set(unstaged_paths) | set(deleted_paths)))
-    diagnostic_items: list[RecoveryDiagnostic] = [
-        RecoveryDiagnostic(
+    incomplete = scope.incomplete
+    uncommitted = tuple(sorted(set(staged) | set(unstaged) | set(deleted)))
+    items: list[RecoveryDiagnostic] = [
+        _diag(
             "recovery.git.repository",
             "pass",
             "info",
             "The configured vault is covered by a local Git repository.",
         )
     ]
-    if not head_exists:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+
+    if not head:
+        items.append(
+            _diag(
                 "recovery.git.last_canonical_commit",
                 "failure",
                 "error",
-                "The Git repository has no commit yet, so no canonical vault version is recoverable from history.",
+                (
+                    "The Git repository has no commit yet, so no canonical vault version is "
+                    "recoverable from history."
+                ),
                 "Create a reviewed initial commit containing the intended canonical vault files.",
             )
         )
-    elif last_commit is None:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+    elif incomplete:
+        items.append(
+            _diag(
+                "recovery.git.last_canonical_commit",
+                "unknown",
+                "warning",
+                _incomplete("Canonical commit-history coverage"),
+                (
+                    "Review protected/excluded recovery scope explicitly before treating commit "
+                    "coverage as complete."
+                ),
+            )
+        )
+    elif last is None:
+        items.append(
+            _diag(
                 "recovery.git.last_canonical_commit",
                 "failure",
                 "error",
@@ -1002,109 +894,167 @@ def collect_recovery_readiness(
             )
         )
     else:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+        items.append(
+            _diag(
                 "recovery.git.last_canonical_commit",
                 "info",
                 "info",
                 (
-                    f"Latest canonical commit is {last_commit.sha[:12]} from "
-                    f"{last_commit.committed_at} ({last_commit.age_days} day(s) old)."
+                    f"Latest canonical commit is {last.sha[:12]} from {last.committed_at} "
+                    f"({last.age_days} day(s) old)."
                 ),
             )
         )
 
-    if not head_exists:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+    if not head:
+        items.append(
+            _diag(
                 "recovery.git.canonical_objects",
                 "unknown",
                 "warning",
                 "Committed canonical blob availability cannot be verified before the first commit.",
             )
         )
-    elif unrecoverable_paths:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+    elif unrecoverable:
+        items.append(
+            _diag(
                 "recovery.git.canonical_objects",
                 "failure",
                 "error",
                 (
-                    f"{len(unrecoverable_paths)} committed canonical path(s) are not backed by "
-                    "locally readable regular blob objects."
+                    f"{len(unrecoverable)} visible committed canonical path(s) are not backed by "
+                    "locally hash-verified regular blob objects."
                 ),
                 (
                     "Repair the local Git object store or replace gitlink/symlink-style canonical "
                     "entries with ordinary recoverable vault files before relying on local history."
                 ),
-                unrecoverable_paths,
+                unrecoverable,
+            )
+        )
+    elif incomplete:
+        items.append(
+            _diag(
+                "recovery.git.canonical_objects",
+                "unknown",
+                "warning",
+                _incomplete("Committed canonical object coverage"),
+                (
+                    "Review protected/excluded recovery scope explicitly before treating local "
+                    "object coverage as complete."
+                ),
             )
         )
     else:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+        items.append(
+            _diag(
                 "recovery.git.canonical_objects",
                 "pass",
                 "info",
-                "Committed canonical tree entries are backed by locally readable regular blobs.",
+                (
+                    "Committed canonical tree entries are backed by locally hash-verified regular "
+                    "blobs."
+                ),
             )
         )
 
-    if index_flagged_paths:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+    uncertain_all = tuple(sorted(set(uncertain) | set(flags)))
+    all_tracked = tuple(sorted(set(uncommitted) | set(uncertain_all)))
+    if uncommitted:
+        suffix = (
+            f" {len(uncertain_all)} additional tracked path(s) have unverified metadata state."
+            if uncertain_all
+            else ""
+        )
+        items.append(
+            _diag(
+                "recovery.git.uncommitted_canonical",
+                "warning",
+                "warning",
+                (
+                    f"{len(uncommitted)} tracked canonical path(s) have staged, modified, or "
+                    f"deleted state not represented by the latest commit.{suffix}"
+                ),
+                (
+                    "Review and commit intended canonical changes; inspect metadata-uncertain "
+                    "paths and clear hiding index flags before treating the tree as clean."
+                ),
+                all_tracked,
+            )
+        )
+    elif uncertain_all:
+        items.append(
+            _diag(
                 "recovery.git.uncommitted_canonical",
                 "unknown",
                 "warning",
                 (
-                    f"Working-tree cleanliness cannot be proven for {len(index_flagged_paths)} "
-                    "canonical path(s) marked assume-unchanged or skip-worktree."
+                    f"Working-tree content equality cannot be proven for {len(uncertain_all)} "
+                    "visible canonical path(s) from metadata alone."
                 ),
                 (
-                    "Clear assume-unchanged/skip-worktree on canonical paths, then rerun the doctor "
-                    "and review any staged, modified, or deleted changes."
+                    "Inspect the listed paths and clear assume-unchanged/skip-worktree flags where "
+                    "present before treating the tree as clean."
                 ),
-                tuple(sorted(set(uncommitted_paths) | set(index_flagged_paths))),
+                uncertain_all,
             )
         )
-    elif uncommitted_paths:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+    elif incomplete:
+        items.append(
+            _diag(
                 "recovery.git.uncommitted_canonical",
+                "unknown",
                 "warning",
-                "warning",
+                _incomplete("Uncommitted canonical coverage"),
                 (
-                    f"{len(uncommitted_paths)} tracked canonical path(s) have staged, modified, "
-                    "or deleted state not represented by the latest commit."
+                    "Review protected/excluded recovery scope explicitly before treating the "
+                    "working tree as clean."
                 ),
-                "Review and commit the intended canonical changes; staging alone is not durable history.",
-                uncommitted_paths,
             )
         )
     else:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+        items.append(
+            _diag(
                 "recovery.git.uncommitted_canonical",
                 "pass",
                 "info",
-                "No tracked canonical paths have uncommitted changes or hiding index flags.",
+                (
+                    "No tracked canonical paths have proven uncommitted changes or unresolved "
+                    "metadata state."
+                ),
             )
         )
 
-    if untracked_paths:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+    if untracked:
+        items.append(
+            _diag(
                 "recovery.git.untracked_canonical",
                 "warning",
                 "warning",
-                f"{len(untracked_paths)} canonical path(s) are untracked and absent from committed history.",
+                (
+                    f"{len(untracked)} visible canonical path(s) are untracked and absent from "
+                    "committed history."
+                ),
                 "Review these paths and add/commit the canonical files that should be recoverable.",
-                untracked_paths,
+                untracked,
+            )
+        )
+    elif incomplete:
+        items.append(
+            _diag(
+                "recovery.git.untracked_canonical",
+                "unknown",
+                "warning",
+                _incomplete("Untracked canonical coverage"),
+                (
+                    "Review protected/excluded recovery scope explicitly before treating untracked "
+                    "coverage as complete."
+                ),
             )
         )
     else:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+        items.append(
+            _diag(
                 "recovery.git.untracked_canonical",
                 "pass",
                 "info",
@@ -1112,23 +1062,39 @@ def collect_recovery_readiness(
             )
         )
 
-    if ignored_paths:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+    if ignored:
+        items.append(
+            _diag(
                 "recovery.git.ignored_canonical",
                 "warning",
                 "warning",
                 (
-                    f"{len(ignored_paths)} canonical path(s) are ignored by Git and are not present "
-                    "in committed canonical history."
+                    f"{len(ignored)} visible canonical path(s) are ignored by Git and absent from "
+                    "committed canonical history."
                 ),
-                "Review ignore rules and protect these canonical files through the intended durable history.",
-                ignored_paths,
+                (
+                    "Review ignore rules and protect these canonical files through the intended "
+                    "durable history."
+                ),
+                ignored,
+            )
+        )
+    elif incomplete:
+        items.append(
+            _diag(
+                "recovery.git.ignored_canonical",
+                "unknown",
+                "warning",
+                _incomplete("Ignored canonical coverage"),
+                (
+                    "Review protected/excluded recovery scope explicitly before treating ignore "
+                    "coverage as complete."
+                ),
             )
         )
     else:
-        diagnostic_items.append(
-            RecoveryDiagnostic(
+        items.append(
+            _diag(
                 "recovery.git.ignored_canonical",
                 "pass",
                 "info",
@@ -1136,20 +1102,21 @@ def collect_recovery_readiness(
             )
         )
 
-    diagnostic_items.extend((_external_backup_diagnostic(), _runtime_diagnostic(config)))
+    items.extend((_external(), _runtime(config)))
     return RecoveryReport(
-        diagnostics=tuple(diagnostic_items),
-        repository_root=str(repository_root),
-        last_canonical_commit=last_commit,
-        committed_canonical_count=len(committed_paths),
-        uncommitted_paths=uncommitted_paths,
-        staged_paths=staged_paths,
-        unstaged_paths=unstaged_paths,
-        deleted_paths=deleted_paths,
-        untracked_paths=untracked_paths,
-        ignored_paths=ignored_paths,
-        index_flagged_paths=index_flagged_paths,
-        unrecoverable_committed_paths=unrecoverable_paths,
+        tuple(items),
+        str(root),
+        last,
+        len(committed),
+        uncommitted,
+        staged,
+        unstaged,
+        deleted,
+        untracked,
+        ignored,
+        flags,
+        uncertain,
+        unrecoverable,
     )
 
 
@@ -1162,7 +1129,6 @@ def _terminal_safe_path(value: str) -> str:
 
 
 def format_recovery_text(report: RecoveryReport) -> list[str]:
-    """Format recovery evidence for inclusion in the human-readable doctor report."""
     lines = ["Recovery readiness"]
     if report.repository_root is not None:
         lines.append(f"  local Git repository: {_terminal_safe_text(report.repository_root)}")
@@ -1172,17 +1138,17 @@ def format_recovery_text(report: RecoveryReport) -> list[str]:
             f"  {diagnostic.id}: {diagnostic.status} ({diagnostic.severity}) - "
             f"{_terminal_safe_text(diagnostic.summary)}"
         )
-        for path in diagnostic.paths:
-            lines.append(f"    path: {_terminal_safe_path(path)}")
+        lines.extend(
+            f"    path: {_terminal_safe_path(path)}" for path in diagnostic.paths
+        )
         if diagnostic.remediation:
             lines.append(f"    next: {_terminal_safe_text(diagnostic.remediation)}")
     return lines
 
 
 def recovery_report_to_dict(report: RecoveryReport) -> dict[str, object]:
-    """Return a stable JSON-ready recovery report shape."""
     return {
-        "diagnostics": [asdict(diagnostic) for diagnostic in report.diagnostics],
+        "diagnostics": [asdict(item) for item in report.diagnostics],
         "repository_root": report.repository_root,
         "last_canonical_commit": (
             asdict(report.last_canonical_commit) if report.last_canonical_commit else None
@@ -1195,5 +1161,6 @@ def recovery_report_to_dict(report: RecoveryReport) -> dict[str, object]:
         "untracked_paths": list(report.untracked_paths),
         "ignored_paths": list(report.ignored_paths),
         "index_flagged_paths": list(report.index_flagged_paths),
+        "working_tree_uncertain_paths": list(report.working_tree_uncertain_paths),
         "unrecoverable_committed_paths": list(report.unrecoverable_committed_paths),
     }
