@@ -141,15 +141,20 @@ The recovery section distinguishes three layers:
 
 1. **Canonical Git coverage.** LifeOS checks whether the configured vault is
    covered by Git, whether canonical history has any commit, the latest commit
-   that actually touched the configured vault, whether committed canonical tree
-   entries are ordinary locally available blob objects, and current staged,
-   modified, deleted, untracked, or ignored canonical paths. Missing local blob
-   objects, gitlinks, or symlink-style committed entries are reported through
+   that actually touched the configured vault, whether visible committed
+   canonical tree entries are ordinary locally **hash-verified** blob objects,
+   and current staged, modified, deleted, untracked, or ignored canonical paths.
+   Missing or corrupt local blob objects, object-ID mismatches, gitlinks, or
+   symlink-style committed entries are reported through
    `recovery.git.canonical_objects` rather than counted as recoverable canonical
    coverage. Canonical paths marked `assume-unchanged` or `skip-worktree` make
-   working-tree cleanliness **unknown** until those flags are cleared. Staging is
-   not a substitute for a commit. An old commit timestamp is informational by
-   itself; a clean vault can remain fully represented by an old commit.
+   working-tree cleanliness **unknown** until those flags are cleared. If only
+   stat-cache metadata changed and content equality cannot be established from
+   metadata alone, the path is reported under `working_tree_uncertain_paths` and
+   the uncommitted diagnostic is **unknown**, not falsely labeled modified.
+   Staging is not a substitute for a commit. An old commit timestamp is
+   informational by itself; a clean vault can remain fully represented by an old
+   commit.
 2. **Independent backup/snapshot evidence.** Local Git history can recover
    committed logical versions, but it can disappear with the same disk. A Git
    remote name or remote-tracking ref does not prove that an off-device copy is
@@ -163,13 +168,20 @@ The recovery section distinguishes three layers:
    Restore canonical files first, then rebuild the runtime state. Do not solve a
    doctor warning by committing `.lifeos/`.
 
+Protected or policy-excluded canonical paths are never named in recovery output.
+Because the current doctor has no explicit protected-scope authorization input,
+checks whose completeness depends on such hidden scope report **unknown /
+incomplete** rather than `pass`. This preserves nondisclosure without turning
+uninspected sensitive data into a false clean signal.
+
 Typical actionable Git warnings name only the relative paths needed to fix the
 problem. Git repository inspection failures are reported as **unknown** rather
 than being confused with a vault that has no repository. Recovery queries disable
 Git features that can execute configured filesystem monitors or content filters,
-strip inherited repository-selection variables, and avoid lazy object fetching.
-The doctor does not copy note bodies or secrets into recovery output and does not
-commit, push, restore, scan, repair, or create backups for you.
+strip inherited repository-selection variables, avoid lazy object fetching, and
+hash-check committed blob payloads without copying their contents into diagnostic
+output. The doctor does not copy note bodies or secrets into recovery output and
+does not commit, push, restore, scan, repair, or create backups for you.
 
 ## Safe upgrade
 
