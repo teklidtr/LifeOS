@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import shutil
 import stat
@@ -15,6 +16,8 @@ from typing import Literal
 
 from lifeos.coherence import CoherenceError
 from lifeos.config import LifeOSConfig
+from lifeos.retrieval.contracts import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
 RecoveryStatus = Literal["pass", "warning", "failure", "info", "unknown"]
@@ -195,6 +198,31 @@ def _runtime_exclusion_matcher(config: LifeOSConfig) -> PathExclusion:
     )
 
 
+def _canonical_exclusion_matcher(config: LifeOSConfig) -> PathExclusion:
+    """Combine disposable runtime and default-deny retrieval privacy policy for path exposure."""
+    runtime_excluded = _runtime_exclusion_matcher(config)
+    try:
+        policy = load_retrieval_policy(config.vault_root)
+    except RetrievalError as error:
+        raise RecoveryGitError("Could not load retrieval policy safely") from error
+    scope = RetrievalScope()
+
+    def excluded(path: str) -> bool:
+        try:
+            if runtime_excluded(path):
+                return True
+            return not scope_decision(
+                path,
+                scope=scope,
+                policy=policy,
+                mode="local",
+            ).allowed
+        except (CoherenceError, RetrievalError) as error:
+            raise RecoveryGitError("Could not verify canonical recovery scope") from error
+
+    return excluded
+
+
 def _canonical_vault_path(
     repo_path: str,
     *,
@@ -213,14 +241,14 @@ def _canonical_vault_path(
         relative_parts = repo_parts
     if not relative_parts:
         return None
-    if any(part.startswith(".") or part == "__pycache__" for part in relative_parts):
+    if any(part == "__pycache__" for part in relative_parts):
         return None
     relative_path = PurePosixPath(*relative_parts).as_posix()
     try:
         if runtime_excluded(relative_path):
             return None
     except CoherenceError as error:
-        raise RecoveryGitError("Could not verify configured runtime exclusion") from error
+        raise RecoveryGitError("Could not verify canonical recovery scope") from error
     return relative_path
 
 
@@ -308,6 +336,28 @@ def _head_exists(git_executable: str, repository_root: Path) -> bool:
     return result.returncode == 0
 
 
+def _blob_payload_readable(
+    git_executable: str,
+    *,
+    repository_root: Path,
+    object_id: str,
+) -> bool:
+    """Force Git to inflate a committed blob without exposing its payload to Python or the terminal."""
+    try:
+        result = subprocess.run(
+            [git_executable, "cat-file", "blob", object_id],
+            cwd=repository_root,
+            shell=False,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env=_git_environment(),
+        )
+    except OSError as error:
+        raise RecoveryGitError(f"Could not execute Git: {error}") from error
+    return result.returncode == 0
+
+
 def _available_blob_oids(
     git_executable: str,
     *,
@@ -339,7 +389,12 @@ def _available_blob_oids(
         if observed != expected:
             raise RecoveryGitError("Git object verification returned an unexpected object")
         if parts[1] == b"blob":
-            available.add(expected)
+            if _blob_payload_readable(
+                git_executable,
+                repository_root=repository_root,
+                object_id=expected,
+            ):
+                available.add(expected)
         elif parts[1] != b"missing":
             raise RecoveryGitError("Git tree entry did not resolve to a blob object")
     return frozenset(available)
@@ -839,8 +894,8 @@ def collect_recovery_readiness(
         return _fallback_report(config, _non_repository_diagnostics())
 
     repository_root, vault_repo_prefix, pathspec = context
-    runtime_excluded = _runtime_exclusion_matcher(config)
     try:
+        runtime_excluded = _canonical_exclusion_matcher(config)
         head_exists = _head_exists(git_executable, repository_root)
         committed_paths, unrecoverable_paths = _committed_canonical_coverage(
             git_executable,
@@ -976,7 +1031,7 @@ def collect_recovery_readiness(
                 "error",
                 (
                     f"{len(unrecoverable_paths)} committed canonical path(s) are not backed by "
-                    "locally available regular blob objects."
+                    "locally readable regular blob objects."
                 ),
                 (
                     "Repair the local Git object store or replace gitlink/symlink-style canonical "
@@ -991,7 +1046,7 @@ def collect_recovery_readiness(
                 "recovery.git.canonical_objects",
                 "pass",
                 "info",
-                "Committed canonical tree entries are backed by locally available regular blobs.",
+                "Committed canonical tree entries are backed by locally readable regular blobs.",
             )
         )
 
@@ -1098,20 +1153,29 @@ def collect_recovery_readiness(
     )
 
 
+def _terminal_safe_text(value: str) -> str:
+    return json.dumps(value, ensure_ascii=True)[1:-1]
+
+
+def _terminal_safe_path(value: str) -> str:
+    return json.dumps(value, ensure_ascii=True)
+
+
 def format_recovery_text(report: RecoveryReport) -> list[str]:
     """Format recovery evidence for inclusion in the human-readable doctor report."""
     lines = ["Recovery readiness"]
     if report.repository_root is not None:
-        lines.append(f"  local Git repository: {report.repository_root}")
+        lines.append(f"  local Git repository: {_terminal_safe_text(report.repository_root)}")
     lines.append(f"  committed canonical paths: {report.committed_canonical_count}")
     for diagnostic in report.diagnostics:
         lines.append(
-            f"  {diagnostic.id}: {diagnostic.status} ({diagnostic.severity}) - {diagnostic.summary}"
+            f"  {diagnostic.id}: {diagnostic.status} ({diagnostic.severity}) - "
+            f"{_terminal_safe_text(diagnostic.summary)}"
         )
         for path in diagnostic.paths:
-            lines.append(f"    path: {path}")
+            lines.append(f"    path: {_terminal_safe_path(path)}")
         if diagnostic.remediation:
-            lines.append(f"    next: {diagnostic.remediation}")
+            lines.append(f"    next: {_terminal_safe_text(diagnostic.remediation)}")
     return lines
 
 
