@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import shlex
+import stat
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -217,7 +219,7 @@ def test_recovery_detects_unstaged_metadata_without_running_clean_filter(
     assert diagnostics["recovery.git.uncommitted_canonical"].status == "warning"
 
 
-def test_recovery_staged_diff_disables_rename_detection(
+def test_recovery_staged_state_avoids_git_diff_subsystem(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -227,10 +229,14 @@ def test_recovery_staged_diff_disables_rename_detection(
     capsys.readouterr()
     (vault / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
     _commit_all(vault, "baseline")
+    staged = vault / "wiki" / "staged.md"
+    staged.write_text("staged\n", encoding="utf-8")
+    _git(vault, "add", "wiki/staged.md")
     _git(vault, "config", "diff.renames", "true")
+    _git(vault, "config", "diff.orderFile", "secrets/order-file")
 
     real_run_git = recovery_readiness._run_git
-    staged_queries: list[tuple[str, ...]] = []
+    diff_queries: list[tuple[str, ...]] = []
 
     def recording_run_git(
         git_executable: str,
@@ -241,8 +247,8 @@ def test_recovery_staged_diff_disables_rename_detection(
         input_bytes: bytes | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         args = tuple(arguments)
-        if args[:2] == ("diff", "--cached"):
-            staged_queries.append(args)
+        if args and args[0] == "diff":
+            diff_queries.append(args)
         return real_run_git(
             git_executable,
             cwd=cwd,
@@ -253,10 +259,10 @@ def test_recovery_staged_diff_disables_rename_detection(
 
     monkeypatch.setattr(recovery_readiness, "_run_git", recording_run_git)
 
-    collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
 
-    assert staged_queries
-    assert all("--no-renames" in args for args in staged_queries)
+    assert diff_queries == []
+    assert "wiki/staged.md" in report.staged_paths
 
 
 def test_recovery_treats_missing_blob_payload_integrity_as_unknown(
@@ -328,9 +334,138 @@ def test_recovery_git_environment_clears_inherited_config_injection(
     assert env["GIT_CONFIG_COUNT"] == "1"
     assert env["GIT_CONFIG_KEY_0"] == "core.fsmonitor"
     assert env["GIT_CONFIG_VALUE_0"] == "false"
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_CONFIG_GLOBAL"] == recovery_readiness.os.devnull
     assert "GIT_CONFIG_KEY_1" not in env
     assert "GIT_CONFIG_VALUE_1" not in env
     assert "GIT_DIR" not in env
     assert "GIT_TRACE_PACKET" not in env
     assert env["GIT_NO_LAZY_FETCH"] == "1"
     assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_recovery_skips_ignore_traversal_when_protected_scope_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    policy = vault / "system" / "retrieval-policy.yml"
+    policy.write_text(
+        "schema_version: 1\nprotected_prefixes:\n  - secrets\n",
+        encoding="utf-8",
+    )
+    (vault / "wiki" / "visible.md").write_text("visible\n", encoding="utf-8")
+    _commit_all(vault, "baseline")
+    protected = vault / "secrets"
+    protected.mkdir()
+    (protected / ".gitignore").write_text("*.md\n", encoding="utf-8")
+    (protected / "private.md").write_text("private\n", encoding="utf-8")
+
+    real_run_git = recovery_readiness._run_git
+    ignore_queries: list[tuple[str, ...]] = []
+
+    def recording_run_git(
+        git_executable: str,
+        *,
+        cwd: Path,
+        arguments: tuple[str, ...] | list[str],
+        check: bool = True,
+        input_bytes: bytes | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        args = tuple(arguments)
+        if args and args[0] == "ls-files" and "--exclude-standard" in args:
+            ignore_queries.append(args)
+        return real_run_git(
+            git_executable,
+            cwd=cwd,
+            arguments=arguments,
+            check=check,
+            input_bytes=input_bytes,
+        )
+
+    monkeypatch.setattr(recovery_readiness, "_run_git", recording_run_git)
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    diagnostics = _diagnostics(report)
+
+    assert ignore_queries == []
+    assert report.untracked_paths == ()
+    assert report.ignored_paths == ()
+    assert diagnostics["recovery.git.untracked_canonical"].status == "unknown"
+    assert diagnostics["recovery.git.ignored_canonical"].status == "unknown"
+
+
+def test_recovery_returns_unknown_if_head_or_index_changes_during_collection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    (vault / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
+    _commit_all(vault, "baseline")
+
+    real_snapshot = recovery_readiness._git_snapshot
+    calls = 0
+
+    def unstable_snapshot(git: str, root: Path, pathspec: str) -> recovery_readiness._GitSnapshot:
+        nonlocal calls
+        snapshot = real_snapshot(git, root, pathspec)
+        calls += 1
+        if calls == 2:
+            return recovery_readiness._GitSnapshot(
+                snapshot.head_oid,
+                snapshot.index_debug + b"changed-after-collection",
+                snapshot.index_flags,
+            )
+        return snapshot
+
+    monkeypatch.setattr(recovery_readiness, "_git_snapshot", unstable_snapshot)
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    diagnostics = _diagnostics(report)
+
+    assert calls == 2
+    assert diagnostics["recovery.git.repository"].status == "unknown"
+    assert diagnostics["recovery.git.uncommitted_canonical"].status == "unknown"
+    assert "changed during recovery inspection" in diagnostics["recovery.git.repository"].summary
+
+
+def test_recovery_large_index_size_is_uncertain_not_modified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = recovery_readiness._IndexEntry(
+        path="wiki/huge.bin",
+        mode=0o100644,
+        oid="0" * 40,
+        ctime_ns=1,
+        mtime_ns=1,
+        device=0,
+        inode=0,
+        size=7,
+    )
+    observed = SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o644,
+        st_size=(1 << 32) + 7,
+        st_mtime_ns=1,
+        st_ctime_ns=1,
+        st_dev=0,
+        st_ino=0,
+    )
+    monkeypatch.setattr(recovery_readiness, "_lstat", lambda _vault, _path: observed)
+
+    modified, deleted, uncertain = recovery_readiness._worktree_from_entries(
+        (entry,),
+        tmp_path,
+        (),
+        lambda _path: False,
+    )
+
+    assert modified == ()
+    assert deleted == ()
+    assert uncertain == ("wiki/huge.bin",)
