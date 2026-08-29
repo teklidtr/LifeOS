@@ -247,6 +247,7 @@ action for the remaining draft-to-applied lifecycle. One digest-bound confirmati
 that exact reviewed content; Python still persists each lifecycle transition, reloads and
 rechecks the digest between transitions, and runs full application-time target validation.
 See [Obsidian Desktop Architecture](obsidian-desktop-architecture.md).
+
 ## Adaptive feedback release architecture
 
 Adaptive planning is shipped as a bounded layer above the baseline planner.
@@ -375,9 +376,9 @@ notes, reminders, or calendar-like structures use the shared proposal engine.
 
 The bridge exposes typed `experiment.*` capabilities, while the Obsidian plugin
 remains a thin graphical client for design, tracking, analysis, evidence, history,
-proposals, migration, recovery, and visualization
-models. Local creation, tracking, analysis, and review integration require no model. Optional
-assistance uses provider-neutral contracts and bounded, inspectable source selection. See
+proposals, migration, recovery, and visualization models. Local creation, tracking, analysis, and review
+integration require no model. Optional assistance uses provider-neutral contracts
+and bounded, inspectable source selection. See
 [Personal Experiment Architecture](personal-experiment-architecture.md) and
 [Personal Experiments](user-manual/12-personal-experiments.md).
 
@@ -497,6 +498,7 @@ requires an explicit Host allowlist, and the deployment guide requires a private
 or TLS-terminating authenticated reverse proxy rather than unauthenticated public Internet
 exposure. LifeOS does not own DNS, certificates, routers, VPN configuration, or a general sync
 transport.
+
 The generic OCI image is the supported deployment unit for Linux/NAS/Raspberry Pi-class nodes.
 The container keeps the canonical vault/Git view on a persistent writable mount while
 `.lifeos/` runtime state may live on a separate disposable/rebuildable volume. Full validation
