@@ -25,9 +25,9 @@ from typing import Any, Literal
 
 from lifeos import _recovery_readiness_base as _base
 from lifeos._recovery_readiness_base import (
-    RecoveryReport,
-    format_recovery_text,
-    recovery_report_to_dict,
+    RecoveryReport as RecoveryReport,
+    format_recovery_text as format_recovery_text,
+    recovery_report_to_dict as recovery_report_to_dict,
 )
 from lifeos.coherence import CoherenceError
 from lifeos.retrieval.contracts import RetrievalError, scope_decision
