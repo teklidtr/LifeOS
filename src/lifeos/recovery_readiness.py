@@ -15,6 +15,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys as _sys
 import tempfile
 import types
 import unicodedata
@@ -93,7 +94,6 @@ def _discover_git_directory(vault: Path) -> tuple[Path, Path] | None:
             raise _base.RecoveryGitError("Git repository metadata could not be resolved") from exc
         if not git_dir.is_dir():
             raise _base.RecoveryGitError("Git repository metadata directory is unavailable")
-        # Linked-worktree common-dir semantics need a broader metadata snapshot than this task.
         if (git_dir / "commondir").exists():
             raise _base.RecoveryGitError(
                 "Linked-worktree Git metadata cannot be inspected safely by recovery diagnostics"
@@ -229,9 +229,14 @@ def _metadata_fingerprint(git_dir: Path) -> str:
                 observed = os.lstat(path)
                 if stat.S_ISLNK(observed.st_mode) or not stat.S_ISREG(observed.st_mode):
                     raise _base.RecoveryGitError("Git refs contain an unsafe entry")
-                digest.update(f"{relative_dir}/{filename}".encode("utf-8", errors="surrogateescape"))
+                digest.update(
+                    f"{relative_dir}/{filename}".encode("utf-8", errors="surrogateescape")
+                )
                 digest.update(b"\0")
-                digest.update(path.read_bytes())
+                try:
+                    digest.update(path.read_bytes())
+                except OSError as exc:
+                    raise _base.RecoveryGitError("Could not fingerprint Git refs") from exc
                 digest.update(b"\0")
     return digest.hexdigest()
 
@@ -241,8 +246,7 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
     if discovered is None:
         return None
     root, git_dir = discovered
-    config_bytes, contains_includes, filemode = _config_snapshot(git_dir / "config")
-    del config_bytes
+    _config_bytes, contains_includes, filemode = _config_snapshot(git_dir / "config")
     fingerprint = _metadata_fingerprint(git_dir)
     try:
         index_state = os.lstat(git_dir / "index")
@@ -503,7 +507,6 @@ def _latest_commit(
 
 
 def _reject_repository_config_includes(_git: str, _vault: Path) -> None:
-    # Repository configuration is replaced by the active sanitized metadata snapshot.
     return None
 
 
@@ -530,8 +533,6 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
     token = _ACTIVE_SANDBOX.set(sandbox)
     try:
         if sandbox.contains_includes:
-            # Keep the established path-free diagnostic behavior, but run the compatibility
-            # probe only against the sanitized config snapshot, never the repository config.
             _base._run_git(
                 git,
                 cwd=config.vault_root,
@@ -555,7 +556,8 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
             config,
             **({} if clock_fn is None else {"clock_fn": clock_fn}),
         )
-        if _metadata_fingerprint(_discover_git_directory(config.vault_root)[1]) != sandbox.fingerprint:  # type: ignore[index]
+        discovered = _discover_git_directory(config.vault_root)
+        if discovered is None or _metadata_fingerprint(discovered[1]) != sandbox.fingerprint:
             return _base._fallback(
                 config,
                 _base._git_unknown(
@@ -571,8 +573,6 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
         sandbox.close()
 
 
-# Patch the implementation module's runtime globals. Functions defined there resolve these
-# names at call time, so existing behavior is preserved while the trust boundary is hardened.
 _base._run_git = _run_git
 _base._run_git_presence = _run_git_presence
 _base._ScopeFilter.__call__ = _scope_filter_call
@@ -582,8 +582,6 @@ _base._compare_index_entry = _compare_index_entry
 _base._latest_commit = _latest_commit
 _base._reject_repository_config_includes = _reject_repository_config_includes
 
-# Re-export the established module surface, including private helpers used by isolated regression
-# tests. Locally defined hardened names win over the base implementation.
 for _name in dir(_base):
     if not _name.startswith("__") and _name not in globals():
         globals()[_name] = getattr(_base, _name)
@@ -597,7 +595,5 @@ class _RecoveryModuleProxy(types.ModuleType):
         if hasattr(_base, name):
             setattr(_base, name, value)
 
-
-import sys as _sys
 
 _sys.modules[__name__].__class__ = _RecoveryModuleProxy
