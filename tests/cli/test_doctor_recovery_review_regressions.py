@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import zlib
 from pathlib import Path
 
 import pytest
@@ -62,7 +63,7 @@ def test_recovery_includes_hidden_canonical_paths(tmp_path: Path) -> None:
     assert all(not path.startswith(".lifeos/") for path in report.untracked_paths)
 
 
-def test_recovery_applies_retrieval_policy_before_reporting_or_counting_paths(
+def test_recovery_applies_retrieval_policy_without_false_clean_status(
     tmp_path: Path,
 ) -> None:
     vault = tmp_path / "vault"
@@ -104,9 +105,17 @@ def test_recovery_applies_retrieval_policy_before_reporting_or_counting_paths(
     assert report.uncommitted_paths == ()
     assert report.untracked_paths == ()
     assert report.ignored_paths == ()
-    assert getattr(_diagnostic(report, "recovery.git.uncommitted_canonical"), "status") == "pass"
-    assert getattr(_diagnostic(report, "recovery.git.untracked_canonical"), "status") == "pass"
-    assert getattr(_diagnostic(report, "recovery.git.ignored_canonical"), "status") == "pass"
+    for diagnostic_id in (
+        "recovery.git.last_canonical_commit",
+        "recovery.git.canonical_objects",
+        "recovery.git.uncommitted_canonical",
+        "recovery.git.untracked_canonical",
+        "recovery.git.ignored_canonical",
+    ):
+        diagnostic = _diagnostic(report, diagnostic_id)
+        assert getattr(diagnostic, "status") == "unknown"
+        assert "protected or policy-excluded" in getattr(diagnostic, "summary")
+
     for private_path in (
         "journal/private/tracked.md",
         "secrets/new.md",
@@ -131,6 +140,26 @@ def test_recovery_human_output_escapes_terminal_control_characters(tmp_path: Pat
     assert "\x1b" not in human
     assert "line\\nbreak" in human
     assert "\\u001b[31m.md" in human
+
+
+def test_recovery_treats_stat_only_drift_as_unknown_not_modified(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    note = vault / "wiki" / "touched.md"
+    note.write_text("unchanged canonical bytes\n", encoding="utf-8")
+    _commit_all(vault, "touch baseline")
+
+    before = note.stat()
+    os.utime(note, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    diagnostic = _diagnostic(report, "recovery.git.uncommitted_canonical")
+
+    assert "wiki/touched.md" not in report.unstaged_paths
+    assert "wiki/touched.md" not in report.uncommitted_paths
+    assert "wiki/touched.md" in report.working_tree_uncertain_paths
+    assert getattr(diagnostic, "status") == "unknown"
+    assert "wiki/touched.md" in getattr(diagnostic, "paths")
 
 
 def test_recovery_verifies_committed_blob_payload_integrity(tmp_path: Path) -> None:
@@ -163,10 +192,37 @@ def test_recovery_verifies_committed_blob_payload_integrity(tmp_path: Path) -> N
     diagnostic = _diagnostic(report, "recovery.git.canonical_objects")
 
     assert "wiki/corrupt.md" in report.unrecoverable_committed_paths
-    assert "wiki/corrupt.md" not in {
-        path
-        for path in report.unrecoverable_committed_paths
-        if path.startswith(".lifeos/")
-    }
     assert getattr(diagnostic, "status") == "failure"
     assert getattr(diagnostic, "severity") == "error"
+
+
+def test_recovery_verifies_blob_payload_hash_matches_expected_oid(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    note = vault / "wiki" / "hash-mismatch.md"
+    note.write_text("original canonical body\n", encoding="utf-8")
+    _commit_all(vault, "hash baseline")
+
+    object_id = _git(vault, "rev-parse", "HEAD:wiki/hash-mismatch.md").stdout.strip()
+    object_path = vault / ".git" / "objects" / object_id[:2] / object_id[2:]
+    assert object_path.is_file(), "test requires the freshly committed blob to remain loose"
+
+    replacement = b"different but well-formed blob payload\n"
+    encoded = zlib.compress(f"blob {len(replacement)}\0".encode("ascii") + replacement)
+    os.chmod(object_path, 0o644)
+    object_path.write_bytes(encoded)
+
+    cat_file = subprocess.run(
+        ["git", "cat-file", "blob", object_id],
+        cwd=vault,
+        check=False,
+        capture_output=True,
+    )
+    assert cat_file.returncode == 0
+    assert cat_file.stdout == replacement
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    diagnostic = _diagnostic(report, "recovery.git.canonical_objects")
+
+    assert "wiki/hash-mismatch.md" in report.unrecoverable_committed_paths
+    assert getattr(diagnostic, "status") == "failure"
