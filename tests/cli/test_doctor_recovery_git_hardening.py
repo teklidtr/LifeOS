@@ -469,3 +469,25 @@ def test_recovery_large_index_size_is_uncertain_not_modified(
     assert modified == ()
     assert deleted == ()
     assert uncertain == ("wiki/huge.bin",)
+
+
+def test_recovery_check_ignore_overrides_literal_pathspec_environment(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+
+    (vault / ".gitignore").write_text("wiki/ignored.md\n", encoding="utf-8")
+    _commit_all(vault, "ignore baseline")
+    ignored = vault / "wiki" / "ignored.md"
+    ignored.write_text("ignored canonical body\n", encoding="utf-8")
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    diagnostics = _diagnostics(report)
+
+    assert report.ignored_paths == ("wiki/ignored.md",)
+    assert report.untracked_paths == ()
+    assert diagnostics["recovery.git.ignored_canonical"].status == "warning"
+    assert diagnostics["recovery.git.repository"].status == "pass"
