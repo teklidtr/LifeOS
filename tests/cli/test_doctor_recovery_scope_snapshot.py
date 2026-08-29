@@ -442,6 +442,7 @@ def test_case_semantics_probe_does_not_enumerate_vault_names(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    (tmp_path / "lifeos.yml").write_text("safe metadata\n", encoding="utf-8")
     monkeypatch.setattr(
         recovery_readiness.os,
         "scandir",
@@ -449,6 +450,77 @@ def test_case_semantics_probe_does_not_enumerate_vault_names(
     )
 
     assert isinstance(recovery_readiness._vault_case_insensitive(tmp_path), bool)
+
+
+def test_vault_case_semantics_uses_actual_safe_metadata_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "lifeos.yml").write_text("safe metadata\n", encoding="utf-8")
+    calls: list[tuple[Path, Path]] = []
+
+    def fake_case_probe(root: Path, relative: Path) -> bool:
+        calls.append((root, relative))
+        return True
+
+    monkeypatch.setattr(recovery_readiness, "_filesystem_case_insensitive", fake_case_probe)
+
+    assert recovery_readiness._vault_case_insensitive(tmp_path) is True
+    assert calls == [(tmp_path, Path("lifeos.yml"))]
+
+
+def test_repository_config_include_is_rejected_before_repository_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    secret = vault / "secrets" / "note.md"
+    secret.parent.mkdir()
+    secret.write_text("[core\ninvalid = config body\n", encoding="utf-8")
+    with (vault / ".git" / "config").open("a", encoding="utf-8") as handle:
+        handle.write("\n[include]\n\tpath = ../secrets/note.md\n")
+
+    real_run_git = recovery_readiness._run_git
+    calls: list[tuple[str, ...]] = []
+
+    def recording_run_git(
+        git_executable: str,
+        *,
+        cwd: Path,
+        arguments: tuple[str, ...] | list[str],
+        check: bool = True,
+        input_bytes: bytes | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        args = tuple(arguments)
+        calls.append(args)
+        return real_run_git(
+            git_executable,
+            cwd=cwd,
+            arguments=arguments,
+            check=check,
+            input_bytes=input_bytes,
+        )
+
+    monkeypatch.setattr(recovery_readiness, "_run_git", recording_run_git)
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    diagnostic = _diagnostics(report)["recovery.git.repository"]
+
+    assert diagnostic.status == "unknown"
+    assert "secrets/note.md" not in diagnostic.summary
+    assert calls == [
+        (
+            "config",
+            "--no-includes",
+            "--name-only",
+            "--get-regexp",
+            r"^include(if)?\.",
+        )
+    ]
+    assert all(call[:2] != ("rev-parse", "--show-toplevel") for call in calls)
 
 
 def test_protected_gitignore_prevents_check_ignore_invocation(
