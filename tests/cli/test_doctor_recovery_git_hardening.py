@@ -191,9 +191,7 @@ def test_recovery_detects_unstaged_metadata_without_running_clean_filter(
     marker = tmp_path / "clean-filter-called"
     filter_script = tmp_path / "clean-filter.sh"
     filter_script.write_text(
-        "#!/bin/sh\n"
-        f"touch {shlex.quote(str(marker))}\n"
-        "cat\n",
+        f"#!/bin/sh\ntouch {shlex.quote(str(marker))}\ncat\n",
         encoding="utf-8",
     )
     filter_script.chmod(0o755)
@@ -342,6 +340,64 @@ def test_recovery_git_environment_clears_inherited_config_injection(
     assert "GIT_TRACE_PACKET" not in env
     assert env["GIT_NO_LAZY_FETCH"] == "1"
     assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_recovery_git_environment_clears_inherited_pathspec_modes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "GIT_GLOB_PATHSPECS",
+        "GIT_NOGLOB_PATHSPECS",
+        "GIT_ICASE_PATHSPECS",
+    ):
+        monkeypatch.setenv(key, "1")
+
+    env = recovery_readiness._git_environment()
+
+    assert "GIT_LITERAL_PATHSPECS" not in env
+    assert "GIT_GLOB_PATHSPECS" not in env
+    assert "GIT_NOGLOB_PATHSPECS" not in env
+    assert "GIT_ICASE_PATHSPECS" not in env
+
+
+def test_absent_skip_worktree_path_is_uncertain_not_deleted(
+    tmp_path: Path,
+) -> None:
+    entry = recovery_readiness._IndexEntry("wiki/sparse.md", 0o100644, "0" * 40, 1, 1, 0, 0, 7)
+
+    modified, deleted, uncertain, matched = recovery_readiness._worktree_from_snapshot(
+        (entry,),
+        tmp_path,
+        (),
+        lambda _path: False,
+        recovery_readiness._WorkingTreeSnapshot(()),
+        skip_worktree_paths=("wiki/sparse.md",),
+    )
+
+    assert modified == ()
+    assert deleted == ()
+    assert uncertain == ("wiki/sparse.md",)
+    assert matched == ()
+
+
+def test_recovery_detects_executable_bit_drift_when_filemode_enabled(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    note = vault / "wiki" / "mode.md"
+    note.write_text("mode\n", encoding="utf-8")
+    note.chmod(0o644)
+    _commit_all(vault, "mode baseline")
+    _git(vault, "config", "core.filemode", "true")
+    note.chmod(0o755)
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+
+    assert "wiki/mode.md" in report.unstaged_paths
+    assert _diagnostics(report)["recovery.git.uncommitted_canonical"].status == "warning"
 
 
 def test_recovery_skips_ignore_traversal_when_protected_scope_exists(

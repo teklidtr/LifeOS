@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -87,9 +88,7 @@ def test_case_probe_walks_only_ancestor_tree_levels(
 
     monkeypatch.setattr(recovery_readiness, "_run_git", fake_run_git)
 
-    assert recovery_readiness._git_prefix_spelling("git", tmp_path, ("Vault",)) == (
-        "vault",
-    )
+    assert recovery_readiness._git_prefix_spelling("git", tmp_path, ("Vault",)) == ("vault",)
     assert calls == [("ls-tree", "-z", root_oid)]
     assert all("ls-files" not in call for call in calls)
 
@@ -144,18 +143,12 @@ def test_protected_git_scope_is_excluded_before_recursive_queries(
     assert "secrets/private.md" not in rendered
     index_queries = [call for call in calls if "ls-files" in call]
     assert index_queries
-    assert any(
-        ":(top,exclude,literal)secrets" in call for call in index_queries
-    )
-    recursive_tree_queries = [
-        call for call in calls if "ls-tree" in call and "-r" in call
-    ]
+    assert any(":(top,exclude,literal)secrets" in call for call in index_queries)
+    recursive_tree_queries = [call for call in calls if "ls-tree" in call and "-r" in call]
     assert recursive_tree_queries == []
     history_queries = [call for call in calls if "rev-list" in call or "diff-tree" in call]
     assert history_queries
-    assert all(
-        ":(top,exclude,literal)secrets" in call for call in history_queries
-    )
+    assert all(":(top,exclude,literal)secrets" in call for call in history_queries)
 
 
 def test_working_tree_snapshot_drift_fails_closed(
@@ -315,7 +308,9 @@ def test_reserved_lifeos_is_disposable_with_external_configured_runtime(
     assert all(not path.startswith(".lifeos/") for path in report.untracked_paths)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows trims or rejects trailing-space path components")
+@pytest.mark.skipif(
+    os.name == "nt", reason="Windows trims or rejects trailing-space path components"
+)
 def test_repository_root_preserves_trailing_whitespace(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -345,6 +340,7 @@ def test_case_insensitive_policy_alias_is_protected_without_disclosure(
         "schema_version: 1\nprotected_prefixes:\n  - secrets\n",
         encoding="utf-8",
     )
+    _commit_all(vault, "policy baseline")
     protected = vault / "Secrets" / "new.md"
     protected.parent.mkdir()
     protected.write_text("private body\n", encoding="utf-8")
@@ -357,9 +353,7 @@ def test_case_insensitive_policy_alias_is_protected_without_disclosure(
     assert "Secrets/new.md" not in rendered
     assert report.untracked_paths == ()
     assert diagnostics["recovery.git.untracked_canonical"].status == "unknown"
-    assert "protected or policy-excluded" in diagnostics[
-        "recovery.git.untracked_canonical"
-    ].summary
+    assert "protected or policy-excluded" in diagnostics["recovery.git.untracked_canonical"].summary
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not allow '*' in filenames")
@@ -381,3 +375,103 @@ def test_check_ignore_keeps_pathspec_magic_filename_literal(
     assert filename in report.ignored_paths
     assert filename not in report.untracked_paths
     assert _diagnostics(report)["recovery.git.ignored_canonical"].status == "warning"
+
+
+def test_recovery_policy_drift_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    (vault / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
+    _commit_all(vault, "baseline")
+    policy_path = vault / "system" / "retrieval-policy.yml"
+    real_load = recovery_readiness.load_retrieval_policy
+    calls = 0
+
+    def drifting_load(root: Path) -> recovery_readiness.RetrievalPolicy:
+        nonlocal calls
+        policy = real_load(root)
+        calls += 1
+        if calls == 1:
+            policy_path.write_text(
+                "schema_version: 1\nprotected_prefixes:\n  - wiki\n",
+                encoding="utf-8",
+            )
+        return policy
+
+    monkeypatch.setattr(recovery_readiness, "load_retrieval_policy", drifting_load)
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+
+    assert calls == 2
+    assert _diagnostics(report)["recovery.git.repository"].status == "unknown"
+    assert "policy changed" in _diagnostics(report)["recovery.git.repository"].summary
+
+
+def test_unicode_normalization_alias_is_protected_without_disclosure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    nfc = "s\N{LATIN SMALL LETTER E WITH ACUTE}crets"
+    nfd = unicodedata.normalize("NFD", nfc)
+    (vault / "system" / "retrieval-policy.yml").write_text(
+        f"schema_version: 1\nprotected_prefixes:\n  - {nfc}\n",
+        encoding="utf-8",
+    )
+    _commit_all(vault, "policy baseline")
+    protected = vault / nfd / "note.md"
+    protected.parent.mkdir()
+    protected.write_text("private\n", encoding="utf-8")
+    monkeypatch.setattr(recovery_readiness, "_vault_case_insensitive", lambda _vault: False)
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    rendered = json.dumps(recovery_report_to_dict(report), ensure_ascii=False)
+
+    assert nfd not in rendered
+    assert _diagnostics(report)["recovery.git.untracked_canonical"].status == "unknown"
+
+
+def test_case_semantics_probe_does_not_enumerate_vault_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        recovery_readiness.os,
+        "scandir",
+        lambda *_args, **_kwargs: pytest.fail("vault names must not be enumerated"),
+    )
+
+    assert isinstance(recovery_readiness._vault_case_insensitive(tmp_path), bool)
+
+
+def test_protected_gitignore_prevents_check_ignore_invocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    (vault / "system" / "retrieval-policy.yml").write_text(
+        "schema_version: 1\nprotected_prefixes:\n  - wiki/.gitignore\n",
+        encoding="utf-8",
+    )
+    (vault / "wiki" / ".gitignore").write_text("*.tmp\n", encoding="utf-8")
+    (vault / "wiki" / "candidate.tmp").write_text("canonical\n", encoding="utf-8")
+    monkeypatch.setattr(
+        recovery_readiness,
+        "_ignored_paths",
+        lambda *_args, **_kwargs: pytest.fail("protected ignore metadata must not be read"),
+    )
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+
+    assert "wiki/candidate.tmp" in report.untracked_paths
+    assert _diagnostics(report)["recovery.git.ignored_canonical"].status == "unknown"

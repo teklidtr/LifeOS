@@ -32,7 +32,7 @@ def test_recovery_git_queries_disable_side_effecting_git_features(
     env = observed["env"]
     assert isinstance(env, dict)
     assert env["GIT_OPTIONAL_LOCKS"] == "0"
-    assert env["GIT_LITERAL_PATHSPECS"] == "1"
+    assert "GIT_LITERAL_PATHSPECS" not in env
     assert env["GIT_NO_LAZY_FETCH"] == "1"
     assert env["GIT_PAGER"] == ""
     assert env["GIT_CONFIG_COUNT"] == "1"

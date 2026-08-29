@@ -8,6 +8,8 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -44,8 +46,12 @@ _GIT_ENV_KEYS = frozenset(
         "GIT_EXEC_PATH",
         "GIT_EXTERNAL_DIFF",
         "GIT_GRAFT_FILE",
+        "GIT_GLOB_PATHSPECS",
+        "GIT_ICASE_PATHSPECS",
         "GIT_INDEX_FILE",
+        "GIT_LITERAL_PATHSPECS",
         "GIT_NAMESPACE",
+        "GIT_NOGLOB_PATHSPECS",
         "GIT_OBJECT_DIRECTORY",
         "GIT_PREFIX",
         "GIT_QUARANTINE_PATH",
@@ -152,7 +158,7 @@ class _ScopeFilter:
         try:
             if self.runtime(path):
                 return True
-            if self.case_insensitive and _casefold_denied(path, self.policy, self.request):
+            if _casefold_denied(path, self.policy, self.request):
                 self.incomplete = True
                 return True
             decision = scope_decision(
@@ -190,7 +196,6 @@ def _git_environment() -> dict[str, str]:
             env.pop(key, None)
     env.update(
         GIT_OPTIONAL_LOCKS="0",
-        GIT_LITERAL_PATHSPECS="1",
         GIT_NO_LAZY_FETCH="1",
         GIT_NO_REPLACE_OBJECTS="1",
         GIT_PAGER="",
@@ -274,46 +279,24 @@ def _runtime_filter(config: LifeOSConfig) -> PathExclusion:
     )
 
     def excluded(path: str) -> bool:
-        return reserved(path) or configured(path)
+        return bool(reserved(path) or configured(path))
 
     return excluded
 
 
 def _vault_case_insensitive(vault: Path) -> bool:
-    try:
-        root_fd = os.open(vault, _DIR_FLAGS)
-    except OSError as exc:
-        raise RecoveryGitError("Could not inspect vault case semantics") from exc
-    try:
-        try:
-            with os.scandir(root_fd) as iterator:
-                names = sorted(entry.name for entry in iterator if entry.name != ".git")
-        except OSError as exc:
-            raise RecoveryGitError("Could not inspect vault case semantics") from exc
-        for name in names:
-            variant = name.swapcase()
-            if variant == name:
-                continue
-            try:
-                actual = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
-                alternate = os.stat(variant, dir_fd=root_fd, follow_symlinks=False)
-            except FileNotFoundError:
-                continue
-            except OSError as exc:
-                raise RecoveryGitError("Could not inspect vault case semantics") from exc
-            if (actual.st_dev, actual.st_ino) == (alternate.st_dev, alternate.st_ino):
-                return True
-            return False
-        return False
-    finally:
-        os.close(root_fd)
+    del vault
+    # Do not enumerate vault names merely to select privacy matching semantics.
+    # macOS commonly exposes normalization- and case-insensitive volumes, so fail
+    # closed there; later identity checks still prevent unrelated aliases matching.
+    return sys.platform == "darwin"
 
 
 def _casefold_matches_prefix(path: str, prefixes: Sequence[str]) -> bool:
-    folded = path.casefold()
+    folded = unicodedata.normalize("NFC", path).casefold()
     return any(
-        folded == prefix.rstrip("/").casefold()
-        or folded.startswith(prefix.rstrip("/").casefold() + "/")
+        folded == unicodedata.normalize("NFC", prefix.rstrip("/")).casefold()
+        or folded.startswith(unicodedata.normalize("NFC", prefix.rstrip("/")).casefold() + "/")
         for prefix in prefixes
     )
 
@@ -327,10 +310,7 @@ def _casefold_denied(
         return True
     if _casefold_matches_prefix(path, request.excluded_paths):
         return True
-    return (
-        not request.allow_protected
-        and _casefold_matches_prefix(path, policy.protected_prefixes)
-    )
+    return not request.allow_protected and _casefold_matches_prefix(path, policy.protected_prefixes)
 
 
 def _scope_filter(config: LifeOSConfig) -> _ScopeFilter:
@@ -380,9 +360,7 @@ def _prefix_matches(
         return True
     if not case_insensitive:
         return False
-    return tuple(part.casefold() for part in candidate) == tuple(
-        part.casefold() for part in prefix
-    )
+    return tuple(part.casefold() for part in candidate) == tuple(part.casefold() for part in prefix)
 
 
 def _canonical_path(
@@ -429,9 +407,7 @@ def _filter_paths(
 
 def _nul_paths(raw: bytes) -> tuple[str, ...]:
     return tuple(
-        part.decode("utf-8", errors="surrogateescape")
-        for part in raw.split(b"\0")
-        if part
+        part.decode("utf-8", errors="surrogateescape") for part in raw.split(b"\0") if part
     )
 
 
@@ -568,9 +544,7 @@ def _repo_context(git: str, vault: Path) -> _RepoContext | None:
     try:
         relative = vault.relative_to(root)
     except ValueError as exc:
-        raise RecoveryGitError(
-            "Git repository root does not contain the configured vault"
-        ) from exc
+        raise RecoveryGitError("Git repository root does not contain the configured vault") from exc
     prefix = tuple(relative.parts)
     case_insensitive = _filesystem_case_insensitive(root, relative) if prefix else False
     if prefix and case_insensitive:
@@ -652,9 +626,11 @@ def _authorized_git_pathspecs(
     scope: _ScopeFilter,
     config: LifeOSConfig,
 ) -> tuple[str, ...]:
-    pathspecs: list[str] = []
-    if context.prefix:
-        pathspecs.append(_literal_pathspec(PurePosixPath(*context.prefix).as_posix()))
+    pathspecs = [
+        _literal_pathspec(PurePosixPath(*context.prefix).as_posix())
+        if context.prefix
+        else "."
+    ]
     denied = (*_policy_denied_prefixes(scope), *_runtime_prefixes(config))
     for relative in dict.fromkeys(denied):
         pathspecs.append(
@@ -664,16 +640,22 @@ def _authorized_git_pathspecs(
                 icase=scope.case_insensitive,
             )
         )
-    return tuple(pathspecs) if pathspecs else (".",)
+    return tuple(pathspecs)
 
 
 def _uses_magic(pathspecs: Sequence[str]) -> bool:
     return any(path.startswith(":(") for path in pathspecs)
 
 
-def _pathspec_command(command: str, arguments: Sequence[str], pathspec: Pathspec) -> tuple[str, ...]:
+def _pathspec_command(
+    command: str, arguments: Sequence[str], pathspec: Pathspec
+) -> tuple[str, ...]:
     pathspecs = (pathspec,) if isinstance(pathspec, str) else tuple(pathspec)
-    prefix = ("--no-literal-pathspecs",) if _uses_magic(pathspecs) else ()
+    prefix = (
+        ("--no-literal-pathspecs",)
+        if _uses_magic(pathspecs)
+        else ("--literal-pathspecs",)
+    )
     return (*prefix, command, *arguments, "--", *pathspecs)
 
 
@@ -706,9 +688,7 @@ def _index_debug_raw(git: str, root: Path, pathspec: Pathspec) -> bytes:
     result = _run_git(
         git,
         cwd=root,
-        arguments=_pathspec_command(
-            "ls-files", ("--stage", "--debug", "-z"), pathspec
-        ),
+        arguments=_pathspec_command("ls-files", ("--stage", "--debug", "-z"), pathspec),
     )
     if result.stderr.strip():
         raise RecoveryGitError("Git worktree query reported incomplete results")
@@ -746,7 +726,7 @@ def _tree_root_oid(
     result = _run_git(
         git,
         cwd=root,
-        arguments=("ls-tree", "-z", head_oid, "--", path),
+        arguments=("--literal-pathspecs", "ls-tree", "-z", head_oid, "--", path),
     )
     if result.stderr.strip():
         raise RecoveryGitError("Git vault tree query reported incomplete results")
@@ -865,6 +845,46 @@ def _index_flags_from_raw(
     )
 
 
+def _skip_worktree_paths_from_raw(
+    raw: bytes,
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
+) -> tuple[str, ...]:
+    paths: list[str] = []
+    for record in (part for part in raw.split(b"\0") if part):
+        if len(record) < 3 or record[1:2] != b" ":
+            raise RecoveryGitError("Git index flag query returned malformed output")
+        if record[0:1] == b"S":
+            paths.append(record[2:].decode("utf-8", errors="surrogateescape"))
+    return _filter_paths(
+        paths,
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
+
+
+def _core_filemode(git: str, root: Path) -> bool:
+    result = _run_git(
+        git,
+        cwd=root,
+        arguments=("config", "--bool", "--get", "core.filemode"),
+        check=False,
+    )
+    if result.returncode == 1 and not result.stderr.strip():
+        return True
+    if result.returncode or result.stderr.strip():
+        raise RecoveryGitError("Git file-mode configuration could not be verified safely")
+    value = result.stdout.rstrip(b"\n")
+    if value == b"true":
+        return True
+    if value == b"false":
+        return False
+    raise RecoveryGitError("Git returned malformed file-mode configuration")
+
+
 def _index_flags(
     git: str,
     root: Path,
@@ -896,9 +916,7 @@ def _time(line: bytes, prefix: bytes) -> int:
     try:
         return int(values[0]) * 1_000_000_000 + int(values[1])
     except (IndexError, ValueError) as exc:
-        raise RecoveryGitError(
-            "Git index metadata query returned malformed timestamps"
-        ) from exc
+        raise RecoveryGitError("Git index metadata query returned malformed timestamps") from exc
 
 
 def _pair(line: bytes, prefix: bytes, second: bytes) -> tuple[int, int]:
@@ -910,9 +928,7 @@ def _pair(line: bytes, prefix: bytes, second: bytes) -> tuple[int, int]:
     try:
         return int(left), int(right[len(second) :])
     except ValueError as exc:
-        raise RecoveryGitError(
-            "Git index metadata query returned malformed stat data"
-        ) from exc
+        raise RecoveryGitError("Git index metadata query returned malformed stat data") from exc
 
 
 def _index_entries(raw: bytes) -> tuple[_IndexEntry, ...]:
@@ -1026,9 +1042,7 @@ def _lstat(vault: Path, relative: str) -> os.stat_result | None:
                     raise RecoveryGitError(
                         "Canonical working-tree metadata traverses an unsafe parent entry"
                     ) from exc
-                raise RecoveryGitError(
-                    "Could not inspect canonical working-tree metadata"
-                ) from exc
+                raise RecoveryGitError("Could not inspect canonical working-tree metadata") from exc
             opened.append(next_fd)
             current = next_fd
         try:
@@ -1138,12 +1152,16 @@ def _snapshot_entry_for_index_path(
 def _compare_index_entry(
     entry: _IndexEntry,
     observed: _FsEntry,
+    *,
+    filemode: bool = False,
 ) -> Literal["clean", "modified", "uncertain"]:
     if entry.mode not in {0o100644, 0o100755} or not stat.S_ISREG(observed.mode):
         return "modified"
     if observed.size > _INDEX_SIZE_MAX:
         return "uncertain"
     if entry.size != observed.size:
+        return "modified"
+    if filemode and bool(entry.mode & 0o100) != bool(observed.mode & stat.S_IXUSR):
         return "modified"
     if (
         entry.mtime_ns != observed.mtime_ns
@@ -1163,6 +1181,8 @@ def _worktree_from_snapshot(
     snapshot: _WorkingTreeSnapshot,
     *,
     case_insensitive_prefix: bool = False,
+    skip_worktree_paths: Sequence[str] = (),
+    filemode: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     index = _canonical_index_entries(
         entries,
@@ -1177,10 +1197,13 @@ def _worktree_from_snapshot(
     for path, entry in index.items():
         observed = _snapshot_entry_for_index_path(vault, path, snapshot)
         if observed is None:
-            deleted.add(path)
+            if path in skip_worktree_paths:
+                uncertain.add(path)
+            else:
+                deleted.add(path)
             continue
         matched_visible.add(observed.path)
-        classification = _compare_index_entry(entry, observed)
+        classification = _compare_index_entry(entry, observed, filemode=filemode)
         if classification == "modified":
             modified.add(path)
         elif classification == "uncertain":
@@ -1254,9 +1277,9 @@ def _ignored_paths(
     if not paths:
         return ()
     repo_paths = tuple(f"./{_repo_path(path, prefix)}" for path in paths)
-    input_bytes = b"\0".join(
-        path.encode("utf-8", errors="surrogateescape") for path in repo_paths
-    ) + b"\0"
+    input_bytes = (
+        b"\0".join(path.encode("utf-8", errors="surrogateescape") for path in repo_paths) + b"\0"
+    )
     result = _run_git(
         git,
         cwd=root,
@@ -1335,7 +1358,14 @@ def _latest_commit(
         stamp_result = _run_git(
             git,
             cwd=root,
-            arguments=("show", "-s", "--format=%cI", sha),
+            arguments=(
+                "-c",
+                f"diff.orderFile={os.devnull}",
+                "show",
+                "-s",
+                "--format=%cI",
+                sha,
+            ),
         )
         if stamp_result.stderr.strip():
             raise RecoveryGitError("Git commit query reported incomplete results")
@@ -1350,9 +1380,7 @@ def _latest_commit(
         now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
         age = max(
             0.0,
-            (
-                now.astimezone(timezone.utc) - committed.astimezone(timezone.utc)
-            ).total_seconds(),
+            (now.astimezone(timezone.utc) - committed.astimezone(timezone.utc)).total_seconds(),
         )
         return CanonicalCommitEvidence(sha, stamp, int(age // 86_400))
     return None
@@ -1792,15 +1820,27 @@ def collect_recovery_readiness(
     case_insensitive_prefix = context.case_insensitive_prefix
     try:
         scope = _scope_filter(config)
+        policy_before = scope.policy
         hidden_index_before = _hidden_index_state(git, root, context, scope)
         if any(hidden_index_before):
             scope.incomplete = True
         pathspec = _authorized_git_pathspecs(context, scope, config)
+        try:
+            policy_at_scan = load_retrieval_policy(config.vault_root)
+        except (CoherenceError, RetrievalError) as exc:
+            raise RecoveryGitError(
+                "Recovery scope policy changed or could not be revalidated safely"
+            ) from exc
+        if policy_at_scan != policy_before:
+            raise RecoveryGitError(
+                "Recovery scope policy changed before recovery inspection; retry for a stable authorization snapshot."
+            )
         fs_before = _working_tree_snapshot(config.vault_root, scope)
         snapshot_before = _git_snapshot(git, root, pathspec)
         head_oid = snapshot_before.head_oid
         head = head_oid is not None
         index_entries = _index_entries(snapshot_before.index_debug)
+        filemode_before = _core_filemode(git, root)
         tree_entries = _tree_entries(
             git,
             root,
@@ -1831,6 +1871,13 @@ def collect_recovery_readiness(
             scope,
             fs_before,
             case_insensitive_prefix=case_insensitive_prefix,
+            skip_worktree_paths=_skip_worktree_paths_from_raw(
+                snapshot_before.index_flags,
+                prefix,
+                scope,
+                case_insensitive_prefix=case_insensitive_prefix,
+            ),
+            filemode=filemode_before,
         )
         flags = _index_flags_from_raw(
             snapshot_before.index_flags,
@@ -1839,13 +1886,17 @@ def collect_recovery_readiness(
             case_insensitive_prefix=case_insensitive_prefix,
         )
         untracked_candidates = tuple(sorted(set(fs_before.paths) - set(tracked_visible)))
-        ignored = _ignored_paths(
-            git,
-            root,
-            untracked_candidates,
-            prefix,
-            scope,
-            case_insensitive_prefix=case_insensitive_prefix,
+        ignored = (
+            ()
+            if scope.incomplete
+            else _ignored_paths(
+                git,
+                root,
+                untracked_candidates,
+                prefix,
+                scope,
+                case_insensitive_prefix=case_insensitive_prefix,
+            )
         )
         untracked = tuple(sorted(set(untracked_candidates) - set(ignored)))
         last = (
@@ -1865,6 +1916,20 @@ def collect_recovery_readiness(
         snapshot_after = _git_snapshot(git, root, pathspec)
         fs_after = _working_tree_snapshot(config.vault_root, scope)
         hidden_index_after = _hidden_index_state(git, root, context, scope)
+        try:
+            policy_after = load_retrieval_policy(config.vault_root)
+        except (CoherenceError, RetrievalError) as exc:
+            raise RecoveryGitError(
+                "Recovery scope policy changed or could not be revalidated safely"
+            ) from exc
+        if policy_after != policy_before:
+            raise RecoveryGitError(
+                "Recovery scope policy changed during recovery inspection; retry for a stable authorization snapshot."
+            )
+        if _core_filemode(git, root) != filemode_before:
+            raise RecoveryGitError(
+                "Git file-mode configuration changed during recovery inspection; retry for a stable snapshot."
+            )
         if hidden_index_after != hidden_index_before:
             raise RecoveryGitError(
                 "Protected Git index scope changed during recovery inspection; retry for a stable snapshot."

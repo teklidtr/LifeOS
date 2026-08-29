@@ -221,13 +221,6 @@ def test_case_insensitive_nested_prefix_uses_git_casing_without_widening_scope(
                 stdout=f"{repository}\n".encode(),
                 stderr=b"",
             )
-        if args == ("ls-files", "-z"):
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                stdout=b"vault/wiki/note.md\0outside.txt\0",
-                stderr=b"",
-            )
         return real_run_git(
             git_executable,
             cwd=cwd,
@@ -241,6 +234,11 @@ def test_case_insensitive_nested_prefix_uses_git_casing_without_widening_scope(
         recovery_readiness,
         "_filesystem_case_insensitive",
         lambda root, relative: True,
+    )
+    monkeypatch.setattr(
+        recovery_readiness,
+        "_git_prefix_spelling",
+        lambda _git, _root, _prefix: ("vault",),
     )
 
     context = recovery_readiness._repo_context("git", vault)
@@ -339,7 +337,7 @@ def test_latest_commit_diff_tree_disables_rename_detection(
         input_bytes: bytes | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         args = tuple(arguments)
-        if args and args[0] == "diff-tree":
+        if "diff-tree" in args:
             history_queries.append(args)
         return real_run_git(
             git_executable,

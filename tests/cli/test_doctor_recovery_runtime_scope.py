@@ -54,7 +54,7 @@ def test_recovery_reuses_filesystem_aware_runtime_exclusion(
     case_variant_runtime.parent.mkdir(parents=True)
     case_variant_runtime.write_bytes(b"derived")
 
-    observed: dict[str, object] = {}
+    observed: list[dict[str, object]] = []
 
     def fake_build_runtime_exclusion_matcher(
         vault_root: Path,
@@ -62,9 +62,13 @@ def test_recovery_reuses_filesystem_aware_runtime_exclusion(
         runtime_dir: Path | None,
         snapshot_prefix: str | None,
     ) -> Callable[[str], bool]:
-        observed["vault_root"] = vault_root
-        observed["runtime_dir"] = runtime_dir
-        observed["snapshot_prefix"] = snapshot_prefix
+        observed.append(
+            {
+                "vault_root": vault_root,
+                "runtime_dir": runtime_dir,
+                "snapshot_prefix": snapshot_prefix,
+            }
+        )
         return lambda path: path.startswith("Runtime/node-a/")
 
     monkeypatch.setattr(
@@ -74,10 +78,10 @@ def test_recovery_reuses_filesystem_aware_runtime_exclusion(
 
     report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
 
-    assert observed == {
+    assert {
         "vault_root": vault.resolve(),
         "runtime_dir": (vault / "runtime" / "node-a").resolve(strict=False),
         "snapshot_prefix": "runtime/node-a/",
-    }
+    } in observed
     assert report.untracked_paths == ()
     assert all("Runtime/node-a" not in path for path in report.uncommitted_paths)
