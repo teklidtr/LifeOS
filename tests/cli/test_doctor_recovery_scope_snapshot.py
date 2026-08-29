@@ -330,3 +330,54 @@ def test_repository_root_preserves_trailing_whitespace(
 
     assert report.repository_root == str(vault.resolve())
     assert _diagnostics(report)["recovery.git.repository"].status == "pass"
+
+
+def test_case_insensitive_policy_alias_is_protected_without_disclosure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    policy = vault / "system" / "retrieval-policy.yml"
+    policy.write_text(
+        "schema_version: 1\nprotected_prefixes:\n  - secrets\n",
+        encoding="utf-8",
+    )
+    protected = vault / "Secrets" / "new.md"
+    protected.parent.mkdir()
+    protected.write_text("private body\n", encoding="utf-8")
+    monkeypatch.setattr(recovery_readiness, "_vault_case_insensitive", lambda _vault: True)
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    rendered = json.dumps(recovery_report_to_dict(report), ensure_ascii=True)
+    diagnostics = _diagnostics(report)
+
+    assert "Secrets/new.md" not in rendered
+    assert report.untracked_paths == ()
+    assert diagnostics["recovery.git.untracked_canonical"].status == "unknown"
+    assert "protected or policy-excluded" in diagnostics[
+        "recovery.git.untracked_canonical"
+    ].summary
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not allow '*' in filenames")
+def test_check_ignore_keeps_pathspec_magic_filename_literal(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    filename = ":(glob)*"
+    with (vault / ".gitignore").open("a", encoding="utf-8") as handle:
+        handle.write(":(glob)\\*\n")
+    path = vault / filename
+    path.write_text("ignored canonical file\n", encoding="utf-8")
+
+    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+
+    assert filename in report.ignored_paths
+    assert filename not in report.untracked_paths
+    assert _diagnostics(report)["recovery.git.ignored_canonical"].status == "warning"
