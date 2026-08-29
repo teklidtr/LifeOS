@@ -145,11 +145,15 @@ class _ScopeFilter:
     runtime: PathExclusion
     policy: RetrievalPolicy
     request: RetrievalScope
+    case_insensitive: bool = False
     incomplete: bool = False
 
     def __call__(self, path: str) -> bool:
         try:
             if self.runtime(path):
+                return True
+            if self.case_insensitive and _casefold_denied(path, self.policy, self.request):
+                self.incomplete = True
                 return True
             decision = scope_decision(
                 path,
@@ -275,13 +279,68 @@ def _runtime_filter(config: LifeOSConfig) -> PathExclusion:
     return excluded
 
 
+def _vault_case_insensitive(vault: Path) -> bool:
+    try:
+        root_fd = os.open(vault, _DIR_FLAGS)
+    except OSError as exc:
+        raise RecoveryGitError("Could not inspect vault case semantics") from exc
+    try:
+        try:
+            with os.scandir(root_fd) as iterator:
+                names = sorted(entry.name for entry in iterator if entry.name != ".git")
+        except OSError as exc:
+            raise RecoveryGitError("Could not inspect vault case semantics") from exc
+        for name in names:
+            variant = name.swapcase()
+            if variant == name:
+                continue
+            try:
+                actual = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                alternate = os.stat(variant, dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise RecoveryGitError("Could not inspect vault case semantics") from exc
+            if (actual.st_dev, actual.st_ino) == (alternate.st_dev, alternate.st_ino):
+                return True
+            return False
+        return False
+    finally:
+        os.close(root_fd)
+
+
+def _casefold_matches_prefix(path: str, prefixes: Sequence[str]) -> bool:
+    folded = path.casefold()
+    return any(
+        folded == prefix.rstrip("/").casefold()
+        or folded.startswith(prefix.rstrip("/").casefold() + "/")
+        for prefix in prefixes
+    )
+
+
+def _casefold_denied(
+    path: str,
+    policy: RetrievalPolicy,
+    request: RetrievalScope,
+) -> bool:
+    if _casefold_matches_prefix(path, policy.excluded_prefixes):
+        return True
+    if _casefold_matches_prefix(path, request.excluded_paths):
+        return True
+    return (
+        not request.allow_protected
+        and _casefold_matches_prefix(path, policy.protected_prefixes)
+    )
+
+
 def _scope_filter(config: LifeOSConfig) -> _ScopeFilter:
     try:
         runtime = _runtime_filter(config)
         policy = load_retrieval_policy(config.vault_root)
+        case_insensitive = _vault_case_insensitive(config.vault_root)
     except (CoherenceError, RetrievalError) as exc:
         raise RecoveryGitError("Could not load recovery scope policy safely") from exc
-    return _ScopeFilter(runtime, policy, RetrievalScope())
+    return _ScopeFilter(runtime, policy, RetrievalScope(), case_insensitive)
 
 
 def _filesystem_case_insensitive(root: Path, relative: Path) -> bool:
@@ -573,9 +632,19 @@ def _repo_path(path: str, prefix: tuple[str, ...]) -> str:
     return PurePosixPath(*parts).as_posix()
 
 
-def _literal_pathspec(path: str, *, exclude: bool = False) -> str:
-    magic = "top,exclude,literal" if exclude else "top,literal"
-    return f":({magic}){path}"
+def _literal_pathspec(
+    path: str,
+    *,
+    exclude: bool = False,
+    icase: bool = False,
+) -> str:
+    parts = ["top"]
+    if exclude:
+        parts.append("exclude")
+    if icase:
+        parts.append("icase")
+    parts.append("literal")
+    return f":({','.join(parts)}){path}"
 
 
 def _authorized_git_pathspecs(
@@ -588,7 +657,13 @@ def _authorized_git_pathspecs(
         pathspecs.append(_literal_pathspec(PurePosixPath(*context.prefix).as_posix()))
     denied = (*_policy_denied_prefixes(scope), *_runtime_prefixes(config))
     for relative in dict.fromkeys(denied):
-        pathspecs.append(_literal_pathspec(_repo_path(relative, context.prefix), exclude=True))
+        pathspecs.append(
+            _literal_pathspec(
+                _repo_path(relative, context.prefix),
+                exclude=True,
+                icase=scope.case_insensitive,
+            )
+        )
     return tuple(pathspecs) if pathspecs else (".",)
 
 
@@ -620,7 +695,7 @@ def _hidden_index_state(
                     "ls-files",
                     "--error-unmatch",
                     "--",
-                    _literal_pathspec(repo_relative),
+                    _literal_pathspec(repo_relative, icase=scope.case_insensitive),
                 ),
             )
         )
@@ -1178,7 +1253,7 @@ def _ignored_paths(
 ) -> tuple[str, ...]:
     if not paths:
         return ()
-    repo_paths = tuple(_repo_path(path, prefix) for path in paths)
+    repo_paths = tuple(f"./{_repo_path(path, prefix)}" for path in paths)
     input_bytes = b"\0".join(
         path.encode("utf-8", errors="surrogateescape") for path in repo_paths
     ) + b"\0"
