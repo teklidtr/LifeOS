@@ -149,14 +149,20 @@ def test_recovery_index_flags_prevent_false_clean_report(
 
     assume = vault / "wiki" / "assume.md"
     skipped = vault / "wiki" / "skip.md"
-    assume.write_text("before assume\n", encoding="utf-8")
-    skipped.write_text("before skip\n", encoding="utf-8")
+    assume_before = b"assume-before\n"
+    assume_after = b"assume-after!\n"
+    skip_before = b"skip-before\n"
+    skip_after = b"skip-after!\n"
+    assert len(assume_before) == len(assume_after)
+    assert len(skip_before) == len(skip_after)
+    assume.write_bytes(assume_before)
+    skipped.write_bytes(skip_before)
     _commit_all(vault, "flag baseline")
 
     _git(vault, "update-index", "--assume-unchanged", "wiki/assume.md")
     _git(vault, "update-index", "--skip-worktree", "wiki/skip.md")
-    assume.write_text("after assume changed\n", encoding="utf-8")
-    skipped.write_text("after skip changed\n", encoding="utf-8")
+    assume.write_bytes(assume_after)
+    skipped.write_bytes(skip_after)
 
     report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
     diagnostics = _diagnostics(report)

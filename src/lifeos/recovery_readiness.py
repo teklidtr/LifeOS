@@ -16,7 +16,12 @@ from typing import Literal
 
 from lifeos.coherence import CoherenceError
 from lifeos.config import LifeOSConfig
-from lifeos.retrieval.contracts import RetrievalError, RetrievalPolicy, RetrievalScope, scope_decision
+from lifeos.retrieval.contracts import (
+    RetrievalError,
+    RetrievalPolicy,
+    RetrievalScope,
+    scope_decision,
+)
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
@@ -92,6 +97,14 @@ class _IndexEntry:
     device: int
     inode: int
     size: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RepoContext:
+    root: Path
+    prefix: tuple[str, ...]
+    pathspec: str
+    case_insensitive_prefix: bool
 
 
 @dataclass(slots=True)
@@ -202,17 +215,66 @@ def _scope_filter(config: LifeOSConfig) -> _ScopeFilter:
     return _ScopeFilter(runtime, policy, RetrievalScope())
 
 
+def _filesystem_case_insensitive(root: Path, relative: Path) -> bool:
+    """Detect whether any existing component in the vault path resolves case-insensitively."""
+    current = root
+    for component in relative.parts:
+        actual = current / component
+        variant_name = component.swapcase()
+        if variant_name != component:
+            variant = current / variant_name
+            try:
+                actual_state = os.stat(actual, follow_symlinks=False)
+                variant_state = os.stat(variant, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise RecoveryGitError("Could not inspect Git vault path casing") from exc
+            else:
+                if (actual_state.st_dev, actual_state.st_ino) == (
+                    variant_state.st_dev,
+                    variant_state.st_ino,
+                ):
+                    return True
+        current = actual
+    return False
+
+
+def _prefix_matches(
+    parts: tuple[str, ...],
+    prefix: tuple[str, ...],
+    *,
+    case_insensitive: bool,
+) -> bool:
+    if len(parts) < len(prefix):
+        return False
+    candidate = parts[: len(prefix)]
+    if candidate == prefix:
+        return True
+    if not case_insensitive:
+        return False
+    return tuple(part.casefold() for part in candidate) == tuple(
+        part.casefold() for part in prefix
+    )
+
+
 def _canonical_path(
     path: str,
     prefix: tuple[str, ...],
     excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
 ) -> str | None:
     pure = PurePosixPath(path)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         return None
     parts = pure.parts
     if prefix:
-        if parts[: len(prefix)] != prefix:
+        if not _prefix_matches(
+            parts,
+            prefix,
+            case_insensitive=case_insensitive_prefix,
+        ):
             return None
         parts = parts[len(prefix) :]
     if not parts or "__pycache__" in parts:
@@ -227,8 +289,18 @@ def _filter_paths(
     paths: Sequence[str],
     prefix: tuple[str, ...],
     excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
 ) -> tuple[str, ...]:
-    output = {_canonical_path(path, prefix, excluded) for path in paths}
+    output = {
+        _canonical_path(
+            path,
+            prefix,
+            excluded,
+            case_insensitive_prefix=case_insensitive_prefix,
+        )
+        for path in paths
+    }
     return tuple(sorted(path for path in output if path is not None))
 
 
@@ -246,9 +318,19 @@ def _git_paths(
     args: Sequence[str],
     prefix: tuple[str, ...],
     excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
 ) -> tuple[str, ...]:
     result = _run_git(git, cwd=root, arguments=args)
-    return _filter_paths(_nul_paths(result.stdout), prefix, excluded)
+    if result.stderr.strip():
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RecoveryGitError(f"Git path query reported incomplete traversal: {detail}")
+    return _filter_paths(
+        _nul_paths(result.stdout),
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
 
 
 def _git_marker_exists(vault: Path) -> bool:
@@ -263,7 +345,33 @@ def _git_marker_exists(vault: Path) -> bool:
     return False
 
 
-def _repo_context(git: str, vault: Path) -> tuple[Path, tuple[str, ...], str] | None:
+def _git_prefix_spelling(
+    git: str,
+    root: Path,
+    prefix: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Recover Git's tracked display spelling for a case-insensitive nested vault prefix."""
+    result = _run_git(git, cwd=root, arguments=("ls-files", "-z"))
+    if result.stderr.strip():
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RecoveryGitError(f"Git index query reported incomplete traversal: {detail}")
+    matches: set[tuple[str, ...]] = set()
+    folded = tuple(part.casefold() for part in prefix)
+    for path in _nul_paths(result.stdout):
+        parts = PurePosixPath(path).parts
+        if len(parts) < len(prefix):
+            continue
+        candidate = tuple(parts[: len(prefix)])
+        if tuple(part.casefold() for part in candidate) == folded:
+            matches.add(candidate)
+    if len(matches) > 1:
+        raise RecoveryGitError(
+            "Git index contains ambiguous case variants for the configured vault"
+        )
+    return next(iter(matches)) if matches else prefix
+
+
+def _repo_context(git: str, vault: Path) -> _RepoContext | None:
     result = _run_git(
         git,
         cwd=vault,
@@ -287,7 +395,15 @@ def _repo_context(git: str, vault: Path) -> tuple[Path, tuple[str, ...], str] | 
             "Git repository root does not contain the configured vault"
         ) from exc
     prefix = tuple(relative.parts)
-    return root, prefix, relative.as_posix() if prefix else "."
+    case_insensitive = _filesystem_case_insensitive(root, relative) if prefix else False
+    if prefix and case_insensitive:
+        prefix = _git_prefix_spelling(git, root, prefix)
+    return _RepoContext(
+        root=root,
+        prefix=prefix,
+        pathspec=PurePosixPath(*prefix).as_posix() if prefix else ".",
+        case_insensitive_prefix=case_insensitive,
+    )
 
 
 def _head_exists(git: str, root: Path) -> bool:
@@ -350,17 +466,22 @@ def _committed_coverage(
     pathspec: str,
     prefix: tuple[str, ...],
     excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if not _head_exists(git, root):
         return (), ()
-    raw = _run_git(
+    result = _run_git(
         git,
         cwd=root,
         arguments=("ls-tree", "-r", "-z", "HEAD", "--", pathspec),
-    ).stdout
+    )
+    if result.stderr.strip():
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RecoveryGitError(f"Git tree query reported incomplete traversal: {detail}")
     entries: list[tuple[str, str]] = []
     gaps: set[str] = set()
-    for record in (part for part in raw.split(b"\0") if part):
+    for record in (part for part in result.stdout.split(b"\0") if part):
         meta, tab, raw_path = record.partition(b"\t")
         fields = meta.split()
         if tab != b"\t" or len(fields) != 3:
@@ -370,6 +491,7 @@ def _committed_coverage(
             raw_path.decode("utf-8", errors="surrogateescape"),
             prefix,
             excluded,
+            case_insensitive_prefix=case_insensitive_prefix,
         )
         if canonical is None:
             continue
@@ -392,20 +514,30 @@ def _index_flags(
     pathspec: str,
     prefix: tuple[str, ...],
     excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
 ) -> tuple[str, ...]:
-    raw = _run_git(
+    result = _run_git(
         git,
         cwd=root,
         arguments=("ls-files", "-v", "-z", "--", pathspec),
-    ).stdout
+    )
+    if result.stderr.strip():
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RecoveryGitError(f"Git index flag query reported incomplete traversal: {detail}")
     paths: list[str] = []
-    for record in (part for part in raw.split(b"\0") if part):
+    for record in (part for part in result.stdout.split(b"\0") if part):
         if len(record) < 3 or record[1:2] != b" ":
             raise RecoveryGitError("Git index flag query returned malformed output")
         tag = chr(record[0])
         if tag == "S" or tag.islower():
             paths.append(record[2:].decode("utf-8", errors="surrogateescape"))
-    return _filter_paths(paths, prefix, excluded)
+    return _filter_paths(
+        paths,
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
 
 
 def _debug_line(raw: bytes, cursor: int) -> tuple[bytes, int]:
@@ -492,8 +624,7 @@ def _lstat(vault: Path, relative: str) -> os.stat_result | None:
         opened.append(current)
         for part in pure.parts[:-1]:
             try:
-                current = os.open(part, _DIR_FLAGS, dir_fd=current)
-                opened.append(current)
+                next_fd = os.open(part, _DIR_FLAGS, dir_fd=current)
             except FileNotFoundError:
                 return None
             except OSError as exc:
@@ -504,6 +635,8 @@ def _lstat(vault: Path, relative: str) -> os.stat_result | None:
                 raise RecoveryGitError(
                     "Could not inspect canonical working-tree metadata"
                 ) from exc
+            opened.append(next_fd)
+            current = next_fd
         try:
             return os.stat(pure.parts[-1], dir_fd=current, follow_symlinks=False)
         except FileNotFoundError:
@@ -525,17 +658,27 @@ def _worktree(
     pathspec: str,
     prefix: tuple[str, ...],
     excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
-    raw = _run_git(
+    result = _run_git(
         git,
         cwd=root,
         arguments=("ls-files", "--stage", "--debug", "-z", "--", pathspec),
-    ).stdout
+    )
+    if result.stderr.strip():
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RecoveryGitError(f"Git worktree query reported incomplete traversal: {detail}")
     modified: set[str] = set()
     deleted: set[str] = set()
     uncertain: set[str] = set()
-    for entry in _index_entries(raw):
-        path = _canonical_path(entry.path, prefix, excluded)
+    for entry in _index_entries(result.stdout):
+        path = _canonical_path(
+            entry.path,
+            prefix,
+            excluded,
+            case_insensitive_prefix=case_insensitive_prefix,
+        )
         if path is None:
             continue
         observed = _lstat(vault, path)
@@ -565,15 +708,20 @@ def _latest_commit(
     prefix: tuple[str, ...],
     excluded: PathExclusion,
     clock: Callable[[], datetime],
+    *,
+    case_insensitive_prefix: bool = False,
 ) -> CanonicalCommitEvidence | None:
     if not _head_exists(git, root):
         return None
-    revisions = _run_git(
+    revision_result = _run_git(
         git,
         cwd=root,
         arguments=("rev-list", "HEAD", "--", pathspec),
-    ).stdout
-    for sha in revisions.decode("ascii", errors="strict").splitlines():
+    )
+    if revision_result.stderr.strip():
+        detail = revision_result.stderr.decode("utf-8", errors="replace").strip()
+        raise RecoveryGitError(f"Git history query reported incomplete traversal: {detail}")
+    for sha in revision_result.stdout.decode("ascii", errors="strict").splitlines():
         changed = _git_paths(
             git,
             root,
@@ -593,14 +741,19 @@ def _latest_commit(
             ),
             prefix,
             excluded,
+            case_insensitive_prefix=case_insensitive_prefix,
         )
         if not changed:
             continue
-        stamp = _run_git(
+        stamp_result = _run_git(
             git,
             cwd=root,
             arguments=("show", "-s", "--format=%cI", sha),
-        ).stdout.decode("ascii", errors="strict").strip()
+        )
+        if stamp_result.stderr.strip():
+            detail = stamp_result.stderr.decode("utf-8", errors="replace").strip()
+            raise RecoveryGitError(f"Git commit query reported incomplete traversal: {detail}")
+        stamp = stamp_result.stdout.decode("ascii", errors="strict").strip()
         try:
             committed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
         except ValueError as exc:
@@ -679,7 +832,10 @@ def _no_repo() -> tuple[RecoveryDiagnostic, ...]:
             "failure",
             "error",
             "The configured vault is not covered by a Git repository.",
-            "Initialize version history for the canonical vault and commit the intended durable files.",
+            (
+                "Initialize version history for the canonical vault and commit the intended "
+                "durable files."
+            ),
         ),
         _diag(
             "recovery.git.last_canonical_commit",
@@ -739,7 +895,10 @@ def _runtime(config: LifeOSConfig) -> RecoveryDiagnostic:
         "recovery.runtime.disposable",
         "info",
         "info",
-        f"Disposable runtime state at {display} is rebuildable and is not canonical recovery material.",
+        (
+            f"Disposable runtime state at {display} is rebuildable and is not canonical "
+            "recovery material."
+        ),
         "Restore canonical vault data first, then rebuild or recreate derived runtime state.",
     )
 
@@ -790,11 +949,22 @@ def collect_recovery_readiness(
         return _fallback(config, _git_unknown(str(exc)))
     if context is None:
         return _fallback(config, _no_repo())
-    root, prefix, pathspec = context
+
+    root = context.root
+    prefix = context.prefix
+    pathspec = context.pathspec
+    case_insensitive_prefix = context.case_insensitive_prefix
     try:
         scope = _scope_filter(config)
         head = _head_exists(git, root)
-        committed, unrecoverable = _committed_coverage(git, root, pathspec, prefix, scope)
+        committed, unrecoverable = _committed_coverage(
+            git,
+            root,
+            pathspec,
+            prefix,
+            scope,
+            case_insensitive_prefix=case_insensitive_prefix,
+        )
         staged = _git_paths(
             git,
             root,
@@ -810,6 +980,7 @@ def collect_recovery_readiness(
             ),
             prefix,
             scope,
+            case_insensitive_prefix=case_insensitive_prefix,
         )
         unstaged, deleted, uncertain = _worktree(
             git,
@@ -818,6 +989,7 @@ def collect_recovery_readiness(
             pathspec,
             prefix,
             scope,
+            case_insensitive_prefix=case_insensitive_prefix,
         )
         untracked = _git_paths(
             git,
@@ -825,6 +997,7 @@ def collect_recovery_readiness(
             ("ls-files", "--others", "--exclude-standard", "-z", "--", pathspec),
             prefix,
             scope,
+            case_insensitive_prefix=case_insensitive_prefix,
         )
         ignored = _git_paths(
             git,
@@ -840,9 +1013,25 @@ def collect_recovery_readiness(
             ),
             prefix,
             scope,
+            case_insensitive_prefix=case_insensitive_prefix,
         )
-        flags = _index_flags(git, root, pathspec, prefix, scope)
-        last = _latest_commit(git, root, pathspec, prefix, scope, clock_fn)
+        flags = _index_flags(
+            git,
+            root,
+            pathspec,
+            prefix,
+            scope,
+            case_insensitive_prefix=case_insensitive_prefix,
+        )
+        last = _latest_commit(
+            git,
+            root,
+            pathspec,
+            prefix,
+            scope,
+            clock_fn,
+            case_insensitive_prefix=case_insensitive_prefix,
+        )
     except RecoveryGitError as exc:
         return _fallback(config, _git_unknown(str(exc)), root)
 

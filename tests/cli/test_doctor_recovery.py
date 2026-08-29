@@ -169,6 +169,7 @@ def test_doctor_reports_dirty_staged_deleted_untracked_and_ignored_canonical_pat
     assert diagnostics["recovery.git.untracked_canonical"]["status"] == "warning"
     assert diagnostics["recovery.git.ignored_canonical"]["status"] == "warning"
     assert set(recovery["uncommitted_paths"]) == {
+        ".gitignore",
         "goals/staged.md",
         "plans/deleted.md",
         "wiki/modified.md",
