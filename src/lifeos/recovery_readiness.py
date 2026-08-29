@@ -28,6 +28,7 @@ from lifeos.runtime_scope import build_runtime_exclusion_matcher
 RecoveryStatus = Literal["pass", "warning", "failure", "info", "unknown"]
 RecoverySeverity = Literal["info", "warning", "error"]
 PathExclusion = Callable[[str], bool]
+Pathspec = str | Sequence[str]
 
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _INDEX_SIZE_MAX = (1 << 32) - 1
@@ -116,6 +117,29 @@ class _GitSnapshot:
     index_flags: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class _FsEntry:
+    path: str
+    mode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkingTreeSnapshot:
+    entries: tuple[_FsEntry, ...]
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return tuple(entry.path for entry in self.entries)
+
+    def by_path(self) -> dict[str, _FsEntry]:
+        return {entry.path: entry for entry in self.entries}
+
+
 @dataclass(slots=True)
 class _ScopeFilter:
     runtime: PathExclusion
@@ -127,15 +151,15 @@ class _ScopeFilter:
         try:
             if self.runtime(path):
                 return True
-            allowed = scope_decision(
+            decision = scope_decision(
                 path,
                 scope=self.request,
                 policy=self.policy,
                 mode="local",
-            ).allowed
+            )
         except (CoherenceError, RetrievalError) as exc:
             raise RecoveryGitError("Could not verify canonical recovery scope") from exc
-        if not allowed:
+        if not decision.allowed:
             self.incomplete = True
             return True
         return False
@@ -202,17 +226,53 @@ def _run_git(
     return result
 
 
+def _run_git_presence(
+    git_executable: str,
+    *,
+    cwd: Path,
+    arguments: Sequence[str],
+) -> bool:
+    """Run a metadata-only existence probe while discarding any pathname output."""
+    try:
+        result = subprocess.run(
+            [git_executable, *arguments],
+            cwd=cwd,
+            shell=False,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env=_git_environment(),
+        )
+    except OSError as exc:
+        raise RecoveryGitError("Could not execute Git safely") from exc
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise RecoveryGitError("Git metadata existence query could not be verified safely")
+
+
 def _runtime_filter(config: LifeOSConfig) -> PathExclusion:
     try:
         relative = config.runtime_dir.relative_to(config.vault_root)
         prefix = f"{relative.as_posix().rstrip('/')}/" if relative.parts else None
     except ValueError:
         prefix = None
-    return build_runtime_exclusion_matcher(
+    configured = build_runtime_exclusion_matcher(
         config.vault_root,
         runtime_dir=config.runtime_dir,
         snapshot_prefix=prefix,
     )
+    reserved = build_runtime_exclusion_matcher(
+        config.vault_root,
+        runtime_dir=config.vault_root / ".lifeos",
+        snapshot_prefix=".lifeos/",
+    )
+
+    def excluded(path: str) -> bool:
+        return reserved(path) or configured(path)
+
+    return excluded
 
 
 def _scope_filter(config: LifeOSConfig) -> _ScopeFilter:
@@ -225,7 +285,6 @@ def _scope_filter(config: LifeOSConfig) -> _ScopeFilter:
 
 
 def _filesystem_case_insensitive(root: Path, relative: Path) -> bool:
-    """Detect whether any existing component in the vault path resolves case-insensitively."""
     current = root
     for component in relative.parts:
         actual = current / component
@@ -279,14 +338,10 @@ def _canonical_path(
         return None
     parts = pure.parts
     if prefix:
-        if not _prefix_matches(
-            parts,
-            prefix,
-            case_insensitive=case_insensitive_prefix,
-        ):
+        if not _prefix_matches(parts, prefix, case_insensitive=case_insensitive_prefix):
             return None
         parts = parts[len(prefix) :]
-    if not parts or ".git" in parts or "__pycache__" in parts:
+    if not parts or ".git" in parts:
         return None
     relative = PurePosixPath(*parts).as_posix()
     if excluded(relative):
@@ -353,29 +408,84 @@ def _git_marker_exists(vault: Path) -> bool:
     return False
 
 
+def _decode_single_line_path(raw: bytes) -> str:
+    if not raw.endswith(b"\n"):
+        raise RecoveryGitError("Git repository discovery returned malformed output")
+    try:
+        return raw[:-1].decode("utf-8", errors="surrogateescape")
+    except UnicodeError as exc:
+        raise RecoveryGitError("Git repository discovery returned malformed output") from exc
+
+
+def _parse_tree_records(raw: bytes) -> tuple[tuple[int, str, str, str], ...]:
+    output: list[tuple[int, str, str, str]] = []
+    for record in (part for part in raw.split(b"\0") if part):
+        meta, tab, raw_path = record.partition(b"\t")
+        fields = meta.split()
+        if tab != b"\t" or len(fields) != 3:
+            raise RecoveryGitError("Git tree query returned malformed output")
+        raw_mode, raw_type, raw_oid = fields
+        try:
+            mode = int(raw_mode, 8)
+            obj_type = raw_type.decode("ascii", errors="strict")
+            oid = raw_oid.decode("ascii", errors="strict")
+            path = raw_path.decode("utf-8", errors="surrogateescape")
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise RecoveryGitError("Git tree query returned malformed metadata") from exc
+        output.append((mode, obj_type, oid, path))
+    return tuple(output)
+
+
+def _root_tree_oid(git: str, root: Path, head_oid: str) -> str:
+    result = _run_git(
+        git,
+        cwd=root,
+        arguments=("rev-parse", "--verify", f"{head_oid}^{{tree}}"),
+    )
+    if result.stderr.strip():
+        raise RecoveryGitError("Git root tree query reported incomplete results")
+    try:
+        oid = result.stdout.decode("ascii", errors="strict").strip()
+    except UnicodeDecodeError as exc:
+        raise RecoveryGitError("Git returned a malformed tree object identifier") from exc
+    if not oid:
+        raise RecoveryGitError("Git returned an empty tree object identifier")
+    return oid
+
+
 def _git_prefix_spelling(
     git: str,
     root: Path,
     prefix: tuple[str, ...],
 ) -> tuple[str, ...]:
-    """Recover Git's tracked display spelling for a case-insensitive nested vault prefix."""
-    result = _run_git(git, cwd=root, arguments=("ls-files", "-z"))
-    if result.stderr.strip():
-        raise RecoveryGitError("Git index query reported incomplete results")
-    matches: set[tuple[str, ...]] = set()
-    folded = tuple(part.casefold() for part in prefix)
-    for path in _nul_paths(result.stdout):
-        parts = PurePosixPath(path).parts
-        if len(parts) < len(prefix):
-            continue
-        candidate = tuple(parts[: len(prefix)])
-        if tuple(part.casefold() for part in candidate) == folded:
-            matches.add(candidate)
-    if len(matches) > 1:
-        raise RecoveryGitError(
-            "Git index contains ambiguous case variants for the configured vault"
-        )
-    return next(iter(matches)) if matches else prefix
+    """Resolve only the configured ancestor chain, never the parent repository file inventory."""
+    head = _head_oid(git, root)
+    if head is None:
+        return prefix
+    tree_oid = _root_tree_oid(git, root, head)
+    selected: list[str] = []
+    for offset, requested in enumerate(prefix):
+        result = _run_git(git, cwd=root, arguments=("ls-tree", "-z", tree_oid))
+        if result.stderr.strip():
+            raise RecoveryGitError("Git prefix query reported incomplete results")
+        matches = [
+            record
+            for record in _parse_tree_records(result.stdout)
+            if PurePosixPath(record[3]).name.casefold() == requested.casefold()
+        ]
+        if len(matches) > 1:
+            raise RecoveryGitError(
+                "Git tree contains ambiguous case variants for the configured vault"
+            )
+        if not matches:
+            return prefix
+        mode, obj_type, oid, name = matches[0]
+        selected.append(PurePosixPath(name).name)
+        if offset < len(prefix) - 1:
+            if obj_type != "tree" or (mode & 0o170000) != 0o040000:
+                return prefix
+            tree_oid = oid
+    return tuple(selected)
 
 
 def _repo_context(git: str, vault: Path) -> _RepoContext | None:
@@ -395,9 +505,7 @@ def _repo_context(git: str, vault: Path) -> _RepoContext | None:
         raise RecoveryGitError(
             "Git repository discovery reported incomplete results; state is unknown."
         )
-    root = Path(
-        result.stdout.decode("utf-8", errors="surrogateescape").strip()
-    ).resolve(strict=False)
+    root = Path(_decode_single_line_path(result.stdout)).resolve(strict=False)
     try:
         relative = vault.relative_to(root)
     except ValueError as exc:
@@ -440,29 +548,110 @@ def _head_exists(git: str, root: Path) -> bool:
     return _head_oid(git, root) is not None
 
 
-def _index_debug_raw(git: str, root: Path, pathspec: str) -> bytes:
+def _policy_denied_prefixes(scope: _ScopeFilter) -> tuple[str, ...]:
+    values: list[str] = [*scope.policy.excluded_prefixes, *scope.request.excluded_paths]
+    if not scope.request.allow_protected:
+        values.extend(scope.policy.protected_prefixes)
+    normalized = {value.rstrip("/") for value in values if value.rstrip("/")}
+    return tuple(sorted(normalized))
+
+
+def _runtime_prefixes(config: LifeOSConfig) -> tuple[str, ...]:
+    values = {".lifeos"}
+    try:
+        relative = config.runtime_dir.relative_to(config.vault_root)
+    except ValueError:
+        pass
+    else:
+        if relative.parts:
+            values.add(relative.as_posix().rstrip("/"))
+    return tuple(sorted(values))
+
+
+def _repo_path(path: str, prefix: tuple[str, ...]) -> str:
+    parts = (*prefix, *PurePosixPath(path).parts)
+    return PurePosixPath(*parts).as_posix()
+
+
+def _literal_pathspec(path: str, *, exclude: bool = False) -> str:
+    magic = "top,exclude,literal" if exclude else "top,literal"
+    return f":({magic}){path}"
+
+
+def _authorized_git_pathspecs(
+    context: _RepoContext,
+    scope: _ScopeFilter,
+    config: LifeOSConfig,
+) -> tuple[str, ...]:
+    pathspecs: list[str] = []
+    if context.prefix:
+        pathspecs.append(_literal_pathspec(PurePosixPath(*context.prefix).as_posix()))
+    denied = (*_policy_denied_prefixes(scope), *_runtime_prefixes(config))
+    for relative in dict.fromkeys(denied):
+        pathspecs.append(_literal_pathspec(_repo_path(relative, context.prefix), exclude=True))
+    return tuple(pathspecs) if pathspecs else (".",)
+
+
+def _uses_magic(pathspecs: Sequence[str]) -> bool:
+    return any(path.startswith(":(") for path in pathspecs)
+
+
+def _pathspec_command(command: str, arguments: Sequence[str], pathspec: Pathspec) -> tuple[str, ...]:
+    pathspecs = (pathspec,) if isinstance(pathspec, str) else tuple(pathspec)
+    prefix = ("--no-literal-pathspecs",) if _uses_magic(pathspecs) else ()
+    return (*prefix, command, *arguments, "--", *pathspecs)
+
+
+def _hidden_index_state(
+    git: str,
+    root: Path,
+    context: _RepoContext,
+    scope: _ScopeFilter,
+) -> tuple[bool, ...]:
+    state: list[bool] = []
+    for relative in _policy_denied_prefixes(scope):
+        repo_relative = _repo_path(relative, context.prefix)
+        state.append(
+            _run_git_presence(
+                git,
+                cwd=root,
+                arguments=(
+                    "--no-literal-pathspecs",
+                    "ls-files",
+                    "--error-unmatch",
+                    "--",
+                    _literal_pathspec(repo_relative),
+                ),
+            )
+        )
+    return tuple(state)
+
+
+def _index_debug_raw(git: str, root: Path, pathspec: Pathspec) -> bytes:
     result = _run_git(
         git,
         cwd=root,
-        arguments=("ls-files", "--stage", "--debug", "-z", "--", pathspec),
+        arguments=_pathspec_command(
+            "ls-files", ("--stage", "--debug", "-z"), pathspec
+        ),
     )
     if result.stderr.strip():
         raise RecoveryGitError("Git worktree query reported incomplete results")
     return result.stdout
 
 
-def _index_flags_raw(git: str, root: Path, pathspec: str) -> bytes:
+def _index_flags_raw(git: str, root: Path, pathspec: Pathspec) -> bytes:
     result = _run_git(
         git,
         cwd=root,
-        arguments=("ls-files", "-v", "-z", "--", pathspec),
+        arguments=_pathspec_command("ls-files", ("-v", "-z"), pathspec),
     )
     if result.stderr.strip():
         raise RecoveryGitError("Git index flag query reported incomplete results")
     return result.stdout
 
 
-def _git_snapshot(git: str, root: Path, pathspec: str) -> _GitSnapshot:
+def _git_snapshot(git: str, root: Path, pathspec: Pathspec) -> _GitSnapshot:
     return _GitSnapshot(
         _head_oid(git, root),
         _index_debug_raw(git, root, pathspec),
@@ -470,56 +659,93 @@ def _git_snapshot(git: str, root: Path, pathspec: str) -> _GitSnapshot:
     )
 
 
+def _tree_root_oid(
+    git: str,
+    root: Path,
+    head_oid: str,
+    prefix: tuple[str, ...],
+) -> str | None:
+    if not prefix:
+        return _root_tree_oid(git, root, head_oid)
+    path = PurePosixPath(*prefix).as_posix()
+    result = _run_git(
+        git,
+        cwd=root,
+        arguments=("ls-tree", "-z", head_oid, "--", path),
+    )
+    if result.stderr.strip():
+        raise RecoveryGitError("Git vault tree query reported incomplete results")
+    records = _parse_tree_records(result.stdout)
+    exact = [record for record in records if record[3] == path]
+    if not exact:
+        return None
+    if len(exact) != 1:
+        raise RecoveryGitError("Git vault tree query returned ambiguous output")
+    mode, obj_type, oid, _ = exact[0]
+    if obj_type != "tree" or (mode & 0o170000) != 0o040000:
+        raise RecoveryGitError("Configured vault path is not a Git tree")
+    return oid
+
+
+def _walk_tree_entries(
+    git: str,
+    root: Path,
+    tree_oid: str,
+    relative_parts: tuple[str, ...],
+    excluded: PathExclusion,
+) -> dict[str, tuple[int, str, str]]:
+    result = _run_git(git, cwd=root, arguments=("ls-tree", "-z", tree_oid))
+    if result.stderr.strip():
+        raise RecoveryGitError("Git tree query reported incomplete results")
+    output: dict[str, tuple[int, str, str]] = {}
+    for mode, obj_type, oid, name in _parse_tree_records(result.stdout):
+        if "/" in name:
+            raise RecoveryGitError("Git tree query returned an unexpected nested path")
+        child = PurePosixPath(*relative_parts, name).as_posix()
+        if excluded(child):
+            continue
+        if obj_type == "tree" and (mode & 0o170000) == 0o040000:
+            nested = _walk_tree_entries(
+                git,
+                root,
+                oid,
+                (*relative_parts, name),
+                excluded,
+            )
+            overlap = set(output) & set(nested)
+            if overlap:
+                raise RecoveryGitError("Git tree contains ambiguous canonical path aliases")
+            output.update(nested)
+            continue
+        if child in output:
+            raise RecoveryGitError("Git tree contains ambiguous canonical path aliases")
+        output[child] = (mode, obj_type, oid)
+    return output
+
+
 def _tree_entries(
     git: str,
     root: Path,
     head_oid: str | None,
-    pathspec: str,
+    pathspec: Pathspec,
     prefix: tuple[str, ...],
     excluded: PathExclusion,
     *,
     case_insensitive_prefix: bool = False,
 ) -> dict[str, tuple[int, str, str]]:
+    del pathspec, case_insensitive_prefix
     if head_oid is None:
         return {}
-    result = _run_git(
-        git,
-        cwd=root,
-        arguments=("ls-tree", "-r", "-z", head_oid, "--", pathspec),
-    )
-    if result.stderr.strip():
-        raise RecoveryGitError("Git tree query reported incomplete results")
-    entries: dict[str, tuple[int, str, str]] = {}
-    for record in (part for part in result.stdout.split(b"\0") if part):
-        meta, tab, raw_path = record.partition(b"\t")
-        fields = meta.split()
-        if tab != b"\t" or len(fields) != 3:
-            raise RecoveryGitError("Git tree query returned malformed output")
-        raw_mode, raw_type, raw_oid = fields
-        canonical = _canonical_path(
-            raw_path.decode("utf-8", errors="surrogateescape"),
-            prefix,
-            excluded,
-            case_insensitive_prefix=case_insensitive_prefix,
-        )
-        if canonical is None:
-            continue
-        try:
-            mode = int(raw_mode, 8)
-            obj_type = raw_type.decode("ascii", errors="strict")
-            oid = raw_oid.decode("ascii", errors="strict")
-        except (UnicodeDecodeError, ValueError) as exc:
-            raise RecoveryGitError("Git tree query returned malformed metadata") from exc
-        if canonical in entries:
-            raise RecoveryGitError("Git tree contains ambiguous canonical path aliases")
-        entries[canonical] = (mode, obj_type, oid)
-    return entries
+    tree_oid = _tree_root_oid(git, root, head_oid, prefix)
+    if tree_oid is None:
+        return {}
+    return _walk_tree_entries(git, root, tree_oid, (), excluded)
 
 
 def _committed_coverage(
     git: str,
     root: Path,
-    pathspec: str,
+    pathspec: Pathspec,
     prefix: tuple[str, ...],
     excluded: PathExclusion,
     *,
@@ -539,8 +765,7 @@ def _committed_coverage(
         for path, (mode, obj_type, _oid) in entries.items()
         if obj_type == "blob" and (mode & 0o170000) == 0o100000
     }
-    gaps = set(entries) - covered
-    return tuple(sorted(covered)), tuple(sorted(gaps))
+    return tuple(sorted(covered)), tuple(sorted(set(entries) - covered))
 
 
 def _index_flags_from_raw(
@@ -568,7 +793,7 @@ def _index_flags_from_raw(
 def _index_flags(
     git: str,
     root: Path,
-    pathspec: str,
+    pathspec: Pathspec,
     prefix: tuple[str, ...],
     excluded: PathExclusion,
     *,
@@ -745,20 +970,32 @@ def _lstat(vault: Path, relative: str) -> os.stat_result | None:
                 pass
 
 
-def _walk_visible_paths(
+def _fs_entry(path: str, observed: os.stat_result) -> _FsEntry:
+    return _FsEntry(
+        path,
+        observed.st_mode,
+        observed.st_size,
+        observed.st_mtime_ns,
+        observed.st_ctime_ns,
+        observed.st_dev,
+        observed.st_ino,
+    )
+
+
+def _walk_visible_snapshot(
     directory_fd: int,
     relative_parts: tuple[str, ...],
     excluded: PathExclusion,
-) -> set[str]:
+) -> list[_FsEntry]:
     try:
         with os.scandir(directory_fd) as iterator:
             entries = sorted(iterator, key=lambda entry: entry.name)
     except OSError as exc:
         raise RecoveryGitError("Could not enumerate canonical working-tree metadata") from exc
-    output: set[str] = set()
+    output: list[_FsEntry] = []
     for entry in entries:
         name = entry.name
-        if name == ".git" or name == "__pycache__":
+        if name == ".git":
             continue
         child_parts = (*relative_parts, name)
         relative = PurePosixPath(*child_parts).as_posix()
@@ -774,28 +1011,160 @@ def _walk_visible_paths(
             except OSError as exc:
                 raise RecoveryGitError("Could not inspect canonical working-tree metadata") from exc
             try:
-                output.update(_walk_visible_paths(child_fd, child_parts, excluded))
+                output.extend(_walk_visible_snapshot(child_fd, child_parts, excluded))
             finally:
                 os.close(child_fd)
             continue
-        output.add(relative)
+        output.append(_fs_entry(relative, observed))
     return output
 
 
-def _visible_worktree_paths(vault: Path, excluded: PathExclusion) -> tuple[str, ...]:
+def _working_tree_snapshot(vault: Path, excluded: PathExclusion) -> _WorkingTreeSnapshot:
     try:
         root_fd = os.open(vault, _DIR_FLAGS)
     except OSError as exc:
         raise RecoveryGitError("Could not inspect canonical working-tree metadata") from exc
     try:
-        return tuple(sorted(_walk_visible_paths(root_fd, (), excluded)))
+        entries = tuple(
+            sorted(_walk_visible_snapshot(root_fd, (), excluded), key=lambda item: item.path)
+        )
     finally:
         os.close(root_fd)
+    return _WorkingTreeSnapshot(entries)
 
 
-def _repo_path(path: str, prefix: tuple[str, ...]) -> str:
-    parts = (*prefix, *PurePosixPath(path).parts)
-    return PurePosixPath(*parts).as_posix()
+def _visible_worktree_paths(vault: Path, excluded: PathExclusion) -> tuple[str, ...]:
+    return _working_tree_snapshot(vault, excluded).paths
+
+
+def _snapshot_entry_for_index_path(
+    vault: Path,
+    path: str,
+    snapshot: _WorkingTreeSnapshot,
+) -> _FsEntry | None:
+    by_path = snapshot.by_path()
+    exact = by_path.get(path)
+    if exact is not None:
+        return exact
+    folded = path.casefold()
+    candidates = [entry for entry in snapshot.entries if entry.path.casefold() == folded]
+    if not candidates:
+        return None
+    observed = _lstat(vault, path)
+    if observed is None:
+        return None
+    identity = (observed.st_dev, observed.st_ino)
+    matches = [entry for entry in candidates if (entry.device, entry.inode) == identity]
+    if len(matches) > 1:
+        raise RecoveryGitError("Filesystem exposes ambiguous case aliases for a canonical path")
+    return matches[0] if matches else None
+
+
+def _compare_index_entry(
+    entry: _IndexEntry,
+    observed: _FsEntry,
+) -> Literal["clean", "modified", "uncertain"]:
+    if entry.mode not in {0o100644, 0o100755} or not stat.S_ISREG(observed.mode):
+        return "modified"
+    if observed.size > _INDEX_SIZE_MAX:
+        return "uncertain"
+    if entry.size != observed.size:
+        return "modified"
+    if (
+        entry.mtime_ns != observed.mtime_ns
+        or entry.ctime_ns != observed.ctime_ns
+        or (entry.device and entry.device != (observed.device & 0xFFFFFFFF))
+        or (entry.inode and entry.inode != (observed.inode & 0xFFFFFFFF))
+    ):
+        return "uncertain"
+    return "clean"
+
+
+def _worktree_from_snapshot(
+    entries: Sequence[_IndexEntry],
+    vault: Path,
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
+    snapshot: _WorkingTreeSnapshot,
+    *,
+    case_insensitive_prefix: bool = False,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    index = _canonical_index_entries(
+        entries,
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
+    modified: set[str] = set()
+    deleted: set[str] = set()
+    uncertain: set[str] = set()
+    matched_visible: set[str] = set()
+    for path, entry in index.items():
+        observed = _snapshot_entry_for_index_path(vault, path, snapshot)
+        if observed is None:
+            deleted.add(path)
+            continue
+        matched_visible.add(observed.path)
+        classification = _compare_index_entry(entry, observed)
+        if classification == "modified":
+            modified.add(path)
+        elif classification == "uncertain":
+            uncertain.add(path)
+    return (
+        tuple(sorted(modified)),
+        tuple(sorted(deleted)),
+        tuple(sorted(uncertain)),
+        tuple(sorted(matched_visible)),
+    )
+
+
+def _worktree_from_entries(
+    entries: Sequence[_IndexEntry],
+    vault: Path,
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    index = _canonical_index_entries(
+        entries,
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
+    modified: set[str] = set()
+    deleted: set[str] = set()
+    uncertain: set[str] = set()
+    for path, entry in index.items():
+        observed = _lstat(vault, path)
+        if observed is None:
+            deleted.add(path)
+            continue
+        classification = _compare_index_entry(entry, _fs_entry(path, observed))
+        if classification == "modified":
+            modified.add(path)
+        elif classification == "uncertain":
+            uncertain.add(path)
+    return tuple(sorted(modified)), tuple(sorted(deleted)), tuple(sorted(uncertain))
+
+
+def _worktree(
+    git: str,
+    root: Path,
+    vault: Path,
+    pathspec: Pathspec,
+    prefix: tuple[str, ...],
+    excluded: PathExclusion,
+    *,
+    case_insensitive_prefix: bool = False,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    return _worktree_from_entries(
+        _index_entries(_index_debug_raw(git, root, pathspec)),
+        vault,
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
 
 
 def _ignored_paths(
@@ -837,70 +1206,10 @@ def _ignored_paths(
     )
 
 
-def _worktree_from_entries(
-    entries: Sequence[_IndexEntry],
-    vault: Path,
-    prefix: tuple[str, ...],
-    excluded: PathExclusion,
-    *,
-    case_insensitive_prefix: bool = False,
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
-    index = _canonical_index_entries(
-        entries,
-        prefix,
-        excluded,
-        case_insensitive_prefix=case_insensitive_prefix,
-    )
-    modified: set[str] = set()
-    deleted: set[str] = set()
-    uncertain: set[str] = set()
-    for path, entry in index.items():
-        observed = _lstat(vault, path)
-        if observed is None:
-            deleted.add(path)
-            continue
-        if entry.mode not in {0o100644, 0o100755} or not stat.S_ISREG(observed.st_mode):
-            modified.add(path)
-            continue
-        if observed.st_size > _INDEX_SIZE_MAX:
-            uncertain.add(path)
-            continue
-        if entry.size != observed.st_size:
-            modified.add(path)
-            continue
-        if (
-            entry.mtime_ns != observed.st_mtime_ns
-            or entry.ctime_ns != observed.st_ctime_ns
-            or (entry.device and entry.device != (observed.st_dev & 0xFFFFFFFF))
-            or (entry.inode and entry.inode != (observed.st_ino & 0xFFFFFFFF))
-        ):
-            uncertain.add(path)
-    return tuple(sorted(modified)), tuple(sorted(deleted)), tuple(sorted(uncertain))
-
-
-def _worktree(
-    git: str,
-    root: Path,
-    vault: Path,
-    pathspec: str,
-    prefix: tuple[str, ...],
-    excluded: PathExclusion,
-    *,
-    case_insensitive_prefix: bool = False,
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
-    return _worktree_from_entries(
-        _index_entries(_index_debug_raw(git, root, pathspec)),
-        vault,
-        prefix,
-        excluded,
-        case_insensitive_prefix=case_insensitive_prefix,
-    )
-
-
 def _latest_commit(
     git: str,
     root: Path,
-    pathspec: str,
+    pathspec: Pathspec,
     prefix: tuple[str, ...],
     excluded: PathExclusion,
     clock: Callable[[], datetime],
@@ -914,15 +1223,18 @@ def _latest_commit(
     revision_result = _run_git(
         git,
         cwd=root,
-        arguments=("rev-list", revision, "--", pathspec),
+        arguments=_pathspec_command("rev-list", (revision,), pathspec),
     )
     if revision_result.stderr.strip():
         raise RecoveryGitError("Git history query reported incomplete results")
     for sha in revision_result.stdout.decode("ascii", errors="strict").splitlines():
+        pathspecs = (pathspec,) if isinstance(pathspec, str) else tuple(pathspec)
+        prefix_args = ("--no-literal-pathspecs",) if _uses_magic(pathspecs) else ()
         changed = _git_paths(
             git,
             root,
             (
+                *prefix_args,
                 "diff-tree",
                 "--no-ext-diff",
                 "--no-textconv",
@@ -937,7 +1249,7 @@ def _latest_commit(
                 "-z",
                 sha,
                 "--",
-                pathspec,
+                *pathspecs,
             ),
             prefix,
             excluded,
@@ -1031,10 +1343,7 @@ def _no_repo() -> tuple[RecoveryDiagnostic, ...]:
             "failure",
             "error",
             "The configured vault is not covered by a Git repository.",
-            (
-                "Initialize version history for the canonical vault and commit the intended "
-                "durable files."
-            ),
+            "Initialize version history for the canonical vault and commit the intended durable files.",
         ),
         _diag(
             "recovery.git.last_canonical_commit",
@@ -1094,10 +1403,7 @@ def _runtime(config: LifeOSConfig) -> RecoveryDiagnostic:
         "recovery.runtime.disposable",
         "info",
         "info",
-        (
-            f"Disposable runtime state at {display} is rebuildable and is not canonical "
-            "recovery material."
-        ),
+        f"Disposable runtime state at {display} is rebuildable and is not canonical recovery material.",
         "Restore canonical vault data first, then rebuild or recreate derived runtime state.",
     )
 
@@ -1164,10 +1470,7 @@ def _build_report(
                 "recovery.git.last_canonical_commit",
                 "failure",
                 "error",
-                (
-                    "The Git repository has no commit yet, so no canonical vault version is "
-                    "recoverable from history."
-                ),
+                "The Git repository has no commit yet, so no canonical vault version is recoverable from history.",
                 "Create a reviewed initial commit containing the intended canonical vault files.",
             )
         )
@@ -1178,10 +1481,7 @@ def _build_report(
                 "unknown",
                 "warning",
                 _incomplete("Canonical commit-history coverage"),
-                (
-                    "Review protected/excluded recovery scope explicitly before treating commit "
-                    "coverage as complete."
-                ),
+                "Review protected/excluded recovery scope explicitly before treating commit coverage as complete.",
             )
         )
     elif last is None:
@@ -1200,10 +1500,7 @@ def _build_report(
                 "recovery.git.last_canonical_commit",
                 "info",
                 "info",
-                (
-                    f"Latest canonical commit is {last.sha[:12]} from {last.committed_at} "
-                    f"({last.age_days} day(s) old)."
-                ),
+                f"Latest canonical commit is {last.sha[:12]} from {last.committed_at} ({last.age_days} day(s) old).",
             )
         )
 
@@ -1222,14 +1519,8 @@ def _build_report(
                 "recovery.git.canonical_objects",
                 "failure",
                 "error",
-                (
-                    f"{len(unrecoverable)} visible committed canonical path(s) are not ordinary "
-                    "Git blob entries."
-                ),
-                (
-                    "Replace gitlink/symlink-style canonical entries with ordinary tracked vault "
-                    "files before relying on local history."
-                ),
+                f"{len(unrecoverable)} visible committed canonical path(s) are not ordinary Git blob entries.",
+                "Replace gitlink/symlink-style canonical entries with ordinary tracked vault files before relying on local history.",
                 unrecoverable,
             )
         )
@@ -1240,10 +1531,7 @@ def _build_report(
                 "unknown",
                 "warning",
                 _incomplete("Committed canonical object coverage"),
-                (
-                    "Review protected/excluded recovery scope explicitly before treating local "
-                    "object coverage as complete."
-                ),
+                "Review protected/excluded recovery scope explicitly before treating local object coverage as complete.",
             )
         )
     else:
@@ -1257,10 +1545,7 @@ def _build_report(
                     "payload integrity is intentionally not verified because recovery diagnostics "
                     "do not read canonical note bodies."
                 ),
-                (
-                    "Use dedicated Git integrity tooling separately if object-payload verification "
-                    "is required."
-                ),
+                "Use dedicated Git integrity tooling separately if object-payload verification is required.",
             )
         )
 
@@ -1281,10 +1566,7 @@ def _build_report(
                     f"{len(uncommitted)} tracked canonical path(s) have staged, modified, or "
                     f"deleted state not represented by the latest commit.{suffix}"
                 ),
-                (
-                    "Review and commit intended canonical changes; inspect metadata-uncertain "
-                    "paths and clear hiding index flags before treating the tree as clean."
-                ),
+                "Review and commit intended canonical changes; inspect metadata-uncertain paths and clear hiding index flags before treating the tree as clean.",
                 all_tracked,
             )
         )
@@ -1294,14 +1576,8 @@ def _build_report(
                 "recovery.git.uncommitted_canonical",
                 "unknown",
                 "warning",
-                (
-                    f"Working-tree content equality cannot be proven for {len(uncertain_all)} "
-                    "visible canonical path(s) from metadata alone."
-                ),
-                (
-                    "Inspect the listed paths and clear assume-unchanged/skip-worktree flags where "
-                    "present before treating the tree as clean."
-                ),
+                f"Working-tree content equality cannot be proven for {len(uncertain_all)} visible canonical path(s) from metadata alone.",
+                "Inspect the listed paths and clear assume-unchanged/skip-worktree flags where present before treating the tree as clean.",
                 uncertain_all,
             )
         )
@@ -1312,10 +1588,7 @@ def _build_report(
                 "unknown",
                 "warning",
                 _incomplete("Uncommitted canonical coverage"),
-                (
-                    "Review protected/excluded recovery scope explicitly before treating the "
-                    "working tree as clean."
-                ),
+                "Review protected/excluded recovery scope explicitly before treating the working tree as clean.",
             )
         )
     else:
@@ -1324,10 +1597,7 @@ def _build_report(
                 "recovery.git.uncommitted_canonical",
                 "pass",
                 "info",
-                (
-                    "No tracked canonical paths have proven uncommitted changes or unresolved "
-                    "metadata state."
-                ),
+                "No tracked canonical paths have proven uncommitted changes or unresolved metadata state.",
             )
         )
 
@@ -1337,10 +1607,7 @@ def _build_report(
                 "recovery.git.untracked_canonical",
                 "warning",
                 "warning",
-                (
-                    f"{len(untracked)} visible canonical path(s) are untracked and absent from "
-                    "committed history."
-                ),
+                f"{len(untracked)} visible canonical path(s) are untracked and absent from committed history.",
                 "Review these paths and add/commit the canonical files that should be recoverable.",
                 untracked,
             )
@@ -1352,10 +1619,7 @@ def _build_report(
                 "unknown",
                 "warning",
                 _incomplete("Untracked canonical coverage"),
-                (
-                    "Review protected/excluded recovery scope explicitly before treating untracked "
-                    "coverage as complete."
-                ),
+                "Review protected/excluded recovery scope explicitly before treating untracked coverage as complete.",
             )
         )
     else:
@@ -1374,14 +1638,8 @@ def _build_report(
                 "recovery.git.ignored_canonical",
                 "warning",
                 "warning",
-                (
-                    f"{len(ignored)} visible canonical path(s) are ignored by Git and absent from "
-                    "committed canonical history."
-                ),
-                (
-                    "Review ignore rules and protect these canonical files through the intended "
-                    "durable history."
-                ),
+                f"{len(ignored)} visible canonical path(s) are ignored by Git and absent from committed canonical history.",
+                "Review ignore rules and protect these canonical files through the intended durable history.",
                 ignored,
             )
         )
@@ -1392,10 +1650,7 @@ def _build_report(
                 "unknown",
                 "warning",
                 _incomplete("Ignored canonical coverage"),
-                (
-                    "Review protected/excluded recovery scope explicitly before treating ignore "
-                    "coverage as complete."
-                ),
+                "Review protected/excluded recovery scope explicitly before treating ignore coverage as complete.",
             )
         )
     else:
@@ -1426,12 +1681,25 @@ def _build_report(
     )
 
 
+def _resolve_git_executable() -> str | None:
+    discovered = shutil.which("git")
+    if discovered is None:
+        return None
+    try:
+        return str(Path(discovered).resolve(strict=True))
+    except OSError as exc:
+        raise RecoveryGitError("Git executable could not be resolved safely") from exc
+
+
 def collect_recovery_readiness(
     config: LifeOSConfig,
     *,
     clock_fn: Callable[[], datetime] = _utc_now,
 ) -> RecoveryReport:
-    git = shutil.which("git")
+    try:
+        git = _resolve_git_executable()
+    except RecoveryGitError as exc:
+        return _fallback(config, _git_unknown(str(exc)))
     if git is None:
         return _fallback(
             config,
@@ -1446,20 +1714,18 @@ def collect_recovery_readiness(
 
     root = context.root
     prefix = context.prefix
-    pathspec = context.pathspec
     case_insensitive_prefix = context.case_insensitive_prefix
     try:
         scope = _scope_filter(config)
+        hidden_index_before = _hidden_index_state(git, root, context, scope)
+        if any(hidden_index_before):
+            scope.incomplete = True
+        pathspec = _authorized_git_pathspecs(context, scope, config)
+        fs_before = _working_tree_snapshot(config.vault_root, scope)
         snapshot_before = _git_snapshot(git, root, pathspec)
         head_oid = snapshot_before.head_oid
         head = head_oid is not None
         index_entries = _index_entries(snapshot_before.index_debug)
-        canonical_index = _canonical_index_entries(
-            index_entries,
-            prefix,
-            scope,
-            case_insensitive_prefix=case_insensitive_prefix,
-        )
         tree_entries = _tree_entries(
             git,
             root,
@@ -1483,11 +1749,12 @@ def collect_recovery_readiness(
             scope,
             case_insensitive_prefix=case_insensitive_prefix,
         )
-        unstaged, deleted, uncertain = _worktree_from_entries(
+        unstaged, deleted, uncertain, tracked_visible = _worktree_from_snapshot(
             index_entries,
             config.vault_root,
             prefix,
             scope,
+            fs_before,
             case_insensitive_prefix=case_insensitive_prefix,
         )
         flags = _index_flags_from_raw(
@@ -1496,10 +1763,7 @@ def collect_recovery_readiness(
             scope,
             case_insensitive_prefix=case_insensitive_prefix,
         )
-        visible_paths = _visible_worktree_paths(config.vault_root, scope)
-        untracked_candidates = tuple(
-            sorted(set(visible_paths) - set(canonical_index))
-        )
+        untracked_candidates = tuple(sorted(set(fs_before.paths) - set(tracked_visible)))
         ignored = _ignored_paths(
             git,
             root,
@@ -1524,9 +1788,19 @@ def collect_recovery_readiness(
             else None
         )
         snapshot_after = _git_snapshot(git, root, pathspec)
+        fs_after = _working_tree_snapshot(config.vault_root, scope)
+        hidden_index_after = _hidden_index_state(git, root, context, scope)
+        if hidden_index_after != hidden_index_before:
+            raise RecoveryGitError(
+                "Protected Git index scope changed during recovery inspection; retry for a stable snapshot."
+            )
         if snapshot_after != snapshot_before:
             raise RecoveryGitError(
                 "Git HEAD or index changed during recovery inspection; retry for a stable snapshot."
+            )
+        if fs_after != fs_before:
+            raise RecoveryGitError(
+                "Canonical working-tree metadata changed during recovery inspection; retry for a stable snapshot."
             )
     except RecoveryGitError as exc:
         return _fallback(config, _git_unknown(str(exc)), root)
@@ -1567,9 +1841,7 @@ def format_recovery_text(report: RecoveryReport) -> list[str]:
             f"  {diagnostic.id}: {diagnostic.status} ({diagnostic.severity}) - "
             f"{_terminal_safe_text(diagnostic.summary)}"
         )
-        lines.extend(
-            f"    path: {_terminal_safe_path(path)}" for path in diagnostic.paths
-        )
+        lines.extend(f"    path: {_terminal_safe_path(path)}" for path in diagnostic.paths)
         if diagnostic.remediation:
             lines.append(f"    next: {_terminal_safe_text(diagnostic.remediation)}")
     return lines
