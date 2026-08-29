@@ -375,9 +375,9 @@ notes, reminders, or calendar-like structures use the shared proposal engine.
 
 The bridge exposes typed `experiment.*` capabilities, while the Obsidian plugin
 remains a thin graphical client for design, tracking, analysis, evidence, history,
-proposals, migration, recovery, and visualization models. Local creation, tracking, analysis, and review
-integration require no model. Optional assistance uses provider-neutral contracts
-and bounded, inspectable source selection. See
+proposals, migration, recovery, and visualization
+models. Local creation, tracking, analysis, and review integration require no model. Optional
+assistance uses provider-neutral contracts and bounded, inspectable source selection. See
 [Personal Experiment Architecture](personal-experiment-architecture.md) and
 [Personal Experiments](user-manual/12-personal-experiments.md).
 
@@ -536,8 +536,8 @@ Recovery has three independent evidence classes:
 The JSON recovery section carries stable diagnostic IDs, status, severity, summary, optional
 remediation, and only the relative exposed paths needed to fix a local gap. The initial IDs are
 `recovery.git.repository`, `recovery.git.last_canonical_commit`,
-`recovery.git.uncommitted_canonical`, `recovery.git.untracked_canonical`,
-`recovery.git.ignored_canonical`, `recovery.backup.external`, and
-`recovery.runtime.disposable`. Operational doctor readiness remains separate from this recovery
-evidence so advisory recovery gaps do not silently redefine whether the local LifeOS application
-can run.
+`recovery.git.canonical_objects`, `recovery.git.uncommitted_canonical`,
+`recovery.git.untracked_canonical`, `recovery.git.ignored_canonical`,
+`recovery.backup.external`, and `recovery.runtime.disposable`. Operational doctor readiness
+remains separate from this recovery evidence so advisory recovery gaps do not silently redefine
+whether the local LifeOS application can run.
