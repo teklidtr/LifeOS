@@ -817,6 +817,7 @@ def _ignored_paths(
         git,
         cwd=root,
         arguments=(
+            "--no-literal-pathspecs",
             "-c",
             f"core.excludesFile={os.devnull}",
             "check-ignore",
