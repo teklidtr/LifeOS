@@ -40,6 +40,8 @@ def _candidate_parts(path: str) -> tuple[str, ...] | None:
     pure = PurePosixPath(path)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         return None
+    if any(part != part.strip() for part in pure.parts):
+        return None
     return tuple(pure.parts)
 
 
@@ -86,8 +88,6 @@ def runtime_path_selects_configured_directory(
         try:
             root_fd = os.open(root, _DIRECTORY_FLAGS)
         except FileNotFoundError:
-            # With no canonical vault root there cannot be an existing in-vault runtime inode to
-            # match. Callers that need the vault itself will surface their own not-found failure.
             return False
         try:
             runtime_fd = _open_directory_chain(root_fd, runtime_parts)
