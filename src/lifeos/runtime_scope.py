@@ -35,9 +35,9 @@ def _runtime_relative_parts(
 
 
 def _candidate_parts(path: str) -> tuple[str, ...] | None:
-    if not isinstance(path, str) or not path.strip() or "\\" in path or "\x00" in path:
+    if not isinstance(path, str) or path == "" or "\\" in path or "\x00" in path:
         return None
-    pure = PurePosixPath(path.strip())
+    pure = PurePosixPath(path)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         return None
     return tuple(pure.parts)

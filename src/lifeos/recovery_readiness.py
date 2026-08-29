@@ -183,12 +183,10 @@ def _run_git(
             input=input_bytes,
         )
     except OSError as exc:
-        raise RecoveryGitError(f"Could not execute Git: {exc}") from exc
+        raise RecoveryGitError("Could not execute Git safely") from exc
     if check and result.returncode:
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        suffix = f": {detail}" if detail else ""
         raise RecoveryGitError(
-            f"Git metadata query failed with exit code {result.returncode}{suffix}"
+            "Git metadata query failed; repository state could not be verified safely."
         )
     return result
 
@@ -323,8 +321,7 @@ def _git_paths(
 ) -> tuple[str, ...]:
     result = _run_git(git, cwd=root, arguments=args)
     if result.stderr.strip():
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RecoveryGitError(f"Git path query reported incomplete traversal: {detail}")
+        raise RecoveryGitError("Git path query reported incomplete results")
     return _filter_paths(
         _nul_paths(result.stdout),
         prefix,
@@ -353,8 +350,7 @@ def _git_prefix_spelling(
     """Recover Git's tracked display spelling for a case-insensitive nested vault prefix."""
     result = _run_git(git, cwd=root, arguments=("ls-files", "-z"))
     if result.stderr.strip():
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RecoveryGitError(f"Git index query reported incomplete traversal: {detail}")
+        raise RecoveryGitError("Git index query reported incomplete results")
     matches: set[tuple[str, ...]] = set()
     folded = tuple(part.casefold() for part in prefix)
     for path in _nul_paths(result.stdout):
@@ -380,9 +376,8 @@ def _repo_context(git: str, vault: Path) -> _RepoContext | None:
     )
     if result.returncode:
         if _git_marker_exists(vault):
-            detail = result.stderr.decode("utf-8", errors="replace").strip()
             raise RecoveryGitError(
-                f"Git repository discovery failed: {detail or result.returncode}"
+                "Git repository discovery failed; repository state could not be verified safely."
             )
         return None
     root = Path(
@@ -416,50 +411,6 @@ def _head_exists(git: str, root: Path) -> bool:
     return result.returncode == 0
 
 
-def _blob_matches_oid(git: str, root: Path, oid: str) -> bool:
-    try:
-        oid.encode("ascii")
-        producer = subprocess.Popen(
-            [git, "cat-file", "blob", oid],
-            cwd=root,
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env=_git_environment(),
-        )
-    except UnicodeEncodeError as exc:
-        raise RecoveryGitError("Git returned a non-ASCII object identifier") from exc
-    except OSError as exc:
-        raise RecoveryGitError(f"Could not execute Git: {exc}") from exc
-    if producer.stdout is None:
-        producer.kill()
-        producer.wait()
-        raise RecoveryGitError("Could not verify Git blob payload")
-    try:
-        verifier = subprocess.run(
-            [git, "hash-object", "--stdin"],
-            cwd=root,
-            shell=False,
-            check=False,
-            stdin=producer.stdout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=_git_environment(),
-        )
-    except OSError as exc:
-        producer.kill()
-        producer.wait()
-        raise RecoveryGitError(f"Could not execute Git: {exc}") from exc
-    finally:
-        producer.stdout.close()
-    if producer.wait() or verifier.returncode:
-        return False
-    try:
-        return verifier.stdout.decode("ascii", errors="strict").strip() == oid
-    except UnicodeDecodeError as exc:
-        raise RecoveryGitError("Git returned a non-ASCII object identifier") from exc
-
-
 def _committed_coverage(
     git: str,
     root: Path,
@@ -477,16 +428,15 @@ def _committed_coverage(
         arguments=("ls-tree", "-r", "-z", "HEAD", "--", pathspec),
     )
     if result.stderr.strip():
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RecoveryGitError(f"Git tree query reported incomplete traversal: {detail}")
-    entries: list[tuple[str, str]] = []
+        raise RecoveryGitError("Git tree query reported incomplete results")
+    covered: set[str] = set()
     gaps: set[str] = set()
     for record in (part for part in result.stdout.split(b"\0") if part):
         meta, tab, raw_path = record.partition(b"\t")
         fields = meta.split()
         if tab != b"\t" or len(fields) != 3:
             raise RecoveryGitError("Git tree query returned malformed output")
-        mode, obj_type, raw_oid = fields
+        mode, obj_type, _raw_oid = fields
         canonical = _canonical_path(
             raw_path.decode("utf-8", errors="surrogateescape"),
             prefix,
@@ -498,13 +448,7 @@ def _committed_coverage(
         if obj_type != b"blob" or not mode.startswith(b"100"):
             gaps.add(canonical)
             continue
-        try:
-            entries.append((canonical, raw_oid.decode("ascii", errors="strict")))
-        except UnicodeDecodeError as exc:
-            raise RecoveryGitError("Git returned a non-ASCII object identifier") from exc
-    availability = {oid: _blob_matches_oid(git, root, oid) for _, oid in entries}
-    covered = {path for path, oid in entries if availability[oid]}
-    gaps.update(path for path, oid in entries if not availability[oid])
+        covered.add(canonical)
     return tuple(sorted(covered)), tuple(sorted(gaps))
 
 
@@ -523,8 +467,7 @@ def _index_flags(
         arguments=("ls-files", "-v", "-z", "--", pathspec),
     )
     if result.stderr.strip():
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RecoveryGitError(f"Git index flag query reported incomplete traversal: {detail}")
+        raise RecoveryGitError("Git index flag query reported incomplete results")
     paths: list[str] = []
     for record in (part for part in result.stdout.split(b"\0") if part):
         if len(record) < 3 or record[1:2] != b" ":
@@ -667,8 +610,7 @@ def _worktree(
         arguments=("ls-files", "--stage", "--debug", "-z", "--", pathspec),
     )
     if result.stderr.strip():
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RecoveryGitError(f"Git worktree query reported incomplete traversal: {detail}")
+        raise RecoveryGitError("Git worktree query reported incomplete results")
     modified: set[str] = set()
     deleted: set[str] = set()
     uncertain: set[str] = set()
@@ -719,8 +661,7 @@ def _latest_commit(
         arguments=("rev-list", "HEAD", "--", pathspec),
     )
     if revision_result.stderr.strip():
-        detail = revision_result.stderr.decode("utf-8", errors="replace").strip()
-        raise RecoveryGitError(f"Git history query reported incomplete traversal: {detail}")
+        raise RecoveryGitError("Git history query reported incomplete results")
     for sha in revision_result.stdout.decode("ascii", errors="strict").splitlines():
         changed = _git_paths(
             git,
@@ -729,6 +670,7 @@ def _latest_commit(
                 "diff-tree",
                 "--no-ext-diff",
                 "--no-textconv",
+                "--no-renames",
                 "-m",
                 "--root",
                 "--no-commit-id",
@@ -751,8 +693,7 @@ def _latest_commit(
             arguments=("show", "-s", "--format=%cI", sha),
         )
         if stamp_result.stderr.strip():
-            detail = stamp_result.stderr.decode("utf-8", errors="replace").strip()
-            raise RecoveryGitError(f"Git commit query reported incomplete traversal: {detail}")
+            raise RecoveryGitError("Git commit query reported incomplete results")
         stamp = stamp_result.stdout.decode("ascii", errors="strict").strip()
         try:
             committed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
@@ -802,7 +743,7 @@ def _git_unknown(summary: str) -> tuple[RecoveryDiagnostic, ...]:
             "recovery.git.canonical_objects",
             "unknown",
             "warning",
-            "Local recoverability of committed canonical blobs could not be verified.",
+            "Committed canonical object payload integrity is not verified by recovery diagnostics.",
         ),
         _diag(
             "recovery.git.uncommitted_canonical",
@@ -847,7 +788,7 @@ def _no_repo() -> tuple[RecoveryDiagnostic, ...]:
             "recovery.git.canonical_objects",
             "unknown",
             "warning",
-            "No committed canonical blobs can be verified without a Git repository.",
+            "Committed canonical object payload integrity is not inspected without Git history.",
         ),
         _diag(
             "recovery.git.uncommitted_canonical",
@@ -973,6 +914,7 @@ def collect_recovery_readiness(
                 "--cached",
                 "--no-ext-diff",
                 "--no-textconv",
+                "--no-renames",
                 "--name-only",
                 "-z",
                 "--",
@@ -1101,7 +1043,7 @@ def collect_recovery_readiness(
                 "recovery.git.canonical_objects",
                 "unknown",
                 "warning",
-                "Committed canonical blob availability cannot be verified before the first commit.",
+                "Committed canonical tree structure cannot be verified before the first commit.",
             )
         )
     elif unrecoverable:
@@ -1111,12 +1053,12 @@ def collect_recovery_readiness(
                 "failure",
                 "error",
                 (
-                    f"{len(unrecoverable)} visible committed canonical path(s) are not backed by "
-                    "locally hash-verified regular blob objects."
+                    f"{len(unrecoverable)} visible committed canonical path(s) are not ordinary "
+                    "Git blob entries."
                 ),
                 (
-                    "Repair the local Git object store or replace gitlink/symlink-style canonical "
-                    "entries with ordinary recoverable vault files before relying on local history."
+                    "Replace gitlink/symlink-style canonical entries with ordinary tracked vault "
+                    "files before relying on local history."
                 ),
                 unrecoverable,
             )
@@ -1138,11 +1080,16 @@ def collect_recovery_readiness(
         items.append(
             _diag(
                 "recovery.git.canonical_objects",
-                "pass",
-                "info",
+                "unknown",
+                "warning",
                 (
-                    "Committed canonical tree entries are backed by locally hash-verified regular "
-                    "blobs."
+                    "Committed canonical paths are represented as regular Git blob entries, but "
+                    "payload integrity is intentionally not verified because recovery diagnostics "
+                    "do not read canonical note bodies."
+                ),
+                (
+                    "Use dedicated Git integrity tooling separately if object-payload verification "
+                    "is required."
                 ),
             )
         )

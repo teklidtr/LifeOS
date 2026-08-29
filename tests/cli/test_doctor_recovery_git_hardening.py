@@ -94,7 +94,7 @@ def test_recovery_ignores_inherited_repository_selection_environment(
     assert not (tmp_path / "unexpected-trace").exists()
 
 
-def test_recovery_repository_discovery_failure_is_unknown(
+def test_recovery_repository_discovery_failure_is_unknown_without_stderr_leak(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -119,7 +119,7 @@ def test_recovery_repository_discovery_failure_is_unknown(
                 command,
                 128,
                 stdout=b"",
-                stderr=b"fatal: detected dubious ownership in repository\n",
+                stderr=b"fatal: detected dubious ownership in private/repository\n",
             )
         return real_run_git(
             git_executable,
@@ -133,9 +133,12 @@ def test_recovery_repository_discovery_failure_is_unknown(
 
     report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
     diagnostics = _diagnostics(report)
+    summary = diagnostics["recovery.git.repository"].summary
 
     assert diagnostics["recovery.git.repository"].status == "unknown"
-    assert "dubious ownership" in diagnostics["recovery.git.repository"].summary
+    assert "dubious ownership" not in summary
+    assert "private/repository" not in summary
+    assert "could not be verified safely" in summary
     assert report.repository_root is None
 
 
@@ -214,7 +217,49 @@ def test_recovery_detects_unstaged_metadata_without_running_clean_filter(
     assert diagnostics["recovery.git.uncommitted_canonical"].status == "warning"
 
 
-def test_recovery_reports_missing_committed_blob_as_unrecoverable(
+def test_recovery_staged_diff_disables_rename_detection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    (vault / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
+    _commit_all(vault, "baseline")
+    _git(vault, "config", "diff.renames", "true")
+
+    real_run_git = recovery_readiness._run_git
+    staged_queries: list[tuple[str, ...]] = []
+
+    def recording_run_git(
+        git_executable: str,
+        *,
+        cwd: Path,
+        arguments: tuple[str, ...] | list[str],
+        check: bool = True,
+        input_bytes: bytes | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        args = tuple(arguments)
+        if args[:2] == ("diff", "--cached"):
+            staged_queries.append(args)
+        return real_run_git(
+            git_executable,
+            cwd=cwd,
+            arguments=arguments,
+            check=check,
+            input_bytes=input_bytes,
+        )
+
+    monkeypatch.setattr(recovery_readiness, "_run_git", recording_run_git)
+
+    collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+
+    assert staged_queries
+    assert all("--no-renames" in args for args in staged_queries)
+
+
+def test_recovery_treats_missing_blob_payload_integrity_as_unknown(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -233,9 +278,9 @@ def test_recovery_reports_missing_committed_blob_as_unrecoverable(
     report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
     diagnostics = _diagnostics(report)
 
-    assert diagnostics["recovery.git.canonical_objects"].status == "failure"
-    assert report.unrecoverable_committed_paths == ("wiki/missing-object.md",)
-    assert "wiki/missing-object.md" in diagnostics["recovery.git.canonical_objects"].paths
+    assert diagnostics["recovery.git.canonical_objects"].status == "unknown"
+    assert report.unrecoverable_committed_paths == ()
+    assert report.committed_canonical_count > 0
 
 
 def test_recovery_reports_gitlink_as_unrecoverable_canonical_entry(

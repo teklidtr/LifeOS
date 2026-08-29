@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import lifeos.coherence_scoped as coherence_scoped
+from lifeos.runtime_scope import build_runtime_exclusion_matcher
 
 
 def test_opened_component_spelling_uses_directory_entry_name(tmp_path: Path) -> None:
@@ -43,3 +44,21 @@ def test_runtime_prefix_uses_filesystem_selected_spelling(
         vault,
         runtime_dir=vault / "Runtime",
     ) == "runtime/"
+
+
+def test_runtime_exclusion_preserves_filename_whitespace(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime = vault / "runtime"
+    runtime.mkdir()
+
+    matcher = build_runtime_exclusion_matcher(
+        vault,
+        runtime_dir=runtime,
+        snapshot_prefix="runtime/",
+    )
+
+    assert matcher("runtime/cache.db")
+    assert not matcher(" runtime/cache.db")
+    assert not matcher("runtime /cache.db")
+    assert not matcher("runtime/cache.db ")

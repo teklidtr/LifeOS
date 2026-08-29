@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import zlib
 from pathlib import Path
 
 import pytest
@@ -163,70 +162,36 @@ def test_recovery_treats_stat_only_drift_as_unknown_not_modified(tmp_path: Path)
     assert "wiki/touched.md" in getattr(diagnostic, "paths")
 
 
-def test_recovery_verifies_committed_blob_payload_integrity(tmp_path: Path) -> None:
+def test_recovery_does_not_inflate_committed_note_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     vault = tmp_path / "vault"
     assert main(["init", str(vault)]) == 0
-    corrupt = vault / "wiki" / "corrupt.md"
-    corrupt.write_text("header\n" + ("A" * 200_000) + "\nfooter\n", encoding="utf-8")
-    _commit_all(vault, "commit payload")
+    note = vault / "wiki" / "private.md"
+    note.write_text("canonical body must stay unread by doctor\n", encoding="utf-8")
+    _commit_all(vault, "metadata-only baseline")
 
-    object_id = _git(vault, "rev-parse", "HEAD:wiki/corrupt.md").stdout.strip()
-    object_path = vault / ".git" / "objects" / object_id[:2] / object_id[2:]
-    assert object_path.is_file(), "test requires the freshly committed blob to remain loose"
-    original = bytearray(object_path.read_bytes())
-    assert original
-    os.chmod(object_path, 0o644)
-    original[-1] ^= 0x01
-    object_path.write_bytes(original)
+    real_popen = subprocess.Popen
+    forbidden: list[tuple[str, ...]] = []
 
-    batch_check = subprocess.run(
-        ["git", "cat-file", "--batch-check=%(objectname) %(objecttype)"],
-        cwd=vault,
-        input=f"{object_id}\n",
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert batch_check.stdout.strip() == f"{object_id} blob"
+    def guarded_popen(*args, **kwargs):
+        command = args[0] if args else kwargs.get("args")
+        normalized = tuple(str(part) for part in command)
+        if "cat-file" in normalized or "hash-object" in normalized:
+            forbidden.append(normalized)
+            raise AssertionError("recovery diagnostics must not read committed payloads")
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(recovery_readiness.subprocess, "Popen", guarded_popen)
 
     report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
     diagnostic = _diagnostic(report, "recovery.git.canonical_objects")
 
-    assert "wiki/corrupt.md" in report.unrecoverable_committed_paths
-    assert getattr(diagnostic, "status") == "failure"
-    assert getattr(diagnostic, "severity") == "error"
-
-
-def test_recovery_verifies_blob_payload_hash_matches_expected_oid(tmp_path: Path) -> None:
-    vault = tmp_path / "vault"
-    assert main(["init", str(vault)]) == 0
-    note = vault / "wiki" / "hash-mismatch.md"
-    note.write_text("original canonical body\n", encoding="utf-8")
-    _commit_all(vault, "hash baseline")
-
-    object_id = _git(vault, "rev-parse", "HEAD:wiki/hash-mismatch.md").stdout.strip()
-    object_path = vault / ".git" / "objects" / object_id[:2] / object_id[2:]
-    assert object_path.is_file(), "test requires the freshly committed blob to remain loose"
-
-    replacement = b"different but well-formed blob payload\n"
-    encoded = zlib.compress(f"blob {len(replacement)}\0".encode("ascii") + replacement)
-    os.chmod(object_path, 0o644)
-    object_path.write_bytes(encoded)
-
-    cat_file = subprocess.run(
-        ["git", "cat-file", "blob", object_id],
-        cwd=vault,
-        check=False,
-        capture_output=True,
-    )
-    assert cat_file.returncode == 0
-    assert cat_file.stdout == replacement
-
-    report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
-    diagnostic = _diagnostic(report, "recovery.git.canonical_objects")
-
-    assert "wiki/hash-mismatch.md" in report.unrecoverable_committed_paths
-    assert getattr(diagnostic, "status") == "failure"
+    assert forbidden == []
+    assert report.committed_canonical_count > 0
+    assert getattr(diagnostic, "status") == "unknown"
+    assert "do not read canonical note bodies" in getattr(diagnostic, "summary")
 
 
 def test_case_insensitive_nested_prefix_uses_git_casing_without_widening_scope(
@@ -298,10 +263,12 @@ def test_case_insensitive_nested_prefix_uses_git_casing_without_widening_scope(
     ) is None
 
 
-def test_git_path_query_warning_fails_closed_as_unknown(
+def test_git_path_query_warning_fails_closed_without_leaking_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    private_warning = "warning: could not open directory 'secrets/private/': Permission denied"
+
     def fake_run_git(
         git_executable: str,
         *,
@@ -315,12 +282,12 @@ def test_git_path_query_warning_fails_closed_as_unknown(
             command,
             0,
             stdout=b"",
-            stderr=b"warning: could not open directory 'locked/': Permission denied\n",
+            stderr=f"{private_warning}\n".encode(),
         )
 
     monkeypatch.setattr(recovery_readiness, "_run_git", fake_run_git)
 
-    with pytest.raises(recovery_readiness.RecoveryGitError, match="incomplete traversal"):
+    with pytest.raises(recovery_readiness.RecoveryGitError) as error:
         recovery_readiness._git_paths(
             "git",
             tmp_path,
@@ -328,3 +295,63 @@ def test_git_path_query_warning_fails_closed_as_unknown(
             (),
             lambda path: False,
         )
+
+    message = str(error.value)
+    diagnostics = recovery_readiness._git_unknown(message)
+    rendered = json.dumps(
+        [
+            {
+                "id": item.id,
+                "status": item.status,
+                "summary": item.summary,
+                "remediation": item.remediation,
+            }
+            for item in diagnostics
+        ],
+        ensure_ascii=True,
+    )
+
+    assert "incomplete results" in message
+    assert private_warning not in message
+    assert "secrets/private" not in message
+    assert private_warning not in rendered
+    assert "secrets/private" not in rendered
+
+
+def test_latest_commit_diff_tree_disables_rename_detection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    (vault / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
+    _commit_all(vault, "baseline")
+
+    real_run_git = recovery_readiness._run_git
+    history_queries: list[tuple[str, ...]] = []
+
+    def recording_run_git(
+        git_executable: str,
+        *,
+        cwd: Path,
+        arguments: tuple[str, ...] | list[str],
+        check: bool = True,
+        input_bytes: bytes | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        args = tuple(arguments)
+        if args and args[0] == "diff-tree":
+            history_queries.append(args)
+        return real_run_git(
+            git_executable,
+            cwd=cwd,
+            arguments=arguments,
+            check=check,
+            input_bytes=input_bytes,
+        )
+
+    monkeypatch.setattr(recovery_readiness, "_run_git", recording_run_git)
+
+    collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+
+    assert history_queries
+    assert all("--no-renames" in args for args in history_queries)

@@ -142,19 +142,21 @@ The recovery section distinguishes three layers:
 1. **Canonical Git coverage.** LifeOS checks whether the configured vault is
    covered by Git, whether canonical history has any commit, the latest commit
    that actually touched the configured vault, whether visible committed
-   canonical tree entries are ordinary locally **hash-verified** blob objects,
-   and current staged, modified, deleted, untracked, or ignored canonical paths.
-   Missing or corrupt local blob objects, object-ID mismatches, gitlinks, or
+   canonical tree entries are structurally ordinary Git blob entries, and current
+   staged, modified, deleted, untracked, or ignored canonical paths. Gitlinks and
    symlink-style committed entries are reported through
-   `recovery.git.canonical_objects` rather than counted as recoverable canonical
-   coverage. Canonical paths marked `assume-unchanged` or `skip-worktree` make
-   working-tree cleanliness **unknown** until those flags are cleared. If only
-   stat-cache metadata changed and content equality cannot be established from
-   metadata alone, the path is reported under `working_tree_uncertain_paths` and
-   the uncommitted diagnostic is **unknown**, not falsely labeled modified.
-   Staging is not a substitute for a commit. An old commit timestamp is
-   informational by itself; a clean vault can remain fully represented by an old
-   commit.
+   `recovery.git.canonical_objects` rather than counted as ordinary canonical blob
+   entries. The doctor deliberately does **not** inflate or hash committed note
+   payloads, because this diagnostic is metadata-only and must not read canonical
+   note bodies. Object-payload integrity therefore remains **unknown** here and
+   requires separate Git integrity tooling if you need to verify it. Canonical
+   paths marked `assume-unchanged` or `skip-worktree` make working-tree
+   cleanliness **unknown** until those flags are cleared. If only stat-cache
+   metadata changed and content equality cannot be established from metadata
+   alone, the path is reported under `working_tree_uncertain_paths` and the
+   uncommitted diagnostic is **unknown**, not falsely labeled modified. Staging is
+   not a substitute for a commit. An old commit timestamp is informational by
+   itself; a clean vault can remain fully represented by an old commit.
 2. **Independent backup/snapshot evidence.** Local Git history can recover
    committed logical versions, but it can disappear with the same disk. A Git
    remote name or remote-tracking ref does not prove that an off-device copy is
@@ -175,13 +177,14 @@ incomplete** rather than `pass`. This preserves nondisclosure without turning
 uninspected sensitive data into a false clean signal.
 
 Typical actionable Git warnings name only the relative paths needed to fix the
-problem. Git repository inspection failures are reported as **unknown** rather
-than being confused with a vault that has no repository. Recovery queries disable
-Git features that can execute configured filesystem monitors or content filters,
-strip inherited repository-selection variables, avoid lazy object fetching, and
-hash-check committed blob payloads without copying their contents into diagnostic
-output. The doctor does not copy note bodies or secrets into recovery output and
-does not commit, push, restore, scan, repair, or create backups for you.
+problem. Git repository inspection failures are reported as **unknown** with
+path-free summaries rather than exposing Git stderr that may contain protected
+filenames. Recovery queries disable configured filesystem monitors, inherited
+repository selection, content filters, rename detection on diff-based name
+queries, and lazy object fetching where relevant. The doctor reads Git/path and
+filesystem metadata only for this recovery surface; it does not read or emit note
+bodies or secrets, and it does not commit, push, restore, scan, repair, or create
+backups for you.
 
 ## Safe upgrade
 
