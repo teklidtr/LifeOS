@@ -372,8 +372,9 @@ def _scope_filter_call(self: Any, path: str) -> bool:
         if self.case_insensitive and _base._casefold_denied(path, self.policy, self.request):
             self.incomplete = True
             return True
+        normalized_path = unicodedata.normalize("NFC", path)
         decision = scope_decision(
-            path,
+            normalized_path,
             scope=self.request,
             policy=self.policy,
             mode="local",
@@ -486,8 +487,9 @@ def _latest_commit(
                 cwd=root,
                 arguments=(
                     "--no-literal-pathspecs",
-                    "rev-list",
+                    "log",
                     "-1",
+                    "--format=%H",
                     revision,
                     "--",
                     _base._literal_pathspec(
