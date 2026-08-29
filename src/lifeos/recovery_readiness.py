@@ -8,7 +8,6 @@ import os
 import shutil
 import stat
 import subprocess
-import sys
 import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
@@ -285,11 +284,16 @@ def _runtime_filter(config: LifeOSConfig) -> PathExclusion:
 
 
 def _vault_case_insensitive(vault: Path) -> bool:
-    del vault
-    # Do not enumerate vault names merely to select privacy matching semantics.
-    # macOS commonly exposes normalization- and case-insensitive volumes, so fail
-    # closed there; later identity checks still prevent unrelated aliases matching.
-    return sys.platform == "darwin"
+    # Probe only fixed LifeOS metadata names; never enumerate user-owned vault names.
+    for relative in (Path("lifeos.yml"), Path("system"), Path("system/retrieval-policy.yml")):
+        try:
+            os.lstat(vault / relative)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise RecoveryGitError("Could not inspect vault case semantics safely") from exc
+        return _filesystem_case_insensitive(vault, relative)
+    raise RecoveryGitError("Could not determine vault filesystem case semantics safely")
 
 
 def _casefold_matches_prefix(path: str, prefixes: Sequence[str]) -> bool:
@@ -441,6 +445,33 @@ def _git_marker_exists(vault: Path) -> bool:
             return True
         return True
     return False
+
+
+def _reject_repository_config_includes(git: str, vault: Path) -> None:
+    """Reject local/worktree include directives before any ordinary Git metadata query."""
+    if not _git_marker_exists(vault):
+        return
+    result = _run_git(
+        git,
+        cwd=vault,
+        arguments=(
+            "config",
+            "--no-includes",
+            "--name-only",
+            "--get-regexp",
+            r"^include(if)?\.",
+        ),
+        check=False,
+    )
+    if result.stderr.strip():
+        raise RecoveryGitError("Git repository configuration could not be inspected safely")
+    if result.returncode == 1:
+        return
+    if result.returncode == 0:
+        raise RecoveryGitError(
+            "Git repository configuration contains include directives that recovery diagnostics will not follow."
+        )
+    raise RecoveryGitError("Git repository configuration could not be inspected safely")
 
 
 def _decode_single_line_path(raw: bytes) -> str:
@@ -1809,6 +1840,7 @@ def collect_recovery_readiness(
             _git_unknown("Git is unavailable, so local canonical history is unknown."),
         )
     try:
+        _reject_repository_config_includes(git, config.vault_root)
         context = _repo_context(git, config.vault_root)
     except RecoveryGitError as exc:
         return _fallback(config, _git_unknown(str(exc)))
