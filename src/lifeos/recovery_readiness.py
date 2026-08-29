@@ -54,6 +54,13 @@ _ACTIVE_SANDBOX: contextvars.ContextVar[_GitMetadataSandbox | None] = contextvar
 _SECTION_RE = re.compile(r"^\s*\[\s*([^\]\s]+)", re.IGNORECASE)
 _INCLUDE_SECTION_RE = re.compile(r"^\s*\[\s*include(?:if\b[^\]]*)?\]", re.IGNORECASE)
 _KEY_VALUE_RE = re.compile(r"^\s*([A-Za-z0-9.-]+)\s*(?:=\s*)?(.*?)\s*$")
+_DEAD_HELPERS = (
+    "_committed_coverage",
+    "_head_exists",
+    "_index_flags",
+    "_visible_worktree_paths",
+    "_worktree",
+)
 
 
 def _read_small_metadata(path: Path, *, limit: int = 2_000_000) -> bytes:
@@ -476,9 +483,19 @@ def _latest_commit(
     case_insensitive_prefix: bool = False,
     head_oid: str | None = None,
 ) -> Any:
+    visible = _ORIGINAL_LATEST_COMMIT(
+        git,
+        root,
+        pathspec,
+        prefix,
+        excluded,
+        clock,
+        case_insensitive_prefix=case_insensitive_prefix,
+        head_oid=head_oid,
+    )
     revision = head_oid if head_oid is not None else _base._head_oid(git, root)
     if revision is None:
-        return None
+        return visible
     if isinstance(excluded, _base._ScopeFilter):
         for relative in _base._policy_denied_prefixes(excluded):
             repo_relative = _base._repo_path(relative, prefix)
@@ -503,16 +520,7 @@ def _latest_commit(
             if result.stdout.strip():
                 excluded.incomplete = True
                 return None
-    return _ORIGINAL_LATEST_COMMIT(
-        git,
-        root,
-        pathspec,
-        prefix,
-        excluded,
-        clock,
-        case_insensitive_prefix=case_insensitive_prefix,
-        head_oid=head_oid,
-    )
+    return visible
 
 
 def _reject_repository_config_includes(_git: str, _vault: Path) -> None:
@@ -590,6 +598,8 @@ setattr(_base, "_snapshot_entry_for_index_path", _snapshot_entry_for_index_path)
 setattr(_base, "_compare_index_entry", _compare_index_entry)
 setattr(_base, "_latest_commit", _latest_commit)
 setattr(_base, "_reject_repository_config_includes", _reject_repository_config_includes)
+for _dead_helper in _DEAD_HELPERS:
+    _base.__dict__.pop(_dead_helper, None)
 
 for _name in dir(_base):
     if not _name.startswith("__") and _name not in globals():
