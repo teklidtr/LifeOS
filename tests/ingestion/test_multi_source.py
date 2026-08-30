@@ -154,6 +154,8 @@ def test_generated_update_accumulates_only_target_grounding_sources() -> None:
     parsed = parse_markdown_note(Path("wiki/generated-topic.md"), content=operation["new_content"])
     result = extract_provenance(parsed.frontmatter)
     proposal = documents.proposal_markdown.decode("utf-8")
+    proposal_note = parse_markdown_note(Path("proposal.md"), content=proposal)
+    target_grounding = proposal_note.frontmatter["extensions"]["ingestion"]["target_grounding"]
 
     assert operation["op"] == "replace_generated_file"
     assert result is not None
@@ -164,8 +166,8 @@ def test_generated_update_accumulates_only_target_grounding_sources() -> None:
     ]
     assert unrelated.path not in {item.path for item in result.sources}
     assert parsed.frontmatter["tags"] == ["grounded"]
-    assert f"tag_rationale: {tag_rationale}" in proposal
-    assert f"Tag rationale: {tag_rationale}" in proposal
+    assert target_grounding[0]["tag_rationale"] == tag_rationale
+    assert f"Tag rationale: {tag_rationale}" in proposal_note.body
 
 
 def test_distinct_targets_keep_distinct_source_subsets_in_review_metadata() -> None:
