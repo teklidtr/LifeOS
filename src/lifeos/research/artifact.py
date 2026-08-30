@@ -59,6 +59,7 @@ def _source_identity(
     title = source_title.strip()
     author = _trimmed(source_author)
     publisher = _trimmed(source_publisher)
+    basis: dict[str, str | None]
     if locator is not None:
         basis = {"kind": "locator", "locator": locator}
     else:
