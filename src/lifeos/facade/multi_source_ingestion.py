@@ -56,6 +56,7 @@ from lifeos.registry import Registry
 from lifeos.registry.file_tracking import FileTrackingError, hash_file_content
 from lifeos.proposals.review_snapshot import ReviewSnapshotError
 from lifeos.proposals.schema import generate_proposal_id
+from lifeos.proposals.target_identity import ProposalTargetStaleError
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
 
@@ -298,6 +299,12 @@ def _map_review_snapshot_error(error: ReviewSnapshotError) -> NoReturn:
     raise ToolExecutionError("Could not build multi-source review snapshot") from error
 
 
+def _map_publication_error(error: ProposalPublicationError) -> NoReturn:
+    if isinstance(error.__cause__, ProposalTargetStaleError):
+        raise ToolConflictError("A batch target changed before proposal publication") from error
+    raise ToolExecutionError("Could not publish multi-source draft proposal") from error
+
+
 def evolve_wiki_batch_proposal(
     *,
     vault_root: Path,
@@ -396,19 +403,21 @@ def evolve_wiki_batch_proposal(
     except WikiSectionUnchangedError as error:
         raise ToolConflictError("A batch target already has the proposed content") from error
 
-    final_verified = _load_observed_sources(
-        vault_root=vault_root,
-        registry=registry,
-        expected=request.source_snapshots,
-    )
-    if tuple(item.source for item in final_verified) != tuple(item.source for item in verified):
-        raise ToolConflictError("A registered batch source changed before proposal publication")
+    def verify_sources_before_publish() -> None:
+        final_verified = _load_observed_sources(
+            vault_root=vault_root,
+            registry=registry,
+            expected=request.source_snapshots,
+        )
+        if tuple(item.source for item in final_verified) != tuple(item.source for item in verified):
+            raise ToolConflictError("A registered batch source changed before proposal publication")
 
     try:
         persisted = persist_compounding_wiki_proposal(
             proposals_root=vault_root / "proposals",
             documents=documents,
             runtime_dir=runtime_dir,
+            before_publish=verify_sources_before_publish,
         )
     except ReviewSnapshotError as error:
         _map_review_snapshot_error(error)
@@ -417,7 +426,7 @@ def evolve_wiki_batch_proposal(
     except ProposalAlreadyExistsError as error:
         raise ToolConflictError("Draft proposal already exists") from error
     except ProposalPublicationError as error:
-        raise ToolExecutionError("Could not publish multi-source draft proposal") from error
+        _map_publication_error(error)
 
     return EvolveWikiBatchProposalResult(
         proposal_id=proposal_id,
