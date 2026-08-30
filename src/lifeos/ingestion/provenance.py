@@ -1,5 +1,6 @@
 import re
-from dataclasses import dataclass
+from contextvars import ContextVar, Token
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any, Mapping
@@ -11,10 +12,29 @@ class ProvenanceValidationError(ValueError):
     pass
 
 
+_SELECTED_ACQUISITION_ID: ContextVar[str | None] = ContextVar(
+    "lifeos_provenance_selected_acquisition",
+    default=None,
+)
+
+
+def push_provenance_acquisition_id(acquisition_id: str) -> Token[str | None]:
+    if not isinstance(acquisition_id, str) or not acquisition_id.strip():
+        raise ValueError("provenance acquisition_id must be a non-empty string")
+    if acquisition_id != acquisition_id.strip() or not acquisition_id.startswith("acq-"):
+        raise ValueError("provenance acquisition_id must be a canonical acquisition ID")
+    return _SELECTED_ACQUISITION_ID.set(acquisition_id)
+
+
+def reset_provenance_acquisition_id(token: Token[str | None]) -> None:
+    _SELECTED_ACQUISITION_ID.reset(token)
+
+
 @dataclass(frozen=True, slots=True)
 class ProvenanceSource:
     path: str
     content_hash: str
+    acquisition_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +55,7 @@ class LifeOSProvenance:
 
 TIMESTAMP_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 HASH_REGEX = re.compile(r"^sha256:[a-f0-9]{64}$")
+ACQUISITION_ID_REGEX = re.compile(r"^acq-[a-f0-9]{24}$")
 
 
 def _validate_path(path: Any) -> str:
@@ -70,6 +91,16 @@ def _validate_hash(hash_val: Any) -> str:
             "Content hash must be in canonical form: sha256:<64 lowercase hexadecimal characters>"
         )
     return hash_val
+
+
+def _validate_acquisition_id(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ProvenanceValidationError("acquisition_id must be a string")
+    if not ACQUISITION_ID_REGEX.match(value):
+        raise ProvenanceValidationError(
+            "acquisition_id must match acq-<24 lowercase hexadecimal characters>"
+        )
+    return value
 
 
 def _validate_timestamp(ts: Any) -> str:
@@ -122,16 +153,25 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
 
         path = raw_source.get("path")
         content_hash = raw_source.get("content_hash")
+        acquisition_id = raw_source.get("acquisition_id")
 
         for k in raw_source:
-            if k not in ("path", "content_hash"):
+            if k not in ("path", "content_hash", "acquisition_id"):
                 raise ProvenanceValidationError(f"Unknown field in source: {k}")
 
         if path is None or content_hash is None:
             raise ProvenanceValidationError("source entry must contain path and content_hash")
 
         source_objs.append(
-            ProvenanceSource(path=_validate_path(path), content_hash=_validate_hash(content_hash))
+            ProvenanceSource(
+                path=_validate_path(path),
+                content_hash=_validate_hash(content_hash),
+                acquisition_id=(
+                    _validate_acquisition_id(acquisition_id)
+                    if acquisition_id is not None
+                    else None
+                ),
+            )
         )
 
     raw_generator = raw.get("generator")
@@ -188,14 +228,20 @@ def merge_provenance_sources(
 ) -> tuple[ProvenanceSource, ...]:
     """Append one accepted source snapshot without erasing provenance history.
 
-    Exact ``(path, content_hash)`` repeats are deduplicated. The same path with a
-    changed hash remains a distinct historical snapshot. Accepted-order is preserved,
-    which makes serialization deterministic and the page's reference history inspectable.
+    Exact ``(path, content_hash, acquisition_id)`` repeats are deduplicated. The
+    same source snapshot with a distinct research acquisition remains distinct so
+    durable synthesis can identify which query/reason selected the evidence.
+    Accepted-order is preserved.
     """
+    selected_acquisition = _SELECTED_ACQUISITION_ID.get()
+    incoming = source
+    if selected_acquisition is not None and incoming.acquisition_id is None:
+        incoming = replace(incoming, acquisition_id=selected_acquisition)
+
     merged: list[ProvenanceSource] = []
-    seen: set[tuple[str, str]] = set()
-    for item in (*existing, source):
-        key = (item.path, item.content_hash)
+    seen: set[tuple[str, str, str | None]] = set()
+    for item in (*existing, incoming):
+        key = (item.path, item.content_hash, item.acquisition_id)
         if key in seen:
             continue
         seen.add(key)
@@ -205,9 +251,20 @@ def merge_provenance_sources(
 
 def provenance_to_frontmatter_value(provenance: LifeOSProvenance) -> dict[str, object]:
     """Convert a typed provenance model back to a deterministically ordered mapping."""
+    selected_acquisition = _SELECTED_ACQUISITION_ID.get()
     sources_list = []
-    for s in provenance.sources:
-        sources_list.append({"path": s.path, "content_hash": s.content_hash})
+    last_index = len(provenance.sources) - 1
+    for index, source in enumerate(provenance.sources):
+        acquisition_id = source.acquisition_id
+        if acquisition_id is None and selected_acquisition is not None and index == last_index:
+            acquisition_id = selected_acquisition
+        item: dict[str, object] = {
+            "path": source.path,
+            "content_hash": source.content_hash,
+        }
+        if acquisition_id is not None:
+            item["acquisition_id"] = acquisition_id
+        sources_list.append(item)
 
     gen_dict: dict[str, object] = {
         "id": provenance.generator.id,
