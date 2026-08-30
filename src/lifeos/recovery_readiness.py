@@ -1,20 +1,21 @@
 """Stable recovery-readiness facade with final Git metadata hardening.
 
-The reviewed implementation lives in ``_recovery_readiness_impl``.  This thin
-facade preserves the public/monkeypatch surface while tightening two bounded
-trust-boundary details: Git config scalar decoding and object-store descendant
-pinning.
+The reviewed implementation lives in ``_recovery_readiness_impl``. This thin
+facade preserves the public/monkeypatch surface while tightening bounded
+trust-boundary details around Git config parsing, metadata-root pinning,
+object-store snapshotting, and ignore-source safety.
 """
 
 from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys as _sys
 import tempfile
 import types
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from lifeos import _recovery_readiness_base as _base
@@ -178,13 +179,21 @@ class _GitMetadataSandbox:
     fingerprint: str
     contains_includes: bool
     ignorecase: bool
+    metadata_fd: int | None = None
+    metadata_fd_path: str | None = None
     object_fd: int | None = None
     object_fd_path: str | None = None
     object_fds: tuple[int, ...] = ()
 
     def close(self) -> None:
+        # The temporary path is rooted through metadata_fd, so clean it before
+        # closing that descriptor. Object descriptors are bounded to the root.
+        try:
+            self.temporary.cleanup()
+        except OSError:
+            pass
         seen: set[int] = set()
-        for fd in (self.object_fd, *self.object_fds):
+        for fd in (self.object_fd, *self.object_fds, self.metadata_fd):
             if fd is None or fd in seen:
                 continue
             seen.add(fd)
@@ -194,38 +203,47 @@ class _GitMetadataSandbox:
                 pass
         self.object_fd = None
         self.object_fds = ()
-        try:
-            self.temporary.cleanup()
-        except OSError:
-            pass
+        self.metadata_fd = None
 
 
-def _pinned_regular_fd_path(fd: int, observed: os.stat_result) -> str:
-    for root in ("/proc/self/fd", "/dev/fd"):
-        candidate = f"{root}/{fd}"
+def _discover_pinned_git_directory(
+    vault: Path,
+) -> tuple[Path, Path, int, os.stat_result, str] | None:
+    for root in (vault, *vault.parents):
+        marker = root / ".git"
         try:
-            candidate_state = os.stat(candidate)
-        except OSError:
+            expected = os.lstat(marker)
+        except FileNotFoundError:
             continue
-        if (
-            stat.S_ISREG(candidate_state.st_mode)
-            and (candidate_state.st_dev, candidate_state.st_ino)
-            == (observed.st_dev, observed.st_ino)
-        ):
-            return candidate
-    raise _base.RecoveryGitError(
-        "Platform cannot expose pinned Git object files safely"
-    )
+        except OSError as exc:
+            raise _base.RecoveryGitError("Could not inspect Git repository metadata") from exc
+        if not stat.S_ISDIR(expected.st_mode) or stat.S_ISLNK(expected.st_mode):
+            raise _base.RecoveryGitError(
+                "Indirect Git metadata layouts are not supported by recovery diagnostics"
+            )
+        metadata_fd = _impl._open_metadata_directory(marker)
+        assert metadata_fd is not None
+        try:
+            observed = os.fstat(metadata_fd)
+            if (observed.st_dev, observed.st_ino) != (expected.st_dev, expected.st_ino):
+                raise _base.RecoveryGitError(
+                    "Git repository metadata changed during safe root pinning"
+                )
+            pinned_path = _impl._pinned_fd_path(metadata_fd, observed)
+            return root, marker, metadata_fd, observed, pinned_path
+        except Exception:
+            os.close(metadata_fd)
+            raise
+    return None
 
 
 def _snapshot_object_directory(
     source_fd: int,
     destination: Path,
-    pinned_fds: list[int],
     *,
     relative: tuple[str, ...] = (),
 ) -> None:
-    """Create an object-store pathname view backed only by pinned regular-file FDs."""
+    """Create a path-stable object-store snapshot with bounded descriptors."""
 
     try:
         destination.mkdir(parents=True, exist_ok=True)
@@ -244,12 +262,7 @@ def _snapshot_object_directory(
 
         if stat.S_ISDIR(observed.st_mode):
             try:
-                _snapshot_object_directory(
-                    child_fd,
-                    target,
-                    pinned_fds,
-                    relative=child_relative,
-                )
+                _snapshot_object_directory(child_fd, target, relative=child_relative)
             finally:
                 os.close(child_fd)
             continue
@@ -261,13 +274,35 @@ def _snapshot_object_directory(
             )
 
         try:
-            target.symlink_to(_pinned_regular_fd_path(child_fd, observed))
+            # Link by name relative to the pinned parent, then verify the linked
+            # inode is the one already opened. This closes the path-swap race
+            # without keeping one descriptor open for every loose/pack object.
+            os.link(
+                name,
+                target,
+                src_dir_fd=source_fd,
+                follow_symlinks=False,
+            )
+            linked = os.stat(target, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(linked.st_mode)
+                or (linked.st_dev, linked.st_ino) != (observed.st_dev, observed.st_ino)
+            ):
+                try:
+                    target.unlink()
+                except OSError:
+                    pass
+                raise _base.RecoveryGitError(
+                    "Git object store changed during bounded snapshot creation"
+                )
+        except _base.RecoveryGitError:
+            raise
         except OSError as exc:
-            os.close(child_fd)
             raise _base.RecoveryGitError(
-                "Could not create pinned Git object-store view"
+                "Could not create bounded Git object-store snapshot"
             ) from exc
-        pinned_fds.append(child_fd)
+        finally:
+            os.close(child_fd)
 
 
 def _open_object_store_root(git_dir: Path) -> tuple[Path, int, os.stat_result]:
@@ -293,29 +328,94 @@ def _metadata_fingerprint(
     *,
     object_state: os.stat_result | None = None,
 ) -> str:
-    # The object payload/pathname view used by Git is independently pinned in the
-    # sandbox. Preserve the reviewed metadata fingerprint for config/index/refs
-    # drift and the top-level object-store identity.
+    sandbox = _impl._ACTIVE_SANDBOX.get()
+    if sandbox is not None and getattr(sandbox, "metadata_fd", None) is not None:
+        metadata_fd = sandbox.metadata_fd
+        metadata_fd_path = sandbox.metadata_fd_path
+        assert metadata_fd is not None and metadata_fd_path is not None
+        try:
+            live = os.lstat(git_dir)
+            pinned = os.fstat(metadata_fd)
+        except OSError as exc:
+            raise _base.RecoveryGitError("Could not revalidate Git metadata root") from exc
+        if (
+            not stat.S_ISDIR(live.st_mode)
+            or stat.S_ISLNK(live.st_mode)
+            or (live.st_dev, live.st_ino) != (pinned.st_dev, pinned.st_ino)
+        ):
+            raise _base.RecoveryGitError(
+                "Git repository metadata changed during recovery inspection"
+            )
+        git_dir = Path(metadata_fd_path)
     return cast(str, _ORIGINAL_METADATA_FINGERPRINT(git_dir, object_state=object_state))
 
 
+def _temporary_object_snapshot(
+    root: Path,
+    metadata_fd_path: str,
+    object_state: os.stat_result,
+) -> tempfile.TemporaryDirectory[str]:
+    """Create a temporary directory on the object store filesystem when possible."""
+
+    candidate_dirs: tuple[str | None, ...] = (
+        None,
+        str(root.parent),
+        metadata_fd_path,
+    )
+    last_error: OSError | None = None
+    for directory in candidate_dirs:
+        try:
+            if directory is None:
+                temporary = tempfile.TemporaryDirectory(
+                    prefix="lifeos-doctor-snapshot-"
+                )
+            else:
+                temporary = tempfile.TemporaryDirectory(
+                    prefix="lifeos-doctor-snapshot-",
+                    dir=directory,
+                )
+        except OSError as exc:
+            last_error = exc
+            continue
+        try:
+            observed = os.stat(temporary.name)
+        except OSError as exc:
+            last_error = exc
+            try:
+                temporary.cleanup()
+            except OSError:
+                pass
+            continue
+        if observed.st_dev == object_state.st_dev:
+            return temporary
+        try:
+            temporary.cleanup()
+        except OSError:
+            pass
+    if last_error is not None:
+        raise last_error
+    raise OSError("no temporary directory is available on the Git object-store filesystem")
+
+
 def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
-    discovered = _impl._discover_git_directory(vault)
+    discovered = _discover_pinned_git_directory(vault)
     if discovered is None:
         return None
-    root, git_dir = discovered
-    _impl._reject_split_index(git_dir)
-    _config_bytes, contains_includes, filemode, ignorecase = _config_snapshot(
-        git_dir / "config"
-    )
-    object_dir, object_fd, object_state = _open_object_store_root(git_dir)
+    root, git_dir, metadata_fd, _metadata_state, metadata_fd_path = discovered
+    pinned_git_dir = Path(metadata_fd_path)
 
     temporary: tempfile.TemporaryDirectory[str] | None = None
-    pinned_object_fds: list[int] = []
+    object_fd: int | None = None
     try:
-        fingerprint = _metadata_fingerprint(git_dir, object_state=object_state)
+        _impl._reject_split_index(pinned_git_dir)
+        _config_bytes, contains_includes, filemode, ignorecase = _config_snapshot(
+            pinned_git_dir / "config"
+        )
+        _object_dir, object_fd, object_state = _open_object_store_root(pinned_git_dir)
+        fingerprint = _metadata_fingerprint(pinned_git_dir, object_state=object_state)
+
         try:
-            index_state = os.lstat(git_dir / "index")
+            index_state = os.lstat(pinned_git_dir / "index")
         except FileNotFoundError:
             index_mtime_ns = None
         except OSError as exc:
@@ -330,18 +430,22 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
             index_mtime_ns = index_state.st_mtime_ns
 
         try:
-            temporary = tempfile.TemporaryDirectory(prefix="lifeos-doctor-git-")
+            temporary = _temporary_object_snapshot(
+                root,
+                metadata_fd_path,
+                object_state,
+            )
             fake = Path(temporary.name) / "git"
             fake.mkdir(parents=True)
             for name in ("HEAD", "index", "packed-refs", "shallow"):
-                _impl._copy_regular_metadata(git_dir / name, fake / name)
-            _impl._copy_metadata_tree(git_dir / "refs", fake / "refs")
+                _impl._copy_regular_metadata(pinned_git_dir / name, fake / name)
+            _impl._copy_metadata_tree(pinned_git_dir / "refs", fake / "refs")
             _impl._copy_regular_metadata(
-                git_dir / "info" / "exclude",
+                pinned_git_dir / "info" / "exclude",
                 fake / "info" / "exclude",
             )
             fake_objects = fake / "objects"
-            _snapshot_object_directory(object_fd, fake_objects, pinned_object_fds)
+            _snapshot_object_directory(object_fd, fake_objects)
             (fake / "config").write_text(
                 "[core]\n"
                 "\trepositoryformatversion = 0\n"
@@ -360,27 +464,32 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
             root,
             vault,
             fake,
-            object_dir,
+            fake_objects,
             index_mtime_ns,
             fingerprint,
             contains_includes,
             ignorecase,
+            metadata_fd,
+            metadata_fd_path,
             object_fd,
             str(fake_objects),
-            tuple(pinned_object_fds),
+            (object_fd,),
         )
     except Exception:
-        for fd in pinned_object_fds:
+        if object_fd is not None:
             try:
-                os.close(fd)
+                os.close(object_fd)
             except OSError:
                 pass
-        os.close(object_fd)
         if temporary is not None:
             try:
                 temporary.cleanup()
             except OSError:
                 pass
+        try:
+            os.close(metadata_fd)
+        except OSError:
+            pass
         raise
 
 
@@ -401,10 +510,122 @@ def _sandbox_pass_fds() -> tuple[int, ...]:
     if sandbox is None:
         return ()
     output: list[int] = []
-    for fd in (sandbox.object_fd, *getattr(sandbox, "object_fds", ())):
+    for fd in (
+        getattr(sandbox, "metadata_fd", None),
+        getattr(sandbox, "object_fd", None),
+    ):
         if fd is not None and fd not in output:
             output.append(fd)
     return tuple(output)
+
+
+def _selects_repository_metadata(path: str) -> bool:
+    sandbox = _impl._ACTIVE_SANDBOX.get()
+    if sandbox is None or getattr(sandbox, "metadata_fd", None) is None:
+        return False
+    pure = PurePosixPath(path)
+    if not pure.parts:
+        return False
+    try:
+        metadata_state = os.fstat(sandbox.metadata_fd)
+        candidate_state = os.stat(
+            sandbox.vault / pure.parts[0],
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise _base.RecoveryGitError("Could not verify repository metadata boundary") from exc
+    return (metadata_state.st_dev, metadata_state.st_ino) == (
+        candidate_state.st_dev,
+        candidate_state.st_ino,
+    )
+
+
+def _applicable_ignore_sources(
+    root: Path,
+    path: str,
+    prefix: tuple[str, ...],
+) -> tuple[Path, ...]:
+    repo_path = PurePosixPath(_base._repo_path(path, prefix))
+    output = [root / ".gitignore"]
+    for depth in range(1, len(repo_path.parts)):
+        output.append(root.joinpath(*repo_path.parts[:depth], ".gitignore"))
+    return tuple(output)
+
+
+def _validate_ignore_sources(root: Path, paths: Any, prefix: tuple[str, ...]) -> None:
+    seen: set[Path] = set()
+    for path in paths:
+        for source in _applicable_ignore_sources(root, path, prefix):
+            if source in seen:
+                continue
+            seen.add(source)
+            try:
+                observed = os.lstat(source)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise _base.RecoveryGitError("Could not inspect Git ignore metadata") from exc
+            if (
+                stat.S_ISLNK(observed.st_mode)
+                or not stat.S_ISREG(observed.st_mode)
+                or observed.st_nlink != 1
+            ):
+                raise _base.RecoveryGitError(
+                    "Git ignore metadata uses an unsupported non-regular entry"
+                )
+
+
+def _ignored_paths(
+    git: str,
+    root: Path,
+    paths: Any,
+    prefix: tuple[str, ...],
+    excluded: Any,
+    *,
+    case_insensitive_prefix: bool = False,
+) -> tuple[str, ...]:
+    if not paths:
+        return ()
+    _validate_ignore_sources(root, paths, prefix)
+    repo_paths = tuple(f"./{_base._repo_path(path, prefix)}" for path in paths)
+    input_bytes = (
+        b"\0".join(path.encode("utf-8", errors="surrogateescape") for path in repo_paths)
+        + b"\0"
+    )
+    try:
+        result = subprocess.run(
+            [
+                git,
+                "--no-literal-pathspecs",
+                "-c",
+                f"core.excludesFile={os.devnull}",
+                "check-ignore",
+                "--stdin",
+                "-z",
+            ],
+            cwd=root,
+            shell=False,
+            check=False,
+            capture_output=True,
+            env=_sandbox_environment(),
+            input=input_bytes,
+            pass_fds=_sandbox_pass_fds(),
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise _base.RecoveryGitError("Git ignore query exceeded its safe time bound") from exc
+    except OSError as exc:
+        raise _base.RecoveryGitError("Could not execute Git ignore query safely") from exc
+    if result.returncode not in {0, 1} or result.stderr.strip():
+        raise _base.RecoveryGitError("Git ignore query could not be verified safely")
+    return _base._filter_paths(
+        _base._nul_paths(result.stdout),
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
 
 
 # Install the bounded fixes into the reviewed implementation module. Its existing
@@ -418,8 +639,12 @@ for _name, _value in {
     "_build_sandbox": _build_sandbox,
     "_sandbox_environment": _sandbox_environment,
     "_sandbox_pass_fds": _sandbox_pass_fds,
+    "_selects_repository_metadata": _selects_repository_metadata,
+    "_ignored_paths": _ignored_paths,
 }.items():
     setattr(_impl, _name, _value)
+
+setattr(_base, "_ignored_paths", _ignored_paths)
 
 
 class _RecoveryModuleProxy(types.ModuleType):
