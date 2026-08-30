@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from mcp.server.fastmcp.tools import Tool
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict
 
 from lifeos.coherence import CoherenceError
@@ -22,7 +23,6 @@ from lifeos.facade.multi_source_ingestion import (
 )
 from lifeos.facade.registry_tools import refresh_registry
 from lifeos.mcp.activity_store import MCPActivityStore
-from lifeos.mcp.exploration_tools import _strict_tool
 from lifeos.mcp.models import EvolveWikiProposalMCPResult
 from lifeos.registry import Registry
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
@@ -66,6 +66,44 @@ EVOLVE_WIKI_BATCH_MCP_DESCRIPTION = (
     "payload. Oversized batches fail without automatic fan-out. This creates one draft only; "
     "when joint reasoning finds zero durable changes, do not call this tool."
 )
+
+
+def _proposal_tool(fn: Callable[..., object]) -> Tool:
+    tool = Tool.from_function(
+        fn,
+        name="ingestion_evolve_wiki_batch_proposal",
+        description=EVOLVE_WIKI_BATCH_MCP_DESCRIPTION,
+        annotations=ToolAnnotations(
+            title="Reconcile a multi-source wiki batch",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )
+    base_model = tool.fn_metadata.arg_model
+    strict_model = cast(
+        type[BaseModel],
+        type(
+            f"Strict{base_model.__name__}",
+            (base_model,),
+            {
+                "model_config": ConfigDict(
+                    arbitrary_types_allowed=True,
+                    extra="forbid",
+                    strict=True,
+                )
+            },
+        ),
+    )
+    strict_model.model_rebuild()
+    strict_metadata = tool.fn_metadata.model_copy(update={"arg_model": strict_model})
+    return tool.model_copy(
+        update={
+            "fn_metadata": strict_metadata,
+            "parameters": strict_model.model_json_schema(by_alias=True),
+        }
+    )
 
 
 def build_multi_source_ingestion_tools(
@@ -187,11 +225,4 @@ def build_multi_source_ingestion_tools(
 
         return cast(EvolveWikiProposalMCPResult, invoke(op))
 
-    return [
-        _strict_tool(
-            ingestion_evolve_wiki_batch_proposal_tool,
-            name="ingestion_evolve_wiki_batch_proposal",
-            description=EVOLVE_WIKI_BATCH_MCP_DESCRIPTION,
-            title="Reconcile a multi-source wiki batch",
-        )
-    ]
+    return [_proposal_tool(ingestion_evolve_wiki_batch_proposal_tool)]
