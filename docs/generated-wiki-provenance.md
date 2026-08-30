@@ -59,6 +59,12 @@ A proposal's `related_sources` describes the source or sources involved in that 
 
 Those concepts intentionally differ. A proposal updating a page from source B can have B as its current related source while the resulting page provenance records A, B, and earlier accepted source snapshots.
 
+## Multi-source target grounding
+
+One folder-ingestion proposal may verify many source snapshots, but provenance is still target-specific. Each reconciled target mutation names the subset of verified `(path, content_hash)` snapshots that actually support that target. A new generated page starts with that subset, and a generated-owned replacement merges that subset into the page's existing accepted source history using the same deterministic deduplication rules above.
+
+The proposal-level `related_sources` field is the deterministic union of selected batch sources. It must not be interpreted as evidence that every source contributed to every target. The digest-bound ingestion review metadata records the target-to-source grounding map so reviewers can distinguish batch membership from page-specific evidence lineage without storing hidden reasoning.
+
 ## Registry indexing
 
 The registry derives provenance rows from canonical Markdown. One generated page produces one provenance document record plus one ordered source row per entry in `lifeos_provenance.sources`.

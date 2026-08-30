@@ -28,6 +28,7 @@ from lifeos.mcp.exploration_tools import (
     build_policy_read_tools,
 )
 from lifeos.mcp.models import WikiSearchMCPResult
+from lifeos.mcp.multi_source_tools import build_multi_source_ingestion_tools
 from lifeos.mcp.research_tools import build_research_tools
 from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS as CORE_MCP_INSTRUCTIONS,
@@ -70,15 +71,22 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "never acts as a protected-scope bypass. Semantic interpretation belongs to the external "
     "agent. LifeOS constrains mutation, not exploration: canonical changes remain available only "
     "through bounded proposal and consequential authorization tools; there is no generic vault "
-    "write, delete, move, or shell surface. External research also remains agent-led: start with "
-    "research_query_context when a single read-only research context is useful, or compose the "
-    "lower-level context/search tools directly. When a material evidence gap requires an external "
-    "source, use research_capture_evidence to preserve the selected source snapshot in raw/ with "
-    "hash-bound acquisition lineage. If that research creates a reusable durable delta, use "
-    "research_create_wiki_proposal with the exact returned source_path and acquisition_id; "
-    "generic ingestion cannot silently choose among research acquisitions. Never send an "
-    "uncaptured external claim directly to wiki mutation, and create no proposal when the answer "
-    "is already represented or produces no durable delta. "
+    "write, delete, move, or shell surface. Folder or multi-source ingestion is one logical batch: "
+    "discover the candidate sources, use vault_read_many to read the selected evidence together, "
+    "carry the exact path/content_hash snapshots from vault_read_many into the batch proposal "
+    "call, inspect applicable context and wiki knowledge, jointly reason about the durable delta, "
+    "group that delta by target, then use ingestion_evolve_wiki_batch_proposal to create one "
+    "target-reconciled draft. If any selected source changed since that read, reread it and "
+    "re-reason rather than rebinding the old synthesis to new bytes. Do not loop the single-source "
+    "proposal tool once per file. Zero durable changes remains a valid outcome. External research "
+    "also remains agent-led: start with research_query_context when a single read-only research "
+    "context is useful, or compose the lower-level context/search tools directly. When a material "
+    "evidence gap requires an external source, use research_capture_evidence to preserve the "
+    "selected source snapshot in raw/ with hash-bound acquisition lineage. If that research "
+    "creates a reusable durable delta, use research_create_wiki_proposal with the exact returned "
+    "source_path and acquisition_id; generic ingestion cannot silently choose among research "
+    "acquisitions. Never send an uncaptured external claim directly to wiki mutation, and create "
+    "no proposal when the answer is already represented or produces no durable delta. "
     + CORE_MCP_INSTRUCTIONS
 )
 
@@ -223,6 +231,13 @@ def create_mcp_server(
         authorizer=authorizer,
         refresh_for_ingestion=refresh_research_for_ingestion,
     )
+    multi_source_ingestion = build_multi_source_ingestion_tools(
+        vault_root=vault_root,
+        runtime_dir=resolved_runtime_dir,
+        registry=registry,
+        activity=activity,
+        invoke=runtime_scoped_invoke,
+    )
 
     def wiki_search_tool(query: str, limit: int = 8) -> WikiSearchMCPResult:
         def op() -> WikiSearchMCPResult:
@@ -264,7 +279,15 @@ def create_mcp_server(
     return FastMCP(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
-        tools=[*core_tools, *policy_reads, *exploration, wiki_search, *research, *coherence],
+        tools=[
+            *core_tools,
+            *policy_reads,
+            *exploration,
+            wiki_search,
+            *multi_source_ingestion,
+            *research,
+            *coherence,
+        ],
         host=host,
         port=port,
         transport_security=transport_security,

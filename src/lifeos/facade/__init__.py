@@ -9,6 +9,16 @@ from .errors import (
     ToolValidationError,
 )
 from .models import ToolDescriptor, ToolEffect
+from .multi_source_ingestion import (
+    EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR,
+    BatchSourceSnapshotRequest,
+    BatchWikiCreateRequest,
+    BatchWikiSectionRequest,
+    BatchWikiUpdateRequest,
+    EvolveWikiBatchProposalRequest,
+    EvolveWikiBatchProposalResult,
+    evolve_wiki_batch_proposal,
+)
 from .proposal_tools import (
     COMPOUND_WIKI_PROPOSAL_DESCRIPTOR,
     CREATE_WIKI_PROPOSAL_DESCRIPTOR,
@@ -38,11 +48,18 @@ from .registry_tools import (
 __all__ = [
     "COMPOUND_WIKI_PROPOSAL_DESCRIPTOR",
     "CREATE_WIKI_PROPOSAL_DESCRIPTOR",
+    "EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR",
     "UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR",
+    "BatchSourceSnapshotRequest",
+    "BatchWikiCreateRequest",
+    "BatchWikiSectionRequest",
+    "BatchWikiUpdateRequest",
     "CompoundWikiProposalRequest",
     "CompoundWikiProposalResult",
     "CreateWikiProposalRequest",
     "CreateWikiProposalResult",
+    "EvolveWikiBatchProposalRequest",
+    "EvolveWikiBatchProposalResult",
     "READ_MARKDOWN_DESCRIPTOR",
     "REGISTRY_REFRESH_DESCRIPTOR",
     "ReadMarkdownRequest",
@@ -62,6 +79,7 @@ __all__ = [
     "UpdateWikiSectionProposalResult",
     "create_wiki_and_update_section_proposal",
     "create_wiki_proposal",
+    "evolve_wiki_batch_proposal",
     "read_markdown",
     "refresh_registry",
     "update_wiki_section_proposal",

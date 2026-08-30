@@ -642,3 +642,43 @@ builds the same image for `linux/arm64`. Home Assistant OS uses only a thin App/
 packaging wrapper around that multi-arch image. The home node remains the single active LifeOS
 mutation authority required by DD-089; a phone/laptop MCP client is a transport consumer of that
 authority, not another writer.
+
+## DD-092: Multi-source ingestion batches evidence once and reconciles by target
+
+For folder-scoped or otherwise multi-source knowledge work, the **logical evidence batch is the
+proposal boundary**. LifeOS does not implement folder ingestion as one invocation of a
+single-source proposal tool per file. An external agent discovers and reads the selected sources,
+inspects applicable vault context and existing wiki knowledge, reasons over the evidence jointly,
+and supplies one reconciled desired mutation per target. Semantic synthesis, disagreement
+resolution, and source weighting remain external-agent responsibilities; deterministic LifeOS
+validates the reviewed result and does not become a second semantic authority.
+
+Folder location supplies scope and context, never mutation permission. One logical batch accepts
+at most 64 distinct source paths and at most 32 distinct target operations. The serialized
+canonical `patches.json` plus immutable `review.json` payload is additionally limited to 2 MiB.
+These are independent reviewability limits. Crossing any limit fails the batch and never silently
+fans it out into multiple proposals.
+
+Every selected source is independently subject to vault containment, external retrieval policy,
+runtime exclusion, registration, current-hash, and safe-read validation. The complete selected
+set is verified again immediately before proposal publication; one missing, changed, denied,
+unregistered, unsafe, ambiguous, or unreadable source aborts the entire draft before persistence.
+
+A target path occurs at most once in the resulting patch document. Several reviewed section
+changes to one human-owned Markdown file are first combined into one final candidate and then
+represented as one `patch_human_file` against the single reviewed base hash. A generated-owned
+target similarly becomes one ownership/hash-bound replacement, and a new generated target is
+created once. Existing stable-identity, reviewed-path, stale-content, ownership, authorization,
+recovery, and atomic-application rules remain unchanged; one stale or invalid target prevents
+partial publication of the rest of the batch.
+
+Proposal metadata exposes a deterministic target-to-source grounding map with the target
+rationale and exact verified source snapshots. The map participates in the ordinary review
+digest and is inspectable without storing hidden reasoning. Proposal-level `related_sources` is
+the ordered union of selected source paths and is not a claim that every source contributed to
+every target. Generated-page provenance merges only the source subset that grounds that reviewed
+target mutation, preserving accepted prior history and deterministic deduplication semantics.
+
+Existing single-source ingestion tools remain compatibility APIs with their existing bounds and
+observable behavior. A multi-source exploration that finds no reusable durable knowledge delta
+is also a valid outcome and creates no proposal.

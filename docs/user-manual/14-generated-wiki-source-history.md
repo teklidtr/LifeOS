@@ -89,7 +89,24 @@ Generated page references after acceptance:
 
 That difference is expected. Proposal metadata explains **this change**; page provenance explains **the generated page's accumulated lineage**.
 
-## 14.6 Why `sources` contains objects instead of only paths
+## 14.6 Several files can contribute in one batch
+
+Folder ingestion can review several source files together and still create only one change for a
+generated Wiki target. If `notes/a.md` and `notes/b.md` both support the reconciled update to
+`wiki/topic.md`, that one reviewed replacement adds both verified source snapshots to the page's
+history in the same operation.
+
+A third file selected elsewhere in the folder does **not** appear in `wiki/topic.md` provenance
+unless it actually grounds that target. The proposal shows a target-to-source grounding map so
+you can distinguish “selected for this batch” from “contributed to this page.” Existing accepted
+history remains first, new relevant snapshots are appended deterministically, and exact repeats
+are not duplicated.
+
+This is why folder ingestion is not implemented as one proposal per source file. The proposal is
+reconciled by target first, so a page receives one reviewed candidate and one coherent provenance
+update rather than several sibling drafts that immediately make one another stale.
+
+## 14.7 Why `sources` contains objects instead of only paths
 
 The current schema keeps each source as an object:
 
@@ -103,7 +120,7 @@ rather than storing only a list of paths. This is slightly more verbose, but it 
 
 The schema remains `schema_version: 1`; there is no version-2 migration for this behavior.
 
-## 14.7 What provenance does not mean
+## 14.8 What provenance does not mean
 
 A source appearing in the list does not mean every sentence in the Wiki page came from that source. The current contract records **page-level contribution history**, not claim-by-claim citations.
 

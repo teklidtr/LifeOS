@@ -15,7 +15,7 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, Callable
 
 from lifeos._secure_io import SecureIOError, open_directory_secure
 from lifeos.coherence import CoherenceError
@@ -268,19 +268,26 @@ def persist_compound_wiki_proposal(  # type: ignore[no-redef]
 
 
 def persist_compounding_wiki_proposal(  # type: ignore[no-redef]
-    *, proposals_root: Path, documents: Any, runtime_dir: Path | None = None
+    *,
+    proposals_root: Path,
+    documents: Any,
+    runtime_dir: Path | None = None,
+    before_publish: Callable[[], None] | None = None,
 ) -> Path:
     _raise_existing_create_target(
         proposals_root=proposals_root,
         target_paths=tuple(documents.create_target_paths),
     )
+    bound_documents = _bind_existing_target_identities(
+        proposals_root=proposals_root,
+        documents=documents,
+        runtime_dir=runtime_dir,
+    )
+    if before_publish is not None:
+        before_publish()
     return _original_persist_compounding_wiki_proposal(
         proposals_root=proposals_root,
-        documents=_bind_existing_target_identities(
-            proposals_root=proposals_root,
-            documents=documents,
-            runtime_dir=runtime_dir,
-        ),
+        documents=bound_documents,
     )
 
 
