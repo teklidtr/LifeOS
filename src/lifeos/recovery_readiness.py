@@ -58,9 +58,26 @@ class _GitMetadataSandbox:
     fingerprint: str
     contains_includes: bool
     ignorecase: bool
+    object_fd: int | None = None
+    object_fd_path: str | None = None
 
     def close(self) -> None:
-        self.temporary.cleanup()
+        if self.object_fd is not None:
+            try:
+                os.close(self.object_fd)
+            except OSError:
+                pass
+            self.object_fd = None
+        try:
+            self.temporary.cleanup()
+        except OSError:
+            pass
+
+
+@dataclass(frozen=True, slots=True)
+class _VisibleIgnoreClassification:
+    untracked: tuple[str, ...]
+    ignored: tuple[str, ...]
 
 
 _ACTIVE_SANDBOX: contextvars.ContextVar[_GitMetadataSandbox | None] = contextvars.ContextVar(
@@ -72,6 +89,12 @@ _ACTIVE_CONFIG: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
 _ACTIVE_WORKTREE_SNAPSHOT: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
     "lifeos_recovery_worktree_snapshot", default=None
 )
+_ACTIVE_GIT_EXECUTABLE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "lifeos_recovery_git_executable", default=None
+)
+_ACTIVE_VISIBLE_IGNORE_CLASSIFICATION: contextvars.ContextVar[
+    _VisibleIgnoreClassification | None
+] = contextvars.ContextVar("lifeos_recovery_visible_ignore_classification", default=None)
 
 _SECTION_RE = re.compile(
     r'^\s*\[\s*([^\]\s"]+)(?:\s+"((?:\\.|[^"\\])*)")?\s*\]\s*(?:[#;].*)?$'
@@ -97,6 +120,8 @@ def _base_original(name: str) -> Any:
 
 _ORIGINAL_SCOPE_FILTER = _base_original("_scope_filter")
 _ORIGINAL_WORKING_TREE_SNAPSHOT = _base_original("_working_tree_snapshot")
+_ORIGINAL_WORKTREE_FROM_SNAPSHOT = _base_original("_worktree_from_snapshot")
+_ORIGINAL_IGNORED_PATHS = _base_original("_ignored_paths")
 _ORIGINAL_BUILD_REPORT = _base_original("_build_report")
 _ORIGINAL_LATEST_COMMIT = _base_original("_latest_commit")
 
@@ -166,7 +191,7 @@ def _parse_git_bool(value: str, *, key: str) -> bool:
 
 def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
     raw = _read_small_metadata(config_path)
-    text = raw.decode("utf-8", errors="surrogateescape")
+    text = raw.decode("utf-8-sig", errors="surrogateescape")
     section = ""
     subsection: str | None = None
     contains_includes = False
@@ -218,13 +243,17 @@ def _copy_regular_metadata(source: Path, destination: Path) -> None:
     if opened is None:
         return
     fd, _observed = opened
-    destination.parent.mkdir(parents=True, exist_ok=True)
     try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
         with os.fdopen(fd, "rb", closefd=True) as source_handle:
+            fd = -1
             with destination.open("wb") as destination_handle:
                 shutil.copyfileobj(source_handle, destination_handle, length=131_072)
     except OSError as exc:
         raise _base.RecoveryGitError("Could not snapshot Git metadata") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def _open_metadata_directory(source: Path, *, missing_ok: bool = False) -> int | None:
@@ -415,38 +444,84 @@ def _reject_split_index(git_dir: Path) -> None:
         raise _base.RecoveryGitError("Could not inspect Git index topology") from exc
 
 
-def _validate_object_store(git_dir: Path) -> tuple[Path, os.stat_result]:
-    object_dir = git_dir / "objects"
-    try:
-        observed = os.lstat(object_dir)
-    except OSError as exc:
-        raise _base.RecoveryGitError("Git object directory is unavailable") from exc
-    if stat.S_ISLNK(observed.st_mode) or not stat.S_ISDIR(observed.st_mode):
-        raise _base.RecoveryGitError(
-            "Redirected Git object stores are not supported by recovery diagnostics"
-        )
-    for relative in (Path("info/alternates"), Path("info/http-alternates")):
+def _pinned_fd_path(fd: int, observed: os.stat_result) -> str:
+    for root in ("/proc/self/fd", "/dev/fd"):
+        candidate = f"{root}/{fd}"
         try:
-            os.lstat(object_dir / relative)
-        except FileNotFoundError:
+            candidate_state = os.stat(candidate)
+        except OSError:
             continue
-        except OSError as exc:
-            raise _base.RecoveryGitError("Could not inspect Git object-store topology") from exc
-        raise _base.RecoveryGitError(
-            "Alternate Git object stores are not supported by recovery diagnostics"
-        )
-    return object_dir, observed
+        if (
+            stat.S_ISDIR(candidate_state.st_mode)
+            and (candidate_state.st_dev, candidate_state.st_ino)
+            == (observed.st_dev, observed.st_ino)
+        ):
+            return candidate
+    raise _base.RecoveryGitError(
+        "Platform cannot expose a pinned Git object directory safely"
+    )
 
 
-def _metadata_fingerprint(git_dir: Path) -> str:
+def _open_object_store(
+    git_dir: Path,
+) -> tuple[Path, int, os.stat_result, str]:
+    object_dir = git_dir / "objects"
+    object_fd = _open_metadata_directory(object_dir)
+    assert object_fd is not None
+    try:
+        object_state = os.fstat(object_fd)
+        top_entries = dict(_metadata_directory_entries(object_fd))
+        info_state = top_entries.get("info")
+        if info_state is not None:
+            if not stat.S_ISDIR(info_state.st_mode) or stat.S_ISLNK(info_state.st_mode):
+                raise _base.RecoveryGitError(
+                    "Git object-store info metadata uses an unsupported entry"
+                )
+            info_fd, _ = _open_metadata_child(object_fd, "info", info_state)
+            try:
+                info_names = {name for name, _state in _metadata_directory_entries(info_fd)}
+            finally:
+                os.close(info_fd)
+            if {"alternates", "http-alternates"} & info_names:
+                raise _base.RecoveryGitError(
+                    "Alternate Git object stores are not supported by recovery diagnostics"
+                )
+        object_fd_path = _pinned_fd_path(object_fd, object_state)
+        return object_dir, object_fd, object_state, object_fd_path
+    except Exception:
+        os.close(object_fd)
+        raise
+
+
+def _validate_object_store(git_dir: Path) -> tuple[Path, os.stat_result]:
+    try:
+        object_dir, object_fd, object_state, _object_fd_path = _open_object_store(git_dir)
+    except _base.RecoveryGitError as exc:
+        if "unsafe directory" in str(exc) or "open Git metadata directory" in str(exc):
+            raise _base.RecoveryGitError(
+                "Redirected Git object stores are not supported by recovery diagnostics"
+            ) from exc
+        raise
+    try:
+        return object_dir, object_state
+    finally:
+        os.close(object_fd)
+
+
+def _metadata_fingerprint(
+    git_dir: Path,
+    *,
+    object_state: os.stat_result | None = None,
+) -> str:
     digest = hashlib.sha256()
     for name in ("config", "HEAD", "index", "packed-refs", "shallow", "info/exclude"):
         _fingerprint_regular_metadata(digest, name, git_dir / name)
     _fingerprint_metadata_tree(digest, git_dir, git_dir / "refs")
-    object_dir, object_state = _validate_object_store(git_dir)
+    if object_state is None:
+        object_dir, object_state = _validate_object_store(git_dir)
+        if object_dir != git_dir / "objects":
+            raise _base.RecoveryGitError("Git object-store topology changed unexpectedly")
     digest.update(f"objects\0{object_state.st_dev}:{object_state.st_ino}\0".encode())
-    if object_dir != git_dir / "objects":
-        raise _base.RecoveryGitError("Git object-store topology changed unexpectedly")
     return digest.hexdigest()
 
 
@@ -457,53 +532,73 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
     root, git_dir = discovered
     _reject_split_index(git_dir)
     _config_bytes, contains_includes, filemode, ignorecase = _config_snapshot(git_dir / "config")
-    object_dir, _object_state = _validate_object_store(git_dir)
-    fingerprint = _metadata_fingerprint(git_dir)
     try:
-        index_state = os.lstat(git_dir / "index")
-    except FileNotFoundError:
-        index_mtime_ns = None
-    except OSError as exc:
-        raise _base.RecoveryGitError("Could not inspect Git index metadata") from exc
-    else:
-        if stat.S_ISLNK(index_state.st_mode) or not stat.S_ISREG(index_state.st_mode):
-            raise _base.RecoveryGitError("Git index metadata uses an unsafe entry")
-        if index_state.st_nlink != 1:
-            raise _base.RecoveryGitError("Git index metadata uses an unsupported hard link")
-        index_mtime_ns = index_state.st_mtime_ns
+        object_dir, object_fd, object_state, object_fd_path = _open_object_store(git_dir)
+    except _base.RecoveryGitError as exc:
+        if "unsafe directory" in str(exc) or "open Git metadata directory" in str(exc):
+            raise _base.RecoveryGitError(
+                "Redirected Git object stores are not supported by recovery diagnostics"
+            ) from exc
+        raise
 
-    temporary = tempfile.TemporaryDirectory(prefix="lifeos-doctor-git-")
-    fake = Path(temporary.name) / "git"
-    fake.mkdir(parents=True)
+    temporary: tempfile.TemporaryDirectory[str] | None = None
     try:
-        for name in ("HEAD", "index", "packed-refs", "shallow"):
-            _copy_regular_metadata(git_dir / name, fake / name)
-        _copy_metadata_tree(git_dir / "refs", fake / "refs")
-        _copy_regular_metadata(git_dir / "info" / "exclude", fake / "info" / "exclude")
-        (fake / "config").write_text(
-            "[core]\n"
-            "\trepositoryformatversion = 0\n"
-            f"\tfilemode = {'true' if filemode else 'false'}\n"
-            f"\tignorecase = {'true' if ignorecase else 'false'}\n"
-            "\tbare = false\n"
-            "\tlogallrefupdates = false\n"
-            "\tfsmonitor = false\n",
-            encoding="utf-8",
+        fingerprint = _metadata_fingerprint(git_dir, object_state=object_state)
+        try:
+            index_state = os.lstat(git_dir / "index")
+        except FileNotFoundError:
+            index_mtime_ns = None
+        except OSError as exc:
+            raise _base.RecoveryGitError("Could not inspect Git index metadata") from exc
+        else:
+            if stat.S_ISLNK(index_state.st_mode) or not stat.S_ISREG(index_state.st_mode):
+                raise _base.RecoveryGitError("Git index metadata uses an unsafe entry")
+            if index_state.st_nlink != 1:
+                raise _base.RecoveryGitError("Git index metadata uses an unsupported hard link")
+            index_mtime_ns = index_state.st_mtime_ns
+
+        try:
+            temporary = tempfile.TemporaryDirectory(prefix="lifeos-doctor-git-")
+            fake = Path(temporary.name) / "git"
+            fake.mkdir(parents=True)
+            for name in ("HEAD", "index", "packed-refs", "shallow"):
+                _copy_regular_metadata(git_dir / name, fake / name)
+            _copy_metadata_tree(git_dir / "refs", fake / "refs")
+            _copy_regular_metadata(git_dir / "info" / "exclude", fake / "info" / "exclude")
+            (fake / "config").write_text(
+                "[core]\n"
+                "\trepositoryformatversion = 0\n"
+                f"\tfilemode = {'true' if filemode else 'false'}\n"
+                f"\tignorecase = {'true' if ignorecase else 'false'}\n"
+                "\tbare = false\n"
+                "\tlogallrefupdates = false\n"
+                "\tfsmonitor = false\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            raise _base.RecoveryGitError("Could not create Git metadata sandbox") from exc
+
+        return _GitMetadataSandbox(
+            temporary,
+            root,
+            vault,
+            fake,
+            object_dir,
+            index_mtime_ns,
+            fingerprint,
+            contains_includes,
+            ignorecase,
+            object_fd,
+            object_fd_path,
         )
     except Exception:
-        temporary.cleanup()
+        os.close(object_fd)
+        if temporary is not None:
+            try:
+                temporary.cleanup()
+            except OSError:
+                pass
         raise
-    return _GitMetadataSandbox(
-        temporary,
-        root,
-        vault,
-        fake,
-        object_dir,
-        index_mtime_ns,
-        fingerprint,
-        contains_includes,
-        ignorecase,
-    )
 
 
 def _sandbox_environment() -> dict[str, str]:
@@ -513,9 +608,16 @@ def _sandbox_environment() -> dict[str, str]:
         env.update(
             GIT_DIR=str(sandbox.git_dir),
             GIT_WORK_TREE=str(sandbox.root),
-            GIT_OBJECT_DIRECTORY=str(sandbox.object_dir),
+            GIT_OBJECT_DIRECTORY=sandbox.object_fd_path or str(sandbox.object_dir),
         )
     return env
+
+
+def _sandbox_pass_fds() -> tuple[int, ...]:
+    sandbox = _ACTIVE_SANDBOX.get()
+    if sandbox is None or sandbox.object_fd is None:
+        return ()
+    return (sandbox.object_fd,)
 
 
 def _run_git(
@@ -535,6 +637,7 @@ def _run_git(
             capture_output=True,
             env=_sandbox_environment(),
             input=input_bytes,
+            pass_fds=_sandbox_pass_fds(),
         )
     except OSError as exc:
         raise _base.RecoveryGitError("Could not execute Git safely") from exc
@@ -560,6 +663,7 @@ def _run_git_presence(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             env=_sandbox_environment(),
+            pass_fds=_sandbox_pass_fds(),
         )
     except OSError as exc:
         raise _base.RecoveryGitError("Could not execute Git safely") from exc
@@ -746,13 +850,7 @@ def _tree_entries(
     *,
     case_insensitive_prefix: bool = False,
 ) -> dict[str, tuple[int, str, str]]:
-    """Reconstruct the authorized HEAD view without enumerating denied tree names.
-
-    ``ls-tree`` cannot apply exclude pathspec magic. Start from the already-authorized index
-    inventory instead, then reverse the metadata-only staged diff so the result represents HEAD.
-    Both Git commands receive the same positive/exclusion pathspecs before producing pathname
-    output, and rename detection is disabled so no blob similarity reads are needed.
-    """
+    """Reconstruct the authorized HEAD view without enumerating denied tree names."""
     if head_oid is None:
         return {}
 
@@ -889,7 +987,86 @@ def _working_tree_snapshot(vault: Path, excluded: Any) -> Any:
     return snapshot
 
 
+def _scope_allows_without_mutation(scope: Any, path: str) -> bool:
+    try:
+        if scope.case_insensitive and _base._casefold_denied(path, scope.policy, scope.request):
+            return False
+        decision = scope_decision(
+            unicodedata.normalize("NFC", path),
+            scope=scope.request,
+            policy=scope.policy,
+            mode="local",
+        )
+    except (CoherenceError, RetrievalError) as exc:
+        raise _base.RecoveryGitError("Could not verify Git ignore metadata scope") from exc
+    return decision.allowed
+
+
+def _ignore_sources_authorized(path: str, scope: Any) -> bool:
+    parts = PurePosixPath(path).parts
+    candidates = [".gitignore"]
+    for depth in range(1, len(parts)):
+        candidates.append(PurePosixPath(*parts[:depth], ".gitignore").as_posix())
+    return all(_scope_allows_without_mutation(scope, source) for source in candidates)
+
+
+def _worktree_from_snapshot(
+    entries: Any,
+    vault: Path,
+    prefix: tuple[str, ...],
+    excluded: Any,
+    snapshot: Any,
+    *,
+    case_insensitive_prefix: bool = False,
+    skip_worktree_paths: Any = (),
+    filemode: bool = False,
+) -> Any:
+    result = _ORIGINAL_WORKTREE_FROM_SNAPSHOT(
+        entries,
+        vault,
+        prefix,
+        excluded,
+        snapshot,
+        case_insensitive_prefix=case_insensitive_prefix,
+        skip_worktree_paths=skip_worktree_paths,
+        filemode=filemode,
+    )
+    _ACTIVE_VISIBLE_IGNORE_CLASSIFICATION.set(None)
+    if not isinstance(excluded, _base._ScopeFilter) or not excluded.incomplete:
+        return result
+
+    git = _ACTIVE_GIT_EXECUTABLE.get()
+    sandbox = _ACTIVE_SANDBOX.get()
+    if git is None or sandbox is None:
+        return result
+
+    tracked_visible = result[3]
+    untracked_candidates = tuple(sorted(set(snapshot.paths) - set(tracked_visible)))
+    safe_candidates = tuple(
+        path for path in untracked_candidates if _ignore_sources_authorized(path, excluded)
+    )
+    ignored = _ORIGINAL_IGNORED_PATHS(
+        git,
+        sandbox.root,
+        safe_candidates,
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
+    untracked = tuple(sorted(set(safe_candidates) - set(ignored)))
+    _ACTIVE_VISIBLE_IGNORE_CLASSIFICATION.set(
+        _VisibleIgnoreClassification(untracked=untracked, ignored=ignored)
+    )
+    return result
+
+
 def _build_report(config: Any, **kwargs: Any) -> Any:
+    classification = _ACTIVE_VISIBLE_IGNORE_CLASSIFICATION.get()
+    if classification is not None:
+        kwargs = dict(kwargs)
+        kwargs["untracked"] = classification.untracked
+        kwargs["ignored"] = classification.ignored
+
     report = _ORIGINAL_BUILD_REPORT(config, **kwargs)
     snapshot = _ACTIVE_WORKTREE_SNAPSHOT.get()
     untracked = tuple(kwargs.get("untracked", ()))
@@ -1011,6 +1188,8 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
     sandbox_token = _ACTIVE_SANDBOX.set(sandbox)
     config_token = _ACTIVE_CONFIG.set(config)
     snapshot_token = _ACTIVE_WORKTREE_SNAPSHOT.set(None)
+    git_token = _ACTIVE_GIT_EXECUTABLE.set(git)
+    ignore_token = _ACTIVE_VISIBLE_IGNORE_CLASSIFICATION.set(None)
     try:
         if sandbox.contains_includes:
             return _base._fallback(
@@ -1046,6 +1225,8 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
     except _base.RecoveryGitError as exc:
         return _base._fallback(config, _base._git_unknown(str(exc)), sandbox.root)
     finally:
+        _ACTIVE_VISIBLE_IGNORE_CLASSIFICATION.reset(ignore_token)
+        _ACTIVE_GIT_EXECUTABLE.reset(git_token)
         _ACTIVE_WORKTREE_SNAPSHOT.reset(snapshot_token)
         _ACTIVE_CONFIG.reset(config_token)
         _ACTIVE_SANDBOX.reset(sandbox_token)
@@ -1062,6 +1243,7 @@ setattr(_base, "_tree_entries", _tree_entries)
 setattr(_base, "_snapshot_entry_for_index_path", _snapshot_entry_for_index_path)
 setattr(_base, "_compare_index_entry", _compare_index_entry)
 setattr(_base, "_working_tree_snapshot", _working_tree_snapshot)
+setattr(_base, "_worktree_from_snapshot", _worktree_from_snapshot)
 setattr(_base, "_build_report", _build_report)
 setattr(_base, "_latest_commit", _latest_commit)
 setattr(_base, "_reject_repository_config_includes", _reject_repository_config_includes)
