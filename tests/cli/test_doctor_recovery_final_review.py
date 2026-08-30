@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import stat
@@ -359,3 +360,136 @@ def test_repository_metadata_case_alias_is_excluded_by_inode(
     finally:
         recovery_readiness._ACTIVE_SANDBOX.reset(token)
         sandbox.close()
+
+
+def test_ambiguous_policy_prefix_fails_before_worktree_scan(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    (vault / "system" / "retrieval-policy.yml").write_text(
+        'schema_version: 1\nprotected_prefixes:\n  - " private"\n',
+        encoding="utf-8",
+    )
+    protected = vault / " private" / "secret.md"
+    protected.parent.mkdir()
+    protected.write_text("secret\n", encoding="utf-8")
+
+    def fail_scan(_vault: Path, _excluded: object) -> object:
+        raise AssertionError("canonical worktree scanning must not start")
+
+    monkeypatch.setattr(recovery_readiness, "_ORIGINAL_WORKING_TREE_SNAPSHOT", fail_scan)
+    report = recovery_readiness.collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    diagnostics = _diagnostics(report)
+    rendered = json.dumps(recovery_report_to_dict(report), ensure_ascii=True)
+
+    assert diagnostics["recovery.git.repository"].status == "unknown"
+    assert "unambiguous literal POSIX spelling" in diagnostics["recovery.git.repository"].summary
+    assert " private/secret.md" not in rendered
+
+
+def test_hidden_probes_ignore_runtime_inside_protected_scope(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    runtime = repository / "private" / "runtime"
+    runtime.mkdir(parents=True)
+    (runtime / "cache.md").write_text("runtime\n", encoding="utf-8")
+    wiki = repository / "wiki"
+    wiki.mkdir()
+    (wiki / "note.md").write_text("visible\n", encoding="utf-8")
+    baseline = _commit_all(repository, "baseline")
+
+    config = SimpleNamespace(vault_root=repository, runtime_dir=runtime)
+    context = SimpleNamespace(prefix=(), case_insensitive_prefix=False)
+    scope = recovery_readiness._ScopeFilter(
+        lambda path: path == "private/runtime" or path.startswith("private/runtime/"),
+        RetrievalPolicy(protected_prefixes=("private",)),
+        RetrievalScope(),
+    )
+    git = recovery_readiness._resolve_git_executable()
+    assert git is not None
+    config_token = recovery_readiness._ACTIVE_CONFIG.set(config)
+    try:
+        assert recovery_readiness._hidden_index_state(git, repository, context, scope) == (False,)
+        pathspec = recovery_readiness._authorized_git_pathspecs(context, scope, config)
+        visible = recovery_readiness._latest_commit(
+            git,
+            repository,
+            pathspec,
+            (),
+            scope,
+            recovery_readiness._utc_now,
+            head_oid=baseline,
+        )
+        assert visible is not None
+        assert scope.incomplete is False
+
+        protected = repository / "private" / "secret.md"
+        protected.write_text("protected\n", encoding="utf-8")
+        _git(repository, "add", "private/secret.md")
+        assert recovery_readiness._hidden_index_state(git, repository, context, scope) == (True,)
+        protected_head = _commit_all(repository, "protected sibling")
+        scope.incomplete = False
+        hidden = recovery_readiness._latest_commit(
+            git,
+            repository,
+            pathspec,
+            (),
+            scope,
+            recovery_readiness._utc_now,
+            head_oid=protected_head,
+        )
+        assert hidden is None
+        assert scope.incomplete is True
+    finally:
+        recovery_readiness._ACTIVE_CONFIG.reset(config_token)
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks are unavailable")
+def test_untracked_symlink_is_structural_recovery_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    (vault / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
+    _commit_all(vault, "baseline")
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside body\n", encoding="utf-8")
+    link = vault / "wiki" / "linked.md"
+    link.symlink_to(outside)
+
+    report = recovery_readiness.collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    diagnostics = _diagnostics(report)
+
+    assert "wiki/linked.md" in report.untracked_paths
+    objects = diagnostics["recovery.git.canonical_objects"]
+    assert objects.status == "failure"
+    assert objects.severity == "error"
+    assert objects.paths == ("wiki/linked.md",)
+    assert objects.remediation is not None and "symlink" in objects.remediation
+    untracked = diagnostics["recovery.git.untracked_canonical"]
+    assert untracked.remediation is not None and "non-regular" in untracked.remediation
+
+
+def test_recovery_facade_reload_preserves_latest_commit_helper(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+    (vault / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
+    _commit_all(vault, "baseline")
+    original = recovery_readiness._ORIGINAL_LATEST_COMMIT
+
+    reloaded = importlib.reload(recovery_readiness)
+    report = reloaded.collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+
+    assert reloaded._ORIGINAL_LATEST_COMMIT is original
+    assert report.last_canonical_commit is not None
