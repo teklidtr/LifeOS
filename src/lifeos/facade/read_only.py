@@ -150,12 +150,15 @@ def read_markdown(
 class WikiSearchRequest:
     query: str
     limit: int = 8
+    mode: RetrievalMode = "local"
 
     def __post_init__(self) -> None:
         if not isinstance(self.query, str) or not self.query.strip():
             raise ValueError("query must be a non-empty string")
         if type(self.limit) is not int or not 1 <= self.limit <= 20:
             raise ValueError("limit must be an integer between 1 and 20")
+        if self.mode not in {"local", "external"}:
+            raise ValueError("mode must be local or external")
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +194,7 @@ def search_wiki(
                 path,
                 scope=scope,
                 policy=policy,
-                mode="local",
+                mode=request.mode,
             ),
         )
     except ContextSearchExecutionError as exc:
