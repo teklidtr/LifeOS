@@ -514,7 +514,7 @@ def test_repository_config_include_is_rejected_before_repository_discovery(
     assert calls == []
 
 
-def test_protected_gitignore_prevents_check_ignore_invocation(
+def test_protected_gitignore_prevents_affected_candidate_ignore_query(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -528,13 +528,34 @@ def test_protected_gitignore_prevents_check_ignore_invocation(
     )
     (vault / "wiki" / ".gitignore").write_text("*.tmp\n", encoding="utf-8")
     (vault / "wiki" / "candidate.tmp").write_text("canonical\n", encoding="utf-8")
-    monkeypatch.setattr(
-        recovery_readiness,
-        "_ignored_paths",
-        lambda *_args, **_kwargs: pytest.fail("protected ignore metadata must not be read"),
-    )
+
+    real_ignored_paths = recovery_readiness._ignored_paths
+    queries: list[tuple[str, ...]] = []
+
+    def recording_ignored_paths(
+        git: str,
+        root: Path,
+        paths: tuple[str, ...],
+        prefix: tuple[str, ...],
+        excluded: recovery_readiness.PathExclusion,
+        *,
+        case_insensitive_prefix: bool = False,
+    ) -> tuple[str, ...]:
+        queries.append(tuple(paths))
+        assert "wiki/candidate.tmp" not in paths
+        return real_ignored_paths(
+            git,
+            root,
+            paths,
+            prefix,
+            excluded,
+            case_insensitive_prefix=case_insensitive_prefix,
+        )
+
+    monkeypatch.setattr(recovery_readiness, "_ignored_paths", recording_ignored_paths)
 
     report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
 
+    assert queries
     assert "wiki/candidate.tmp" in report.untracked_paths
     assert _diagnostics(report)["recovery.git.ignored_canonical"].status == "unknown"
