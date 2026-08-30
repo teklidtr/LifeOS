@@ -171,8 +171,12 @@ class EvolveWikiBatchProposalRequest:
         if len(set(targets)) != len(targets):
             raise ValueError("batch mutations must be reconciled to distinct target paths")
         allowed = set(self.source_paths)
-        for item in (*self.creates, *self.updates):
-            missing = [path for path in item.source_paths if path not in allowed]
+        for create_item in self.creates:
+            missing = [path for path in create_item.source_paths if path not in allowed]
+            if missing:
+                raise ValueError("target grounding source must belong to the requested batch")
+        for update_item in self.updates:
+            missing = [path for path in update_item.source_paths if path not in allowed]
             if missing:
                 raise ValueError("target grounding source must belong to the requested batch")
 
@@ -269,9 +273,9 @@ def evolve_wiki_batch_proposal(
     )
     prepared: list[PreparedBatchCreateMutation | PreparedBatchUpdateMutation] = []
 
-    for item in request.creates:
+    for create_item in request.creates:
         target_path = _resolve_create_wiki_target(
-            target_path=item.target_path,
+            target_path=create_item.target_path,
             page_kind=None,
             slug=None,
         )
@@ -284,38 +288,38 @@ def evolve_wiki_batch_proposal(
             PreparedBatchCreateMutation(
                 target_path=target_path,
                 content=WikiProposalContent(
-                    title=item.title,
-                    body=item.body,
+                    title=create_item.title,
+                    body=create_item.body,
                     generator=generator,
-                    tags=item.tags,
-                    tag_rationale=item.tag_rationale,
+                    tags=create_item.tags,
+                    tag_rationale=create_item.tag_rationale,
                 ),
-                rationale=item.rationale,
-                sources=_grounding_sources(item.source_paths, snapshots),
+                rationale=create_item.rationale,
+                sources=_grounding_sources(create_item.source_paths, snapshots),
             )
         )
 
-    for item in request.updates:
+    for update_item in request.updates:
         content, content_bytes, expected_generator_id = _read_update_target(
             vault_root=vault_root,
-            target_path=item.target_path,
+            target_path=update_item.target_path,
             ownership=ownership,
         )
-        if item.tags is not None and expected_generator_id is None:
+        if update_item.tags is not None and expected_generator_id is None:
             raise ToolValidationError("Ingestion cannot change tags on a human-owned wiki target")
         prepared.append(
             PreparedBatchUpdateMutation(
-                target_path=item.target_path,
+                target_path=update_item.target_path,
                 target_content=content,
                 target_content_hash=f"sha256:{hash_file_content(content_bytes)}",
                 sections=tuple(
                     PreparedBatchSection(heading=section.heading, body=section.body)
-                    for section in item.sections
+                    for section in update_item.sections
                 ),
-                rationale=item.rationale,
-                sources=_grounding_sources(item.source_paths, snapshots),
+                rationale=update_item.rationale,
+                sources=_grounding_sources(update_item.source_paths, snapshots),
                 expected_generator_id=expected_generator_id,
-                proposed_tags=item.tags,
+                proposed_tags=update_item.tags,
             )
         )
 
