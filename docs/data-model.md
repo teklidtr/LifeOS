@@ -88,9 +88,15 @@ items: []
 ## Multi-source ingestion proposal grounding
 
 Folder or explicit multi-source ingestion still creates an ordinary proposal and an ordinary
-`PatchDocumentV2`; it does not introduce another canonical proposal format. The batch-specific
-review facts live in the proposal metadata extension and are included in the normal review
-digest:
+`PatchDocumentV2`; it does not introduce another canonical proposal format. The public batch call
+carries the exact `(path, content_hash)` snapshots returned when the agent read the selected
+evidence with `vault_read_many`. Those are observed evidence versions, not hints that a later
+registry refresh may silently advance. Proposal construction succeeds only while every current
+registered source still matches its supplied observation hash; a mismatch requires rereading and
+reasoning from the new bytes before a new batch can be proposed.
+
+The batch-specific review facts live in the proposal metadata extension and are included in the
+normal review digest:
 
 ```yaml
 extensions:
@@ -110,6 +116,7 @@ extensions:
         kind: update_sections
         headings: [Evidence, Mechanism]
         rationale: Reconcile the reviewed contributions.
+        tag_rationale: Preserve the reviewed taxonomy decision when tags change.
         sources:
           - path: notes/a.md
             content_hash: sha256:<64 lowercase hex characters>
@@ -125,12 +132,15 @@ extensions:
 
 `related_sources` is the deterministic ordered union of the selected batch source paths, while
 `target_grounding` identifies the narrower source subset that actually supports each mutation.
-Every target path occurs at most once in the patch document. Several exact-section changes to one
-human-owned Markdown file are first reconciled into one final candidate and serialized as one
-base-hash-bound `patch_human_file`; generated-owned targets similarly produce one
-ownership/hash-bound replacement with only that target's relevant source snapshots merged into
-cumulative provenance. The batch is bounded independently by source count, target count, and the
-serialized patch-plus-review payload; those limits do not change the canonical patch schema.
+When a generated create or generated-owned update includes a reviewed taxonomy rationale, that
+rationale remains in the digest-bound target-grounding metadata and the human-readable proposal
+body rather than being discarded after validation. Every target path occurs at most once in the
+patch document. Several exact-section changes to one human-owned Markdown file are first
+reconciled into one final candidate and serialized as one base-hash-bound `patch_human_file`;
+generated-owned targets similarly produce one ownership/hash-bound replacement with only that
+target's relevant source snapshots merged into cumulative provenance. The batch is bounded
+independently by source count, target count, and the serialized patch-plus-review payload; those
+limits do not change the canonical patch schema.
 
 ## Generated Wiki provenance (canonical)
 
