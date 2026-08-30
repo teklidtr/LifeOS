@@ -126,6 +126,8 @@ def build_multi_source_ingestion_tools(
         scope = RetrievalScope()
 
         def allowed(path: str) -> bool:
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
             try:
                 if runtime_excluded(path):
                     return False
