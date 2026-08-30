@@ -11,6 +11,7 @@ from .errors import (
 from .models import ToolDescriptor, ToolEffect
 from .multi_source_ingestion import (
     EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR,
+    BatchSourceSnapshotRequest,
     BatchWikiCreateRequest,
     BatchWikiSectionRequest,
     BatchWikiUpdateRequest,
@@ -49,6 +50,7 @@ __all__ = [
     "CREATE_WIKI_PROPOSAL_DESCRIPTOR",
     "EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR",
     "UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR",
+    "BatchSourceSnapshotRequest",
     "BatchWikiCreateRequest",
     "BatchWikiSectionRequest",
     "BatchWikiUpdateRequest",
