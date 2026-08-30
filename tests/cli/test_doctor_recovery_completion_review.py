@@ -73,14 +73,24 @@ def test_git_metadata_root_remains_pinned_after_live_marker_swap(
     assert swapped is True
 
 
-def test_object_store_snapshot_uses_bounded_descriptors(tmp_path: Path) -> None:
+def test_object_store_snapshot_is_read_only_with_bounded_descriptors(
+    tmp_path: Path,
+) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
     _git(repository, "init", "-q")
     loose = repository / ".git" / "objects" / "aa"
     loose.mkdir()
-    for index in range(400):
-        (loose / f"{index:038x}").write_bytes(f"object-{index}".encode())
+    object_paths = []
+    for index in range(20):
+        path = loose / f"{index:038x}"
+        path.write_bytes(f"object-{index}".encode())
+        object_paths.append(path)
+
+    before = {
+        path: (path.stat().st_nlink, path.stat().st_ctime_ns)
+        for path in object_paths
+    }
 
     sandbox = recovery_readiness._build_sandbox(repository)
     assert sandbox is not None
@@ -88,13 +98,34 @@ def test_object_store_snapshot_uses_bounded_descriptors(tmp_path: Path) -> None:
     try:
         assert sandbox.metadata_fd is not None
         assert sandbox.object_fd is not None
-        assert len(sandbox.object_fds) == 1
-        assert len(recovery_readiness._sandbox_pass_fds()) <= 2
+        assert len(sandbox.object_fds) <= recovery_readiness._MAX_PINNED_OBJECT_FILES
+        assert len(recovery_readiness._sandbox_pass_fds()) <= (
+            recovery_readiness._MAX_PINNED_OBJECT_FILES + 2
+        )
     finally:
         recovery_readiness._ACTIVE_SANDBOX.reset(token)
         sandbox.close()
 
-    assert (loose / f"{0:038x}").stat().st_nlink == 1
+    after = {
+        path: (path.stat().st_nlink, path.stat().st_ctime_ns)
+        for path in object_paths
+    }
+    assert after == before
+
+
+def test_object_store_snapshot_fails_closed_above_descriptor_budget(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    loose = repository / ".git" / "objects" / "aa"
+    loose.mkdir()
+    for index in range(recovery_readiness._MAX_PINNED_OBJECT_FILES + 1):
+        (loose / f"{index:038x}").write_bytes(f"object-{index}".encode())
+
+    with pytest.raises(recovery_readiness.RecoveryGitError, match="descriptor budget"):
+        recovery_readiness._build_sandbox(repository)
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO entries are unavailable")
