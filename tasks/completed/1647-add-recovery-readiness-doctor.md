@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1647
 title: Add recovery-readiness doctor diagnostics for canonical vault data
-status: backlog
+status: completed
 phase: 16
 depends_on: []
 risk: medium
@@ -112,34 +112,34 @@ or create backups on the user's behalf.
 
 # Acceptance criteria
 
-- [ ] `lifeos doctor` exists, is read-only, and supports deterministic human-readable and `--json`
+- [x] `lifeos doctor` exists, is read-only, and supports deterministic human-readable and `--json`
       output.
-- [ ] A vault outside Git is reported as a canonical recovery risk with clear remediation.
-- [ ] A newly initialized Git repository with no commit is distinguished from a repository with
+- [x] A vault outside Git is reported as a canonical recovery risk with clear remediation.
+- [x] A newly initialized Git repository with no commit is distinguished from a repository with
       committed canonical history.
-- [ ] The doctor reports the latest commit that actually covers/touches the configured canonical
+- [x] The doctor reports the latest commit that actually covers/touches the configured canonical
       vault rather than blindly using an unrelated repository-wide commit.
-- [ ] Modified, staged, and deleted tracked canonical files are reported as current state not yet
+- [x] Modified, staged, and deleted tracked canonical files are reported as current state not yet
       represented by the latest committed canonical history.
-- [ ] Untracked canonical files are reported as recovery exposure; regression coverage proves a new
+- [x] Untracked canonical files are reported as recovery exposure; regression coverage proves a new
       never-committed canonical file is not falsely described as recoverable from Git.
-- [ ] Canonical files hidden by Git ignore rules are detected/reported when they are outside
+- [x] Canonical files hidden by Git ignore rules are detected/reported when they are outside
       committed canonical history.
-- [ ] Disposable `.lifeos/` files are excluded from canonical Git-gap warnings and the output does
+- [x] Disposable `.lifeos/` files are excluded from canonical Git-gap warnings and the output does
       not recommend committing runtime state.
-- [ ] An old last-commit timestamp alone does not produce a recovery failure when the canonical
+- [x] An old last-commit timestamp alone does not produce a recovery failure when the canonical
       working tree has not changed; the age remains visible as informational evidence.
-- [ ] Local Git history is never labeled as verified off-device backup. When external backup or
+- [x] Local Git history is never labeled as verified off-device backup. When external backup or
       snapshot protection cannot be deterministically verified, the result is explicitly
       `unknown`/`not verified` rather than `pass`.
-- [ ] Stable JSON diagnostics include machine-readable IDs, statuses/severities, summaries, and
+- [x] Stable JSON diagnostics include machine-readable IDs, statuses/severities, summaries, and
       remediation fields suitable for later desktop/home-node presentation without parsing text.
-- [ ] Diagnostics do not read or emit canonical note bodies and do not expose secrets.
-- [ ] Running the doctor leaves canonical files, Git index/history, and `.lifeos/` runtime bytes
+- [x] Diagnostics do not read or emit canonical note bodies and do not expose secrets.
+- [x] Running the doctor leaves canonical files, Git index/history, and `.lifeos/` runtime bytes
       unchanged.
-- [ ] Tests cover clean, dirty, staged, deleted, untracked, ignored, no-repository, and no-commit
+- [x] Tests cover clean, dirty, staged, deleted, untracked, ignored, no-repository, and no-commit
       scenarios using isolated temporary repositories.
-- [ ] Existing CLI behavior and the full test suite remain compatible.
+- [x] Existing CLI behavior and the full test suite remain compatible.
 
 # Documentation impact
 

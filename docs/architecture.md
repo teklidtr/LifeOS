@@ -437,7 +437,6 @@ weaken the patch's base-hash guard. If an identified target moves, pending or ap
 are not silently retargeted. They are stale until a fresh draft/review establishes the new path
 and re-runs path-scoped instruction, privacy, ownership, authorization, and target-type checks.
 The same ID with changed content is stale; a missing, changed, or ambiguous ID is blocked.
-
 Offline mobile capture needs no LifeOS process: the phone may create normal Markdown, sync it
 later, and the active node discovers it on reconciliation. Conflict copies, partial sync views,
 and delayed edits are treated as observable filesystem state, not provider-specific signals.
@@ -511,3 +510,44 @@ This service topology does not change DD-089: there is still one active LifeOS m
 authority for a canonical synchronized view. A remote client is a transport consumer of that
 authority, not an independent writer. See DD-091 and
 [Setup & Installation](user-manual/04-setup-and-installation.md#415-run-an-always-on-home-node).
+
+## Recovery-readiness diagnostics
+
+`lifeos doctor` exposes recovery evidence as a deterministic, read-only layer. It does not
+commit, push, restore, scan, repair, or create a backup. Recovery diagnostics operate on path,
+filesystem, and Git metadata and do not need canonical note bodies to determine coverage.
+
+Recovery has three independent evidence classes:
+
+- **Canonical Git coverage** reports whether the configured vault is inside a Git repository,
+  whether committed canonical history exists, the latest commit that actually affected the
+  configured vault, and current staged, modified, deleted, untracked, or ignored canonical
+  paths. Git queries are path-scoped so unrelated changes in a parent repository do not become
+  LifeOS recovery evidence. Structural coverage treats committed gitlinks/symlink-style entries
+  and visible untracked symlinks or other non-regular entries as recovery gaps: a Git symlink
+  records its target pathname, not the target file bytes. Staging remains uncommitted state.
+  Commit age is informational and is not itself a failure when current canonical state is fully
+  represented by history.
+- **External backup/snapshot evidence** remains provider-neutral. Local commits, configured Git
+  remotes, and remote-tracking refs do not prove an independent current copy. When LifeOS lacks
+  deterministic evidence, `recovery.backup.external` is `unknown` rather than `pass`; the doctor
+  does not manufacture certainty about third-party backup state.
+- **Disposable runtime** explicitly records that `.lifeos/` registry, activity, index,
+  graph/export, cache, processing, and similar derived state is rebuildable. Runtime paths are
+  excluded from canonical Git-gap warnings, including hidden protected-scope presence probes,
+  and are never recommended for committing as a recovery fix.
+
+Recovery scope is authorized before Git pathname output or canonical filesystem traversal.
+Protected/policy-excluded scope that cannot be inspected remains nondisclosed and makes affected
+coverage `unknown`; disposable runtime nested beneath such a prefix does not by itself make the
+scope incomplete. Policy prefixes whose stored spelling cannot be used as an unambiguous literal
+POSIX path fail closed before traversal instead of being silently normalized to another path.
+
+The JSON recovery section carries stable diagnostic IDs, status, severity, summary, optional
+remediation, and only the relative exposed paths needed to fix a local gap. The initial IDs are
+`recovery.git.repository`, `recovery.git.last_canonical_commit`,
+`recovery.git.canonical_objects`, `recovery.git.uncommitted_canonical`,
+`recovery.git.untracked_canonical`, `recovery.git.ignored_canonical`,
+`recovery.backup.external`, and `recovery.runtime.disposable`. Operational doctor readiness
+remains separate from this recovery evidence so advisory recovery gaps do not silently redefine
+whether the local LifeOS application can run.

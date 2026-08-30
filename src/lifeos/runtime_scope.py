@@ -35,9 +35,9 @@ def _runtime_relative_parts(
 
 
 def _candidate_parts(path: str) -> tuple[str, ...] | None:
-    if not isinstance(path, str) or not path.strip() or "\\" in path or "\x00" in path:
+    if not isinstance(path, str) or path == "" or "\\" in path or "\x00" in path:
         return None
-    pure = PurePosixPath(path.strip())
+    pure = PurePosixPath(path)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         return None
     return tuple(pure.parts)
@@ -68,7 +68,9 @@ def runtime_path_selects_configured_directory(
     case-insensitive filesystem, scanner paths captured as ``runtime/...`` therefore still match a
     configured ``Runtime`` directory even if a case-only rename happens between runtime-prefix
     capture and scanning. On a case-sensitive filesystem, differently cased directories remain
-    distinct because they select different inodes.
+    distinct because they select different inodes. Legal whitespace in configured runtime
+    components and descendant names is preserved literally; no pathname component is trimmed into
+    an alias.
     """
     resolved = _runtime_relative_parts(vault_root, runtime_dir)
     if resolved is None:
@@ -86,8 +88,6 @@ def runtime_path_selects_configured_directory(
         try:
             root_fd = os.open(root, _DIRECTORY_FLAGS)
         except FileNotFoundError:
-            # With no canonical vault root there cannot be an existing in-vault runtime inode to
-            # match. Callers that need the vault itself will surface their own not-found failure.
             return False
         try:
             runtime_fd = _open_directory_chain(root_fd, runtime_parts)
@@ -133,6 +133,7 @@ def build_runtime_exclusion_matcher(
     replacing one display spelling with another during an invocation.
     """
     snapshot_root = snapshot_prefix.rstrip("/") if snapshot_prefix is not None else None
+    snapshot_parts = _candidate_parts(snapshot_root) if snapshot_root is not None else None
     matcher_runtime_dir = runtime_dir
     if matcher_runtime_dir is None and snapshot_root is not None:
         matcher_runtime_dir = vault_root / snapshot_root
@@ -141,13 +142,12 @@ def build_runtime_exclusion_matcher(
         candidate = _candidate_parts(path)
         if candidate is None:
             return False
-        normalized = PurePosixPath(*candidate).as_posix()
-        if snapshot_prefix is not None and (
-            normalized == snapshot_root or normalized.startswith(snapshot_prefix)
-        ):
-            return True
+        if snapshot_parts is not None and len(candidate) >= len(snapshot_parts):
+            if candidate[: len(snapshot_parts)] == snapshot_parts:
+                return True
         if matcher_runtime_dir is None:
             return False
+        normalized = PurePosixPath(*candidate).as_posix()
         return runtime_path_selects_configured_directory(
             vault_root,
             runtime_dir=matcher_runtime_dir,

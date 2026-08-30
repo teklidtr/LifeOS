@@ -143,6 +143,27 @@ Ingestion is MCP-only. The external agent performs semantic synthesis; LifeOS
 contains no ingestion model client or API-key configuration. Its facade verifies
 the registered source and owns proposal identity, provenance, and persistence.
 
+## Recovery boundary
+
+Recovery follows the same authority split. Canonical vault files are the durable
+material that must survive device loss. Git history can recover versions that
+were actually committed, but a local Git repository is still on the same failure
+domain as the working copy and cannot recover a new or edited file that was never
+committed. A configured Git remote or remote-tracking ref is not, by itself,
+proof that an independent copy is current.
+
+`lifeos doctor` reports canonical Git coverage separately from independent
+backup/snapshot evidence. If LifeOS has no deterministic provider-neutral way to
+verify an external copy, the backup diagnostic is **unknown / not verified**, not
+pass. That wording means "LifeOS cannot prove this protection," not "no backup
+exists."
+
+Disposable `.lifeos/` state has the opposite recovery contract. Registry rows,
+indexes, activity logs, graph/export generations, processing state, and similar
+derived artifacts may be rebuilt or recreated after canonical data is restored.
+They are therefore excluded from canonical Git-gap warnings, and the recovery fix
+is never to make `.lifeos/` canonical.
+
 ---
 
 [← Manual home](README.md) · [Next: Executive Summary & Philosophy →](02-executive-summary-and-philosophy.md)

@@ -124,6 +124,77 @@ The production `main.js` is a bundled CommonJS Obsidian entry point. Files under
 plugin loads but reports **Unavailable**, the plugin bundle is working; correct
 the Python executable or `lifeos.yml` path in LifeOS Settings.
 
+## Check recovery readiness with `lifeos doctor`
+
+`lifeos doctor` is a read-only diagnostic. From the vault directory, run:
+
+```bash
+uv run lifeos doctor --config lifeos.yml
+```
+
+Use `--json` when another UI or script needs stable diagnostic IDs, statuses,
+severities, remediation, and exposed relative paths. Recovery diagnostics are
+reported separately from ordinary application readiness, so a vault may be
+usable while still having a recovery warning.
+
+The recovery section distinguishes three layers:
+
+1. **Canonical Git coverage.** LifeOS checks whether the configured vault is
+   covered by Git, whether canonical history has any commit, the latest commit
+   that actually touched the configured vault, whether visible committed
+   canonical tree entries are structurally ordinary Git blob entries, and current
+   staged, modified, deleted, untracked, or ignored canonical paths. Gitlinks and
+   symlink-style committed entries are reported through
+   `recovery.git.canonical_objects` rather than counted as ordinary canonical blob
+   entries. Visible untracked symlinks and other non-regular canonical entries are
+   also structural failures under `recovery.git.canonical_objects`: committing a
+   symlink stores its target pathname, not the target file bytes, so replace such
+   entries with ordinary vault files before relying on Git recovery. The doctor
+   deliberately does **not** inflate or hash committed note payloads, because this
+   diagnostic is metadata-only and must not read canonical note bodies.
+   Object-payload integrity therefore remains **unknown** here and requires
+   separate Git integrity tooling if you need to verify it. Canonical paths marked
+   `assume-unchanged` or `skip-worktree` make working-tree cleanliness **unknown**
+   until those flags are cleared. If only stat-cache metadata changed and content
+   equality cannot be established from metadata alone, the path is reported under
+   `working_tree_uncertain_paths` and the uncommitted diagnostic is **unknown**,
+   not falsely labeled modified. Staging is not a substitute for a commit. An old
+   commit timestamp is informational by itself; a clean vault can remain fully
+   represented by an old commit.
+2. **Independent backup/snapshot evidence.** Local Git history can recover
+   committed logical versions, but it can disappear with the same disk. A Git
+   remote name or remote-tracking ref does not prove that an off-device copy is
+   current. The initial provider-neutral doctor therefore reports
+   `recovery.backup.external` as **unknown / not verified** unless LifeOS has
+   deterministic evidence. Unknown means LifeOS cannot prove the backup state; it
+   does not mean that your backup system is absent or broken.
+3. **Disposable runtime.** `.lifeos/registry.db`, activity logs, indexes,
+   graph/export generations, caches, and other derived runtime state are not
+   canonical recovery material. Their absence from Git is not a recovery gap.
+   Restore canonical files first, then rebuild the runtime state. Do not solve a
+   doctor warning by committing `.lifeos/`.
+
+Protected or policy-excluded canonical paths are never named in recovery output.
+Because the current doctor has no explicit protected-scope authorization input,
+checks whose completeness depends on such hidden scope report **unknown /
+incomplete** rather than `pass`. Disposable runtime nested beneath a protected
+prefix remains excluded from those hidden-scope probes and does not make recovery
+coverage incomplete by itself. Ambiguously spelled retrieval-policy prefixes,
+such as values with surrounding whitespace or a leading slash, fail closed before
+canonical traversal begins rather than being normalized into a different path.
+This preserves nondisclosure without turning uninspected sensitive data into a
+false clean signal.
+
+Typical actionable Git warnings name only the relative paths needed to fix the
+problem. Git repository inspection failures are reported as **unknown** with
+path-free summaries rather than exposing Git stderr that may contain protected
+filenames. Recovery queries disable configured filesystem monitors, inherited
+repository selection, content filters, rename detection on diff-based name
+queries, and lazy object fetching where relevant. The doctor reads Git/path and
+filesystem metadata only for this recovery surface; it does not read or emit note
+bodies or secrets, and it does not commit, push, restore, scan, repair, or create
+backups for you.
+
 ## Safe upgrade
 
 1. Commit or back up the Markdown vault.
