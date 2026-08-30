@@ -922,7 +922,7 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
     if sandbox is None:
         return _base._fallback(config, _base._no_repo())
 
-    sandbox_token = _impl._ACTIVE_SANDBOX.set(sandbox)
+    sandbox_token = _impl._ACTIVE_SANDBOX.set(cast(Any, sandbox))
     config_token = _impl._ACTIVE_CONFIG.set(config)
     snapshot_token = _impl._ACTIVE_WORKTREE_SNAPSHOT.set(None)
     git_token = _impl._ACTIVE_GIT_EXECUTABLE.set(git)
