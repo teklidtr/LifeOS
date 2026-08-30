@@ -74,9 +74,12 @@ def _source_identity(
             "author": author,
             "publisher": publisher,
         }
-    payload = json.dumps(basis, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode(
-        "utf-8"
-    )
+    payload = json.dumps(
+        basis,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
     return _digest(payload)
 
 
@@ -115,8 +118,20 @@ def _acquisition_id(
     return f"acq-{hashlib.sha256(payload).hexdigest()[:24]}"
 
 
+def _metadata_hash(metadata: ResearchSourceMetadata) -> str:
+    payload = json.dumps(
+        metadata.to_frontmatter(),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return _digest(payload)
+
+
 def _document(metadata: ResearchSourceMetadata, evidence_text: str) -> str:
-    dumped = yaml.safe_dump(metadata.to_frontmatter(), sort_keys=False, allow_unicode=True).rstrip()
+    frontmatter = metadata.to_frontmatter()
+    frontmatter["metadata_hash"] = _metadata_hash(metadata)
+    dumped = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).rstrip()
     return (
         f"---\n{dumped}\n---\n\n"
         "# Research evidence\n\n"
@@ -160,20 +175,105 @@ def _acquisition_from_dict(value: Mapping[str, Any]) -> ResearchAcquisition:
         raise ResearchError("malformed_artifact", "Research acquisition is malformed.") from exc
 
 
+def _require_timestamp(value: str, *, field: str) -> None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ResearchError(
+            "invalid_timestamp",
+            f"Research {field} timestamp is malformed.",
+            {"field": field},
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+        raise ResearchError(
+            "invalid_timestamp",
+            f"Research {field} timestamp must be UTC and timezone-aware.",
+            {"field": field},
+        )
+
+
+def _validate_metadata_identity(
+    *,
+    relative_path: str,
+    metadata: ResearchSourceMetadata,
+    stored_metadata_hash: object,
+) -> None:
+    expected_source_identity = _source_identity(
+        source_locator=metadata.source_locator,
+        source_title=metadata.source_title,
+        source_author=metadata.source_author,
+        source_publisher=metadata.source_publisher,
+    )
+    if metadata.source_identity != expected_source_identity:
+        raise ResearchError(
+            "identity_mismatch",
+            "Research source identity does not match its source metadata.",
+            {"path": relative_path},
+        )
+
+    for acquisition in metadata.acquisitions:
+        _require_timestamp(acquisition.captured_at, field="captured_at")
+        expected_acquisition_id = _acquisition_id(
+            captured_by=acquisition.captured_by,
+            origin_kind=acquisition.origin_kind,
+            origin_ref=acquisition.origin_ref,
+            research_reason=acquisition.research_reason,
+            research_context=acquisition.research_context,
+        )
+        if acquisition.acquisition_id != expected_acquisition_id:
+            raise ResearchError(
+                "identity_mismatch",
+                "Research acquisition ID does not match its lineage fields.",
+                {
+                    "path": relative_path,
+                    "acquisition_id": acquisition.acquisition_id,
+                },
+            )
+
+    first = metadata.acquisitions[0]
+    _require_timestamp(metadata.first_captured_at, field="first_captured_at")
+    if (
+        metadata.first_captured_at != first.captured_at
+        or metadata.first_captured_by != first.captured_by
+    ):
+        raise ResearchError(
+            "identity_mismatch",
+            "Research first-capture metadata does not match the first acquisition.",
+            {"path": relative_path},
+        )
+
+    if not isinstance(stored_metadata_hash, str):
+        raise ResearchError(
+            "metadata_mismatch",
+            "Research source metadata hash is missing.",
+            {"path": relative_path},
+        )
+    expected_metadata_hash = _metadata_hash(metadata)
+    if stored_metadata_hash != expected_metadata_hash:
+        raise ResearchError(
+            "metadata_mismatch",
+            "Research source metadata no longer matches its hash-bound capture record.",
+            {"path": relative_path},
+        )
+
+
 def _parse(relative_path: str, source_path: Path, content: str) -> ResearchSourceArtifact:
     parsed = parse_markdown_note(source_path, content=content)
     finding = next((item for item in parsed.findings if item.severity == "error"), None)
     if finding is not None:
         raise ResearchError("malformed_artifact", finding.message, {"path": relative_path})
+
     frontmatter = dict(parsed.frontmatter)
     if frontmatter.get("type") != "research-source":
         raise ResearchError("unsupported_artifact", "The note is not a research source.")
+
     try:
         schema = int(frontmatter.get("research_schema", 0))
     except (TypeError, ValueError) as exc:
         raise ResearchError("unsupported_schema", "Research source schema is malformed.") from exc
     if schema != RESEARCH_SOURCE_SCHEMA_VERSION:
         raise ResearchError("unsupported_schema", "Research source schema is unsupported.")
+
     raw_acquisitions = frontmatter.get("acquisitions", [])
     if not isinstance(raw_acquisitions, list):
         raise ResearchError("malformed_artifact", "Research acquisitions must be a list.")
@@ -181,6 +281,7 @@ def _parse(relative_path: str, source_path: Path, content: str) -> ResearchSourc
         _acquisition_from_dict(_mapping(item, "research acquisition"))
         for item in raw_acquisitions
     )
+
     try:
         metadata = ResearchSourceMetadata(
             artifact_id=str(frontmatter["artifact_id"]),
@@ -211,6 +312,13 @@ def _parse(relative_path: str, source_path: Path, content: str) -> ResearchSourc
         if isinstance(exc, ResearchError):
             raise
         raise ResearchError("malformed_artifact", "Research source metadata is malformed.") from exc
+
+    _validate_metadata_identity(
+        relative_path=relative_path,
+        metadata=metadata,
+        stored_metadata_hash=frontmatter.get("metadata_hash"),
+    )
+
     evidence_text = _extract_evidence(content)
     actual_snapshot_hash = _digest(evidence_text.encode("utf-8"))
     if actual_snapshot_hash != metadata.snapshot_hash:
@@ -219,6 +327,7 @@ def _parse(relative_path: str, source_path: Path, content: str) -> ResearchSourc
             "Research evidence bytes no longer match the immutable snapshot hash.",
             {"path": relative_path},
         )
+
     expected_path = _artifact_path(metadata.source_identity, metadata.snapshot_hash)
     if relative_path != expected_path:
         raise ResearchError(
@@ -226,6 +335,7 @@ def _parse(relative_path: str, source_path: Path, content: str) -> ResearchSourc
             "Research source path does not match its hash-bound identity.",
             {"path": relative_path, "expected_path": expected_path},
         )
+
     expected_id = _artifact_id(metadata.source_identity, metadata.snapshot_hash)
     if metadata.artifact_id != expected_id:
         raise ResearchError(
@@ -233,6 +343,7 @@ def _parse(relative_path: str, source_path: Path, content: str) -> ResearchSourc
             "Research source artifact ID does not match its hash-bound identity.",
             {"path": relative_path},
         )
+
     return ResearchSourceArtifact(
         relative_path=relative_path,
         content_hash=f"sha256:{content_hash(content)}",
@@ -297,6 +408,7 @@ class ResearchEvidenceService:
             raise ResearchError("invalid_field", "captured_by must not be blank.")
         if origin_kind not in {"query", "conversation", "manual", "other"}:
             raise ResearchError("invalid_origin", "Research origin kind is unsupported.")
+
         moment = _moment(now)
         captured_at = moment.isoformat()
         locator = _trimmed(source_locator)
@@ -304,6 +416,7 @@ class ResearchEvidenceService:
         publisher = _trimmed(source_publisher)
         ref = _trimmed(origin_ref)
         context = research_context.strip()
+
         source_identity = _source_identity(
             source_locator=locator,
             source_title=title,
@@ -379,27 +492,33 @@ class ResearchEvidenceService:
                 "snapshot_mismatch",
                 "Existing research source does not match the submitted immutable snapshot.",
             )
-        title_value = current.metadata.source_title
-        if title_value != title:
+        if current.metadata.source_title != title:
             raise ResearchError(
                 "metadata_conflict",
                 "Research source title conflicts with the existing source snapshot.",
                 {"field": "source_title"},
             )
+
         merged_author = _same_optional(current.metadata.source_author, author, "source_author")
         merged_publisher = _same_optional(
-            current.metadata.source_publisher, publisher, "source_publisher"
+            current.metadata.source_publisher,
+            publisher,
+            "source_publisher",
         )
-        merged_locator = _same_optional(current.metadata.source_locator, locator, "source_locator")
-        if any(
-            item.acquisition_id == acquisition_id for item in current.metadata.acquisitions
-        ):
+        merged_locator = _same_optional(
+            current.metadata.source_locator,
+            locator,
+            "source_locator",
+        )
+
+        if any(item.acquisition_id == acquisition_id for item in current.metadata.acquisitions):
             return ResearchCaptureResult(
                 artifact=current,
                 acquisition_id=acquisition_id,
                 created=False,
                 acquisition_added=False,
             )
+
         metadata = replace(
             current.metadata,
             source_locator=merged_locator,
@@ -427,6 +546,7 @@ class ResearchEvidenceService:
                 "storage_unavailable",
                 "Research acquisition lineage could not be persisted.",
             ) from exc
+
         artifact = self.load(relative_path)
         return ResearchCaptureResult(
             artifact=artifact,
