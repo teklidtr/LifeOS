@@ -1,8 +1,10 @@
 from dataclasses import fields
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import pytest
+import yaml
 
 from lifeos.facade.research_tools import (
     ResearchEvidenceCaptureRequest,
@@ -33,6 +35,17 @@ def _capture(
     )
 
 
+def _rewrite_frontmatter(path: Path, mutate: Callable[[dict[str, object]], None]) -> None:
+    content = path.read_text(encoding="utf-8")
+    assert content.startswith("---\n")
+    _opening, frontmatter_text, body = content.split("---", 2)
+    frontmatter = yaml.safe_load(frontmatter_text)
+    assert isinstance(frontmatter, dict)
+    mutate(frontmatter)
+    rendered = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).rstrip()
+    path.write_text(f"---\n{rendered}\n---{body}", encoding="utf-8")
+
+
 def test_capture_creates_hash_bound_raw_research_artifact(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
     vault_root.mkdir()
@@ -53,6 +66,8 @@ def test_capture_creates_hash_bound_raw_research_artifact(tmp_path: Path) -> Non
     assert acquisition.origin_ref == "conv-20260830T154000Z-abcd1234#turn-002"
     assert acquisition.research_reason == "The vault lacks evidence for the queried mechanism."
     assert acquisition.research_context.startswith("Agent selected this passage")
+    stored = (vault_root / result.artifact.relative_path).read_text(encoding="utf-8")
+    assert "metadata_hash: sha256:" in stored
 
 
 def test_identical_snapshot_and_acquisition_are_idempotent(tmp_path: Path) -> None:
@@ -132,6 +147,49 @@ def test_snapshot_tampering_fails_hash_validation(tmp_path: Path) -> None:
     with pytest.raises(ResearchError) as error:
         service.load(captured.artifact.relative_path)
     assert error.value.code == "snapshot_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_codes"),
+    [
+        (
+            lambda data: data.__setitem__("source_author", "Forged Author"),
+            {"metadata_mismatch"},
+        ),
+        (
+            lambda data: data.__setitem__("first_captured_by", "agent:forged"),
+            {"identity_mismatch"},
+        ),
+        (
+            lambda data: data["acquisitions"][0].__setitem__(
+                "research_reason", "Forged research reason."
+            ),
+            {"identity_mismatch"},
+        ),
+        (
+            lambda data: data["acquisitions"][0].__setitem__(
+                "captured_at", "2026-08-30T16:41:00+00:00"
+            ),
+            {"identity_mismatch", "metadata_mismatch"},
+        ),
+    ],
+)
+def test_research_metadata_tampering_fails_lineage_validation(
+    tmp_path: Path,
+    mutation: Callable[[dict[str, object]], None],
+    expected_codes: set[str],
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    service = ResearchEvidenceService(vault_root=vault_root)
+    captured = _capture(service)
+    path = vault_root / captured.artifact.relative_path
+
+    _rewrite_frontmatter(path, mutation)
+
+    with pytest.raises(ResearchError) as error:
+        service.load(captured.artifact.relative_path)
+    assert error.value.code in expected_codes
 
 
 def test_facade_keeps_capture_actor_server_authoritative(tmp_path: Path) -> None:
