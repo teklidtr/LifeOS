@@ -62,6 +62,7 @@ def _trusted_actor_id(
 def build_research_tools(
     *,
     vault_root: Path,
+    runtime_dir: Path,
     activity: MCPActivityStore,
     invoke: Invoke,
     authorizer: ConsequentialAuthorizer,
@@ -80,11 +81,13 @@ def build_research_tools(
                     question=query,
                     focus_paths=tuple(focus_paths or ()),
                     limit=limit,
+                    mode="external",
                 ),
+                runtime_dir=runtime_dir,
             )
             wiki = search_wiki(
                 vault_root=vault_root,
-                request=WikiSearchRequest(query=query, limit=limit),
+                request=WikiSearchRequest(query=query, limit=limit, mode="external"),
             )
             source_paths = list(
                 dict.fromkeys(
