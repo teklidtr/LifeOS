@@ -37,6 +37,14 @@ _FILE_FLAGS = (
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
 )
+_DIRECTORY_FLAGS = _FILE_FLAGS | getattr(os, "O_DIRECTORY", 0)
+_ENTRY_FLAGS = _FILE_FLAGS | getattr(os, "O_NONBLOCK", 0)
+_PINNED_DIRECTORY_SUPPORT = (
+    bool(getattr(os, "O_NOFOLLOW", 0))
+    and bool(getattr(os, "O_DIRECTORY", 0))
+    and os.open in os.supports_dir_fd
+    and os.scandir in os.supports_fd
+)
 
 
 @dataclass(slots=True)
@@ -66,7 +74,7 @@ _ACTIVE_WORKTREE_SNAPSHOT: contextvars.ContextVar[Any | None] = contextvars.Cont
 )
 
 _SECTION_RE = re.compile(
-    r'^\s*\[\s*([^\]\s"]+)(?:\s+"([^"]*)")?\s*\]\s*(?:[#;].*)?$'
+    r'^\s*\[\s*([^\]\s"]+)(?:\s+"((?:\\.|[^"\\])*)")?\s*\]\s*(?:[#;].*)?$'
 )
 _KEY_VALUE_RE = re.compile(r"^\s*([A-Za-z0-9.-]+)\s*(?:=\s*)?(.*?)\s*$")
 _DEAD_HELPERS = (
@@ -177,6 +185,8 @@ def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
             contains_includes = contains_includes or section in {"include", "includeif"}
             extensions = extensions or (section == "extensions" and subsection is None)
             continue
+        if line.startswith("["):
+            raise _base.RecoveryGitError("Git config section header is malformed or unsupported")
         if section != "core" or subsection is not None:
             continue
         pair = _KEY_VALUE_RE.match(raw_line)
@@ -217,36 +227,110 @@ def _copy_regular_metadata(source: Path, destination: Path) -> None:
         raise _base.RecoveryGitError("Could not snapshot Git metadata") from exc
 
 
-def _copy_metadata_tree(source: Path, destination: Path) -> None:
+def _open_metadata_directory(source: Path, *, missing_ok: bool = False) -> int | None:
+    if not _PINNED_DIRECTORY_SUPPORT:
+        raise _base.RecoveryGitError(
+            "Platform cannot safely pin Git metadata directories for recovery diagnostics"
+        )
     try:
-        observed = os.lstat(source)
+        fd = os.open(source, _DIRECTORY_FLAGS)
     except FileNotFoundError:
-        return
+        if missing_ok:
+            return None
+        raise _base.RecoveryGitError("Could not open Git metadata directory safely")
     except OSError as exc:
-        raise _base.RecoveryGitError("Could not snapshot Git metadata") from exc
-    if stat.S_ISLNK(observed.st_mode) or not stat.S_ISDIR(observed.st_mode):
-        raise _base.RecoveryGitError("Git metadata snapshot encountered an unsafe directory")
-    destination.mkdir(parents=True, exist_ok=True)
+        raise _base.RecoveryGitError("Could not open Git metadata directory safely") from exc
     try:
-        with os.scandir(source) as iterator:
-            entries = sorted(iterator, key=lambda item: item.name)
+        observed = os.fstat(fd)
+        if not stat.S_ISDIR(observed.st_mode):
+            raise _base.RecoveryGitError("Git metadata snapshot encountered an unsafe directory")
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _metadata_directory_entries(directory_fd: int) -> list[tuple[str, os.stat_result]]:
+    try:
+        with os.scandir(directory_fd) as iterator:
+            entries: list[tuple[str, os.stat_result]] = []
+            for entry in iterator:
+                try:
+                    observed = entry.stat(follow_symlinks=False)
+                except OSError as exc:
+                    raise _base.RecoveryGitError("Could not inspect Git metadata") from exc
+                entries.append((entry.name, observed))
+    except _base.RecoveryGitError:
+        raise
     except OSError as exc:
         raise _base.RecoveryGitError("Could not enumerate Git metadata") from exc
-    for entry in entries:
-        src = source / entry.name
-        dst = destination / entry.name
+    return sorted(entries, key=lambda item: item[0])
+
+
+def _open_metadata_child(
+    directory_fd: int,
+    name: str,
+    expected: os.stat_result,
+) -> tuple[int, os.stat_result]:
+    if stat.S_ISLNK(expected.st_mode):
+        raise _base.RecoveryGitError("Git metadata snapshot encountered an unsafe symlink")
+    if stat.S_ISDIR(expected.st_mode):
+        flags = _DIRECTORY_FLAGS
+    elif stat.S_ISREG(expected.st_mode):
+        flags = _ENTRY_FLAGS
+    else:
+        raise _base.RecoveryGitError("Git metadata snapshot encountered an unsafe entry")
+    try:
+        fd = os.open(name, flags, dir_fd=directory_fd)
+    except OSError as exc:
+        raise _base.RecoveryGitError("Could not open Git metadata entry safely") from exc
+    try:
+        observed = os.fstat(fd)
+        if (observed.st_dev, observed.st_ino) != (expected.st_dev, expected.st_ino):
+            raise _base.RecoveryGitError("Git metadata changed during safe traversal")
+        if stat.S_ISDIR(expected.st_mode) != stat.S_ISDIR(observed.st_mode):
+            raise _base.RecoveryGitError("Git metadata changed during safe traversal")
+        if stat.S_ISREG(expected.st_mode) != stat.S_ISREG(observed.st_mode):
+            raise _base.RecoveryGitError("Git metadata changed during safe traversal")
+        if stat.S_ISREG(observed.st_mode) and observed.st_nlink != 1:
+            raise _base.RecoveryGitError("Git metadata uses an unsupported hard link")
+        return fd, observed
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _copy_metadata_directory(directory_fd: int, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    for name, expected in _metadata_directory_entries(directory_fd):
+        child_fd, observed = _open_metadata_child(directory_fd, name, expected)
+        target = destination / name
+        if stat.S_ISDIR(observed.st_mode):
+            try:
+                _copy_metadata_directory(child_fd, target)
+            finally:
+                os.close(child_fd)
+            continue
         try:
-            entry_state = os.lstat(src)
+            with os.fdopen(child_fd, "rb", closefd=True) as source_handle:
+                child_fd = -1
+                with target.open("wb") as destination_handle:
+                    shutil.copyfileobj(source_handle, destination_handle, length=131_072)
         except OSError as exc:
-            raise _base.RecoveryGitError("Could not inspect Git metadata") from exc
-        if stat.S_ISLNK(entry_state.st_mode):
-            raise _base.RecoveryGitError("Git metadata snapshot encountered an unsafe symlink")
-        if stat.S_ISDIR(entry_state.st_mode):
-            _copy_metadata_tree(src, dst)
-        elif stat.S_ISREG(entry_state.st_mode):
-            _copy_regular_metadata(src, dst)
-        else:
-            raise _base.RecoveryGitError("Git metadata snapshot encountered an unsafe entry")
+            raise _base.RecoveryGitError("Could not snapshot Git metadata") from exc
+        finally:
+            if child_fd >= 0:
+                os.close(child_fd)
+
+
+def _copy_metadata_tree(source: Path, destination: Path) -> None:
+    directory_fd = _open_metadata_directory(source, missing_ok=True)
+    if directory_fd is None:
+        return
+    try:
+        _copy_metadata_directory(directory_fd, destination)
+    finally:
+        os.close(directory_fd)
 
 
 def _fingerprint_regular_metadata(digest: Any, label: str, path: Path) -> None:
@@ -267,32 +351,55 @@ def _fingerprint_regular_metadata(digest: Any, label: str, path: Path) -> None:
     digest.update(b"\0")
 
 
+def _fingerprint_open_regular_metadata(
+    digest: Any,
+    label: str,
+    fd: int,
+    observed: os.stat_result,
+) -> None:
+    digest.update(label.encode("utf-8", errors="surrogateescape") + b"\0")
+    digest.update(f"{observed.st_dev}:{observed.st_ino}:{observed.st_size}".encode())
+    digest.update(b"\0")
+    try:
+        with os.fdopen(fd, "rb", closefd=True) as handle:
+            fd = -1
+            for block in iter(lambda: handle.read(131_072), b""):
+                digest.update(block)
+    except OSError as exc:
+        raise _base.RecoveryGitError("Could not fingerprint Git metadata") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    digest.update(b"\0")
+
+
+def _fingerprint_metadata_directory(
+    digest: Any,
+    directory_fd: int,
+    prefix: str,
+) -> None:
+    for name, expected in _metadata_directory_entries(directory_fd):
+        child_fd, observed = _open_metadata_child(directory_fd, name, expected)
+        label = f"{prefix}/{name}" if prefix else name
+        if stat.S_ISDIR(observed.st_mode):
+            try:
+                _fingerprint_metadata_directory(digest, child_fd, label)
+            finally:
+                os.close(child_fd)
+            continue
+        _fingerprint_open_regular_metadata(digest, label, child_fd, observed)
+
+
 def _fingerprint_metadata_tree(digest: Any, git_dir: Path, source: Path) -> None:
-    try:
-        observed = os.lstat(source)
-    except FileNotFoundError:
-        digest.update(source.relative_to(git_dir).as_posix().encode() + b"\0missing-tree\0")
+    label = source.relative_to(git_dir).as_posix()
+    directory_fd = _open_metadata_directory(source, missing_ok=True)
+    if directory_fd is None:
+        digest.update(label.encode("utf-8", errors="surrogateescape") + b"\0missing-tree\0")
         return
-    except OSError as exc:
-        raise _base.RecoveryGitError("Could not fingerprint Git refs") from exc
-    if stat.S_ISLNK(observed.st_mode) or not stat.S_ISDIR(observed.st_mode):
-        raise _base.RecoveryGitError("Git refs contain an unsafe directory")
     try:
-        with os.scandir(source) as iterator:
-            entries = sorted(iterator, key=lambda item: item.name)
-    except OSError as exc:
-        raise _base.RecoveryGitError("Could not fingerprint Git refs") from exc
-    for entry in entries:
-        path = source / entry.name
-        state = os.lstat(path)
-        if stat.S_ISLNK(state.st_mode):
-            raise _base.RecoveryGitError("Git refs contain an unsafe symlink")
-        if stat.S_ISDIR(state.st_mode):
-            _fingerprint_metadata_tree(digest, git_dir, path)
-        elif stat.S_ISREG(state.st_mode):
-            _fingerprint_regular_metadata(digest, path.relative_to(git_dir).as_posix(), path)
-        else:
-            raise _base.RecoveryGitError("Git refs contain an unsafe entry")
+        _fingerprint_metadata_directory(digest, directory_fd, label)
+    finally:
+        os.close(directory_fd)
 
 
 def _reject_split_index(git_dir: Path) -> None:
