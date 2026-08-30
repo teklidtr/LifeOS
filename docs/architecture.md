@@ -81,6 +81,27 @@ set of 1..12 distinct creates and exact-section updates. Folder organization ben
 agent-selected and may evolve over time; LifeOS does not prescribe an entity/concept/source/
 synthesis taxonomy.
 
+Folder-scoped or otherwise multi-source ingestion uses a wider but independently bounded
+proposal contract rather than looping that single-source path. The external agent discovers and
+reads an ordered source batch, applies relevant vault context, inspects existing durable wiki
+knowledge, reasons over the sources jointly, and reconciles desired changes by `target_path`
+before calling `ingestion_evolve_wiki_batch_proposal` once. A logical batch accepts at most 64
+distinct sources and 32 distinct targets, and the serialized canonical patch plus immutable
+review payload is capped at 2 MiB. Exceeding any bound fails without silently splitting the
+folder into sibling proposals.
+
+Each target appears at most once in the resulting `PatchDocumentV2`. Several exact-section
+changes to one human-owned Wiki file are combined into one final candidate and one
+base-hash-bound `patch_human_file`; a generated-owned target becomes one ownership/hash-bound
+replacement, while an absent generated target is created once. Proposal metadata records the
+review-digest-bound target-to-source grounding map and rationale, while proposal-level
+`related_sources` is only the ordered batch union. Generated provenance merges only the verified
+source subset that actually grounds that target. LifeOS independently verifies every selected
+source and re-verifies the complete batch immediately before draft persistence. The ordinary
+proposal application engine remains authoritative, so a stale or invalid target blocks the whole
+batch before any partial canonical publication. Zero durable changes remains a valid agent
+outcome and produces no proposal.
+
 For a registered `study/` source, the same reasoning pass may additionally propose selective
 flashcards. The agent decides what merits retrieval practice from the inferred learning context
 (exam relevance, future prerequisites, conceptual leverage, mechanisms, confusable distinctions,
