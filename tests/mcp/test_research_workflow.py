@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from lifeos.bootstrap import initialize_vault
 from lifeos.markdown.parser import parse_markdown_note
@@ -68,6 +68,45 @@ def test_research_tool_schemas_preserve_read_write_and_actor_boundaries(tmp_path
     }
     assert "captured_by" not in capture.parameters["properties"]
     assert capture.parameters["additionalProperties"] is False
+
+
+def test_research_query_context_uses_external_scope_and_configured_runtime(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    initialize_vault(vault_root)
+    runtime_dir = tmp_path / "node-runtime"
+    runtime_dir.mkdir()
+    registry = Registry(runtime_dir / "registry.db")
+    authorizer = MagicMock()
+    authorizer.actor_id = "agent:local"
+    server = create_mcp_server(
+        vault_root=vault_root,
+        registry=registry,
+        authorizer=authorizer,
+        runtime_dir=runtime_dir,
+    )
+
+    with (
+        patch("lifeos.mcp.research_tools.get_vault_context") as get_context,
+        patch("lifeos.mcp.research_tools.search_wiki") as research_wiki,
+    ):
+        get_context.return_value = MagicMock(
+            sources=(), instructions=(), evidence_gaps=(), omissions=()
+        )
+        research_wiki.return_value = MagicMock(hits=())
+        server._tool_manager.get_tool("research_query_context").fn(
+            query="bounded evidence",
+            limit=4,
+        )
+
+    context_call = get_context.call_args.kwargs
+    assert context_call["runtime_dir"] == runtime_dir
+    assert context_call["request"].mode == "external"
+    assert research_wiki.call_args.kwargs["request"].mode == "external"
+
+    with patch("lifeos.mcp.runtime_server.search_wiki") as runtime_wiki:
+        runtime_wiki.return_value = MagicMock(query="bounded evidence", hits=())
+        server._tool_manager.get_tool("wiki_search").fn(query="bounded evidence", limit=4)
+    assert runtime_wiki.call_args.kwargs["request"].mode == "external"
 
 
 def test_research_query_context_is_zero_write_by_default(tmp_path: Path) -> None:
