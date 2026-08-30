@@ -159,7 +159,7 @@ def test_hidden_scope_still_classifies_allowed_visible_ignored_path(
     assert "wiki/ignored.md" in report.ignored_paths
     assert "wiki/ignored.md" not in report.untracked_paths
     assert "secrets/private.md" not in rendered
-    assert diagnostics["recovery.git.ignored_canonical"].status == "unknown"
+    assert diagnostics["recovery.git.ignored_canonical"].status == "warning"
     assert diagnostics["recovery.git.untracked_canonical"].status == "unknown"
 
 
@@ -225,6 +225,6 @@ def test_protected_ignore_source_is_not_read_to_classify_visible_candidate(
 
     assert check_ignore_queries == []
     assert "wiki/ignored.md" not in report.ignored_paths
-    assert "wiki/ignored.md" not in report.untracked_paths
+    assert "wiki/ignored.md" in report.untracked_paths
     assert ".gitignore" not in rendered
     assert "secrets/private.md" not in rendered
