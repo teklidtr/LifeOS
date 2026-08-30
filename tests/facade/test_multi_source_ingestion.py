@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import lifeos.facade.multi_source_ingestion as batch_module
-from lifeos.facade.errors import ToolConflictError
+from lifeos.facade.errors import ToolConflictError, ToolValidationError
 from lifeos.facade.models import ToolEffect
 from lifeos.facade.multi_source_ingestion import (
     EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR,
@@ -12,6 +12,7 @@ from lifeos.facade.multi_source_ingestion import (
     EvolveWikiBatchProposalRequest,
     evolve_wiki_batch_proposal,
 )
+from lifeos.ingestion.multi_source import MAX_MULTI_SOURCE_PAYLOAD_BYTES
 from lifeos.registry import Registry
 from lifeos.registry.file_tracking import register_scan
 from lifeos.scanner import VaultFile
@@ -110,6 +111,37 @@ def test_source_change_before_publication_aborts_whole_batch(
     monkeypatch.setattr(batch_module, "build_multi_source_wiki_proposal", mutate_after_build)
 
     with pytest.raises(ToolConflictError, match="Registered source has changed"):
+        evolve_wiki_batch_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=request,
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
+
+
+def test_oversized_payload_fails_before_draft_persistence(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    (vault_root / "wiki").mkdir()
+    (vault_root / "proposals").mkdir()
+    _write_ownership(vault_root)
+    sources = ("notes/source.md",)
+    registry = _register_sources(vault_root, tmp_path, sources)
+    request = EvolveWikiBatchProposalRequest(
+        source_paths=sources,
+        creates=(
+            BatchWikiCreateRequest(
+                target_path="wiki/oversized.md",
+                title="Oversized",
+                body="x" * MAX_MULTI_SOURCE_PAYLOAD_BYTES,
+                rationale="Exercise the publication payload boundary.",
+                source_paths=sources,
+            ),
+        ),
+    )
+
+    with pytest.raises(ToolValidationError, match="patch/review payload exceeds"):
         evolve_wiki_batch_proposal(
             vault_root=vault_root,
             registry=registry,
