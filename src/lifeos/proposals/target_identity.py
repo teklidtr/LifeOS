@@ -18,6 +18,10 @@ class ProposalTargetIdentityError(ValueError):
     """Raised when proposal target identity metadata is malformed or inconsistent."""
 
 
+class ProposalTargetStaleError(ProposalTargetIdentityError):
+    """Raised when the reviewed canonical target changed during identity binding."""
+
+
 @dataclass(frozen=True, slots=True)
 class ProposalTargetIdentity:
     operation_id: str
@@ -53,7 +57,7 @@ def with_target_identity_extension(
             continue
         note = snapshot.by_path(operation.target_path)
         if note is None:
-            raise ProposalTargetIdentityError(
+            raise ProposalTargetStaleError(
                 f"Operation {operation.id!r} reviewed target disappeared during identity binding"
             )
         if note.stable_id is None:
@@ -65,7 +69,7 @@ def with_target_identity_extension(
                 f"Operation {operation.id!r} stable id {note.stable_id!r} is ambiguous: {paths}"
             )
         if note.content_hash != reviewed_hash:
-            raise ProposalTargetIdentityError(
+            raise ProposalTargetStaleError(
                 f"Operation {operation.id!r} base hash does not match the reviewed canonical note"
             )
         targets.append(
