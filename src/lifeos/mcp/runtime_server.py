@@ -67,11 +67,13 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "never acts as a protected-scope bypass. Semantic interpretation belongs to the external "
     "agent. LifeOS constrains mutation, not exploration: canonical changes remain available only "
     "through bounded proposal and consequential authorization tools; there is no generic vault "
-    "write, delete, move, or shell surface. External research also remains agent-led: when a "
-    "material evidence gap requires an external source, use research_capture_evidence to preserve "
-    "the selected source snapshot in raw/ with hash-bound acquisition lineage before using normal "
-    "ingestion proposal tools. Never send an uncaptured external claim directly to wiki mutation, "
-    "and create no proposal when the answer is already represented or produces no durable delta. "
+    "write, delete, move, or shell surface. External research also remains agent-led: start with "
+    "research_query_context when a single read-only research context is useful, or compose the "
+    "lower-level context/search tools directly. When a material evidence gap requires an external "
+    "source, use research_capture_evidence to preserve the selected source snapshot in raw/ with "
+    "hash-bound acquisition lineage before using normal ingestion proposal tools. Never send an "
+    "uncaptured external claim directly to wiki mutation, and create no proposal when the answer "
+    "is already represented or produces no durable delta. "
     + CORE_MCP_INSTRUCTIONS
 )
 

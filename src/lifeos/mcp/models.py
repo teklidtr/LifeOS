@@ -90,6 +90,24 @@ class RegistryRefreshMCPResult(TypedDict):
     proposals_indexed: int
 
 
+class ResearchContextSourceMCPResult(TypedDict):
+    path: str
+    title: str
+    description: str
+    excerpt: str
+    score: int
+
+
+class ResearchQueryContextMCPResult(TypedDict):
+    query: str
+    context_sources: list[ResearchContextSourceMCPResult]
+    wiki_hits: list[ResearchContextSourceMCPResult]
+    evidence_gaps: list[str]
+    omissions: list[str]
+    persistence: Literal["none"]
+    decision_authority: Literal["external-agent"]
+
+
 class ResearchCaptureMCPResult(TypedDict):
     artifact_id: str
     source_path: str

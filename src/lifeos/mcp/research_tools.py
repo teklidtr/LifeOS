@@ -1,4 +1,4 @@
-"""MCP adapter for controlled, hash-bound external research evidence capture."""
+"""MCP adapters for evidence-grounded, externally reasoned research workflows."""
 
 from __future__ import annotations
 
@@ -11,18 +11,30 @@ from mcp.types import ToolAnnotations
 
 from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.facade.errors import ToolUnavailableError
+from lifeos.facade.read_only import (
+    VaultContextRequest,
+    WikiSearchRequest,
+    get_vault_context,
+    search_wiki,
+)
 from lifeos.facade.research_tools import (
     RESEARCH_CAPTURE_DESCRIPTOR,
     ResearchEvidenceCaptureRequest,
     capture_research_evidence,
 )
 from lifeos.mcp.activity_store import MCPActivityStore
-from lifeos.mcp.models import ResearchCaptureMCPResult
+from lifeos.mcp.models import ResearchCaptureMCPResult, ResearchQueryContextMCPResult
 from lifeos.mcp.server import _strict_tool
 from lifeos.runtime.activity import push_activity_actor, reset_activity_actor
 
 Invoke = Callable[[Callable[[], object]], object]
 
+RESEARCH_QUERY_MCP_DESCRIPTION = (
+    "Build a read-only research context from the existing LifeOS vault by composing the "
+    "authoritative vault-context and durable-wiki search surfaces. This persists no query, "
+    "answer, raw source, or proposal. The external agent decides whether the returned evidence "
+    "is sufficient and whether any reported gap is material enough to research externally."
+)
 RESEARCH_CAPTURE_MCP_DESCRIPTION = (
     f"{RESEARCH_CAPTURE_DESCRIPTOR.description} The external agent, not LifeOS core, obtains "
     "the source and submits only the selected evidence snapshot. captured_by is intentionally "
@@ -54,7 +66,67 @@ def build_research_tools(
     invoke: Invoke,
     authorizer: ConsequentialAuthorizer,
 ) -> list[Tool]:
-    """Build the narrow canonical research-capture surface."""
+    """Build the read-only query context and narrow canonical evidence-capture surfaces."""
+
+    def research_query_context_tool(
+        query: str,
+        focus_paths: list[str] | None = None,
+        limit: int = 8,
+    ) -> ResearchQueryContextMCPResult:
+        def op() -> ResearchQueryContextMCPResult:
+            context = get_vault_context(
+                vault_root=vault_root,
+                request=VaultContextRequest(
+                    question=query,
+                    focus_paths=tuple(focus_paths or ()),
+                    limit=limit,
+                ),
+            )
+            wiki = search_wiki(
+                vault_root=vault_root,
+                request=WikiSearchRequest(query=query, limit=limit),
+            )
+            source_paths = list(
+                dict.fromkeys(
+                    [item.path for item in context.sources]
+                    + [item.path for item in wiki.hits]
+                )
+            )
+            activity.append(
+                tool="research_query_context",
+                focus_paths=list(focus_paths or ()),
+                instruction_ids=[item.id for item in context.instructions],
+                source_paths=source_paths,
+            )
+            return {
+                "query": query,
+                "context_sources": [
+                    {
+                        "path": item.path,
+                        "title": item.title,
+                        "description": item.description,
+                        "excerpt": item.excerpt,
+                        "score": item.score,
+                    }
+                    for item in context.sources
+                ],
+                "wiki_hits": [
+                    {
+                        "path": item.path,
+                        "title": item.title,
+                        "description": item.description,
+                        "excerpt": item.excerpt,
+                        "score": item.score,
+                    }
+                    for item in wiki.hits
+                ],
+                "evidence_gaps": list(context.evidence_gaps),
+                "omissions": list(context.omissions),
+                "persistence": "none",
+                "decision_authority": "external-agent",
+            }
+
+        return cast(ResearchQueryContextMCPResult, invoke(op))
 
     def research_capture_evidence_tool(
         evidence_text: str,
@@ -115,6 +187,18 @@ def build_research_tools(
 
     return [
         _strict_tool(
+            research_query_context_tool,
+            name="research_query_context",
+            description=RESEARCH_QUERY_MCP_DESCRIPTION,
+            annotations=ToolAnnotations(
+                title="Build research query context",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        _strict_tool(
             research_capture_evidence_tool,
             name="research_capture_evidence",
             description=RESEARCH_CAPTURE_MCP_DESCRIPTION,
@@ -125,5 +209,5 @@ def build_research_tools(
                 idempotentHint=True,
                 openWorldHint=False,
             ),
-        )
+        ),
     ]
