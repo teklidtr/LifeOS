@@ -45,7 +45,27 @@ def _impl_original(name: str) -> Any:
 
 _PREVIOUS_BUILD_REPORT = _impl_original("_build_report")
 
-_MAX_PINNED_OBJECT_FILES = 128
+_DEFAULT_PINNED_OBJECT_FILES = 1024
+_MAX_PINNED_OBJECT_FILES = 4096
+_PINNED_OBJECT_FD_RESERVE = 64
+
+
+def _pinned_object_file_budget() -> int:
+    """Return a bounded FD budget that leaves room for normal process activity."""
+
+    try:
+        import resource
+    except ImportError:
+        return _DEFAULT_PINNED_OBJECT_FILES
+
+    try:
+        soft_limit, _hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (OSError, ValueError):
+        return _DEFAULT_PINNED_OBJECT_FILES
+    if soft_limit == resource.RLIM_INFINITY:
+        return _MAX_PINNED_OBJECT_FILES
+    available = max(0, int(soft_limit) - _PINNED_OBJECT_FD_RESERVE)
+    return min(_MAX_PINNED_OBJECT_FILES, available)
 
 
 def _decode_git_config_scalar(value: str, *, key: str) -> str:
@@ -362,7 +382,7 @@ def _snapshot_object_directory(
             raise _base.RecoveryGitError(
                 "Git object store contains an unsupported hard link"
             )
-        if len(pinned_fds) >= _MAX_PINNED_OBJECT_FILES:
+        if len(pinned_fds) >= _pinned_object_file_budget():
             os.close(child_fd)
             raise _base.RecoveryGitError(
                 "Git object store exceeds the safe pinned-file descriptor budget"
@@ -980,6 +1000,8 @@ for _name, _value in {
 
 setattr(_base, "_ignored_paths", _ignored_paths)
 setattr(_base, "_build_report", _build_report)
+setattr(_base, "_run_git", _impl._run_git)
+setattr(_base, "_run_git_presence", _impl._run_git_presence)
 
 
 class _RecoveryModuleProxy(types.ModuleType):
@@ -989,6 +1011,8 @@ class _RecoveryModuleProxy(types.ModuleType):
         super().__setattr__(name, value)
         if not name.startswith("__") and hasattr(_impl, name):
             setattr(_impl, name, value)
+        if name in {"_run_git", "_run_git_presence"}:
+            setattr(_base, name, value)
 
 
 _sys.modules[__name__].__class__ = _RecoveryModuleProxy
