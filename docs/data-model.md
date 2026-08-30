@@ -182,6 +182,44 @@ excerpt, ranking signals, and stale state. Hidden chain-of-thought is not stored
 The managed turn block and human-owned annotations are distinct preservation
 zones.
 
+## Research source (canonical)
+
+Externally acquired research evidence is canonical Markdown under
+`raw/research/<source-key>/<snapshot-key>.md` with `type: research-source` and
+`research_schema: 1`.
+
+```yaml
+artifact_id: research-<source-prefix>-<snapshot-prefix>
+source_identity: sha256:<digest>
+source_locator:
+source_title:
+source_author:
+source_publisher:
+snapshot_hash: sha256:<digest>
+first_captured_at:
+first_captured_by:
+acquisitions:
+  - acquisition_id: acq-<digest-prefix>
+    captured_at:
+    captured_by:
+    origin_kind: query | conversation | manual | other
+    origin_ref:
+    research_reason:
+    research_context:
+```
+
+`source_author` and `source_publisher` describe the external source;
+`captured_by` identifies the trusted LifeOS actor that acquired the snapshot;
+neither grants generated ownership or mutation authority. The managed evidence
+body is hash-bound by `snapshot_hash`. Re-capturing identical evidence reuses the
+same artifact, while distinct acquisition reasons add idempotent lineage and
+changed evidence bytes create a distinct historical snapshot. Normal ingestion
+provenance then records the canonical raw research path and full file hash, which
+can be traced back to the exact snapshot and its acquisition lineage.
+
+See [Research Evidence Data Model](research-evidence-data-model.md) for the full
+identity, immutability, and lineage contract.
+
 ## Personal experiment (canonical)
 
 ```yaml
