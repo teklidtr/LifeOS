@@ -15,6 +15,7 @@ from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.facade.errors import ToolExecutionError, ToolValidationError
 from lifeos.facade.multi_source_ingestion import (
     EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR,
+    BatchSourceSnapshotRequest,
     BatchWikiCreateRequest,
     BatchWikiSectionRequest,
     BatchWikiUpdateRequest,
@@ -28,6 +29,12 @@ from lifeos.registry import Registry
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime_scope import build_runtime_exclusion_matcher
+
+
+class BatchSourceSnapshotMCPInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    content_hash: str
 
 
 class BatchWikiSectionMCPInput(BaseModel):
@@ -60,11 +67,13 @@ class BatchWikiUpdateMCPInput(BaseModel):
 EVOLVE_WIKI_BATCH_MCP_DESCRIPTION = (
     f"{EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR.description} Jointly read the selected sources, "
     "inspect vault context and existing wiki knowledge, then reconcile desired changes by target. "
-    "Each target appears once and names only its relevant source subset. One human-owned target "
-    "may include several exact section replacements in one file-level patch. Limits are 64 "
-    "distinct sources, 32 distinct targets, and 2 MiB canonical patch plus immutable review "
-    "payload. Oversized batches fail without automatic fan-out. This creates one draft only; "
-    "when joint reasoning finds zero durable changes, do not call this tool."
+    "Pass the exact path/content_hash snapshots returned by vault_read_many so a registry refresh "
+    "cannot silently advance the evidence version used for synthesis. Each target appears once and "
+    "names only its relevant source subset. One human-owned target may include several exact "
+    "section replacements in one file-level patch. Limits are 64 distinct sources, 32 distinct "
+    "targets, and 2 MiB canonical patch plus immutable review payload. Oversized batches fail "
+    "without automatic fan-out. This creates one draft only; when joint reasoning finds zero "
+    "durable changes, do not call this tool."
 )
 
 
@@ -159,13 +168,19 @@ def build_multi_source_ingestion_tools(
         )
 
     def ingestion_evolve_wiki_batch_proposal_tool(
-        source_paths: list[str],
+        source_snapshots: list[BatchSourceSnapshotMCPInput],
         creates: list[BatchWikiCreateMCPInput] | None = None,
         updates: list[BatchWikiUpdateMCPInput] | None = None,
     ) -> EvolveWikiProposalMCPResult:
         def op() -> EvolveWikiProposalMCPResult:
             request = EvolveWikiBatchProposalRequest(
-                source_paths=tuple(source_paths),
+                source_snapshots=tuple(
+                    BatchSourceSnapshotRequest(
+                        path=item.path,
+                        content_hash=item.content_hash,
+                    )
+                    for item in source_snapshots
+                ),
                 creates=tuple(
                     BatchWikiCreateRequest(
                         target_path=item.target_path,
