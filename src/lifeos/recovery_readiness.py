@@ -15,9 +15,16 @@ import tempfile
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from lifeos import _recovery_readiness_base as _base
 from lifeos import _recovery_readiness_impl as _impl
+from lifeos._recovery_readiness_impl import (
+    RecoveryReport as RecoveryReport,
+    collect_recovery_readiness as collect_recovery_readiness,
+    format_recovery_text as format_recovery_text,
+    recovery_report_to_dict as recovery_report_to_dict,
+)
 
 # Preserve the existing public surface before overriding the final hardening seams.
 for _name in dir(_impl):
@@ -60,7 +67,7 @@ def _decode_git_config_scalar(value: str, *, key: str) -> str:
             }
             replacement = escapes.get(char)
             if replacement is None:
-                raise _impl._base.RecoveryGitError(
+                raise _base.RecoveryGitError(
                     f"Git {key} configuration uses an unsupported escape"
                 )
             output.append(replacement)
@@ -85,14 +92,14 @@ def _decode_git_config_scalar(value: str, *, key: str) -> str:
         if char in "#;":
             break
         if char == "\\":
-            raise _impl._base.RecoveryGitError(
+            raise _base.RecoveryGitError(
                 f"Git {key} configuration uses an unsupported escape"
             )
         output.append(char)
         index += 1
 
     if escaped or quoted:
-        raise _impl._base.RecoveryGitError(f"Git {key} configuration is malformed")
+        raise _base.RecoveryGitError(f"Git {key} configuration is malformed")
     return "".join(output).strip()
 
 
@@ -102,7 +109,7 @@ def _parse_git_bool(value: str, *, key: str) -> bool:
         return True
     if folded in {"false", "no", "off", "0"}:
         return False
-    raise _impl._base.RecoveryGitError(f"Git {key} configuration is malformed")
+    raise _base.RecoveryGitError(f"Git {key} configuration is malformed")
 
 
 def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
@@ -128,7 +135,7 @@ def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
             extensions = extensions or (section == "extensions" and subsection is None)
             continue
         if line.startswith("["):
-            raise _impl._base.RecoveryGitError(
+            raise _base.RecoveryGitError(
                 "Git config section header is malformed or unsupported"
             )
         if section != "core" or subsection is not None:
@@ -143,7 +150,7 @@ def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
         elif key == "ignorecase":
             ignorecase = _parse_git_bool(value, key="ignorecase")
         elif key == "excludesfile":
-            raise _impl._base.RecoveryGitError(
+            raise _base.RecoveryGitError(
                 "Git core.excludesFile configuration is not supported by recovery diagnostics"
             )
         elif key == "repositoryformatversion":
@@ -151,10 +158,10 @@ def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
             try:
                 repository_format = int(scalar or "0")
             except ValueError as exc:
-                raise _impl._base.RecoveryGitError("Git repository format is malformed") from exc
+                raise _base.RecoveryGitError("Git repository format is malformed") from exc
 
     if repository_format != 0 or extensions:
-        raise _impl._base.RecoveryGitError(
+        raise _base.RecoveryGitError(
             "Extended Git repository formats cannot be inspected safely by recovery diagnostics"
         )
     return raw, contains_includes, filemode, ignorecase
@@ -206,7 +213,7 @@ def _pinned_regular_fd_path(fd: int, observed: os.stat_result) -> str:
             == (observed.st_dev, observed.st_ino)
         ):
             return candidate
-    raise _impl._base.RecoveryGitError(
+    raise _base.RecoveryGitError(
         "Platform cannot expose pinned Git object files safely"
     )
 
@@ -223,7 +230,7 @@ def _snapshot_object_directory(
     try:
         destination.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise _impl._base.RecoveryGitError("Could not create Git object-store sandbox") from exc
+        raise _base.RecoveryGitError("Could not create Git object-store sandbox") from exc
 
     for name, expected in _impl._metadata_directory_entries(source_fd):
         child_fd, observed = _impl._open_metadata_child(source_fd, name, expected)
@@ -231,7 +238,7 @@ def _snapshot_object_directory(
         target = destination / name
         if child_relative in {("info", "alternates"), ("info", "http-alternates")}:
             os.close(child_fd)
-            raise _impl._base.RecoveryGitError(
+            raise _base.RecoveryGitError(
                 "Alternate Git object stores are not supported by recovery diagnostics"
             )
 
@@ -249,7 +256,7 @@ def _snapshot_object_directory(
 
         if not stat.S_ISREG(observed.st_mode):
             os.close(child_fd)
-            raise _impl._base.RecoveryGitError(
+            raise _base.RecoveryGitError(
                 "Git object store contains an unsupported entry"
             )
 
@@ -257,7 +264,7 @@ def _snapshot_object_directory(
             target.symlink_to(_pinned_regular_fd_path(child_fd, observed))
         except OSError as exc:
             os.close(child_fd)
-            raise _impl._base.RecoveryGitError(
+            raise _base.RecoveryGitError(
                 "Could not create pinned Git object-store view"
             ) from exc
         pinned_fds.append(child_fd)
@@ -267,9 +274,9 @@ def _open_object_store_root(git_dir: Path) -> tuple[Path, int, os.stat_result]:
     object_dir = git_dir / "objects"
     try:
         object_fd = _impl._open_metadata_directory(object_dir)
-    except _impl._base.RecoveryGitError as exc:
+    except _base.RecoveryGitError as exc:
         if "unsafe directory" in str(exc) or "open Git metadata directory" in str(exc):
-            raise _impl._base.RecoveryGitError(
+            raise _base.RecoveryGitError(
                 "Redirected Git object stores are not supported by recovery diagnostics"
             ) from exc
         raise
@@ -289,7 +296,7 @@ def _metadata_fingerprint(
     # The object payload/pathname view used by Git is independently pinned in the
     # sandbox. Preserve the reviewed metadata fingerprint for config/index/refs
     # drift and the top-level object-store identity.
-    return _ORIGINAL_METADATA_FINGERPRINT(git_dir, object_state=object_state)
+    return cast(str, _ORIGINAL_METADATA_FINGERPRINT(git_dir, object_state=object_state))
 
 
 def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
@@ -312,12 +319,12 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
         except FileNotFoundError:
             index_mtime_ns = None
         except OSError as exc:
-            raise _impl._base.RecoveryGitError("Could not inspect Git index metadata") from exc
+            raise _base.RecoveryGitError("Could not inspect Git index metadata") from exc
         else:
             if stat.S_ISLNK(index_state.st_mode) or not stat.S_ISREG(index_state.st_mode):
-                raise _impl._base.RecoveryGitError("Git index metadata uses an unsafe entry")
+                raise _base.RecoveryGitError("Git index metadata uses an unsafe entry")
             if index_state.st_nlink != 1:
-                raise _impl._base.RecoveryGitError(
+                raise _base.RecoveryGitError(
                     "Git index metadata uses an unsupported hard link"
                 )
             index_mtime_ns = index_state.st_mtime_ns
@@ -346,7 +353,7 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
                 encoding="utf-8",
             )
         except OSError as exc:
-            raise _impl._base.RecoveryGitError("Could not create Git metadata sandbox") from exc
+            raise _base.RecoveryGitError("Could not create Git metadata sandbox") from exc
 
         return _GitMetadataSandbox(
             temporary,
@@ -378,7 +385,7 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
 
 
 def _sandbox_environment() -> dict[str, str]:
-    env = _impl._base._git_environment()
+    env = _base._git_environment()
     sandbox = _impl._ACTIVE_SANDBOX.get()
     if sandbox is not None:
         env.update(
