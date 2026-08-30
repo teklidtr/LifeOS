@@ -199,13 +199,44 @@ target paths, typed patches, evidence references, target hashes, and stale-targe
 checks. The existing submit, approve, apply, and recovery lifecycle remains the
 only route to other canonical notes.
 
+## External research composes retrieval; it does not replace it
+
+LIFEOS-1641 reuses this subsystem when an agent researches beyond the existing
+vault. It does not add another semantic index, conversation engine, answer model,
+or embedded web-search provider. `research_query_context` simply composes the
+existing Context Pack and lexical durable-wiki search in MCP external-disclosure
+mode. The query is read-only and is not automatically saved as a knowledge
+conversation.
+
+If the returned evidence is sufficient, the external agent may answer with zero
+canonical writes. If a material evidence gap remains, the external agent performs
+outside research in its own environment and submits selected evidence through the
+typed `research_capture_evidence` boundary. LifeOS stores that exact snapshot as
+hash-bound canonical Markdown under `raw/research/` with acquisition lineage.
+Only after capture does the source participate in the ordinary registry,
+retrieval, ingestion, provenance, and proposal machinery.
+
+A captured research source is therefore an ordinary canonical evidence source for
+these downstream systems, not a privileged shortcut. Retrieval may index it like
+other allowed canonical Markdown after synchronization. Conversation evidence may
+cite it only through the existing path/section/hash validation. Durable synthesis
+still becomes an ordinary proposal, and no durable delta means no proposal. An
+uncaptured external claim may not jump directly into canonical wiki evolution.
+
+Where available, acquisition lineage retains the originating query or conversation
+reference and the research reason. That lineage is distinct from the conversation
+artifact itself and from generated ownership. See
+[Research Evidence Architecture](research-evidence-architecture.md).
+
 ## Compatibility with ingestion and Graphify
 
 Ingestion provenance and original-source immutability remain unchanged. Retrieved
-chunks retain source metadata but do not become source records. Graphify may add a
-bounded relationship signal; original notes must still be opened and cited. Index
-rebuilds read canonical post-ingestion notes and do not invoke ingestion or mutate
-Graphify state.
+chunks retain source metadata but do not become source records. A captured
+`raw/research/` snapshot is already canonical source material, so normal ingestion
+records its path and current full-file hash without a research-specific proposal
+engine. Graphify may add a bounded relationship signal; original notes must still
+be opened and cited. Index rebuilds read canonical post-ingestion notes and do not
+invoke ingestion or mutate Graphify state.
 
 ## Performance and recovery
 
@@ -218,10 +249,12 @@ can fall back to a full rebuild after incompatible schema or corruption.
 ## Privacy and removal
 
 Built-in protected prefixes and optional `system/retrieval-policy.yml` exclusions
-are enforced before indexing and retrieval. Policy parsing fails closed. Removing
-the plugin or deleting derived state leaves ordinary Markdown conversations and
-notes readable. No provider credentials or provider-specific model fields are
-stored in canonical artifacts.
+are enforced before indexing and retrieval. Policy parsing fails closed. MCP
+research-query composition uses the same external-disclosure retrieval mode as
+other user-facing MCP reads, including the configured node-local runtime
+exclusions. Removing the plugin or deleting derived state leaves ordinary
+Markdown conversations, research snapshots, and notes readable. No provider
+credentials or provider-specific model fields are stored in canonical artifacts.
 
 ## Sequenced implementation
 
@@ -230,4 +263,5 @@ contracts, structural index, synchronization, hybrid retrieval, conversation
 artifacts, grounding, proposals, bridge, Obsidian workspace, recovery/privacy, and
 release validation. `LIFEOS-1642` later reuses that shipped subsystem for the
 pre-existing Context Pack/MCP context surface rather than creating a parallel RAG
-layer.
+layer. `LIFEOS-1641` composes those same retrieval/context capabilities with the
+controlled raw-research capture boundary for externally acquired evidence.
