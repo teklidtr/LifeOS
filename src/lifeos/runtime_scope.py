@@ -43,10 +43,6 @@ def _candidate_parts(path: str) -> tuple[str, ...] | None:
     return tuple(pure.parts)
 
 
-def _descendants_are_unambiguous(parts: tuple[str, ...], prefix_length: int) -> bool:
-    return all(part == part.strip() for part in parts[prefix_length:])
-
-
 def _open_directory_chain(root_fd: int, parts: tuple[str, ...]) -> int:
     current_fd = os.dup(root_fd)
     try:
@@ -73,7 +69,7 @@ def runtime_path_selects_configured_directory(
     configured ``Runtime`` directory even if a case-only rename happens between runtime-prefix
     capture and scanning. On a case-sensitive filesystem, differently cased directories remain
     distinct because they select different inodes. Legal whitespace in configured runtime
-    components is preserved literally; whitespace in later path components is never trimmed into
+    components and descendant names is preserved literally; no pathname component is trimmed into
     an alias.
     """
     resolved = _runtime_relative_parts(vault_root, runtime_dir)
@@ -82,8 +78,6 @@ def runtime_path_selects_configured_directory(
     root, runtime_parts = resolved
     candidate = _candidate_parts(path)
     if candidate is None or len(candidate) < len(runtime_parts):
-        return False
-    if not _descendants_are_unambiguous(candidate, len(runtime_parts)):
         return False
     candidate_runtime_parts = candidate[: len(runtime_parts)]
 
@@ -149,10 +143,7 @@ def build_runtime_exclusion_matcher(
         if candidate is None:
             return False
         if snapshot_parts is not None and len(candidate) >= len(snapshot_parts):
-            if candidate[: len(snapshot_parts)] == snapshot_parts and _descendants_are_unambiguous(
-                candidate,
-                len(snapshot_parts),
-            ):
+            if candidate[: len(snapshot_parts)] == snapshot_parts:
                 return True
         if matcher_runtime_dir is None:
             return False

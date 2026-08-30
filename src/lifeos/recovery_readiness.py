@@ -59,7 +59,9 @@ _ACTIVE_SANDBOX: contextvars.ContextVar[_GitMetadataSandbox | None] = contextvar
     "lifeos_recovery_git_metadata_sandbox", default=None
 )
 
-_SECTION_RE = re.compile(r'^\s*\[\s*([^\]\s"]+)(?:\s+"([^"]*)")?\s*\]\s*$')
+_SECTION_RE = re.compile(
+    r'^\s*\[\s*([^\]\s"]+)(?:\s+"([^"]*)")?\s*\]\s*(?:[#;].*)?$'
+)
 _KEY_VALUE_RE = re.compile(r"^\s*([A-Za-z0-9.-]+)\s*(?:=\s*)?(.*?)\s*$")
 _DEAD_HELPERS = (
     "_committed_coverage",
@@ -164,6 +166,10 @@ def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
             filemode = _parse_git_bool(value, key="filemode")
         elif key == "ignorecase":
             ignorecase = _parse_git_bool(value, key="ignorecase")
+        elif key == "excludesfile":
+            raise _base.RecoveryGitError(
+                "Git core.excludesFile configuration is not supported by recovery diagnostics"
+            )
         elif key == "repositoryformatversion":
             try:
                 repository_format = int(value.strip() or "0")
@@ -310,9 +316,7 @@ def _metadata_fingerprint(git_dir: Path) -> str:
         _fingerprint_regular_metadata(digest, name, git_dir / name)
     _fingerprint_metadata_tree(digest, git_dir, git_dir / "refs")
     object_dir, object_state = _validate_object_store(git_dir)
-    digest.update(
-        f"objects\0{object_state.st_dev}:{object_state.st_ino}\0".encode()
-    )
+    digest.update(f"objects\0{object_state.st_dev}:{object_state.st_ino}\0".encode())
     if object_dir != git_dir / "objects":
         raise _base.RecoveryGitError("Git object-store topology changed unexpectedly")
     return digest.hexdigest()
@@ -516,6 +520,46 @@ def _authorized_git_pathspecs(context: Any, scope: Any, config: Any) -> tuple[st
     return tuple(pathspecs)
 
 
+def _tree_entries(
+    git: str,
+    root: Path,
+    head_oid: str | None,
+    pathspec: Any,
+    prefix: tuple[str, ...],
+    excluded: Any,
+    *,
+    case_insensitive_prefix: bool = False,
+) -> dict[str, tuple[int, str, str]]:
+    """List committed canonical entries with exclusions applied by Git before output."""
+    if head_oid is None:
+        return {}
+    result = _run_git(
+        git,
+        cwd=root,
+        arguments=_base._pathspec_command(
+            "ls-tree",
+            ("-r", "-z", head_oid),
+            pathspec,
+        ),
+    )
+    if result.stderr.strip():
+        raise _base.RecoveryGitError("Git tree query reported incomplete results")
+    output: dict[str, tuple[int, str, str]] = {}
+    for mode, obj_type, oid, path in _base._parse_tree_records(result.stdout):
+        relative = _base._canonical_path(
+            path,
+            prefix,
+            excluded,
+            case_insensitive_prefix=case_insensitive_prefix,
+        )
+        if relative is None:
+            continue
+        if relative in output:
+            raise _base.RecoveryGitError("Git tree contains ambiguous canonical path aliases")
+        output[relative] = (mode, obj_type, oid)
+    return output
+
+
 def _snapshot_entry_for_index_path(vault: Path, path: str, snapshot: Any) -> Any:
     by_path = snapshot.by_path()
     exact = by_path.get(path)
@@ -693,6 +737,7 @@ setattr(_base, "_run_git", _run_git)
 setattr(_base, "_run_git_presence", _run_git_presence)
 setattr(_base._ScopeFilter, "__call__", _scope_filter_call)
 setattr(_base, "_authorized_git_pathspecs", _authorized_git_pathspecs)
+setattr(_base, "_tree_entries", _tree_entries)
 setattr(_base, "_snapshot_entry_for_index_path", _snapshot_entry_for_index_path)
 setattr(_base, "_compare_index_entry", _compare_index_entry)
 setattr(_base, "_latest_commit", _latest_commit)
