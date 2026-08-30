@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -68,6 +69,78 @@ def test_config_snapshot_recognizes_commented_include_header(tmp_path: Path) -> 
     assert includes is True
     assert filemode is True
     assert ignorecase is False
+
+
+def test_config_snapshot_recognizes_escaped_includeif_subsection(tmp_path: Path) -> None:
+    config = tmp_path / "config"
+    config.write_text(
+        "[core]\n"
+        "\tfilemode = true\n"
+        '[includeIf "gitdir:foo\\\"bar"]\n'
+        "\tpath = ../unsafe.conf\n",
+        encoding="utf-8",
+    )
+
+    _raw, includes, filemode, ignorecase = recovery_readiness._config_snapshot(config)
+
+    assert includes is True
+    assert filemode is True
+    assert ignorecase is False
+
+
+def test_config_snapshot_fails_closed_on_unrecognized_section_header(tmp_path: Path) -> None:
+    config = tmp_path / "config"
+    config.write_text(
+        "[core]\n"
+        "\tfilemode = true\n"
+        '[includeIf "unterminated]\n'
+        "\tpath = ../unsafe.conf\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(recovery_readiness.RecoveryGitError, match="section header"):
+        recovery_readiness._config_snapshot(config)
+
+
+def test_metadata_tree_rejects_symlink_swap_before_descending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refs = tmp_path / "refs"
+    heads = refs / "heads"
+    heads.mkdir(parents=True)
+    (heads / "main").write_text("0123456789abcdef\n", encoding="utf-8")
+    protected = tmp_path / "protected"
+    protected.mkdir()
+    (protected / "secret.md").write_text("must-not-copy\n", encoding="utf-8")
+    destination = tmp_path / "snapshot"
+
+    original_open = os.open
+    swapped = False
+
+    def racing_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped
+        if path == "heads" and dir_fd is not None and not swapped:
+            swapped = True
+            heads.rename(refs / "heads-original")
+            (refs / "heads").symlink_to(protected, target_is_directory=True)
+        if dir_fd is None:
+            return original_open(path, flags, mode)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(recovery_readiness.os, "open", racing_open)
+
+    with pytest.raises(recovery_readiness.RecoveryGitError, match="metadata entry safely"):
+        recovery_readiness._copy_metadata_tree(refs, destination)
+
+    assert swapped is True
+    assert not (destination / "heads" / "secret.md").exists()
 
 
 def test_repository_core_excludes_file_fails_closed(tmp_path: Path) -> None:
