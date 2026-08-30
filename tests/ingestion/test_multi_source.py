@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -22,6 +23,10 @@ from lifeos.ingestion.provenance import (
     provenance_to_frontmatter_value,
 )
 from lifeos.markdown.parser import parse_markdown_note
+from lifeos.proposals.application import ApplicationError, ApplicationErrorCode, apply_proposal
+from lifeos.proposals.lifecycle import serialize_proposal_markdown
+from lifeos.proposals.loader import load_proposal_directory
+from lifeos.proposals.schema import validate_metadata
 
 
 GENERATOR = ProvenanceGenerator(
@@ -43,6 +48,36 @@ def _source(index: int) -> SourceSnapshot:
 
 def _content(title: str) -> WikiProposalContent:
     return WikiProposalContent(title=title, body="Knowledge body.\n", generator=GENERATOR)
+
+
+def _approved_metadata():
+    return validate_metadata(
+        {
+            "id": PROPOSAL_ID,
+            "schema_version": 1,
+            "patch_schema_version": 2,
+            "lifecycle_schema_version": 1,
+            "title": "Multi-source batch",
+            "description": "Approved test batch",
+            "status": "approved",
+            "risk": "medium",
+            "created_at": CREATED_AT,
+            "created_by": "agent",
+            "submitted_at": "2026-08-30T18:01:00Z",
+            "submitted_by": "user",
+            "review_digest": f"sha256:{hashlib.sha256(b'review').hexdigest()}",
+            "approved_at": "2026-08-30T18:02:00Z",
+            "approved_by": "user",
+            "rejected_at": None,
+            "rejected_by": None,
+            "rejection_reason": None,
+            "applied_at": None,
+            "applied_by": None,
+            "related_goals": [],
+            "related_sources": ["notes/source-1.md", "notes/source-2.md"],
+            "extensions": {},
+        }
+    )
 
 
 def test_three_source_sections_become_one_human_patch() -> None:
@@ -208,3 +243,69 @@ def test_payload_budget_fails_before_persistence(tmp_path: Path) -> None:
             vault_root=tmp_path,
             patches_json=documents.patches_json,
         )
+
+
+def test_stale_target_aborts_all_batch_operations_before_any_publication(tmp_path: Path) -> None:
+    sources = (_source(1), _source(2))
+    first_original = "# First\n\n## Evidence\nold first\n"
+    second_original = "# Second\n\n## Evidence\nold second\n"
+    mutations = (
+        PreparedBatchUpdateMutation(
+            target_path="wiki/first.md",
+            target_content=first_original,
+            target_content_hash=f"sha256:{hashlib.sha256(first_original.encode()).hexdigest()}",
+            sections=(PreparedBatchSection("Evidence", "new first"),),
+            rationale="Update the first target.",
+            sources=(sources[0],),
+        ),
+        PreparedBatchUpdateMutation(
+            target_path="wiki/second.md",
+            target_content=second_original,
+            target_content_hash=f"sha256:{hashlib.sha256(second_original.encode()).hexdigest()}",
+            sections=(PreparedBatchSection("Evidence", "new second"),),
+            rationale="Update the second target.",
+            sources=(sources[1],),
+        ),
+    )
+    documents = build_multi_source_wiki_proposal(
+        sources=sources,
+        mutations=mutations,
+        generator=GENERATOR,
+        proposal_id=PROPOSAL_ID,
+        created_at=CREATED_AT,
+    )
+
+    vault_root = tmp_path / "vault"
+    wiki = vault_root / "wiki"
+    proposal_dir = vault_root / "proposals" / PROPOSAL_ID
+    system = vault_root / "system"
+    wiki.mkdir(parents=True)
+    proposal_dir.mkdir(parents=True)
+    system.mkdir(parents=True)
+    (wiki / "first.md").write_text(first_original, encoding="utf-8")
+    (wiki / "second.md").write_text(second_original, encoding="utf-8")
+    (system / "generated-ownership.json").write_text(
+        json.dumps({"schema_version": 1, "owned_files": {}}), encoding="utf-8"
+    )
+    (proposal_dir / "proposal.md").write_bytes(
+        serialize_proposal_markdown(_approved_metadata(), "Approved batch test.")
+    )
+    (proposal_dir / "patches.json").write_bytes(documents.patches_json)
+
+    # Simulate an external edit after the draft was reviewed but before application.
+    second_changed = "# Second\n\n## Evidence\nchanged outside proposal\n"
+    (wiki / "second.md").write_text(second_changed, encoding="utf-8")
+
+    loaded = load_proposal_directory(proposal_dir, proposals_root=vault_root / "proposals")
+    assert loaded.proposal is not None
+    with pytest.raises(ApplicationError) as error:
+        apply_proposal(
+            loaded.proposal,
+            vault_root=vault_root,
+            applied_by="user",
+            applied_at="2026-08-30T18:03:00Z",
+        )
+
+    assert error.value.code == ApplicationErrorCode.PREFLIGHT_FAILED
+    assert (wiki / "first.md").read_text(encoding="utf-8") == first_original
+    assert (wiki / "second.md").read_text(encoding="utf-8") == second_changed
