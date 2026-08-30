@@ -16,14 +16,13 @@ from lifeos.ingestion._proposals_core import (
     CompoundingWikiProposalDocuments,
     InvalidWikiSectionError,
     InvalidWikiTargetError,
-    WikiProposalContent,
     WikiSectionUnchangedError,
     _replace_generated_wiki_tags,
     _serialize_wiki_frontmatter,
     replace_wiki_section,
     validate_wiki_target_path,
 )
-from lifeos.ingestion.drafts import SourceSnapshot
+from lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent
 from lifeos.ingestion.provenance import (
     LifeOSProvenance,
     ProvenanceGenerator,
