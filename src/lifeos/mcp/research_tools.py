@@ -19,15 +19,24 @@ from lifeos.facade.read_only import (
 )
 from lifeos.facade.research_tools import (
     RESEARCH_CAPTURE_DESCRIPTOR,
+    RESEARCH_CREATE_WIKI_PROPOSAL_DESCRIPTOR,
     ResearchEvidenceCaptureRequest,
+    ResearchWikiProposalRequest,
     capture_research_evidence,
+    create_research_wiki_proposal,
 )
 from lifeos.mcp.activity_store import MCPActivityStore
-from lifeos.mcp.models import ResearchCaptureMCPResult, ResearchQueryContextMCPResult
+from lifeos.mcp.models import (
+    CreateWikiProposalMCPResult,
+    ResearchCaptureMCPResult,
+    ResearchQueryContextMCPResult,
+)
 from lifeos.mcp.server import _strict_tool
+from lifeos.registry import Registry
 from lifeos.runtime.activity import push_activity_actor, reset_activity_actor
 
 Invoke = Callable[[Callable[[], object]], object]
+RefreshForIngestion = Callable[[str], None]
 
 RESEARCH_QUERY_MCP_DESCRIPTION = (
     "Build a read-only research context from the existing LifeOS vault by composing the "
@@ -42,6 +51,13 @@ RESEARCH_CAPTURE_MCP_DESCRIPTION = (
     "actor. Identical source snapshots are reused, acquisition reasons are linked idempotently, "
     "and changed snapshots remain distinct. The returned raw/ source must pass normal registry "
     "preflight and ingestion/proposal provenance before any durable wiki evolution."
+)
+RESEARCH_CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION = (
+    f"{RESEARCH_CREATE_WIKI_PROPOSAL_DESCRIPTOR.description} Use only when research produced a "
+    "reusable durable delta not already represented in the wiki. Supply the exact source_path "
+    "and acquisition_id returned by research_capture_evidence. LifeOS revalidates the immutable "
+    "research snapshot and acquisition after registry preflight, binds the acquisition ID beside "
+    "the raw source path/hash in proposal provenance, and creates only a normal draft proposal."
 )
 
 
@@ -63,11 +79,13 @@ def build_research_tools(
     *,
     vault_root: Path,
     runtime_dir: Path,
+    registry: Registry,
     activity: MCPActivityStore,
     invoke: Invoke,
     authorizer: ConsequentialAuthorizer,
+    refresh_for_ingestion: RefreshForIngestion,
 ) -> list[Tool]:
-    """Build the read-only query context and narrow canonical evidence-capture surfaces."""
+    """Build read-only query, narrow evidence capture, and acquisition-bound synthesis tools."""
 
     def research_query_context_tool(
         query: str,
@@ -188,6 +206,46 @@ def build_research_tools(
 
         return cast(ResearchCaptureMCPResult, invoke(op))
 
+    def research_create_wiki_proposal_tool(
+        source_path: str,
+        acquisition_id: str,
+        target_path: str,
+        title: str,
+        body: str,
+        tags: list[str] | None = None,
+        tag_rationale: str | None = None,
+    ) -> CreateWikiProposalMCPResult:
+        def op() -> CreateWikiProposalMCPResult:
+            refresh_for_ingestion(source_path)
+            result = create_research_wiki_proposal(
+                vault_root=vault_root,
+                registry=registry,
+                request=ResearchWikiProposalRequest(
+                    source_path=source_path,
+                    acquisition_id=acquisition_id,
+                    target_path=target_path,
+                    title=title,
+                    body=body,
+                    tags=tuple(tags or ()),
+                    tag_rationale=tag_rationale,
+                ),
+            )
+            activity.append(
+                tool="research_create_wiki_proposal",
+                source_paths=[source_path],
+                proposal_id=result.proposal_id,
+                target_paths=[result.target_path],
+                operation_count=1,
+            )
+            return {
+                "proposal_id": result.proposal_id,
+                "proposal_path": result.proposal_path,
+                "target_path": result.target_path,
+                "status": "draft",
+            }
+
+        return cast(CreateWikiProposalMCPResult, invoke(op))
+
     return [
         _strict_tool(
             research_query_context_tool,
@@ -210,6 +268,18 @@ def build_research_tools(
                 readOnlyHint=False,
                 destructiveHint=False,
                 idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        _strict_tool(
+            research_create_wiki_proposal_tool,
+            name="research_create_wiki_proposal",
+            description=RESEARCH_CREATE_WIKI_PROPOSAL_MCP_DESCRIPTION,
+            annotations=ToolAnnotations(
+                title="Create research-backed wiki proposal",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
                 openWorldHint=False,
             ),
         ),
