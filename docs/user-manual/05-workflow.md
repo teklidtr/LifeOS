@@ -151,6 +151,39 @@ and near-term work concrete.
 7. Review the resulting draft proposal. Ingestion does not submit, approve, or
    apply it.
 
+### Process a folder or several related sources together
+
+A folder request is an instruction to explore related evidence together, not to create one
+proposal per file.
+
+1. The agent uses `vault_list` and `vault_search` to discover eligible Markdown under the
+   requested area, then reads the selected source files with `vault_read_many` or
+   `vault_read_markdown`.
+2. It calls `vault_context` with the relevant source paths when scoped instructions, goals, study
+   purpose, journal state, or other nearby canonical context may matter, and searches/reads
+   existing durable Wiki knowledge before deciding what should change.
+3. The external agent reasons over the selected sources jointly and groups the desired durable
+   changes by `target_path`. Several source files may support one target, and several exact
+   section changes in one human-owned Wiki file are reconciled before patch construction.
+4. If there is a reusable durable delta, the agent calls
+   `ingestion_evolve_wiki_batch_proposal` **once** for the logical batch. Each target mutation
+   names only the selected source subset that actually supports that target. If there is no
+   durable delta, it creates no proposal.
+5. One batch may contain at most **64 distinct source paths**, at most **32 distinct target
+   operations**, and at most **2 MiB** of serialized canonical patch plus immutable review
+   payload. Exceeding any limit refuses the batch. LifeOS does not silently split an oversized
+   folder into several proposals; narrow the source selection or create a later explicit batch.
+6. Every selected source is independently checked for safe vault containment, external retrieval
+   policy, runtime exclusion, registration, current hash, and readability. The complete source
+   set is checked again immediately before draft persistence, so one missing or changed source
+   aborts the whole proposal before publication.
+7. The resulting draft still uses the ordinary proposal lifecycle and atomic application engine.
+   If one target becomes stale after review, application stops before any of the other batch
+   targets are partially published.
+
+Folder location remains context, not authority. The same retrieval, ownership, provenance,
+stable-identity, stale-write, authorization, and review rules apply to each source and target.
+
 `vault_context` is an initial context map, not a one-shot answer, crawl, or ingest
 command. Its MCP request remains provider-neutral: the agent asks with the
 question, focus paths, and limit rather than naming an embedding provider or
