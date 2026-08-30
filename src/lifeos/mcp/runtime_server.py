@@ -19,6 +19,7 @@ from lifeos.facade.read_only import (
     reset_vault_context_providers,
     search_wiki,
 )
+from lifeos.facade.registry_tools import refresh_registry
 from lifeos.mcp.activity_store import MCPActivityStore
 from lifeos.mcp.coherence_tools import build_coherence_tools
 from lifeos.mcp.exploration_tools import (
@@ -27,6 +28,7 @@ from lifeos.mcp.exploration_tools import (
     build_policy_read_tools,
 )
 from lifeos.mcp.models import WikiSearchMCPResult
+from lifeos.mcp.research_tools import build_research_tools
 from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS as CORE_MCP_INSTRUCTIONS,
     WIKI_SEARCH_MCP_DESCRIPTION,
@@ -34,12 +36,14 @@ from lifeos.mcp.server import (
     create_mcp_server as create_core_mcp_server,
 )
 from lifeos.registry import Registry
+from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.contracts import (
     push_node_local_excluded_prefixes,
     push_node_local_exclusion_predicates,
     reset_node_local_excluded_prefixes,
     reset_node_local_exclusion_predicates,
 )
+from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime.activity import (
     push_activity_runtime_dir_fd,
     reset_activity_runtime_dir_fd,
@@ -66,7 +70,15 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "never acts as a protected-scope bypass. Semantic interpretation belongs to the external "
     "agent. LifeOS constrains mutation, not exploration: canonical changes remain available only "
     "through bounded proposal and consequential authorization tools; there is no generic vault "
-    "write, delete, move, or shell surface. "
+    "write, delete, move, or shell surface. External research also remains agent-led: start with "
+    "research_query_context when a single read-only research context is useful, or compose the "
+    "lower-level context/search tools directly. When a material evidence gap requires an external "
+    "source, use research_capture_evidence to preserve the selected source snapshot in raw/ with "
+    "hash-bound acquisition lineage. If that research creates a reusable durable delta, use "
+    "research_create_wiki_proposal with the exact returned source_path and acquisition_id; "
+    "generic ingestion cannot silently choose among research acquisitions. Never send an "
+    "uncaptured external claim directly to wiki mutation, and create no proposal when the answer "
+    "is already represented or produces no durable delta. "
     + CORE_MCP_INSTRUCTIONS
 )
 
@@ -143,6 +155,48 @@ def create_mcp_server(
     finally:
         reset_activity_runtime_dir_fd(activity_runtime_token)
 
+    def refresh_research_for_ingestion(source_path: str) -> None:
+        try:
+            policy = load_retrieval_policy(vault_root)
+        except RetrievalError as error:
+            raise ToolExecutionError("Retrieval policy is invalid") from error
+        scope = RetrievalScope()
+
+        def allowed(path: str) -> bool:
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
+            try:
+                return scope_decision(
+                    path,
+                    scope=scope,
+                    policy=policy,
+                    mode="external",
+                ).allowed
+            except RetrievalError as error:
+                raise ToolExecutionError("Retrieval policy is invalid") from error
+
+        result = refresh_registry(
+            vault_root=vault_root,
+            registry=registry,
+            identity_allow_path=allowed,
+        )
+        visible_renamed = [
+            (old_path, new_path)
+            for old_path, new_path in result.renamed
+            if allowed(old_path) and allowed(new_path)
+        ]
+        relocated_paths = [path for pair in visible_renamed for path in pair]
+        changed_paths = [
+            path
+            for path in (*result.new, *result.modified, *result.deleted)
+            if allowed(path)
+        ]
+        activity.append(
+            tool="ingestion_registry_preflight",
+            source_paths=[source_path],
+            changed_paths=[*changed_paths, *relocated_paths],
+        )
+
     policy_reads = build_policy_read_tools(
         vault_root=vault_root,
         activity=activity,
@@ -160,12 +214,21 @@ def create_mcp_server(
         invoke=runtime_scoped_invoke,
         runtime_dir=resolved_runtime_dir,
     )
+    research = build_research_tools(
+        vault_root=vault_root,
+        runtime_dir=resolved_runtime_dir,
+        registry=registry,
+        activity=activity,
+        invoke=runtime_scoped_invoke,
+        authorizer=authorizer,
+        refresh_for_ingestion=refresh_research_for_ingestion,
+    )
 
     def wiki_search_tool(query: str, limit: int = 8) -> WikiSearchMCPResult:
         def op() -> WikiSearchMCPResult:
             result = search_wiki(
                 vault_root=vault_root,
-                request=WikiSearchRequest(query=query, limit=limit),
+                request=WikiSearchRequest(query=query, limit=limit, mode="external"),
             )
             activity.append(
                 tool="wiki_search",
@@ -201,7 +264,7 @@ def create_mcp_server(
     return FastMCP(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
-        tools=[*core_tools, *policy_reads, *exploration, wiki_search, *coherence],
+        tools=[*core_tools, *policy_reads, *exploration, wiki_search, *research, *coherence],
         host=host,
         port=port,
         transport_security=transport_security,

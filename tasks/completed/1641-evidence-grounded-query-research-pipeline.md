@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1641
 title: Add evidence-grounded query research and durable synthesis pipeline
-status: backlog
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1639

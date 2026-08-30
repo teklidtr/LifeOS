@@ -9,6 +9,7 @@ class SourceSnapshot:
     content_hash: str
     tags: tuple[str, ...] = ()
     topics: tuple[str, ...] = ()
+    acquisition_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

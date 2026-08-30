@@ -359,6 +359,48 @@ evidence, and stale-target hashes. They never mutate another note directly. See
 [Semantic Retrieval and Knowledge Conversation Architecture](semantic-retrieval-conversation-architecture.md)
 and [Semantic Retrieval and Knowledge Conversations](user-manual/11-semantic-retrieval-and-knowledge-conversations.md).
 
+## Evidence-grounded external research
+
+Research composes the existing retrieval, exploration, conversation, registry, ingestion,
+provenance, ownership, and proposal boundaries rather than introducing another RAG or web-search
+engine inside LifeOS. `research_query_context` is a read-only convenience composition over the
+configured `vault_context` and `wiki_search` surfaces. Asking a question does not itself create a
+conversation, raw source, answer artifact, or proposal.
+
+When the external agent decides that a material evidence gap requires outside research, the agent
+uses its own provider/browser/search environment. LifeOS core does not browse the public web or
+hold research-provider credentials. Selected external evidence must cross the typed
+`research_capture_evidence` boundary before it can ground durable wiki evolution:
+
+```text
+query
+  -> existing vault context + durable wiki search
+  -> external agent judges evidence sufficiency
+  -> external research only when a material gap remains
+  -> hash-bound raw/research snapshot + acquisition lineage
+  -> normal registry preflight and registered-source verification
+  -> normal ingestion/provenance/proposal path
+  -> zero proposal when no reusable durable delta exists, otherwise reviewed draft
+```
+
+Research snapshots live under `raw/research/`. Source locator/title/author/publisher describe the
+external source; server-authoritative `captured_by` identifies the LifeOS actor that acquired it;
+generated ownership remains a separate authorization system. Snapshot identity is content-bound.
+Identical snapshots are reused and may accumulate idempotent acquisition reasons; changed evidence
+bytes create distinct historical artifacts rather than overwriting the old snapshot. The managed
+evidence bytes are verified against their snapshot hash before use.
+
+External evidence alone never authorizes a wiki mutation. Durable synthesis still uses the
+existing proposal tools, source hashes, target hashes, ownership checks, review snapshots,
+lifecycle transitions, and atomic application. This preserves end-to-end lineage from a future
+proposal or generated wiki page to the canonical raw research file and from that file to the exact
+external snapshot plus originating query/conversation reference and research reason when present.
+There is no direct web-to-wiki path and no requirement to persist already-represented answers.
+
+See [Research Evidence Architecture](research-evidence-architecture.md),
+[Research Evidence Data Model](research-evidence-data-model.md), and
+[Evidence-Grounded Research](user-manual/18-evidence-grounded-research.md).
+
 ## Personal experiments
 
 Personal experiments are canonical Markdown artifacts under `experiments/YYYY/`.

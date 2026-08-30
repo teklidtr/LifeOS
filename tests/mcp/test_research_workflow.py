@@ -1,0 +1,349 @@
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
+
+from lifeos.bootstrap import initialize_vault
+from lifeos.markdown.parser import parse_markdown_note
+from lifeos.mcp.runtime_server import create_mcp_server
+from lifeos.proposals.loader import load_proposal_directory
+from lifeos.registry import Registry
+from lifeos.registry.file_tracking import hash_file_content
+from lifeos.research import ResearchEvidenceService
+from lifeos.runtime.activity import push_activity_actor, reset_activity_actor
+
+
+def _server(tmp_path: Path):
+    vault_root = tmp_path / "vault"
+    initialize_vault(vault_root)
+    runtime_dir = vault_root / ".lifeos"
+    runtime_dir.mkdir(exist_ok=True)
+    registry = Registry(runtime_dir / "registry.db")
+    authorizer = MagicMock()
+    authorizer.actor_id = "agent:local"
+    server = create_mcp_server(
+        vault_root=vault_root,
+        registry=registry,
+        authorizer=authorizer,
+        runtime_dir=runtime_dir,
+    )
+    return vault_root, registry, server
+
+
+def _vault_files(vault_root: Path, prefix: str) -> set[str]:
+    root = vault_root / prefix
+    if not root.exists():
+        return set()
+    return {
+        path.relative_to(vault_root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_research_tool_schemas_preserve_read_write_and_actor_boundaries(tmp_path: Path) -> None:
+    _vault_root, _registry, server = _server(tmp_path)
+    tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
+
+    query = tools["research_query_context"]
+    capture = tools["research_capture_evidence"]
+    proposal = tools["research_create_wiki_proposal"]
+
+    assert query.annotations.readOnlyHint is True
+    assert query.annotations.destructiveHint is False
+    assert query.annotations.idempotentHint is True
+    assert set(query.parameters["properties"]) == {"query", "focus_paths", "limit"}
+    assert query.parameters["additionalProperties"] is False
+
+    assert capture.annotations.readOnlyHint is False
+    assert capture.annotations.destructiveHint is False
+    assert capture.annotations.idempotentHint is True
+    assert set(capture.parameters["properties"]) == {
+        "evidence_text",
+        "source_title",
+        "research_reason",
+        "source_locator",
+        "source_author",
+        "source_publisher",
+        "origin_kind",
+        "origin_ref",
+        "research_context",
+    }
+    assert "captured_by" not in capture.parameters["properties"]
+    assert capture.parameters["additionalProperties"] is False
+
+    assert proposal.annotations.readOnlyHint is False
+    assert proposal.annotations.destructiveHint is False
+    assert proposal.annotations.idempotentHint is False
+    assert set(proposal.parameters["properties"]) == {
+        "source_path",
+        "acquisition_id",
+        "target_path",
+        "title",
+        "body",
+        "tags",
+        "tag_rationale",
+    }
+    assert proposal.parameters["additionalProperties"] is False
+
+
+def test_research_query_context_uses_external_scope_and_configured_runtime(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    initialize_vault(vault_root)
+    runtime_dir = tmp_path / "node-runtime"
+    runtime_dir.mkdir()
+    registry = Registry(runtime_dir / "registry.db")
+    authorizer = MagicMock()
+    authorizer.actor_id = "agent:local"
+    server = create_mcp_server(
+        vault_root=vault_root,
+        registry=registry,
+        authorizer=authorizer,
+        runtime_dir=runtime_dir,
+    )
+
+    with (
+        patch("lifeos.mcp.research_tools.get_vault_context") as get_context,
+        patch("lifeos.mcp.research_tools.search_wiki") as research_wiki,
+    ):
+        get_context.return_value = MagicMock(
+            sources=(), instructions=(), evidence_gaps=(), omissions=()
+        )
+        research_wiki.return_value = MagicMock(hits=())
+        server._tool_manager.get_tool("research_query_context").fn(
+            query="bounded evidence",
+            limit=4,
+        )
+
+    context_call = get_context.call_args.kwargs
+    assert context_call["runtime_dir"] == runtime_dir
+    assert context_call["request"].mode == "external"
+    assert research_wiki.call_args.kwargs["request"].mode == "external"
+
+    with patch("lifeos.mcp.runtime_server.search_wiki") as runtime_wiki:
+        runtime_wiki.return_value = MagicMock(query="bounded evidence", hits=())
+        server._tool_manager.get_tool("wiki_search").fn(query="bounded evidence", limit=4)
+    assert runtime_wiki.call_args.kwargs["request"].mode == "external"
+
+
+def test_research_query_context_is_zero_write_by_default(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    existing = vault_root / "wiki" / "existing.md"
+    existing.write_text(
+        "---\ntitle: Existing evidence\ndescription: Durable answer already represented.\n---\n\n"
+        "Insulin sensitivity changes glucose handling.\n",
+        encoding="utf-8",
+    )
+    raw_before = _vault_files(vault_root, "raw")
+    proposals_before = _vault_files(vault_root, "proposals")
+
+    result = server._tool_manager.get_tool("research_query_context").fn(
+        query="insulin sensitivity glucose",
+        focus_paths=["wiki/existing.md"],
+        limit=8,
+    )
+
+    assert result["persistence"] == "none"
+    assert result["decision_authority"] == "external-agent"
+    assert any(item["path"] == "wiki/existing.md" for item in result["context_sources"])
+    assert _vault_files(vault_root, "raw") == raw_before
+    assert _vault_files(vault_root, "proposals") == proposals_before
+
+
+def test_research_capture_uses_trusted_local_actor_and_dedupes(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    tool = server._tool_manager.get_tool("research_capture_evidence")
+    arguments = {
+        "evidence_text": "Selected external evidence.",
+        "source_title": "External source",
+        "source_locator": "https://example.test/source",
+        "source_author": "Source Author",
+        "research_reason": "The existing vault lacks direct evidence for this claim.",
+        "origin_kind": "query",
+        "origin_ref": "query:insulin-1",
+        "research_context": "Chosen to close the material evidence gap.",
+    }
+
+    first = tool.fn(**arguments)
+    second = tool.fn(**arguments)
+    artifact = ResearchEvidenceService(vault_root=vault_root).load(first["source_path"])
+
+    assert first["created"] is True
+    assert first["acquisition_added"] is True
+    assert second["created"] is False
+    assert second["acquisition_added"] is False
+    assert second["source_path"] == first["source_path"]
+    assert artifact.metadata.first_captured_by == "agent:local"
+    assert artifact.metadata.source_author == "Source Author"
+    assert len(artifact.metadata.acquisitions) == 1
+
+
+def test_authenticated_request_actor_overrides_local_fallback(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    token = push_activity_actor("agent:remote")
+    try:
+        result = server._tool_manager.get_tool("research_capture_evidence").fn(
+            evidence_text="Remote selected evidence.",
+            source_title="Remote source",
+            source_locator="https://example.test/remote",
+            research_reason="Remote query exposed a material evidence gap.",
+        )
+    finally:
+        reset_activity_actor(token)
+
+    artifact = ResearchEvidenceService(vault_root=vault_root).load(result["source_path"])
+    assert artifact.metadata.first_captured_by == "agent:remote"
+
+
+def test_no_durable_novelty_can_finish_after_capture_without_proposal(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    proposals_before = _vault_files(vault_root, "proposals")
+
+    server._tool_manager.get_tool("research_capture_evidence").fn(
+        evidence_text="Evidence confirms what the durable wiki already says.",
+        source_title="Confirmatory source",
+        source_locator="doi:10.0000/confirmatory",
+        research_reason="Check whether the existing durable statement still has external support.",
+    )
+
+    assert _vault_files(vault_root, "proposals") == proposals_before
+
+
+def test_generic_ingestion_cannot_choose_research_acquisition_implicitly(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    capture = server._tool_manager.get_tool("research_capture_evidence").fn(
+        evidence_text="Research evidence requiring explicit lineage selection.",
+        source_title="Explicit lineage source",
+        source_locator="https://example.test/explicit-lineage",
+        research_reason="A material evidence gap requires this source.",
+    )
+
+    with pytest.raises(ToolError):
+        server._tool_manager.get_tool("ingestion_create_wiki_proposal").fn(
+            source_path=capture["source_path"],
+            target_path="wiki/research/implicit.md",
+            title="Implicit research proposal",
+            body="This path must not be accepted without an acquisition selection.",
+        )
+
+    assert not (vault_root / "wiki" / "research" / "implicit.md").exists()
+
+
+def test_research_synthesis_binds_selected_acquisition_into_provenance(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    capture_tool = server._tool_manager.get_tool("research_capture_evidence")
+    first = capture_tool.fn(
+        evidence_text="A reusable external comparison that is not yet represented.",
+        source_title="Comparison source",
+        source_locator="https://example.test/comparison",
+        source_author="External Researcher",
+        research_reason="The first query needs a comparison absent from the vault.",
+        origin_kind="conversation",
+        origin_ref="conv-20260830T154000Z-abcd1234#turn-003",
+        research_context="Agent selected the comparison after checking existing wiki knowledge.",
+    )
+    second = capture_tool.fn(
+        evidence_text="A reusable external comparison that is not yet represented.",
+        source_title="Comparison source",
+        source_locator="https://example.test/comparison",
+        source_author="External Researcher",
+        research_reason="A later query reuses the same snapshot for a different durable synthesis.",
+        origin_kind="query",
+        origin_ref="query:comparison-2",
+        research_context="The same evidence closes a separate material gap.",
+    )
+
+    assert first["source_path"] == second["source_path"]
+    assert first["acquisition_id"] != second["acquisition_id"]
+
+    proposal = server._tool_manager.get_tool("research_create_wiki_proposal").fn(
+        source_path=second["source_path"],
+        acquisition_id=second["acquisition_id"],
+        target_path="wiki/research/comparison.md",
+        title="Research comparison",
+        body="A reusable comparison grounded in the captured external evidence.",
+    )
+
+    loaded = load_proposal_directory(
+        vault_root / proposal["proposal_path"],
+        proposals_root=vault_root / "proposals",
+    ).proposal
+    assert loaded is not None
+    operation = loaded.patch_document.operations[0]
+    assert operation.op == "create_generated_file"
+    parsed = parse_markdown_note(Path(operation.target_path), content=operation.new_content)
+    provenance = parsed.frontmatter["lifeos_provenance"]["sources"][0]
+    source_bytes = (vault_root / second["source_path"]).read_bytes()
+    raw_artifact = ResearchEvidenceService(vault_root=vault_root).load(second["source_path"])
+
+    assert provenance["path"] == second["source_path"]
+    assert provenance["content_hash"] == f"sha256:{hash_file_content(source_bytes)}"
+    assert provenance["acquisition_id"] == second["acquisition_id"]
+    assert raw_artifact.metadata.snapshot_hash == second["snapshot_hash"]
+    selected = next(
+        item
+        for item in raw_artifact.metadata.acquisitions
+        if item.acquisition_id == second["acquisition_id"]
+    )
+    assert selected.origin_ref == "query:comparison-2"
+    assert not (vault_root / "wiki" / "research" / "comparison.md").exists()
+
+    activity = server._tool_manager.get_tool("runtime_activity").fn(limit=10)["records"]
+    proposal_index = next(
+        index
+        for index, record in enumerate(activity)
+        if record["tool"] == "research_create_wiki_proposal"
+    )
+    preflight = activity[proposal_index - 1]
+    assert preflight["tool"] == "ingestion_registry_preflight"
+    assert preflight["source_paths"] == [second["source_path"]]
+
+
+def test_research_synthesis_rejects_unknown_acquisition(tmp_path: Path) -> None:
+    _vault_root, _registry, server = _server(tmp_path)
+    capture = server._tool_manager.get_tool("research_capture_evidence").fn(
+        evidence_text="Selected evidence.",
+        source_title="Selected source",
+        source_locator="https://example.test/selected",
+        research_reason="The query needs this source.",
+    )
+
+    with pytest.raises(ToolError):
+        server._tool_manager.get_tool("research_create_wiki_proposal").fn(
+            source_path=capture["source_path"],
+            acquisition_id="acq-000000000000000000000000",
+            target_path="wiki/research/wrong-acquisition.md",
+            title="Wrong acquisition",
+            body="This proposal must not be created.",
+        )
+
+
+def test_research_synthesis_revalidates_snapshot_after_registry_refresh(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    capture = server._tool_manager.get_tool("research_capture_evidence").fn(
+        evidence_text="Original immutable evidence.",
+        source_title="Immutable source",
+        source_locator="https://example.test/immutable",
+        research_reason="The query needs immutable external evidence.",
+    )
+    source = vault_root / capture["source_path"]
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "Original immutable evidence.",
+            "Tampered evidence after capture.",
+        ),
+        encoding="utf-8",
+    )
+    proposals_before = _vault_files(vault_root, "proposals")
+
+    with pytest.raises(ToolError):
+        server._tool_manager.get_tool("research_create_wiki_proposal").fn(
+            source_path=capture["source_path"],
+            acquisition_id=capture["acquisition_id"],
+            target_path="wiki/research/tampered.md",
+            title="Tampered evidence",
+            body="This proposal must not be created.",
+        )
+
+    assert _vault_files(vault_root, "proposals") == proposals_before

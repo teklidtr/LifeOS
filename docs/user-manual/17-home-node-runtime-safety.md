@@ -1,4 +1,4 @@
-[← Previous: Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) · [Manual home](README.md)
+[← Previous: Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) · [Manual home](README.md) · [Next: Evidence-Grounded Research →](18-evidence-grounded-research.md)
 
 # 17. Home-Node Runtime Safety
 
@@ -82,4 +82,4 @@ rebuildability contract.
 
 ---
 
-[← Previous: Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) · [Manual home](README.md)
+[← Previous: Cross-Device Vault Coherence](16-cross-device-vault-coherence.md) · [Manual home](README.md) · [Next: Evidence-Grounded Research →](18-evidence-grounded-research.md)
