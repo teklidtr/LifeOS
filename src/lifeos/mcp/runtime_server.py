@@ -163,6 +163,8 @@ def create_mcp_server(
         scope = RetrievalScope()
 
         def allowed(path: str) -> bool:
+            if path.startswith("conversations/") or path.startswith("proposals/"):
+                return False
             try:
                 return scope_decision(
                     path,
