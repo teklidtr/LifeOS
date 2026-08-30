@@ -735,11 +735,14 @@ def _copy_relative_ignore_source(
         expected = _stat_child(current_fd, parts[-1])
         if expected is None:
             return
-        source_fd, observed = _impl._open_metadata_child(
-            current_fd,
-            parts[-1],
-            expected,
-        )
+        try:
+            source_fd, observed = _impl._open_metadata_child(
+                current_fd, parts[-1], expected
+            )
+        except _base.RecoveryGitError as exc:
+            raise _base.RecoveryGitError(
+                "Git ignore metadata uses an unsupported entry"
+            ) from exc
         if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
             os.close(source_fd)
             raise _base.RecoveryGitError(
@@ -996,7 +999,12 @@ for _name, _value in {
     "_build_report": _build_report,
     "collect_recovery_readiness": collect_recovery_readiness,
 }.items():
-    setattr(_impl, _name, _value)
+    # ``_impl`` is itself a compatibility proxy whose ``__setattr__`` forwards
+    # names that also exist in ``_base``.  Installing the facade through that
+    # hook would replace the base collector with this wrapper and recurse on
+    # the first real report.  Update the implementation namespace directly;
+    # the explicitly shared base seams are installed just below.
+    _impl.__dict__[_name] = _value
 
 setattr(_base, "_ignored_paths", _ignored_paths)
 setattr(_base, "_build_report", _build_report)
@@ -1010,9 +1018,14 @@ class _RecoveryModuleProxy(types.ModuleType):
     def __setattr__(self, name: str, value: Any) -> None:
         super().__setattr__(name, value)
         if not name.startswith("__") and hasattr(_impl, name):
-            setattr(_impl, name, value)
-        if name in {"_run_git", "_run_git_presence"}:
-            setattr(_base, name, value)
+            _impl.__dict__[name] = value
+        # Tests and integrations historically monkeypatch helper seams on this
+        # facade.  Keep those base call sites synchronized without ever
+        # forwarding the public collector wrapper itself.
+        if name != "collect_recovery_readiness" and hasattr(_base, name):
+            _base.__dict__[name] = value
 
 
-_sys.modules[__name__].__class__ = _RecoveryModuleProxy
+_module = _sys.modules[__name__]
+if not isinstance(_module, _RecoveryModuleProxy):
+    _module.__class__ = _RecoveryModuleProxy
