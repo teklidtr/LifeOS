@@ -72,10 +72,11 @@ against the host filesystem. LifeOS supplies the useful vault-scoped capability 
 
 The complete user-facing MCP read surface enforces the canonical retrieval policy in external
 mode. This includes focused single-note reads, focused/lexical context assembly, broad
-exploration, link traversal, and instruction discovery. Excluded prefixes remain unavailable.
-Protected prefixes are default-deny. `allow_protected=true` records explicit request intent, but
-protected content can cross the MCP boundary only when the canonical policy also matches the path
-through `external_allowed_prefixes`.
+exploration, link traversal, instruction discovery, `wiki_search`, and the composed
+`research_query_context` surface. Excluded prefixes remain unavailable. Protected prefixes are
+default-deny. `allow_protected=true` records explicit request intent on the exploration surfaces
+that support it, but protected content can cross the MCP boundary only when the canonical policy
+also matches the path through `external_allowed_prefixes`.
 
 Policy filtering occurs before denied Markdown or YAML content is opened or decoded and before
 lexical ranking and result caps. Disallowed candidates therefore cannot influence allowed
@@ -168,6 +169,47 @@ Ownership, source hashes, target hashes, provenance, operation budgets, recovery
 application remain authoritative. Broad read capability therefore does not weaken the existing
 strict mutation boundary.
 
+## Evidence-grounded research extension
+
+LIFEOS-1641 adds two narrow MCP capabilities without adding a browser, crawler, provider
+credential store, or generic canonical-write surface to LifeOS:
+
+- `research_query_context` composes the existing policy-aware Context Pack and durable-wiki search
+  surfaces in external-disclosure mode. It is read-only, uses the configured runtime directory,
+  and persists no query, answer, raw source, conversation, or proposal merely because a question
+  was asked.
+- `research_capture_evidence` accepts one selected external evidence snapshot plus source metadata
+  and acquisition context. The caller cannot supply a target path or `captured_by`; LifeOS derives
+  the canonical `raw/research/` path from source/snapshot hashes and derives the actor from the
+  trusted MCP request/local runtime context.
+
+The external agent remains responsible for obtaining and interpreting outside evidence in its own
+provider environment. The safe transition is:
+
+```text
+external agent research
+  ↓
+research_capture_evidence
+  ↓
+hash-bound raw/research snapshot + acquisition lineage
+  ↓
+normal registry preflight / source-hash verification
+  ↓
+existing ingestion proposal tool, only if durable novelty exists
+```
+
+`source_author` and `source_publisher` describe the external source, `captured_by` records the
+trusted LifeOS actor that acquired it, and generated ownership remains a separate authorization
+contract. Identical snapshots are reused, repeated acquisition lineage is idempotent, and changed
+snapshots remain distinct historical evidence. Normal research workflows may add acquisition
+lineage but do not replace the hash-bound evidence body.
+
+There is no direct external-claim-to-wiki path. Captured evidence does not itself authorize a
+mutation, and a question or research result that adds no reusable durable knowledge may finish
+with zero proposals. When durable synthesis is justified, the existing ingestion/provenance,
+ownership, review, lifecycle, and application rules remain authoritative. See
+[Research Evidence Architecture](research-evidence-architecture.md).
+
 ## Derived state
 
 Exploration does not make a second canonical index. Path discovery, lexical search, multi-read,
@@ -184,6 +226,9 @@ Deterministic tests cover both halves of the boundary:
 - MCP inputs are type-strict and cannot coerce strings into protected-read intent or limits;
 - MCP reads use external disclosure policy, including `external_allowed_prefixes` for protected
   content;
+- research query composition preserves external-disclosure mode and the configured runtime
+  directory rather than falling back to local retrieval defaults;
+- research capture has no caller-controlled `captured_by` or arbitrary vault-path field;
 - retrieval policy loading rejects symlinks and other unsafe policy sources;
 - policy filtering happens before Markdown/YAML reads, lexical ranking, and caps;
 - protected malformed YAML/Markdown cannot break or leak through allowed context/search;
