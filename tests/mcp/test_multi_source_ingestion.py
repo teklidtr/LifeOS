@@ -1,8 +1,12 @@
 from pathlib import Path
 
+import pytest
+
+from lifeos.facade.errors import ToolValidationError
 from lifeos.mcp.activity_store import MCPActivityStore
 from lifeos.mcp.multi_source_tools import (
     EVOLVE_WIKI_BATCH_MCP_DESCRIPTION,
+    BatchWikiCreateMCPInput,
     build_multi_source_ingestion_tools,
 )
 from lifeos.mcp.runtime_server import LIFEOS_MCP_INSTRUCTIONS
@@ -48,3 +52,38 @@ def test_runtime_instructions_describe_joint_folder_reconciliation() -> None:
     assert "Folder or multi-source ingestion is one logical batch" in LIFEOS_MCP_INSTRUCTIONS
     assert "Do not loop the single-source proposal tool once per file" in LIFEOS_MCP_INSTRUCTIONS
     assert "one target-reconciled draft" in LIFEOS_MCP_INSTRUCTIONS
+
+
+def test_batch_tool_rejects_internal_proposal_and_conversation_sources(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    runtime_dir = vault_root / ".lifeos"
+    vault_root.mkdir()
+    runtime_dir.mkdir()
+    registry = Registry(runtime_dir / "registry.db")
+    registry.initialize()
+    activity = MCPActivityStore(runtime_dir)
+    tool = build_multi_source_ingestion_tools(
+        vault_root=vault_root,
+        runtime_dir=runtime_dir,
+        registry=registry,
+        activity=activity,
+        invoke=lambda operation: operation(),
+    )[0]
+
+    for source_path in (
+        "proposals/prop-test/proposal.md",
+        "conversations/2026/session.md",
+    ):
+        with pytest.raises(ToolValidationError, match="MCP batch paths are unavailable"):
+            tool.fn(
+                source_paths=[source_path],
+                creates=[
+                    BatchWikiCreateMCPInput(
+                        target_path="wiki/result.md",
+                        title="Result",
+                        body="Body",
+                        rationale="Exercise the established MCP ingestion scope boundary.",
+                        source_paths=[source_path],
+                    )
+                ],
+            )
