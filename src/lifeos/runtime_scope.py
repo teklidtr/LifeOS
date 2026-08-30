@@ -40,8 +40,6 @@ def _candidate_parts(path: str) -> tuple[str, ...] | None:
     pure = PurePosixPath(path)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         return None
-    if any(part != part.strip() for part in pure.parts):
-        return None
     return tuple(pure.parts)
 
 
@@ -70,7 +68,8 @@ def runtime_path_selects_configured_directory(
     case-insensitive filesystem, scanner paths captured as ``runtime/...`` therefore still match a
     configured ``Runtime`` directory even if a case-only rename happens between runtime-prefix
     capture and scanning. On a case-sensitive filesystem, differently cased directories remain
-    distinct because they select different inodes.
+    distinct because they select different inodes. Legal whitespace in a configured component is
+    preserved literally rather than treated as an alias.
     """
     resolved = _runtime_relative_parts(vault_root, runtime_dir)
     if resolved is None:
