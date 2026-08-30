@@ -511,16 +511,7 @@ def test_repository_config_include_is_rejected_before_repository_discovery(
 
     assert diagnostic.status == "unknown"
     assert "secrets/note.md" not in diagnostic.summary
-    assert calls == [
-        (
-            "config",
-            "--no-includes",
-            "--name-only",
-            "--get-regexp",
-            r"^include(if)?\.",
-        )
-    ]
-    assert all(call[:2] != ("rev-parse", "--show-toplevel") for call in calls)
+    assert calls == []
 
 
 def test_protected_gitignore_prevents_check_ignore_invocation(
