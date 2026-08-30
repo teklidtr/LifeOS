@@ -520,6 +520,15 @@ def _authorized_git_pathspecs(context: Any, scope: Any, config: Any) -> tuple[st
     return tuple(pathspecs)
 
 
+def _git_object_type_for_mode(mode: int) -> str:
+    kind = mode & 0o170000
+    if kind in {0o100000, 0o120000}:
+        return "blob"
+    if kind == 0o160000:
+        return "commit"
+    raise _base.RecoveryGitError("Git index contains an unsupported canonical entry type")
+
+
 def _tree_entries(
     git: str,
     root: Path,
@@ -530,33 +539,86 @@ def _tree_entries(
     *,
     case_insensitive_prefix: bool = False,
 ) -> dict[str, tuple[int, str, str]]:
-    """List committed canonical entries with exclusions applied by Git before output."""
+    """Reconstruct the authorized HEAD view without enumerating denied tree names.
+
+    ``ls-tree`` cannot apply exclude pathspec magic. Start from the already-authorized index
+    inventory instead, then reverse the metadata-only staged diff so the result represents HEAD.
+    Both Git commands receive the same positive/exclusion pathspecs before producing pathname
+    output, and rename detection is disabled so no blob similarity reads are needed.
+    """
     if head_oid is None:
         return {}
+
+    index_entries = _base._canonical_index_entries(
+        _base._index_entries(_base._index_debug_raw(git, root, pathspec)),
+        prefix,
+        excluded,
+        case_insensitive_prefix=case_insensitive_prefix,
+    )
+    output: dict[str, tuple[int, str, str]] = {
+        path: (entry.mode, _git_object_type_for_mode(entry.mode), entry.oid)
+        for path, entry in index_entries.items()
+    }
+
     result = _run_git(
         git,
         cwd=root,
         arguments=_base._pathspec_command(
-            "ls-tree",
-            ("-r", "-z", head_oid),
+            "diff-index",
+            ("--cached", "--raw", "--full-index", "-z", "--no-renames", head_oid),
             pathspec,
         ),
     )
     if result.stderr.strip():
-        raise _base.RecoveryGitError("Git tree query reported incomplete results")
-    output: dict[str, tuple[int, str, str]] = {}
-    for mode, obj_type, oid, path in _base._parse_tree_records(result.stdout):
-        relative = _base._canonical_path(
+        raise _base.RecoveryGitError("Git staged metadata query reported incomplete results")
+
+    raw = result.stdout
+    cursor = 0
+    seen: set[str] = set()
+    while cursor < len(raw):
+        header_end = raw.find(b"\0", cursor)
+        if header_end < 0:
+            raise _base.RecoveryGitError("Git staged metadata query returned malformed output")
+        header = raw[cursor:header_end]
+        cursor = header_end + 1
+        if not header:
+            continue
+        path_end = raw.find(b"\0", cursor)
+        if path_end < 0:
+            raise _base.RecoveryGitError("Git staged metadata query returned malformed path data")
+        raw_path = raw[cursor:path_end]
+        cursor = path_end + 1
+        fields = header.split()
+        if len(fields) != 5 or not fields[0].startswith(b":"):
+            raise _base.RecoveryGitError("Git staged metadata query returned malformed entry data")
+        try:
+            old_mode = int(fields[0][1:], 8)
+            old_oid = fields[2].decode("ascii", errors="strict")
+            status = fields[4].decode("ascii", errors="strict")
+            path = raw_path.decode("utf-8", errors="surrogateescape")
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise _base.RecoveryGitError(
+                "Git staged metadata query returned malformed entry data"
+            ) from exc
+        if status not in {"A", "D", "M", "T"}:
+            raise _base.RecoveryGitError("Git staged metadata query returned unsupported status")
+        canonical = _base._canonical_path(
             path,
             prefix,
             excluded,
             case_insensitive_prefix=case_insensitive_prefix,
         )
-        if relative is None:
+        if canonical is None:
             continue
-        if relative in output:
-            raise _base.RecoveryGitError("Git tree contains ambiguous canonical path aliases")
-        output[relative] = (mode, obj_type, oid)
+        if canonical in seen:
+            raise _base.RecoveryGitError("Git staged metadata contains duplicate canonical paths")
+        seen.add(canonical)
+        if status == "A":
+            output.pop(canonical, None)
+            continue
+        if old_mode == 0 or not old_oid or set(old_oid) == {"0"}:
+            raise _base.RecoveryGitError("Git staged metadata omitted the committed object")
+        output[canonical] = (old_mode, _git_object_type_for_mode(old_mode), old_oid)
     return output
 
 

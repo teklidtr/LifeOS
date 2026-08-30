@@ -126,9 +126,10 @@ def test_committed_tree_query_applies_authorized_exclusions_before_output(
             input_bytes=input_bytes,
         )
         normalized = tuple(arguments)
-        if "ls-tree" in normalized:
+        if "ls-files" in normalized or "diff-index" in normalized:
             seen_arguments.append(normalized)
             seen_outputs.append(result.stdout)
+        assert "ls-tree" not in normalized
         return result
 
     monkeypatch.setattr(recovery_readiness, "_run_git", recording_run_git)
