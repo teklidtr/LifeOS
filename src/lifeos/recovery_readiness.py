@@ -19,7 +19,7 @@ import sys as _sys
 import tempfile
 import types
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
@@ -58,6 +58,12 @@ class _GitMetadataSandbox:
 _ACTIVE_SANDBOX: contextvars.ContextVar[_GitMetadataSandbox | None] = contextvars.ContextVar(
     "lifeos_recovery_git_metadata_sandbox", default=None
 )
+_ACTIVE_CONFIG: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
+    "lifeos_recovery_active_config", default=None
+)
+_ACTIVE_WORKTREE_SNAPSHOT: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
+    "lifeos_recovery_worktree_snapshot", default=None
+)
 
 _SECTION_RE = re.compile(
     r'^\s*\[\s*([^\]\s"]+)(?:\s+"([^"]*)")?\s*\]\s*(?:[#;].*)?$'
@@ -70,6 +76,22 @@ _DEAD_HELPERS = (
     "_visible_worktree_paths",
     "_worktree",
 )
+
+
+def _base_original(name: str) -> Any:
+    sentinel = f"__lifeos_recovery_original_{name.lstrip('_')}"
+    original = getattr(_base, sentinel, None)
+    if original is None:
+        original = getattr(_base, name)
+        setattr(_base, sentinel, original)
+    return original
+
+
+_ORIGINAL_SCOPE_FILTER = _base_original("_scope_filter")
+_ORIGINAL_HIDDEN_INDEX_STATE = _base_original("_hidden_index_state")
+_ORIGINAL_WORKING_TREE_SNAPSHOT = _base_original("_working_tree_snapshot")
+_ORIGINAL_BUILD_REPORT = _base_original("_build_report")
+_ORIGINAL_LATEST_COMMIT = _base_original("_latest_commit")
 
 
 def _open_regular_metadata(
@@ -462,6 +484,28 @@ def _selects_repository_metadata(path: str) -> bool:
     )
 
 
+def _policy_prefix_is_literal(value: str) -> bool:
+    if value != value.strip() or value.startswith("/"):
+        return False
+    without_trailing = value.rstrip("/")
+    if not without_trailing:
+        return False
+    return PurePosixPath(without_trailing).as_posix() == without_trailing
+
+
+def _scope_filter(config: Any) -> Any:
+    scope = _ORIGINAL_SCOPE_FILTER(config)
+    values = [*scope.policy.excluded_prefixes]
+    if not scope.request.allow_protected:
+        values.extend(scope.policy.protected_prefixes)
+    values.extend(scope.request.excluded_paths)
+    if any(not _policy_prefix_is_literal(value) for value in values):
+        raise _base.RecoveryGitError(
+            "Recovery policy paths do not have an unambiguous literal POSIX spelling"
+        )
+    return scope
+
+
 def _scope_filter_call(self: Any, path: str) -> bool:
     try:
         if _selects_repository_metadata(path):
@@ -488,6 +532,61 @@ def _scope_filter_call(self: Any, path: str) -> bool:
 
 def _normalization_sensitive(value: str) -> bool:
     return unicodedata.normalize("NFC", value) != unicodedata.normalize("NFD", value)
+
+
+def _runtime_exclusion_pathspecs(prefix: tuple[str, ...], scope: Any) -> tuple[str, ...]:
+    config = _ACTIVE_CONFIG.get()
+    if config is None:
+        raise _base.RecoveryGitError("Recovery runtime scope is unavailable for hidden Git queries")
+    output: list[str] = []
+    for relative in _base._runtime_prefixes(config):
+        if _normalization_sensitive(relative):
+            raise _base.RecoveryGitError(
+                "Git hidden-scope runtime normalization cannot be authorized safely"
+            )
+        output.append(
+            _base._literal_pathspec(
+                _base._repo_path(relative, prefix),
+                exclude=True,
+                icase=scope.case_insensitive,
+            )
+        )
+    return tuple(output)
+
+
+def _hidden_scope_pathspecs(
+    relative: str,
+    prefix: tuple[str, ...],
+    scope: Any,
+) -> tuple[str, ...]:
+    if _normalization_sensitive(relative):
+        raise _base.RecoveryGitError("Git hidden-scope normalization cannot be authorized safely")
+    return (
+        _base._literal_pathspec(
+            _base._repo_path(relative, prefix),
+            icase=scope.case_insensitive,
+        ),
+        *_runtime_exclusion_pathspecs(prefix, scope),
+    )
+
+
+def _hidden_index_state(git: str, root: Path, context: Any, scope: Any) -> tuple[bool, ...]:
+    state: list[bool] = []
+    for relative in _base._policy_denied_prefixes(scope):
+        state.append(
+            _run_git_presence(
+                git,
+                cwd=root,
+                arguments=(
+                    "--no-literal-pathspecs",
+                    "ls-files",
+                    "--error-unmatch",
+                    "--",
+                    *_hidden_scope_pathspecs(relative, context.prefix, scope),
+                ),
+            )
+        )
+    return tuple(state)
 
 
 def _authorized_git_pathspecs(context: Any, scope: Any, config: Any) -> tuple[str, ...]:
@@ -676,7 +775,61 @@ def _compare_index_entry(
     return "clean"
 
 
-_ORIGINAL_LATEST_COMMIT = _base._latest_commit
+def _working_tree_snapshot(vault: Path, excluded: Any) -> Any:
+    snapshot = _ORIGINAL_WORKING_TREE_SNAPSHOT(vault, excluded)
+    _ACTIVE_WORKTREE_SNAPSHOT.set(snapshot)
+    return snapshot
+
+
+def _build_report(config: Any, **kwargs: Any) -> Any:
+    report = _ORIGINAL_BUILD_REPORT(config, **kwargs)
+    snapshot = _ACTIVE_WORKTREE_SNAPSHOT.get()
+    untracked = tuple(kwargs.get("untracked", ()))
+    if snapshot is None or not untracked:
+        return report
+    by_path = snapshot.by_path()
+    non_regular = tuple(
+        sorted(
+            path
+            for path in untracked
+            if (entry := by_path.get(path)) is not None and not stat.S_ISREG(entry.mode)
+        )
+    )
+    if not non_regular:
+        return report
+
+    diagnostics = []
+    for item in report.diagnostics:
+        if item.id == "recovery.git.canonical_objects":
+            paths = tuple(sorted(set(item.paths) | set(non_regular)))
+            item = replace(
+                item,
+                status="failure",
+                severity="error",
+                summary=(
+                    f"{len(paths)} visible canonical path(s) use non-regular recovery entries "
+                    "that do not preserve ordinary file bytes."
+                ),
+                remediation=(
+                    "Replace symlink, gitlink, or other non-regular canonical entries with "
+                    "ordinary tracked vault files before relying on Git recovery."
+                ),
+                paths=paths,
+            )
+        elif item.id == "recovery.git.untracked_canonical":
+            item = replace(
+                item,
+                summary=(
+                    f"{len(untracked)} visible canonical path(s) are untracked and absent from "
+                    f"committed history; {len(non_regular)} are non-regular recovery entries."
+                ),
+                remediation=(
+                    "Replace non-regular paths identified by recovery.git.canonical_objects with "
+                    "ordinary vault files; then add/commit intended regular untracked canonical files."
+                ),
+            )
+        diagnostics.append(item)
+    return replace(report, diagnostics=tuple(diagnostics))
 
 
 def _latest_commit(
@@ -705,11 +858,6 @@ def _latest_commit(
         return visible
     if isinstance(excluded, _base._ScopeFilter):
         for relative in _base._policy_denied_prefixes(excluded):
-            if _normalization_sensitive(relative):
-                raise _base.RecoveryGitError(
-                    "Git hidden-history normalization cannot be authorized safely"
-                )
-            repo_relative = _base._repo_path(relative, prefix)
             result = _run_git(
                 git,
                 cwd=root,
@@ -720,10 +868,7 @@ def _latest_commit(
                     "--format=%H",
                     revision,
                     "--",
-                    _base._literal_pathspec(
-                        repo_relative,
-                        icase=excluded.case_insensitive,
-                    ),
+                    *_hidden_scope_pathspecs(relative, prefix, excluded),
                 ),
             )
             if result.stderr.strip():
@@ -755,7 +900,9 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
     if sandbox is None:
         return _base._fallback(config, _base._no_repo())
 
-    token = _ACTIVE_SANDBOX.set(sandbox)
+    sandbox_token = _ACTIVE_SANDBOX.set(sandbox)
+    config_token = _ACTIVE_CONFIG.set(config)
+    snapshot_token = _ACTIVE_WORKTREE_SNAPSHOT.set(None)
     try:
         if sandbox.contains_includes:
             return _base._fallback(
@@ -791,17 +938,23 @@ def collect_recovery_readiness(config: Any, *, clock_fn: Any = None) -> Any:
     except _base.RecoveryGitError as exc:
         return _base._fallback(config, _base._git_unknown(str(exc)), sandbox.root)
     finally:
-        _ACTIVE_SANDBOX.reset(token)
+        _ACTIVE_WORKTREE_SNAPSHOT.reset(snapshot_token)
+        _ACTIVE_CONFIG.reset(config_token)
+        _ACTIVE_SANDBOX.reset(sandbox_token)
         sandbox.close()
 
 
 setattr(_base, "_run_git", _run_git)
 setattr(_base, "_run_git_presence", _run_git_presence)
+setattr(_base, "_scope_filter", _scope_filter)
 setattr(_base._ScopeFilter, "__call__", _scope_filter_call)
+setattr(_base, "_hidden_index_state", _hidden_index_state)
 setattr(_base, "_authorized_git_pathspecs", _authorized_git_pathspecs)
 setattr(_base, "_tree_entries", _tree_entries)
 setattr(_base, "_snapshot_entry_for_index_path", _snapshot_entry_for_index_path)
 setattr(_base, "_compare_index_entry", _compare_index_entry)
+setattr(_base, "_working_tree_snapshot", _working_tree_snapshot)
+setattr(_base, "_build_report", _build_report)
 setattr(_base, "_latest_commit", _latest_commit)
 setattr(_base, "_reject_repository_config_includes", _reject_repository_config_includes)
 for _dead_helper in _DEAD_HELPERS:
