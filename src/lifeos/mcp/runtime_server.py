@@ -27,6 +27,7 @@ from lifeos.mcp.exploration_tools import (
     build_policy_read_tools,
 )
 from lifeos.mcp.models import WikiSearchMCPResult
+from lifeos.mcp.research_tools import build_research_tools
 from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS as CORE_MCP_INSTRUCTIONS,
     WIKI_SEARCH_MCP_DESCRIPTION,
@@ -66,7 +67,11 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "never acts as a protected-scope bypass. Semantic interpretation belongs to the external "
     "agent. LifeOS constrains mutation, not exploration: canonical changes remain available only "
     "through bounded proposal and consequential authorization tools; there is no generic vault "
-    "write, delete, move, or shell surface. "
+    "write, delete, move, or shell surface. External research also remains agent-led: when a "
+    "material evidence gap requires an external source, use research_capture_evidence to preserve "
+    "the selected source snapshot in raw/ with hash-bound acquisition lineage before using normal "
+    "ingestion proposal tools. Never send an uncaptured external claim directly to wiki mutation, "
+    "and create no proposal when the answer is already represented or produces no durable delta. "
     + CORE_MCP_INSTRUCTIONS
 )
 
@@ -160,6 +165,12 @@ def create_mcp_server(
         invoke=runtime_scoped_invoke,
         runtime_dir=resolved_runtime_dir,
     )
+    research = build_research_tools(
+        vault_root=vault_root,
+        activity=activity,
+        invoke=runtime_scoped_invoke,
+        authorizer=authorizer,
+    )
 
     def wiki_search_tool(query: str, limit: int = 8) -> WikiSearchMCPResult:
         def op() -> WikiSearchMCPResult:
@@ -201,7 +212,7 @@ def create_mcp_server(
     return FastMCP(
         "LifeOS",
         instructions=LIFEOS_MCP_INSTRUCTIONS,
-        tools=[*core_tools, *policy_reads, *exploration, wiki_search, *coherence],
+        tools=[*core_tools, *policy_reads, *exploration, wiki_search, *research, *coherence],
         host=host,
         port=port,
         transport_security=transport_security,

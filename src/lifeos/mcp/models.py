@@ -90,6 +90,15 @@ class RegistryRefreshMCPResult(TypedDict):
     proposals_indexed: int
 
 
+class ResearchCaptureMCPResult(TypedDict):
+    artifact_id: str
+    source_path: str
+    snapshot_hash: str
+    acquisition_id: str
+    created: bool
+    acquisition_added: bool
+
+
 class CreateWikiProposalMCPResult(TypedDict):
     proposal_id: str
     proposal_path: str
