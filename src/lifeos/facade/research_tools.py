@@ -145,8 +145,8 @@ def create_research_wiki_proposal(
         raise ToolValidationError("Research synthesis source must be under raw/research/")
 
     try:
-        source_token = push_research_acquisition_id(request.acquisition_id)
         provenance_token = push_provenance_acquisition_id(request.acquisition_id)
+        source_token = push_research_acquisition_id(request.acquisition_id)
     except ValueError as exc:
         raise ToolValidationError("Research acquisition_id is invalid") from exc
 
@@ -164,8 +164,8 @@ def create_research_wiki_proposal(
             ),
         )
     finally:
-        reset_provenance_acquisition_id(provenance_token)
         reset_research_acquisition_id(source_token)
+        reset_provenance_acquisition_id(provenance_token)
 
     return ResearchWikiProposalResult(
         proposal_id=result.proposal_id,
