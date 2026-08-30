@@ -326,6 +326,10 @@ def test_repository_metadata_case_alias_is_excluded_by_inode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    metadata = tmp_path / ".git"
+    metadata.mkdir()
+    metadata_fd = recovery_readiness._open_metadata_directory(metadata)
+    assert metadata_fd is not None
     temporary = recovery_readiness.tempfile.TemporaryDirectory(prefix="lifeos-git-alias-test-")
     sandbox = recovery_readiness._GitMetadataSandbox(
         temporary,
@@ -337,13 +341,14 @@ def test_repository_metadata_case_alias_is_excluded_by_inode(
         "fingerprint",
         False,
         False,
+        metadata_fd=metadata_fd,
     )
-    state = SimpleNamespace(st_dev=17, st_ino=23)
+    state = os.fstat(metadata_fd)
     real_stat = recovery_readiness.os.stat
 
     def fake_stat(path: object, *args: object, **kwargs: object) -> object:
         spelling = os.fspath(path)
-        if spelling.endswith("/.git") or spelling.endswith("/.GIT"):
+        if spelling.endswith("/.GIT"):
             return state
         return real_stat(path, *args, **kwargs)
 
