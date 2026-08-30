@@ -971,7 +971,7 @@ class _RecoveryModuleProxy(types.ModuleType):
 
     def __setattr__(self, name: str, value: Any) -> None:
         super().__setattr__(name, value)
-        if hasattr(_base, name):
+        if not name.startswith("__") and hasattr(_base, name):
             setattr(_base, name, value)
 
 
