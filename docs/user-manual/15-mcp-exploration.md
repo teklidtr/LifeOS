@@ -147,25 +147,35 @@ not a command to create one proposal for every file. The preferred workflow is:
 ```text
 vault_list / vault_search
   ↓ discover eligible source paths in the requested area
-vault_read_many / vault_read_markdown
-  ↓ inspect the selected source snapshots
+vault_read_many
+  ↓ read selected evidence and retain each exact path + content_hash snapshot
 vault_context + wiki_search + relevant wiki reads
   ↓ understand context and existing durable knowledge
-external agent reasons over the sources together
+external agent reasons over the observed source versions together
   ↓ reconcile desired changes by target_path
- ingestion_evolve_wiki_batch_proposal
+ingestion_evolve_wiki_batch_proposal(source_snapshots=[...])
   ↓ one reviewed atomic draft, or no call when there is no durable delta
 ```
 
-The batch tool accepts an ordered set of distinct source paths and target-centric mutations. Each
-target mutation names only the selected source subset that actually grounds that target. Several
-exact sections of one human-owned Wiki file may therefore be reconciled into one file-level patch,
-and several selected sources may jointly ground one generated page without attaching unrelated
-batch sources to that page's provenance.
+For the selected **ingestion evidence**, use `vault_read_many` so the agent receives both the
+Markdown body and its current `content_hash`. The batch tool accepts an ordered set of those
+observed `{path, content_hash}` source snapshots plus target-centric mutations. It does not accept
+bare source paths and then decide which later source version the agent must have meant. A registry
+refresh may discover newer filesystem state, but it cannot silently advance the evidence version
+behind an already-synthesized candidate. If any current registered source no longer matches the
+hash the agent actually read, the entire draft is refused; the agent must reread that source and
+reason again from the new bytes.
+
+Each target mutation names only the selected source paths whose supplied snapshots actually
+ground that target. Several exact sections of one human-owned Wiki file may therefore be
+reconciled into one file-level patch, and several selected sources may jointly ground one
+generated page without attaching unrelated batch sources to that page's provenance. When a
+generated taxonomy change includes a tag rationale, the rationale remains visible in the
+review-digest-bound proposal instead of disappearing after input validation.
 
 The initial safety/workload limits are independent:
 
-- at most **64 distinct source paths** in one logical batch;
+- at most **64 distinct source snapshots** in one logical batch;
 - at most **32 distinct target operations** in the resulting proposal;
 - at most **2 MiB** for the serialized canonical `patches.json` plus immutable `review.json`
   payload.
@@ -176,11 +186,14 @@ stale-proposal conflict this workflow is designed to avoid. Narrow the source se
 later explicit batch instead.
 
 Every selected source is independently checked for containment, external retrieval policy,
-registration, current hash, safe readability, and runtime exclusion before publication. LifeOS
-re-verifies the selected sources immediately before persisting the draft. One invalid or changed
-source aborts the whole batch. Target application remains ordinary proposal application: if one
-reviewed target has become stale, preflight prevents partial publication of the other target
-operations.
+registration, safe readability, runtime exclusion, and exact observed hash before publication.
+`proposals/` and `conversations/` remain internal MCP ingestion-source scopes and are rejected in
+the same way as the existing source-scoped ingestion tools. LifeOS re-verifies the observed
+source snapshots immediately before persisting the draft. One invalid or changed source aborts
+the whole batch. A target that changes while its immutable review snapshot is being built is
+reported as a stale/conflicting batch rather than as an opaque internal error. Target application
+remains ordinary proposal application: if one reviewed target has become stale, preflight
+prevents partial publication of the other target operations.
 
 Zero durable changes is still a successful outcome. The agent should simply explain that the
 folder did not warrant a reusable knowledge change and create no proposal.
@@ -197,7 +210,7 @@ while page.truncated:
 search = vault_search(query="right of way")
 inspect search.diagnostics when present
   ↓
-vault_read_many(paths=[study hit, relevant wiki hit])
+observed = vault_read_many(paths=[study hit, relevant source hit])
   ↓
 links = vault_links(path="wiki/right-of-way.md", direction="both")
 inspect links.diagnostics when present
@@ -209,10 +222,22 @@ while links.truncated:
     )
   ↓
 vault_context(question="What matters for the exam?", focus_paths=[study hit])
+  ↓
+ingestion_evolve_wiki_batch_proposal(
+    source_snapshots=[
+        {"path": item.path, "content_hash": item.content_hash}
+        for item in observed.items
+        if item is selected evidence
+    ],
+    creates=[...],
+    updates=[...],
+)
 ```
 
-The agent can then search again, follow another reference, or stop. If it proposes a durable
-change, the normal proposal boundary applies.
+The agent can search again, follow another reference, or stop. If a selected source changed after
+`observed` was read, the batch call fails rather than attributing the old synthesis to the new
+bytes; reread and reconsider the evidence. If it proposes a durable change, the normal proposal
+boundary applies.
 
 ## 15.7 Local STDIO remains the runtime
 
