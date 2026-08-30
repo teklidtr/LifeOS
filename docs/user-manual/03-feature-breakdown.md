@@ -457,6 +457,30 @@ set. The returned map does not decide what matters next. The external agent owns
 that iterative choice. `registry_refresh` remains available as an explicit
 maintenance operation outside this normal ingestion loop.
 
+### External research-source capture
+
+When the relevant source is not yet in the vault, the agent can start with
+`research_query_context`. This composes the existing `vault_context` and
+`wiki_search` surfaces and explicitly persists nothing. If existing LifeOS
+knowledge is sufficient, the workflow ends with an answer and zero canonical
+writes.
+
+If the external agent identifies a material evidence gap, the agent performs the
+research using its own provider/environment and submits only selected evidence
+through `research_capture_evidence`. LifeOS does not browse the public web or run
+a crawler itself. The capture tool creates or reuses a deterministic,
+hash-bound `raw/research/` artifact containing source identity, snapshot hash,
+external authorship metadata, and acquisition lineage explaining why the source
+was collected. `captured_by` is not a caller-controlled MCP field; it comes from
+the trusted local or authenticated runtime actor.
+
+The returned `raw/research/...` path then enters the same ingestion flow shown
+above. Proposal-building ingestion performs its normal registry preflight and
+registered-source hash verification. If the captured evidence merely confirms
+knowledge already represented in the wiki, the agent may stop with zero
+proposals. Only a genuinely reusable durable delta should become an ordinary
+reviewed proposal. See [Evidence-Grounded Research](18-evidence-grounded-research.md).
+
 For a `study/` source, the agent may instead use
 `study_evolve_learning_proposal`. The same automatic registry preflight runs
 before source verification, and the atomic draft can contain wiki mutations plus
@@ -580,19 +604,24 @@ Three instruction layers stay separate:
   `vault_context` can route to the current question and focus paths.
 
 The preferred runtime surfaces include `registry_refresh`,
-`vault_read_markdown`, `vault_context`, `wiki_search`,
-`ingestion_evolve_wiki_proposal`, `study_evolve_learning_proposal`, and the
-explicit proposal lifecycle tools. `vault_context(question, focus_paths, limit)`
-remains provider-neutral: the caller does not supply an embedding provider or
-vector-store setting. Its source payload may add retrieval-mode/reason/ranking
-metadata while preserving the same tool name and bounded request shape.
-`registry_refresh` is available for explicit maintenance, while proposal-building
-ingestion performs its own automatic preflight refresh. `runtime_activity` is a
-read-only diagnostic surface that reports recent MCP routing metadata such as tool
-names, paths, instruction IDs, proposal IDs, and changed paths without copying
-canonical note bodies or flashcard answers into the activity log. This makes
-“what did the MCP server do?” inspectable without coupling a client to `.lifeos/`'s
-internal file format.
+`vault_read_markdown`, `vault_context`, `wiki_search`, `research_query_context`,
+`research_capture_evidence`, `ingestion_evolve_wiki_proposal`,
+`study_evolve_learning_proposal`, and the explicit proposal lifecycle tools.
+`research_query_context` is a zero-write composition of existing context and wiki
+search; `research_capture_evidence` is the narrow canonical exception that may
+create/reuse a hash-bound external-evidence source in `raw/`. It does not expose
+generic vault mutation or accept a spoofable capture actor.
+
+`vault_context(question, focus_paths, limit)` remains provider-neutral: the caller
+does not supply an embedding provider or vector-store setting. Its source payload
+may add retrieval-mode/reason/ranking metadata while preserving the same tool name
+and bounded request shape. `registry_refresh` is available for explicit
+maintenance, while proposal-building ingestion performs its own automatic
+preflight refresh. `runtime_activity` is a read-only diagnostic surface that
+reports recent MCP routing metadata such as tool names, paths, instruction IDs,
+proposal IDs, and changed paths without copying canonical note bodies or
+flashcard answers into the activity log. This makes “what did the MCP server do?”
+inspectable without coupling a client to `.lifeos/`'s internal file format.
 
 All ingestion paths stop at the resulting draft unless the user separately asks
 for submission, approval, or application. Orphaned ownership, generator mismatch,
@@ -691,8 +720,11 @@ reviewed conversation outcomes. Missing providers degrade to local retrieval, an
 removing `.lifeos/retrieval/` triggers a rebuild rather than knowledge loss.
 Context Packs add focus-path precedence and instruction routing on top of these
 retrieval contracts, while `wiki_search` remains an explicit lexical exploration
-primitive. See
-[Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md).
+primitive. Research queries reuse these same retrieval surfaces rather than
+creating another RAG engine; external evidence enters through the separate
+hash-bound `raw/research/` capture boundary before it can ground a durable
+proposal. See [Semantic Retrieval and Knowledge Conversations](11-semantic-retrieval-and-knowledge-conversations.md)
+and [Evidence-Grounded Research](18-evidence-grounded-research.md).
 
 
 ## 3.17 Personal experiments
