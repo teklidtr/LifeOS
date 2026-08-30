@@ -328,7 +328,7 @@ def _metadata_fingerprint(
     *,
     object_state: os.stat_result | None = None,
 ) -> str:
-    sandbox = _impl._ACTIVE_SANDBOX.get()
+    sandbox = cast(Any, _impl._ACTIVE_SANDBOX.get())
     if sandbox is not None and getattr(sandbox, "metadata_fd", None) is not None:
         metadata_fd = sandbox.metadata_fd
         metadata_fd_path = sandbox.metadata_fd_path
@@ -520,7 +520,7 @@ def _sandbox_pass_fds() -> tuple[int, ...]:
 
 
 def _selects_repository_metadata(path: str) -> bool:
-    sandbox = _impl._ACTIVE_SANDBOX.get()
+    sandbox = cast(Any, _impl._ACTIVE_SANDBOX.get())
     if sandbox is None or getattr(sandbox, "metadata_fd", None) is None:
         return False
     pure = PurePosixPath(path)
