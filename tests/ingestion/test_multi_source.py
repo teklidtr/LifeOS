@@ -72,7 +72,7 @@ def test_three_source_sections_become_one_human_patch() -> None:
 
     assert len(patch["operations"]) == 1
     operation = patch["operations"][0]
-    assert operation["type"] == "patch_human_file"
+    assert operation["op"] == "patch_human_file"
     assert operation["target_path"] == "wiki/topic.md"
     assert "new one" in operation["unified_diff"]
     assert "new two" in operation["unified_diff"]
@@ -116,7 +116,7 @@ def test_generated_update_accumulates_only_target_grounding_sources() -> None:
     parsed = parse_markdown_note(Path("wiki/generated-topic.md"), content=operation["new_content"])
     result = extract_provenance(parsed.frontmatter)
 
-    assert operation["type"] == "replace_generated_file"
+    assert operation["op"] == "replace_generated_file"
     assert result is not None
     assert [(item.path, item.content_hash) for item in result.sources] == [
         (prior.path, prior.content_hash),
