@@ -88,7 +88,6 @@ def _base_original(name: str) -> Any:
 
 
 _ORIGINAL_SCOPE_FILTER = _base_original("_scope_filter")
-_ORIGINAL_HIDDEN_INDEX_STATE = _base_original("_hidden_index_state")
 _ORIGINAL_WORKING_TREE_SNAPSHOT = _base_original("_working_tree_snapshot")
 _ORIGINAL_BUILD_REPORT = _base_original("_build_report")
 _ORIGINAL_LATEST_COMMIT = _base_original("_latest_commit")
@@ -573,19 +572,21 @@ def _hidden_scope_pathspecs(
 def _hidden_index_state(git: str, root: Path, context: Any, scope: Any) -> tuple[bool, ...]:
     state: list[bool] = []
     for relative in _base._policy_denied_prefixes(scope):
-        state.append(
-            _run_git_presence(
-                git,
-                cwd=root,
-                arguments=(
-                    "--no-literal-pathspecs",
-                    "ls-files",
-                    "--error-unmatch",
-                    "--",
-                    *_hidden_scope_pathspecs(relative, context.prefix, scope),
-                ),
-            )
+        result = _run_git(
+            git,
+            cwd=root,
+            arguments=(
+                "--no-literal-pathspecs",
+                "ls-files",
+                "-z",
+                "--format=%(objectname)",
+                "--",
+                *_hidden_scope_pathspecs(relative, context.prefix, scope),
+            ),
         )
+        if result.stderr.strip():
+            raise _base.RecoveryGitError("Git hidden-index query reported incomplete results")
+        state.append(bool(result.stdout))
     return tuple(state)
 
 
