@@ -6,7 +6,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal, NoReturn
+from typing import Callable, Literal, NoReturn, cast
 
 from lifeos.facade.errors import (
     ToolConflictError,
@@ -412,8 +412,9 @@ def evolve_wiki_batch_proposal(
         if tuple(item.source for item in final_verified) != tuple(item.source for item in verified):
             raise ToolConflictError("A registered batch source changed before proposal publication")
 
+    persist_batch = cast(Callable[..., Path], persist_compounding_wiki_proposal)
     try:
-        persisted = persist_compounding_wiki_proposal(
+        persisted = persist_batch(
             proposals_root=vault_root / "proposals",
             documents=documents,
             runtime_dir=runtime_dir,
