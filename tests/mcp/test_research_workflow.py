@@ -1,6 +1,9 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
+
 from lifeos.bootstrap import initialize_vault
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.mcp.runtime_server import create_mcp_server
@@ -45,6 +48,7 @@ def test_research_tool_schemas_preserve_read_write_and_actor_boundaries(tmp_path
 
     query = tools["research_query_context"]
     capture = tools["research_capture_evidence"]
+    proposal = tools["research_create_wiki_proposal"]
 
     assert query.annotations.readOnlyHint is True
     assert query.annotations.destructiveHint is False
@@ -68,6 +72,20 @@ def test_research_tool_schemas_preserve_read_write_and_actor_boundaries(tmp_path
     }
     assert "captured_by" not in capture.parameters["properties"]
     assert capture.parameters["additionalProperties"] is False
+
+    assert proposal.annotations.readOnlyHint is False
+    assert proposal.annotations.destructiveHint is False
+    assert proposal.annotations.idempotentHint is False
+    assert set(proposal.parameters["properties"]) == {
+        "source_path",
+        "acquisition_id",
+        "target_path",
+        "title",
+        "body",
+        "tags",
+        "tag_rationale",
+    }
+    assert proposal.parameters["additionalProperties"] is False
 
 
 def test_research_query_context_uses_external_scope_and_configured_runtime(tmp_path: Path) -> None:
@@ -192,21 +210,56 @@ def test_no_durable_novelty_can_finish_after_capture_without_proposal(tmp_path: 
     assert _vault_files(vault_root, "proposals") == proposals_before
 
 
-def test_captured_research_source_enters_normal_ingestion_provenance(tmp_path: Path) -> None:
+def test_generic_ingestion_cannot_choose_research_acquisition_implicitly(tmp_path: Path) -> None:
     vault_root, _registry, server = _server(tmp_path)
     capture = server._tool_manager.get_tool("research_capture_evidence").fn(
+        evidence_text="Research evidence requiring explicit lineage selection.",
+        source_title="Explicit lineage source",
+        source_locator="https://example.test/explicit-lineage",
+        research_reason="A material evidence gap requires this source.",
+    )
+
+    with pytest.raises(ToolError):
+        server._tool_manager.get_tool("ingestion_create_wiki_proposal").fn(
+            source_path=capture["source_path"],
+            target_path="wiki/research/implicit.md",
+            title="Implicit research proposal",
+            body="This path must not be accepted without an acquisition selection.",
+        )
+
+    assert not (vault_root / "wiki" / "research" / "implicit.md").exists()
+
+
+def test_research_synthesis_binds_selected_acquisition_into_provenance(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    capture_tool = server._tool_manager.get_tool("research_capture_evidence")
+    first = capture_tool.fn(
         evidence_text="A reusable external comparison that is not yet represented.",
         source_title="Comparison source",
         source_locator="https://example.test/comparison",
         source_author="External Researcher",
-        research_reason="The query needs a reusable comparison absent from the vault.",
+        research_reason="The first query needs a comparison absent from the vault.",
         origin_kind="conversation",
         origin_ref="conv-20260830T154000Z-abcd1234#turn-003",
-        research_context="Agent judged the comparison durable after checking existing wiki knowledge.",
+        research_context="Agent selected the comparison after checking existing wiki knowledge.",
+    )
+    second = capture_tool.fn(
+        evidence_text="A reusable external comparison that is not yet represented.",
+        source_title="Comparison source",
+        source_locator="https://example.test/comparison",
+        source_author="External Researcher",
+        research_reason="A later query reuses the same snapshot for a different durable synthesis.",
+        origin_kind="query",
+        origin_ref="query:comparison-2",
+        research_context="The same evidence closes a separate material gap.",
     )
 
-    proposal = server._tool_manager.get_tool("ingestion_create_wiki_proposal").fn(
-        source_path=capture["source_path"],
+    assert first["source_path"] == second["source_path"]
+    assert first["acquisition_id"] != second["acquisition_id"]
+
+    proposal = server._tool_manager.get_tool("research_create_wiki_proposal").fn(
+        source_path=second["source_path"],
+        acquisition_id=second["acquisition_id"],
         target_path="wiki/research/comparison.md",
         title="Research comparison",
         body="A reusable comparison grounded in the captured external evidence.",
@@ -221,23 +274,76 @@ def test_captured_research_source_enters_normal_ingestion_provenance(tmp_path: P
     assert operation.op == "create_generated_file"
     parsed = parse_markdown_note(Path(operation.target_path), content=operation.new_content)
     provenance = parsed.frontmatter["lifeos_provenance"]["sources"][0]
-    source_bytes = (vault_root / capture["source_path"]).read_bytes()
-    raw_artifact = ResearchEvidenceService(vault_root=vault_root).load(capture["source_path"])
+    source_bytes = (vault_root / second["source_path"]).read_bytes()
+    raw_artifact = ResearchEvidenceService(vault_root=vault_root).load(second["source_path"])
 
-    assert provenance["path"] == capture["source_path"]
+    assert provenance["path"] == second["source_path"]
     assert provenance["content_hash"] == f"sha256:{hash_file_content(source_bytes)}"
-    assert raw_artifact.metadata.snapshot_hash == capture["snapshot_hash"]
-    assert raw_artifact.metadata.acquisitions[0].origin_ref == (
-        "conv-20260830T154000Z-abcd1234#turn-003"
+    assert provenance["acquisition_id"] == second["acquisition_id"]
+    assert raw_artifact.metadata.snapshot_hash == second["snapshot_hash"]
+    selected = next(
+        item
+        for item in raw_artifact.metadata.acquisitions
+        if item.acquisition_id == second["acquisition_id"]
     )
+    assert selected.origin_ref == "query:comparison-2"
     assert not (vault_root / "wiki" / "research" / "comparison.md").exists()
 
     activity = server._tool_manager.get_tool("runtime_activity").fn(limit=10)["records"]
-    ingestion_index = next(
+    proposal_index = next(
         index
         for index, record in enumerate(activity)
-        if record["tool"] == "ingestion_create_wiki_proposal"
+        if record["tool"] == "research_create_wiki_proposal"
     )
-    preflight = activity[ingestion_index - 1]
+    preflight = activity[proposal_index - 1]
     assert preflight["tool"] == "ingestion_registry_preflight"
-    assert preflight["source_paths"] == [capture["source_path"]]
+    assert preflight["source_paths"] == [second["source_path"]]
+
+
+def test_research_synthesis_rejects_unknown_acquisition(tmp_path: Path) -> None:
+    _vault_root, _registry, server = _server(tmp_path)
+    capture = server._tool_manager.get_tool("research_capture_evidence").fn(
+        evidence_text="Selected evidence.",
+        source_title="Selected source",
+        source_locator="https://example.test/selected",
+        research_reason="The query needs this source.",
+    )
+
+    with pytest.raises(ToolError):
+        server._tool_manager.get_tool("research_create_wiki_proposal").fn(
+            source_path=capture["source_path"],
+            acquisition_id="acq-000000000000000000000000",
+            target_path="wiki/research/wrong-acquisition.md",
+            title="Wrong acquisition",
+            body="This proposal must not be created.",
+        )
+
+
+def test_research_synthesis_revalidates_snapshot_after_registry_refresh(tmp_path: Path) -> None:
+    vault_root, _registry, server = _server(tmp_path)
+    capture = server._tool_manager.get_tool("research_capture_evidence").fn(
+        evidence_text="Original immutable evidence.",
+        source_title="Immutable source",
+        source_locator="https://example.test/immutable",
+        research_reason="The query needs immutable external evidence.",
+    )
+    source = vault_root / capture["source_path"]
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "Original immutable evidence.",
+            "Tampered evidence after capture.",
+        ),
+        encoding="utf-8",
+    )
+    proposals_before = _vault_files(vault_root, "proposals")
+
+    with pytest.raises(ToolError):
+        server._tool_manager.get_tool("research_create_wiki_proposal").fn(
+            source_path=capture["source_path"],
+            acquisition_id=capture["acquisition_id"],
+            target_path="wiki/research/tampered.md",
+            title="Tampered evidence",
+            body="This proposal must not be created.",
+        )
+
+    assert _vault_files(vault_root, "proposals") == proposals_before
