@@ -1045,15 +1045,19 @@ def _worktree_from_snapshot(
     safe_candidates = tuple(
         path for path in untracked_candidates if _ignore_sources_authorized(path, excluded)
     )
-    ignored = _ORIGINAL_IGNORED_PATHS(
-        git,
-        sandbox.root,
-        safe_candidates,
-        prefix,
-        excluded,
-        case_insensitive_prefix=case_insensitive_prefix,
+    ignored = (
+        _base._ignored_paths(
+            git,
+            sandbox.root,
+            safe_candidates,
+            prefix,
+            excluded,
+            case_insensitive_prefix=case_insensitive_prefix,
+        )
+        if safe_candidates
+        else ()
     )
-    untracked = tuple(sorted(set(safe_candidates) - set(ignored)))
+    untracked = tuple(sorted(set(untracked_candidates) - set(ignored)))
     _ACTIVE_VISIBLE_IGNORE_CLASSIFICATION.set(
         _VisibleIgnoreClassification(untracked=untracked, ignored=ignored)
     )
