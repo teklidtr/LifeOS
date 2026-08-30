@@ -187,6 +187,56 @@ def test_source_change_before_publication_aborts_whole_batch(
     assert list((vault_root / "proposals").iterdir()) == []
 
 
+def test_source_change_after_identity_binding_aborts_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    (vault_root / "wiki").mkdir()
+    (vault_root / "proposals").mkdir()
+    _write_ownership(vault_root)
+    sources = ("notes/source.md",)
+    registry = _register_sources(vault_root, tmp_path, sources)
+    source = vault_root / sources[0]
+    request = EvolveWikiBatchProposalRequest(
+        source_snapshots=_observed_snapshots(vault_root, sources),
+        creates=(
+            BatchWikiCreateRequest(
+                target_path="wiki/result.md",
+                title="Result",
+                body="Candidate from the observed source.",
+                rationale="Exercise the final publication source check.",
+                source_paths=sources,
+            ),
+        ),
+    )
+    original_persist = batch_module.persist_compounding_wiki_proposal
+
+    def mutate_at_before_publish(**kwargs: object):
+        before_publish = kwargs.get("before_publish")
+        assert callable(before_publish)
+
+        def mutate_then_verify() -> None:
+            source.write_text("Changed during stable-identity binding.\n", encoding="utf-8")
+            before_publish()
+
+        kwargs["before_publish"] = mutate_then_verify
+        return original_persist(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        batch_module, "persist_compounding_wiki_proposal", mutate_at_before_publish
+    )
+
+    with pytest.raises(ToolConflictError, match="Registered source has changed"):
+        evolve_wiki_batch_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=request,
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
+
+
 def test_target_change_before_review_snapshot_maps_to_conflict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -219,6 +269,54 @@ def test_target_change_before_review_snapshot_maps_to_conflict(
         return documents
 
     monkeypatch.setattr(batch_module, "build_multi_source_wiki_proposal", mutate_target_after_build)
+
+    with pytest.raises(ToolConflictError, match="batch target changed"):
+        evolve_wiki_batch_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=request,
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
+
+
+def test_stable_identity_binding_stale_target_maps_to_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    (vault_root / "wiki").mkdir()
+    (vault_root / "proposals").mkdir()
+    _write_ownership(vault_root)
+    sources = ("notes/source.md",)
+    registry = _register_sources(vault_root, tmp_path, sources)
+    target = vault_root / "wiki" / "topic.md"
+    original = "---\nid: topic-stable\ntitle: Topic\n---\n# Topic\n\n## Evidence\nold\n"
+    target.write_text(original, encoding="utf-8")
+    request = EvolveWikiBatchProposalRequest(
+        source_snapshots=_observed_snapshots(vault_root, sources),
+        updates=(
+            BatchWikiUpdateRequest(
+                target_path="wiki/topic.md",
+                sections=(BatchWikiSectionRequest(heading="Evidence", body="new"),),
+                rationale="Exercise stable-identity stale target mapping.",
+                source_paths=sources,
+            ),
+        ),
+    )
+    original_persist = batch_module.persist_compounding_wiki_proposal
+
+    def mutate_before_identity_binding(**kwargs: object):
+        target.write_text(
+            "---\nid: topic-stable\ntitle: Topic\n---\n"
+            "# Topic\n\n## Evidence\nchanged elsewhere\n",
+            encoding="utf-8",
+        )
+        return original_persist(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        batch_module, "persist_compounding_wiki_proposal", mutate_before_identity_binding
+    )
 
     with pytest.raises(ToolConflictError, match="batch target changed"):
         evolve_wiki_batch_proposal(
