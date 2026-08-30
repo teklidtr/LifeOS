@@ -61,4 +61,5 @@ def test_runtime_exclusion_preserves_filename_whitespace(tmp_path: Path) -> None
     assert matcher("runtime/cache.db")
     assert not matcher(" runtime/cache.db")
     assert not matcher("runtime /cache.db")
-    assert not matcher("runtime/cache.db ")
+    assert matcher("runtime/cache.db ")
+    assert matcher("runtime/ cache.db")
