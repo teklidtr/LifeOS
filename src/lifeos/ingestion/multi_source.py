@@ -77,6 +77,7 @@ class PreparedBatchUpdateMutation:
     sources: tuple[SourceSnapshot, ...]
     expected_generator_id: str | None = None
     proposed_tags: tuple[str, ...] | None = None
+    tag_rationale: str | None = None
 
 
 PreparedBatchMutation = PreparedBatchCreateMutation | PreparedBatchUpdateMutation
@@ -265,6 +266,8 @@ def build_multi_source_wiki_proposal(
             )
             create_target_paths.append(norm_target)
             item["kind"] = "create"
+            if mutation.content.tag_rationale is not None:
+                item["tag_rationale"] = mutation.content.tag_rationale
         else:
             candidate = _build_update_candidate(mutation)
             if mutation.expected_generator_id is not None:
@@ -308,6 +311,8 @@ def build_multi_source_wiki_proposal(
                 )
             item["kind"] = "update_sections"
             item["headings"] = [section.heading for section in mutation.sections]
+            if mutation.tag_rationale is not None:
+                item["tag_rationale"] = mutation.tag_rationale
         grounding.append(item)
 
     document = PatchDocumentV2(
@@ -364,6 +369,9 @@ def build_multi_source_wiki_proposal(
         lines.append(
             f"{index}. `{item['target_path']}`{detail} from {source_list}: {item['rationale']}"
         )
+        tag_rationale = cast(str | None, item.get("tag_rationale"))
+        if tag_rationale is not None:
+            lines.append(f"   Tag rationale: {tag_rationale}")
     lines.extend(
         [
             "",
