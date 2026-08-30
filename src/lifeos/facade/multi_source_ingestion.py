@@ -6,7 +6,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Literal, NoReturn
 
 from lifeos.facade.errors import (
     ToolConflictError,
@@ -38,6 +38,7 @@ from lifeos.ingestion.multi_source import (
     build_multi_source_wiki_proposal,
     enforce_multi_source_payload_budget,
 )
+from lifeos.ingestion.orchestration import VerifiedRegisteredSource
 from lifeos.ingestion.proposals import (
     InvalidWikiSectionError,
     InvalidWikiTargetError,
@@ -118,7 +119,6 @@ class BatchWikiCreateRequest:
         object.__setattr__(self, "rationale", _validate_mutation_rationale(self.rationale))
         if not self.source_paths or len(set(self.source_paths)) != len(self.source_paths):
             raise ValueError("source_paths must contain distinct grounding sources")
-        # Reuse established tag validation through the compatibility request.
         from lifeos.facade.proposal_tools import CreateWikiProposalRequest
 
         validated = CreateWikiProposalRequest(
@@ -234,8 +234,8 @@ def _load_observed_sources(
     vault_root: Path,
     registry: Registry,
     expected: tuple[BatchSourceSnapshotRequest, ...],
-) -> tuple[object, ...]:
-    verified = []
+) -> tuple[VerifiedRegisteredSource, ...]:
+    verified: list[VerifiedRegisteredSource] = []
     for snapshot in expected:
         item = _load_verified_source(
             vault_root=vault_root,
@@ -292,7 +292,7 @@ def _read_update_target(
     )
 
 
-def _map_review_snapshot_error(error: ReviewSnapshotError) -> None:
+def _map_review_snapshot_error(error: ReviewSnapshotError) -> NoReturn:
     if error.code == "stale_base_hash":
         raise ToolConflictError("A batch target changed before proposal publication") from error
     raise ToolExecutionError("Could not build multi-source review snapshot") from error
@@ -391,15 +391,11 @@ def evolve_wiki_batch_proposal(
         )
     except ReviewSnapshotError as error:
         _map_review_snapshot_error(error)
-        raise AssertionError("unreachable")
     except (InvalidWikiSectionError, InvalidWikiTargetError, MultiSourcePayloadError) as error:
         raise ToolValidationError(str(error)) from error
     except WikiSectionUnchangedError as error:
         raise ToolConflictError("A batch target already has the proposed content") from error
 
-    # Re-read every selected source immediately before durable publication. The expected hashes
-    # remain the exploration-time snapshots supplied by the caller; registry refresh must never
-    # silently advance the evidence version that grounds the reviewed proposal.
     final_verified = _load_observed_sources(
         vault_root=vault_root,
         registry=registry,
@@ -416,7 +412,6 @@ def evolve_wiki_batch_proposal(
         )
     except ReviewSnapshotError as error:
         _map_review_snapshot_error(error)
-        raise AssertionError("unreachable")
     except WikiTargetExistsError as error:
         raise ToolConflictError("A proposed batch create target already exists") from error
     except ProposalAlreadyExistsError as error:
