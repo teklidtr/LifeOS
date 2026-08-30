@@ -139,7 +139,53 @@ applied
 
 Broad exploration therefore does not make the agent autonomous over canonical data.
 
-## 15.5 Example crawl
+## 15.5 Folder and multi-source ingestion
+
+When you ask an MCP-connected agent to ingest a folder, the folder is the **exploration scope**,
+not a command to create one proposal for every file. The preferred workflow is:
+
+```text
+vault_list / vault_search
+  ↓ discover eligible source paths in the requested area
+vault_read_many / vault_read_markdown
+  ↓ inspect the selected source snapshots
+vault_context + wiki_search + relevant wiki reads
+  ↓ understand context and existing durable knowledge
+external agent reasons over the sources together
+  ↓ reconcile desired changes by target_path
+ ingestion_evolve_wiki_batch_proposal
+  ↓ one reviewed atomic draft, or no call when there is no durable delta
+```
+
+The batch tool accepts an ordered set of distinct source paths and target-centric mutations. Each
+target mutation names only the selected source subset that actually grounds that target. Several
+exact sections of one human-owned Wiki file may therefore be reconciled into one file-level patch,
+and several selected sources may jointly ground one generated page without attaching unrelated
+batch sources to that page's provenance.
+
+The initial safety/workload limits are independent:
+
+- at most **64 distinct source paths** in one logical batch;
+- at most **32 distinct target operations** in the resulting proposal;
+- at most **2 MiB** for the serialized canonical `patches.json` plus immutable `review.json`
+  payload.
+
+Crossing any limit refuses the batch. LifeOS does **not** silently split an oversized folder into
+several proposals, because independent drafts that overlap the same target would recreate the
+stale-proposal conflict this workflow is designed to avoid. Narrow the source selection or make a
+later explicit batch instead.
+
+Every selected source is independently checked for containment, external retrieval policy,
+registration, current hash, safe readability, and runtime exclusion before publication. LifeOS
+re-verifies the selected sources immediately before persisting the draft. One invalid or changed
+source aborts the whole batch. Target application remains ordinary proposal application: if one
+reviewed target has become stale, preflight prevents partial publication of the other target
+operations.
+
+Zero durable changes is still a successful outcome. The agent should simply explain that the
+folder did not warrant a reusable knowledge change and create no proposal.
+
+## 15.6 Example crawl
 
 For a question about driving-licence study material, an MCP-connected agent might:
 
@@ -168,7 +214,7 @@ vault_context(question="What matters for the exam?", focus_paths=[study hit])
 The agent can then search again, follow another reference, or stop. If it proposes a durable
 change, the normal proposal boundary applies.
 
-## 15.6 Local STDIO remains the runtime
+## 15.7 Local STDIO remains the runtime
 
 This feature expands the capability surface, not the transport boundary. The supported MCP
 runtime remains the local STDIO server configured for a specific vault and trusted actor. A
