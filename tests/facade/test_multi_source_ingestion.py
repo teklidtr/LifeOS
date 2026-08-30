@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,7 +9,10 @@ from lifeos.facade.errors import ToolConflictError, ToolValidationError
 from lifeos.facade.models import ToolEffect
 from lifeos.facade.multi_source_ingestion import (
     EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR,
+    BatchSourceSnapshotRequest,
     BatchWikiCreateRequest,
+    BatchWikiSectionRequest,
+    BatchWikiUpdateRequest,
     EvolveWikiBatchProposalRequest,
     evolve_wiki_batch_proposal,
 )
@@ -40,15 +44,33 @@ def _register_sources(vault_root: Path, tmp_path: Path, paths: tuple[str, ...]) 
     return registry
 
 
+def _observed_snapshots(
+    vault_root: Path, paths: tuple[str, ...]
+) -> tuple[BatchSourceSnapshotRequest, ...]:
+    return tuple(
+        BatchSourceSnapshotRequest(
+            path=path,
+            content_hash=f"sha256:{hashlib.sha256((vault_root / path).read_bytes()).hexdigest()}",
+        )
+        for path in paths
+    )
+
+
 def test_batch_descriptor_is_proposal_producing() -> None:
     assert EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR.name == "ingestion.evolve_wiki_batch_proposal"
     assert EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
 
 
 def test_batch_request_refuses_more_than_64_sources_without_fanout() -> None:
-    with pytest.raises(ValueError, match="1..64 source paths"):
+    with pytest.raises(ValueError, match="1..64 source snapshots"):
         EvolveWikiBatchProposalRequest(
-            source_paths=tuple(f"notes/source-{index}.md" for index in range(65)),
+            source_snapshots=tuple(
+                BatchSourceSnapshotRequest(
+                    path=f"notes/source-{index}.md",
+                    content_hash=f"sha256:{index:064x}",
+                )
+                for index in range(65)
+            ),
             creates=(
                 BatchWikiCreateRequest(
                     target_path="wiki/result.md",
@@ -64,7 +86,12 @@ def test_batch_request_refuses_more_than_64_sources_without_fanout() -> None:
 def test_batch_request_refuses_more_than_32_targets_without_fanout() -> None:
     with pytest.raises(ValueError, match="1..32 targets"):
         EvolveWikiBatchProposalRequest(
-            source_paths=("notes/source.md",),
+            source_snapshots=(
+                BatchSourceSnapshotRequest(
+                    path="notes/source.md",
+                    content_hash="sha256:" + "1" * 64,
+                ),
+            ),
             creates=tuple(
                 BatchWikiCreateRequest(
                     target_path=f"wiki/result-{index}.md",
@@ -78,6 +105,46 @@ def test_batch_request_refuses_more_than_32_targets_without_fanout() -> None:
         )
 
 
+def test_exploration_time_source_hash_mismatch_aborts_before_draft(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    (vault_root / "wiki").mkdir()
+    (vault_root / "proposals").mkdir()
+    _write_ownership(vault_root)
+    sources = ("notes/source.md",)
+    registry = _register_sources(vault_root, tmp_path, sources)
+    observed = _observed_snapshots(vault_root, sources)
+
+    source = vault_root / sources[0]
+    source.write_text("Changed after the agent read the old version.\n", encoding="utf-8")
+    register_scan(
+        registry,
+        vault_root,
+        [VaultFile(Path(sources[0]), ".md", source.stat().st_size)],
+    )
+    request = EvolveWikiBatchProposalRequest(
+        source_snapshots=observed,
+        creates=(
+            BatchWikiCreateRequest(
+                target_path="wiki/result.md",
+                title="Result",
+                body="Candidate synthesized from the old source bytes.",
+                rationale="Exercise exploration-time evidence binding.",
+                source_paths=sources,
+            ),
+        ),
+    )
+
+    with pytest.raises(ToolConflictError, match="version read during exploration"):
+        evolve_wiki_batch_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=request,
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
+
+
 def test_source_change_before_publication_aborts_whole_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -89,7 +156,7 @@ def test_source_change_before_publication_aborts_whole_batch(
     sources = ("notes/a.md", "notes/b.md")
     registry = _register_sources(vault_root, tmp_path, sources)
     request = EvolveWikiBatchProposalRequest(
-        source_paths=sources,
+        source_snapshots=_observed_snapshots(vault_root, sources),
         creates=(
             BatchWikiCreateRequest(
                 target_path="wiki/result.md",
@@ -120,6 +187,49 @@ def test_source_change_before_publication_aborts_whole_batch(
     assert list((vault_root / "proposals").iterdir()) == []
 
 
+def test_target_change_before_review_snapshot_maps_to_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    (vault_root / "wiki").mkdir()
+    (vault_root / "proposals").mkdir()
+    _write_ownership(vault_root)
+    sources = ("notes/source.md",)
+    registry = _register_sources(vault_root, tmp_path, sources)
+    target = vault_root / "wiki" / "topic.md"
+    target.write_text("# Topic\n\n## Evidence\nold\n", encoding="utf-8")
+    request = EvolveWikiBatchProposalRequest(
+        source_snapshots=_observed_snapshots(vault_root, sources),
+        updates=(
+            BatchWikiUpdateRequest(
+                target_path="wiki/topic.md",
+                sections=(BatchWikiSectionRequest(heading="Evidence", body="new"),),
+                rationale="Exercise stale review snapshot mapping.",
+                source_paths=sources,
+            ),
+        ),
+    )
+
+    original_builder = batch_module.build_multi_source_wiki_proposal
+
+    def mutate_target_after_build(**kwargs: object):
+        documents = original_builder(**kwargs)  # type: ignore[arg-type]
+        target.write_text("# Topic\n\n## Evidence\nchanged elsewhere\n", encoding="utf-8")
+        return documents
+
+    monkeypatch.setattr(batch_module, "build_multi_source_wiki_proposal", mutate_target_after_build)
+
+    with pytest.raises(ToolConflictError, match="batch target changed"):
+        evolve_wiki_batch_proposal(
+            vault_root=vault_root,
+            registry=registry,
+            request=request,
+        )
+
+    assert list((vault_root / "proposals").iterdir()) == []
+
+
 def test_oversized_payload_fails_before_draft_persistence(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
     vault_root.mkdir()
@@ -129,7 +239,7 @@ def test_oversized_payload_fails_before_draft_persistence(tmp_path: Path) -> Non
     sources = ("notes/source.md",)
     registry = _register_sources(vault_root, tmp_path, sources)
     request = EvolveWikiBatchProposalRequest(
-        source_paths=sources,
+        source_snapshots=_observed_snapshots(vault_root, sources),
         creates=(
             BatchWikiCreateRequest(
                 target_path="wiki/oversized.md",
