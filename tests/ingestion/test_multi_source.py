@@ -130,6 +130,7 @@ def test_generated_update_accumulates_only_target_grounding_sources() -> None:
             "lifeos_provenance": provenance_to_frontmatter_value(provenance),
         }
     ) + "# Generated Topic\n\n## Evidence\nold\n"
+    tag_rationale = "Preserve the reviewed taxonomy justification for this generated update."
     mutation = PreparedBatchUpdateMutation(
         target_path="wiki/generated-topic.md",
         target_content=original,
@@ -138,6 +139,8 @@ def test_generated_update_accumulates_only_target_grounding_sources() -> None:
         rationale="Merge the two sources that support this target.",
         sources=relevant,
         expected_generator_id=GENERATOR.id,
+        proposed_tags=("grounded",),
+        tag_rationale=tag_rationale,
     )
 
     documents = build_multi_source_wiki_proposal(
@@ -150,6 +153,7 @@ def test_generated_update_accumulates_only_target_grounding_sources() -> None:
     operation = json.loads(documents.patches_json)["operations"][0]
     parsed = parse_markdown_note(Path("wiki/generated-topic.md"), content=operation["new_content"])
     result = extract_provenance(parsed.frontmatter)
+    proposal = documents.proposal_markdown.decode("utf-8")
 
     assert operation["op"] == "replace_generated_file"
     assert result is not None
@@ -159,6 +163,9 @@ def test_generated_update_accumulates_only_target_grounding_sources() -> None:
         (relevant[1].path, relevant[1].content_hash),
     ]
     assert unrelated.path not in {item.path for item in result.sources}
+    assert parsed.frontmatter["tags"] == ["grounded"]
+    assert f"tag_rationale: {tag_rationale}" in proposal
+    assert f"Tag rationale: {tag_rationale}" in proposal
 
 
 def test_distinct_targets_keep_distinct_source_subsets_in_review_metadata() -> None:
