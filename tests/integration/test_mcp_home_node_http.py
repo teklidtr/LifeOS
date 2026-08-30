@@ -74,6 +74,7 @@ async def test_remote_http_client_explores_and_submits_without_local_vault(
                 assert "proposal_submit" in tool_names
                 assert "proposal_approve" not in tool_names
                 assert "proposal_apply" not in tool_names
+                assert "ingestion_evolve_wiki_batch_proposal" in tool_names
 
                 listing = await session.call_tool("vault_list", arguments={"prefix": "raw"})
                 assert not listing.isError
