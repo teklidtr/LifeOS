@@ -26,13 +26,15 @@ user query
        -> canonical raw/research snapshot
        -> server-authoritative capture actor
        -> acquisition reason/query or conversation lineage
-  -> existing ingestion proposal tool
-       -> registry preflight
-       -> registered-source hash verification
-       -> existing proposal provenance/ownership/stale-target rules
   -> external agent judges durable novelty
        -> no reusable delta: zero proposal
-       -> reusable delta: reviewed draft proposal
+       -> reusable delta:
+            research_create_wiki_proposal
+              -> exact source_path + acquisition_id selection
+              -> normal registry preflight
+              -> research artifact revalidation
+              -> existing proposal provenance/ownership/stale-target rules
+              -> reviewed draft proposal
   -> normal explicit proposal lifecycle
 ```
 
@@ -50,16 +52,17 @@ The external agent owns semantic decisions:
 - which external source passages are worth capturing;
 - whether research produced a reusable comparison, connection, synthesis, contradiction, or
   other durable delta;
-- which existing ingestion proposal operation best represents that delta.
+- which captured acquisition actually grounded the durable synthesis.
 
 LifeOS owns deterministic boundaries:
 
 - safe query/context retrieval;
 - canonical external-evidence persistence;
-- snapshot hashing and identity;
+- snapshot and metadata hashing;
 - capture actor attribution;
-- acquisition-lineage deduplication;
+- acquisition-lineage identity and deduplication;
 - registry preflight and source hash verification;
+- research-artifact revalidation before durable synthesis;
 - proposal provenance, generated ownership, stale-target validation, review snapshots, and
   application.
 
@@ -84,6 +87,11 @@ locator exists, source title/author/publisher form the deterministic identity ba
 The snapshot hash is SHA-256 over the captured evidence text. The path and artifact ID bind both
 source identity and snapshot hash. Loading a research artifact recomputes the snapshot hash and
 fails closed if the evidence body changed.
+
+The artifact also stores `metadata_hash` over canonical source metadata and acquisition lineage.
+Loading recomputes source identity, every acquisition ID, first-capture attribution, UTC timestamp
+validity, and the metadata hash. Direct edits or synchronization changes therefore cannot become
+trusted lineage merely because a registry refresh observed the new full-file hash.
 
 ## Deduplication and history
 
@@ -115,21 +123,32 @@ wiki content.
 
 ## Ingestion and provenance
 
-A captured research artifact is ordinary canonical Markdown under `raw/`. The existing scanner
-and registry discover it. When an existing ingestion proposal tool receives the returned
-`source_path`, the normal MCP registry preflight runs before `load_registered_source()` verifies
-the exact canonical file hash.
+A captured research artifact is ordinary canonical Markdown under `raw/`, so the existing
+scanner and registry discover it. Research synthesis does not trust the refreshed registry hash
+alone. `research_create_wiki_proposal` requires the exact `source_path` and `acquisition_id`
+returned by capture, runs normal external-policy-scoped registry preflight, then reloads the
+research artifact through `ResearchEvidenceService` before normal ingestion accepts it.
 
-Proposal provenance therefore points to the exact raw research artifact path and full file hash.
-That artifact, in turn, contains the immutable evidence snapshot hash and its acquisition
-lineage, including originating query/conversation reference when supplied. This creates the
-trace:
+The reload rechecks snapshot bytes, source/metadata identity, attribution, acquisition records,
+and metadata integrity. The selected acquisition must exist in that exact artifact. Generic
+ingestion proposal tools do not silently select an acquisition for a `raw/research/` source.
+
+Research-backed generated wiki provenance records:
+
+```text
+raw source path
++ canonical full-file hash
++ selected acquisition_id
+```
+
+The raw artifact then resolves the selected acquisition to the immutable snapshot and its
+originating query/conversation/research reason. The resulting trace is:
 
 ```text
 proposal/wiki provenance
-  -> raw research path + canonical file hash
+  -> raw research path + canonical file hash + acquisition_id
   -> immutable snapshot hash
-  -> acquisition record
+  -> exact acquisition record
   -> query/conversation reference + research reason
 ```
 
@@ -144,10 +163,12 @@ outcomes first-class:
 - existing answer is sufficient: no raw capture and no proposal;
 - external evidence confirms existing durable knowledge: raw capture may exist, proposal may be
   zero;
-- external evidence yields a reusable durable delta: the agent may create an ordinary reviewed
-  proposal using the captured raw source.
+- external evidence yields a reusable durable delta: the agent may create a reviewed draft with
+  `research_create_wiki_proposal` using the exact acquisition that grounded the synthesis.
 
-The existing proposal engine remains the sole durable knowledge-mutation path.
+The existing ingestion/proposal engine remains the sole durable knowledge-mutation path. The
+research-specific MCP tool is a narrow adapter that selects and validates research lineage before
+calling that existing engine; it is not a second proposal implementation.
 
 ## Security and privacy
 
@@ -156,4 +177,6 @@ There is still no MCP `write_file`, `delete_file`, move, shell, browser, or craw
 
 Request-scoped actor identity is supplied by the trusted MCP runtime rather than client input.
 Captured content is untrusted external text and remains evidence until an explicit reviewed
-proposal turns a grounded synthesis into durable LifeOS knowledge.
+proposal turns a grounded synthesis into durable LifeOS knowledge. Registry refresh cannot bless
+a tampered research artifact because ingestion independently reloads and verifies the capture
+contract before proposal construction.
