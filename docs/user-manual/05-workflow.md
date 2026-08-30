@@ -169,6 +169,43 @@ without creating a draft. Restore the generated file or explicitly release its
 ownership; neither automatic ingestion preflight nor an explicit
 `registry_refresh` can make that durable decision.
 
+### Research a question when the vault is missing evidence
+
+External research extends the factual-source workflow without adding a second
+LifeOS RAG engine or an embedded browser.
+
+1. Ask the connected agent to start with `research_query_context`, or let it
+   compose `vault_context`, `wiki_search`, and the normal exploration tools.
+   `research_query_context` is explicitly zero-write: it does not save the
+   question, answer, raw source, conversation, or proposal.
+2. The external agent judges whether the existing LifeOS evidence is sufficient.
+   If it is, answer from that evidence and stop. No new artifact is required.
+3. If a material evidence gap remains, the external agent researches with the
+   browser, academic search, or other provider tools available in its own
+   environment. LifeOS core does not perform that network research.
+4. The agent submits the selected external evidence through
+   `research_capture_evidence`, including the source locator/title/authorship when
+   known and a concise `research_reason` explaining why the evidence was acquired.
+   The MCP caller does not provide `captured_by`; LifeOS derives it from the
+   trusted local or authenticated runtime actor.
+5. LifeOS creates or reuses a hash-bound artifact under `raw/research/`. Repeating
+   the same source snapshot does not create a duplicate. A distinct acquisition
+   reason can add lineage to the same snapshot; changed source content creates a
+   separate historical snapshot rather than replacing the old one.
+6. Use the returned `raw/research/...` path like any other canonical ingestion
+   source. Proposal-building ingestion refreshes the registry, verifies the exact
+   source file hash, and records the raw source in normal proposal provenance.
+7. If research only confirms durable knowledge already present, stop with zero
+   wiki proposals. If it produces a reusable comparison, connection, synthesis,
+   contradiction, or other durable delta, create an ordinary reviewed draft
+   proposal. External evidence alone never authorizes automatic wiki mutation.
+
+The resulting lineage is deliberately two-stage: proposal/wiki provenance points
+to the exact canonical raw research file and file hash; the research artifact
+contains the immutable evidence snapshot hash plus the query/conversation
+reference and acquisition reason when supplied. See
+[Evidence-Grounded Research](18-evidence-grounded-research.md).
+
 ### Capture a flashcard
 
 1. Create a Markdown file under `flashcards/`.
@@ -322,7 +359,9 @@ The MCP `vault_context` tool provides the same bounded behavior to a connected
 agent without requiring provider-specific arguments. The agent can follow the
 map with `vault_list`, `vault_search`, `vault_read_markdown`, `vault_read_many`,
 `vault_links`, and `wiki_search`. Review retrieval reasons, evidence gaps, and
-omissions before trusting a conclusion.
+omissions before trusting a conclusion. For a research question, the agent may
+use the zero-write `research_query_context` composition and move to external
+research/capture only when a material gap remains.
 
 ## Evening
 
@@ -503,7 +542,9 @@ uv run lifeos context build \
 Use evidence gaps and omissions to decide what to read or test next. A Context
 Pack is intentionally bounded, so an agent may follow promising paths with the
 separate list/search/read/link operations rather than treating the first result
-set as a deterministic final crawl.
+set as a deterministic final crawl. If closing a material gap requires external
+research, preserve selected external evidence with `research_capture_evidence`
+before using it to ground a durable proposal.
 
 ### 8. Review AI proposals
 
@@ -631,20 +672,24 @@ A normal remote session is:
 
 1. connect the MCP client to `https://<private-name>/mcp` (or a loopback/private HTTP endpoint
    inside a trusted VPN boundary) and supply the configured bearer credential;
-2. start with `vault_context` when a bounded map would help, then explore iteratively with
-   `vault_list`, `vault_search`, `vault_read_markdown`, `vault_read_many`, `vault_links`,
-   `wiki_search`, and `vault_note_identity` as needed;
-3. create a bounded guarded draft through the same ingestion/proposal tools used by local
-   STDIO;
-4. call `proposal_submit` only when you explicitly want that draft moved to pending;
-5. review and approve/apply the pending proposal through a trusted local/human authorization
+2. start with `vault_context` or `research_query_context` when a bounded map would help, then
+   explore iteratively with `vault_list`, `vault_search`, `vault_read_markdown`,
+   `vault_read_many`, `vault_links`, `wiki_search`, and `vault_note_identity` as needed;
+3. when a material external evidence gap remains, let the external agent research in its own
+   environment and call `research_capture_evidence` so the selected source snapshot enters
+   canonical `raw/research/` with the authenticated request actor;
+4. create a bounded guarded draft through the same ingestion/proposal tools used by local
+   STDIO, using the captured raw path when external evidence grounds the durable delta;
+5. call `proposal_submit` only when you explicitly want that draft moved to pending;
+6. review and approve/apply the pending proposal through a trusted local/human authorization
    surface rather than asking the headless network service to do it.
 
-The service's configured `--actor-id` is stored as proposal submission attribution. Possession
-of the bearer token is intentionally **not** enough to authorize `proposal_approve` or
-`proposal_apply`; those remote calls fail closed. The home node therefore gives a remote agent
-useful read/draft/submit capability without turning a network credential into unrestricted
-canonical-write authority.
+The service's configured `--actor-id` is stored as proposal submission attribution and is also the
+server-authoritative capture actor for research evidence acquired through that authenticated
+request boundary. Possession of the bearer token is intentionally **not** enough to authorize
+`proposal_approve` or `proposal_apply`; those remote calls fail closed. The home node therefore
+gives a remote agent useful read/research-capture/draft/submit capability without turning a
+network credential into unrestricted canonical-write authority.
 
 If `/readyz` returns 503, treat the node as unavailable for consequential submission and inspect
 `lifeos doctor`/`lifeos status` on the node. Read-only exploration may still help diagnose the
