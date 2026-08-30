@@ -53,6 +53,7 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.ownership import GeneratedOwnership
 from lifeos.registry import Registry
 from lifeos.registry.file_tracking import FileTrackingError, hash_file_content
+from lifeos.proposals.review_snapshot import ReviewSnapshotError
 from lifeos.proposals.schema import generate_proposal_id
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
@@ -64,6 +65,23 @@ EVOLVE_WIKI_BATCH_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     ),
     effect=ToolEffect.PROPOSAL_PRODUCING,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class BatchSourceSnapshotRequest:
+    path: str
+    content_hash: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, str) or not self.path or self.path != self.path.strip():
+            raise ValueError("source snapshot path must be a trimmed non-empty string")
+        if (
+            not isinstance(self.content_hash, str)
+            or not self.content_hash.startswith("sha256:")
+            or len(self.content_hash) != 71
+            or any(char not in "0123456789abcdef" for char in self.content_hash[7:])
+        ):
+            raise ValueError("source snapshot content_hash must be sha256:<64 lowercase hex>")
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,17 +168,21 @@ class BatchWikiUpdateRequest:
 
 @dataclass(frozen=True, slots=True)
 class EvolveWikiBatchProposalRequest:
-    source_paths: tuple[str, ...]
+    source_snapshots: tuple[BatchSourceSnapshotRequest, ...]
     creates: tuple[BatchWikiCreateRequest, ...] = ()
     updates: tuple[BatchWikiUpdateRequest, ...] = ()
 
+    @property
+    def source_paths(self) -> tuple[str, ...]:
+        return tuple(snapshot.path for snapshot in self.source_snapshots)
+
     def __post_init__(self) -> None:
-        if not 1 <= len(self.source_paths) <= MAX_MULTI_SOURCE_SOURCES:
+        if not 1 <= len(self.source_snapshots) <= MAX_MULTI_SOURCE_SOURCES:
             raise ValueError(
-                f"multi-source ingestion requires 1..{MAX_MULTI_SOURCE_SOURCES} source paths"
+                f"multi-source ingestion requires 1..{MAX_MULTI_SOURCE_SOURCES} source snapshots"
             )
-        if len(set(self.source_paths)) != len(self.source_paths):
-            raise ValueError("source_paths must be distinct")
+        if len(set(self.source_paths)) != len(self.source_snapshots):
+            raise ValueError("source snapshot paths must be distinct")
         target_count = len(self.creates) + len(self.updates)
         if not 1 <= target_count <= MAX_MULTI_SOURCE_TARGETS:
             raise ValueError(
@@ -207,6 +229,27 @@ def _grounding_sources(
         raise ToolValidationError("Target grounding contains an unverified source") from error
 
 
+def _load_observed_sources(
+    *,
+    vault_root: Path,
+    registry: Registry,
+    expected: tuple[BatchSourceSnapshotRequest, ...],
+) -> tuple[object, ...]:
+    verified = []
+    for snapshot in expected:
+        item = _load_verified_source(
+            vault_root=vault_root,
+            registry=registry,
+            source_path=snapshot.path,
+        )
+        if item.source.content_hash != snapshot.content_hash:
+            raise ToolConflictError(
+                "A registered batch source no longer matches the version read during exploration"
+            )
+        verified.append(item)
+    return tuple(verified)
+
+
 def _read_update_target(
     *,
     vault_root: Path,
@@ -249,6 +292,12 @@ def _read_update_target(
     )
 
 
+def _map_review_snapshot_error(error: ReviewSnapshotError) -> None:
+    if error.code == "stale_base_hash":
+        raise ToolConflictError("A batch target changed before proposal publication") from error
+    raise ToolExecutionError("Could not build multi-source review snapshot") from error
+
+
 def evolve_wiki_batch_proposal(
     *,
     vault_root: Path,
@@ -259,9 +308,10 @@ def evolve_wiki_batch_proposal(
     random_suffix_fn: Callable[[], str] = _random_suffix,
 ) -> EvolveWikiBatchProposalResult:
     """Verify a whole batch and persist at most one operation for each reconciled target."""
-    verified = tuple(
-        _load_verified_source(vault_root=vault_root, registry=registry, source_path=source_path)
-        for source_path in request.source_paths
+    verified = _load_observed_sources(
+        vault_root=vault_root,
+        registry=registry,
+        expected=request.source_snapshots,
     )
     snapshots = {item.source.path: item.source for item in verified}
     ownership = _load_generated_ownership(vault_root=vault_root)
@@ -320,6 +370,7 @@ def evolve_wiki_batch_proposal(
                 sources=_grounding_sources(update_item.source_paths, snapshots),
                 expected_generator_id=expected_generator_id,
                 proposed_tags=update_item.tags,
+                tag_rationale=update_item.tag_rationale,
             )
         )
 
@@ -338,16 +389,21 @@ def evolve_wiki_batch_proposal(
             vault_root=vault_root,
             patches_json=documents.patches_json,
         )
+    except ReviewSnapshotError as error:
+        _map_review_snapshot_error(error)
+        raise AssertionError("unreachable")
     except (InvalidWikiSectionError, InvalidWikiTargetError, MultiSourcePayloadError) as error:
         raise ToolValidationError(str(error)) from error
     except WikiSectionUnchangedError as error:
         raise ToolConflictError("A batch target already has the proposed content") from error
 
-    # Re-read every selected source immediately before durable publication. A single changed,
-    # missing, denied or otherwise invalid source aborts the whole logical batch.
-    final_verified = tuple(
-        _load_verified_source(vault_root=vault_root, registry=registry, source_path=source_path)
-        for source_path in request.source_paths
+    # Re-read every selected source immediately before durable publication. The expected hashes
+    # remain the exploration-time snapshots supplied by the caller; registry refresh must never
+    # silently advance the evidence version that grounds the reviewed proposal.
+    final_verified = _load_observed_sources(
+        vault_root=vault_root,
+        registry=registry,
+        expected=request.source_snapshots,
     )
     if tuple(item.source for item in final_verified) != tuple(item.source for item in verified):
         raise ToolConflictError("A registered batch source changed before proposal publication")
@@ -358,6 +414,9 @@ def evolve_wiki_batch_proposal(
             documents=documents,
             runtime_dir=runtime_dir,
         )
+    except ReviewSnapshotError as error:
+        _map_review_snapshot_error(error)
+        raise AssertionError("unreachable")
     except WikiTargetExistsError as error:
         raise ToolConflictError("A proposed batch create target already exists") from error
     except ProposalAlreadyExistsError as error:
