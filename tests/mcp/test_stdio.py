@@ -91,6 +91,7 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
                 "research_capture_evidence",
                 "research_create_wiki_proposal",
                 "ingestion_evolve_wiki_proposal",
+                "ingestion_evolve_wiki_batch_proposal",
                 "study_evolve_learning_proposal",
                 "ingestion_create_wiki_proposal",
                 "ingestion_create_wiki_and_update_section_proposal",
@@ -117,6 +118,18 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             assert advertised["study_evolve_learning_proposal"].annotations.destructiveHint is False
             assert advertised["runtime_activity"].annotations.readOnlyHint is True
             assert advertised["ingestion_evolve_wiki_proposal"].annotations.destructiveHint is False
+            assert (
+                advertised["ingestion_evolve_wiki_batch_proposal"].annotations.readOnlyHint
+                is False
+            )
+            assert (
+                advertised["ingestion_evolve_wiki_batch_proposal"].annotations.destructiveHint
+                is False
+            )
+            assert (
+                advertised["ingestion_evolve_wiki_batch_proposal"].annotations.idempotentHint
+                is False
+            )
             assert advertised["ingestion_create_wiki_proposal"].annotations.destructiveHint is False
             assert (
                 advertised[
