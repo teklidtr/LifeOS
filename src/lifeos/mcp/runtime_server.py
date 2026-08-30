@@ -169,6 +169,7 @@ def create_mcp_server(
     )
     research = build_research_tools(
         vault_root=vault_root,
+        runtime_dir=resolved_runtime_dir,
         activity=activity,
         invoke=runtime_scoped_invoke,
         authorizer=authorizer,
@@ -178,7 +179,7 @@ def create_mcp_server(
         def op() -> WikiSearchMCPResult:
             result = search_wiki(
                 vault_root=vault_root,
-                request=WikiSearchRequest(query=query, limit=limit),
+                request=WikiSearchRequest(query=query, limit=limit, mode="external"),
             )
             activity.append(
                 tool="wiki_search",
