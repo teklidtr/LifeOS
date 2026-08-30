@@ -16,12 +16,19 @@ or letting web claims jump directly into the wiki.
    available in its own provider/environment.
 6. The agent submits only selected evidence through `research_capture_evidence`.
 7. LifeOS stores or reuses a hash-bound source snapshot under `raw/research/` and records why it
-   was acquired.
-8. The agent can inspect/retrieve that new raw source and use the normal ingestion proposal tools
-   if the research produced genuinely reusable durable knowledge.
-9. If there is no durable novelty, no wiki proposal is needed.
-10. Any durable synthesis remains a normal draft proposal until the ordinary explicit review and
+   was acquired. The result includes both `source_path` and `acquisition_id`.
+8. If research produced genuinely reusable durable knowledge, the agent uses
+   `research_create_wiki_proposal` with that exact `source_path` and the acquisition that grounded
+   the synthesis.
+9. LifeOS runs normal registry preflight, then independently reloads the research artifact and
+   revalidates its snapshot and lineage before creating a draft.
+10. If there is no durable novelty, no wiki proposal is needed.
+11. Any durable synthesis remains a normal draft proposal until the ordinary explicit review and
     lifecycle steps are requested.
+
+Generic ingestion does not silently choose among acquisition records for a `raw/research/`
+source. The research proposal tool is the narrow typed bridge into the existing ingestion and
+proposal engine.
 
 ## What LifeOS does not do
 
@@ -38,14 +45,20 @@ A captured research source records:
 - source locator such as URL or DOI when available;
 - external source title, author, and publisher when known;
 - immutable evidence snapshot hash;
+- hash-bound capture metadata and acquisition lineage;
 - trusted LifeOS capture actor;
 - capture time;
 - the query/conversation reference when available;
 - `research_reason`, which explains why the evidence was acquired;
 - optional agent-authored research context, kept separate from external evidence text.
 
-This means a later proposal can point to the exact raw source, and the raw source can explain
-both where the evidence came from and why it entered LifeOS.
+Loading the artifact recomputes the snapshot hash, source identity, acquisition IDs,
+first-capture attribution, timestamp validity, and metadata hash. A registry refresh therefore
+does not make an edited or synchronized-over research artifact trusted again by itself.
+
+A later research-backed proposal records the exact raw source path, full file hash, and selected
+`acquisition_id`. The raw source then explains both where the evidence came from and why that
+particular acquisition entered the durable synthesis.
 
 ## Duplicate and changed sources
 
@@ -71,8 +84,8 @@ Research is not successful only when it creates a wiki page. Common valid outcom
 - existing LifeOS knowledge already answers the question, so nothing is written;
 - external evidence is captured for traceability but confirms existing durable knowledge, so no
   wiki proposal is created;
-- research produces a reusable comparison, synthesis, contradiction, or durable update, so an
-  ordinary reviewed proposal is created.
+- research produces a reusable comparison, synthesis, contradiction, or durable update, so a
+  reviewed research-backed proposal is created from the exact selected acquisition.
 
 External evidence alone never authorizes an automatic wiki edit.
 
