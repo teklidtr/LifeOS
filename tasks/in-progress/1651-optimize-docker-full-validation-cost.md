@@ -85,6 +85,16 @@ uv run pytest -q
 
 Also compare GitHub Actions step/job timings for at least one cold and one compatible warm explicit full-validation run, recording cache hit/miss evidence and the observed ARM64 build-layer behavior.
 
+# Implementation evidence
+
+Representative hosted-runner measurements were captured on PR #26 before final review:
+
+- Baseline full-validation run `33350329826` (before this task): `docker-setup-e2e` was about four minutes. The ARM64 package-install layer took about 112.8 seconds, QEMU/Buildx setup added roughly 24 seconds, and `--load` image export/import added roughly 13 seconds.
+- First optimized full-validation run `33352350190`: the Docker job completed in about 2 minutes 23 seconds. The ARM64 package-install layer fell to about 34.5 seconds after avoiding the unnecessary CA-bundle upgrade; QEMU setup was about 5.7 seconds, Buildx about 4.3 seconds, and the ARM64 image was no longer loaded into the runner daemon. The initial GHA cache export took about 24.6 seconds. `full-test` and `docker-setup-e2e` were green and the cold fallback was not needed.
+- Compatible warm full-validation run `33352571107` on the same material head: the Docker job completed in about 57 seconds. BuildKit imported the GHA cache manifest in about 0.4 seconds; the ARM64 system-package, dependency, source, project-install, runtime-directory, and workdir layers all reported `CACHED`; the cache export took about 1.5 seconds. `full-test` and `docker-setup-e2e` were green and the cold fallback was again skipped.
+- The warm job therefore reduced representative Docker checkpoint wall time by more than 75% from the approximately four-minute baseline without removing a validation gate. The measurements are regression evidence rather than a hosted-runner SLA.
+- After these measurements, cache import/export was explicitly bounded to one minute. A cache-backed build failure still falls back to a real `no-cache` ARM64 build, while cache export is best-effort, so cache availability cannot become validation authority.
+
 # Relevant decisions
 
 - LIFEOS-1644: fast PR checks and explicit full validation are separate; caches are disposable performance state and must never weaken validation. Docker layer caching was previously rejected when the Docker build cost was only about 11.5 seconds, so the decision must be revisited using the new ARM64 cost profile rather than retained mechanically.
