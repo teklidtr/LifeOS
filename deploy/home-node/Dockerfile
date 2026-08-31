@@ -1,11 +1,13 @@
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates git \
+    && apt-get install -y --no-install-recommends --no-upgrade ca-certificates git \
+    && test -s /etc/ssl/certs/ca-certificates.crt \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md /app/
+RUN uv sync --frozen --no-dev --extra mcp --no-install-project
 COPY src /app/src
 RUN uv sync --frozen --no-dev --extra mcp
 
