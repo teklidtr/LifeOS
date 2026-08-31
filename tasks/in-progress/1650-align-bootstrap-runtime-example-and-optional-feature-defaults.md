@@ -18,7 +18,7 @@ Remove two small inconsistencies in the fresh-vault bootstrap contract: the exam
 - Keep proposal validation/runtime diagnostics clearly distinct from canonical Git-tracked `proposals/<proposal-id>/` history.
 - Change the generated `lifeos.yml` bootstrap defaults so `features.graphify` and `features.exports` are `false` by default.
 - Add or update regression coverage for the generated configuration defaults.
-- Update setup documentation to state that fresh vaults keep optional Graphify/export features disabled until enabled by the user.
+- Update setup-facing documentation to state that fresh vaults keep optional Graphify/export features disabled until enabled by the user.
 
 # Out of scope
 
@@ -33,15 +33,16 @@ Remove two small inconsistencies in the fresh-vault bootstrap contract: the exam
 2. Canonical proposal history remains documented as top-level `proposals/<proposal-id>/`; derived validation remains disposable runtime state.
 3. A freshly initialized vault generates `features.graphify: false` and `features.exports: false`.
 4. Existing configuration-loader defaults remain unchanged and consistent with the generated bootstrap.
-5. Setup documentation explains that Graphify and exports are opt-in after initialization.
+5. Setup-facing documentation explains that Graphify and exports are opt-in after initialization.
 6. Relevant bootstrap/integration tests and documentation validation pass.
 
 # Documentation impact
 
 Status: required
 
-- `.lifeos.example/README.md`: correct the disposable runtime example.
-- `docs/user-manual/04-setup-and-installation.md`: document opt-in fresh-vault feature defaults.
+- `.lifeos.example/README.md`: correct the disposable runtime example and distinguish canonical proposal history from derived proposal validation state.
+- `README.md`: document that fresh-vault Graphify/export flags are disabled until explicitly enabled.
+- `docs/user-manual/04-setup-and-installation.md`: reviewed; no edit required because the existing manual already classifies Graph and export features as optional and does not claim they are enabled by default.
 
 # Validation
 
