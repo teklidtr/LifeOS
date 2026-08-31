@@ -8,7 +8,6 @@ The real `.lifeos/` directory is runtime state and should normally be ignored by
 ```text
 .lifeos/
   state.sqlite
-  proposals/
   graphify/
   generated/
   extracted/
@@ -16,6 +15,10 @@ The real `.lifeos/` directory is runtime state and should normally be ignored by
   exports/
   cache/
 ```
+
+Canonical proposal history lives under the vault-root `proposals/<proposal-id>/` tree.
+Derived proposal validation may use `.lifeos/proposal-validation/`; it is disposable runtime
+state rather than a second proposal store.
 
 Do not place canonical vault configuration inside this runtime directory. The supported
 user-facing location is `<vault>/lifeos.yml`; `.lifeos/` is disposable.
