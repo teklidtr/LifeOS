@@ -42,8 +42,8 @@ BOOTSTRAP_FILES: dict[str, str] = {
         "vault_root: .\n"
         "runtime_dir: .lifeos\n"
         "features:\n"
-        "  graphify: true\n"
-        "  exports: true\n"
+        "  graphify: false\n"
+        "  exports: false\n"
     ),
     "system/generated-ownership.json": (
         json.dumps({"owned_files": {}, "schema_version": 1}, indent=2) + "\n"
