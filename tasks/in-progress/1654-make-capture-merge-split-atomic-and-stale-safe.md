@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1654
 title: Make capture merge and split atomic and stale safe
-status: ready
+status: in-progress
 phase: hardening
 depends_on:
   - LIFEOS-1602
