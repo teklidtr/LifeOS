@@ -147,10 +147,17 @@ runtime gate uncached as behavioral integration checks. Its real `linux/arm64` h
 uses a BuildKit GitHub Actions layer cache scoped to the ARM64 image. That cache contains only
 rebuildable image layers and is performance state, not validation evidence: the ARM64 build
 command still executes at every full checkpoint, a cache miss simply rebuilds the layers, and a
-failed cache-backed build is retried without remote cache. The ARM64 validation uses a
-cache-only BuildKit output because importing the image into the runner daemon solely to inspect
-the architecture would add work without increasing the guarantee already established by the
-explicit `linux/arm64` build target.
+failed cache-backed build is retried without remote cache. Cache import/export operations are
+bounded to one minute so a degraded cache service cannot dominate the validation job. The ARM64
+validation uses a cache-only BuildKit output because importing the image into the runner daemon
+solely to inspect the architecture would add work without increasing the guarantee already
+established by the explicit `linux/arm64` build target.
+
+Representative GitHub-hosted measurements when this cache was introduced reduced the Docker
+job from roughly four minutes to about 2 minutes 23 seconds on the first new run and about 57
+seconds on an immediately repeated compatible warm run. On that warm run the ARM64 system
+package, dependency, source, and project-install layers were all restored from cache; these
+numbers are observations for regression context, not a runtime SLA.
 
 `master` currently has no repository-enforced required status checks, so merge readiness is
 also governed by the PR workflow in `AGENTS.md`. If branch protection is enabled later, use
