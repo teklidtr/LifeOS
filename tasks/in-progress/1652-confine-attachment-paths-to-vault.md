@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1652
 title: Confine attachment storage paths to the vault
-status: backlog
+status: in-progress
 phase: hardening
 depends_on:
   - LIFEOS-1602
