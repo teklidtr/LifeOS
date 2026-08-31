@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 
 from lifeos.experiments import (
     ExperimentArtifactService,
@@ -162,6 +163,10 @@ def test_privacy_is_default_deny_redacted_bounded_and_inspectable(tmp_path: Path
         origins=(SourceReference("diary/private-day.md", "context"),),
         now=NOW,
     )
+    (vault / "system").mkdir()
+    (vault / "system" / "retrieval-policy.yml").write_text(
+        "schema_version: 1\nprotected_prefixes: [diary]\nexternal_allowed_prefixes: [diary]\n"
+    )
     (vault / "diary").mkdir(parents=True)
     (vault / "diary" / "private-day.md").write_text("SecretName slept well. " + "x" * 200)
     denied = preview_experiment_context(
@@ -193,6 +198,87 @@ def test_privacy_is_default_deny_redacted_bounded_and_inspectable(tmp_path: Path
     assert diary_item.redactions[0]["occurrences"] == 1
     assert allowed.total_bytes <= 240
     assert allowed.truncated is True
+
+
+def test_experiment_preview_honors_external_policy_after_explicit_grant(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
+    vault.mkdir()
+    artifact = ExperimentArtifactService(vault_root=vault, runtime_dir=runtime).create(
+        title="Walk",
+        description="",
+        category="focus",
+        protocol=protocol(),
+        now=NOW,
+    )
+    (vault / "system").mkdir()
+    (vault / "system" / "retrieval-policy.yml").write_text(
+        "schema_version: 1\nprotected_prefixes: [research/private]\nexternal_allowed_prefixes: []\n"
+    )
+    (vault / "research" / "private").mkdir(parents=True)
+    (vault / "research" / "private" / "source.md").write_text("must not be disclosed")
+
+    preview = preview_experiment_context(
+        vault_root=vault,
+        runtime_dir=runtime,
+        experiment_path=artifact.path,
+        selected_paths=("research/private/source.md",),
+        allowed_sensitive_roots=("research/private",),
+    )
+
+    assert "research/private/source.md" not in preview.provider_payload_paths
+    assert preview.omissions[0].reason == "protected-external-deny"
+
+
+def test_experiment_preview_checks_primary_before_loading_and_allows_both_grants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
+    vault.mkdir()
+    artifact = ExperimentArtifactService(vault_root=vault, runtime_dir=runtime).create(
+        title="Walk",
+        description="",
+        category="focus",
+        protocol=protocol(),
+        now=NOW,
+    )
+    (vault / "system").mkdir()
+    policy_path = vault / "system" / "retrieval-policy.yml"
+    policy_path.write_text(
+        "schema_version: 1\nprotected_prefixes: [experiments]\nexternal_allowed_prefixes: []\n"
+    )
+    real_load = ExperimentArtifactService.load
+    loaded: list[str] = []
+
+    def recording_load(service: ExperimentArtifactService, path: str):
+        loaded.append(path)
+        return real_load(service, path)
+
+    monkeypatch.setattr(ExperimentArtifactService, "load", recording_load)
+    denied = preview_experiment_context(
+        vault_root=vault,
+        runtime_dir=runtime,
+        experiment_path=artifact.path,
+        allowed_sensitive_roots=("experiments",),
+    )
+    assert denied.provider_payload_paths == ()
+    assert denied.omissions[0].reason == "protected-external-deny"
+    assert loaded == []
+
+    policy_path.write_text(
+        "schema_version: 1\n"
+        "protected_prefixes: [experiments]\n"
+        "external_allowed_prefixes: [experiments]\n"
+    )
+    allowed = preview_experiment_context(
+        vault_root=vault,
+        runtime_dir=runtime,
+        experiment_path=artifact.path,
+        allowed_sensitive_roots=("experiments",),
+    )
+    assert allowed.provider_payload_paths == (artifact.path,)
+    assert loaded == [artifact.path]
 
 
 def test_recovery_reports_moves_duplicates_missing_sources_orphans_and_interruptions(

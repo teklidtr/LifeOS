@@ -244,9 +244,11 @@ proposals.
 
 Before external processing, the workspace shows the selected sources, bounded
 excerpts, redactions, and provider disclosure. Protected scopes are default deny.
-Linked diary, health, or other sensitive notes are not included merely because
-they are related. Local analysis is the default, and telemetry avoids storing
-full sensitive observations.
+Every preview uses `system/retrieval-policy.yml`: excluded paths never enter the
+payload, and a protected path requires both an explicit grant for the current
+request and a matching `external_allowed_prefixes` entry. Linked diary, health,
+or other sensitive notes are not included merely because they are related. Local
+analysis is the default, and telemetry avoids storing full sensitive observations.
 
 Provider adapters use neutral capability, cancellation, timeout, malformed-output,
 and no-model contracts. Model output still passes schema, safety, citation, and

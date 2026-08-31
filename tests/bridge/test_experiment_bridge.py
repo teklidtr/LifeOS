@@ -171,6 +171,10 @@ def test_experiment_migration_privacy_and_recovery_bridge_methods(tmp_path: Path
     ):
         assert capability in handshake["capabilities"]
     created = bridge.call("experiment.create", title="Walk", protocol=protocol(), now=NOW)
+    (vault / "system").mkdir()
+    (vault / "system" / "retrieval-policy.yml").write_text(
+        "schema_version: 1\nprotected_prefixes: [diary]\nexternal_allowed_prefixes: [diary]\n"
+    )
     (vault / "diary").mkdir()
     (vault / "diary" / "day.md").write_text("PrivateName felt focused.")
     denied = bridge.call(

@@ -15,6 +15,7 @@ from lifeos.retrieval import (
     load_retrieval_policy,
     scope_decision,
 )
+from lifeos.retrieval.contracts import provider_path_decision
 
 
 def test_scope_filters_and_protected_prefixes_fail_closed() -> None:
@@ -48,6 +49,50 @@ def test_external_protected_content_requires_policy_and_explicit_scope() -> None
     assert (
         scope_decision("profile/private.md", scope=allowed, policy=policy, mode="external").reason
         == "protected-external-deny"
+    )
+
+
+def test_provider_path_decision_combines_policy_and_explicit_grant() -> None:
+    policy = RetrievalPolicy(
+        excluded_prefixes=("excluded",),
+        protected_prefixes=("private",),
+        external_allowed_prefixes=("private/shareable",),
+    )
+    assert provider_path_decision(
+        "public/note.md", allowed_protected_prefixes=(), policy=policy
+    ).allowed
+    assert (
+        provider_path_decision("public//note.md", allowed_protected_prefixes=(), policy=policy).path
+        == "public/note.md"
+    )
+    assert (
+        provider_path_decision(
+            "private/shareable/note.md",
+            allowed_protected_prefixes=(),
+            policy=policy,
+        ).reason
+        == "protected-default-deny"
+    )
+    assert provider_path_decision(
+        "private/shareable/note.md",
+        allowed_protected_prefixes=("private",),
+        policy=policy,
+    ).allowed
+    assert (
+        provider_path_decision(
+            "private/closed.md",
+            allowed_protected_prefixes=("private",),
+            policy=policy,
+        ).reason
+        == "protected-external-deny"
+    )
+    assert (
+        provider_path_decision(
+            "excluded/note.md",
+            allowed_protected_prefixes=("excluded",),
+            policy=policy,
+        ).reason
+        == "excluded-by-policy"
     )
 
 

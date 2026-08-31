@@ -264,8 +264,13 @@ class AttachmentStore:
 
     def audit(self, attachment_id: str) -> AttachmentAudit:
         manifest = self.manifests.load(manifest_path(attachment_id))
+        return self._audit_manifest(manifest.metadata)
+
+    def _audit_manifest(self, manifest: AttachmentManifest) -> AttachmentAudit:
+        """Audit original bytes against an already policy-approved manifest snapshot."""
+        attachment_id = manifest.attachment_id
         try:
-            with self.open_verified(manifest.metadata):
+            with self.open_verified(manifest):
                 pass
         except VaultAccessError as exc:
             if exc.code == "not-found":
@@ -286,8 +291,8 @@ class AttachmentStore:
             return AttachmentAudit(
                 attachment_id,
                 status,
-                manifest.metadata.canonical_path,
-                manifest.metadata.content_hash,
+                manifest.canonical_path,
+                manifest.content_hash,
                 details=details,
             )
         except CaptureError as exc:
@@ -295,17 +300,17 @@ class AttachmentStore:
             return AttachmentAudit(
                 attachment_id,
                 "changed" if exc.code == "attachment_changed" else exc.code,
-                manifest.metadata.canonical_path,
-                manifest.metadata.content_hash,
+                manifest.canonical_path,
+                manifest.content_hash,
                 str(actual) if actual is not None else None,
                 details=exc.message,
             )
         return AttachmentAudit(
             attachment_id,
             "ok",
-            manifest.metadata.canonical_path,
-            manifest.metadata.content_hash,
-            manifest.metadata.content_hash,
+            manifest.canonical_path,
+            manifest.content_hash,
+            manifest.content_hash,
         )
 
     @contextmanager

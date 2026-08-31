@@ -327,6 +327,28 @@ def scope_decision(
     return ScopeDecision(normalized, True, protected, "allowed")
 
 
+def provider_path_decision(
+    path: str,
+    *,
+    allowed_protected_prefixes: Sequence[str],
+    policy: RetrievalPolicy,
+) -> ScopeDecision:
+    """Apply external policy plus the request's explicit protected-scope grant."""
+    normalized = _safe_relative(path)
+    granted_prefixes = tuple(
+        _safe_relative(prefix, allow_folder=True) for prefix in allowed_protected_prefixes
+    )
+    return scope_decision(
+        normalized,
+        scope=RetrievalScope(
+            paths=(normalized,),
+            allow_protected=_matches_prefix(normalized, granted_prefixes),
+        ),
+        policy=policy,
+        mode="external",
+    )
+
+
 def build_provider_disclosure(
     *,
     evidence: Sequence[AnswerEvidence],

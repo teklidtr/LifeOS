@@ -8,14 +8,27 @@ from pathlib import Path
 from typing import Iterable
 
 from lifeos.daily.service import content_hash
+from lifeos.retrieval.contracts import (
+    RetrievalError,
+    RetrievalPolicy,
+    ScopeDecision,
+    provider_path_decision,
+)
+from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
-from .artifact import CaptureArtifactService
+from .artifact import CaptureArtifactService, manifest_path
 from .contracts import CaptureError
 from .extraction import LocalExtractionService
 from .storage import AttachmentStore
 
+# Backwards-compatible legacy module export. Enforcement loads the current vault policy instead.
 PROTECTED_ROOTS = frozenset({"diary", "health", "medical", "private", "therapy", "photos"})
+_DISCLOSURE = (
+    "Only the listed text excerpts or explicitly selected original files would be sent. "
+    "Linked notes are not traversed automatically, and previewing this disclosure does not "
+    "upload anything."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +112,48 @@ def _truncate(text: str, limit: int) -> tuple[str, int, bool]:
     return "", 0, True
 
 
+def _load_policy(vault_root: Path) -> RetrievalPolicy:
+    try:
+        return load_retrieval_policy(vault_root)
+    except RetrievalError as exc:
+        raise CaptureError(
+            "invalid_retrieval_policy",
+            "Capture context preview requires a valid retrieval policy.",
+            {"reason": exc.code},
+        ) from exc
+
+
+def _provider_decision(
+    path: str,
+    *,
+    allowed_roots: tuple[str, ...],
+    policy: RetrievalPolicy,
+) -> ScopeDecision:
+    try:
+        return provider_path_decision(
+            path,
+            allowed_protected_prefixes=allowed_roots,
+            policy=policy,
+        )
+    except RetrievalError as exc:
+        raise CaptureError(
+            "invalid_provider_scope",
+            "Capture provider scope contains an invalid vault path.",
+            {"path": path, "reason": exc.code},
+        ) from exc
+
+
+def _policy_detail(reason: str) -> str:
+    return {
+        "excluded-by-policy": "The canonical retrieval policy excludes this path.",
+        "excluded-node-local-runtime": "The active runtime policy excludes this path.",
+        "protected-default-deny": ("Protected content requires explicit per-operation path scope."),
+        "protected-external-deny": (
+            "The canonical retrieval policy does not permit external disclosure of this path."
+        ),
+    }.get(reason, "The canonical retrieval policy does not permit this path.")
+
+
 def preview_capture_context(
     *,
     vault_root: Path,
@@ -118,10 +173,6 @@ def preview_capture_context(
         raise CaptureError(
             "invalid_context_budget", "Capture context byte limits must be positive."
         )
-    captures = CaptureArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
-    store = AttachmentStore(vault_root=vault_root, runtime_dir=runtime_dir)
-    extractor = LocalExtractionService(vault_root=vault_root, runtime_dir=runtime_dir)
-    artifact = captures.load(capture_path)
     operations = tuple(
         dict.fromkeys(str(item).strip() for item in requested_operations if str(item).strip())
     )
@@ -131,10 +182,39 @@ def preview_capture_context(
     selected_notes = tuple(
         dict.fromkeys(str(item).strip() for item in selected_paths if str(item).strip())
     )
-    allowed_roots = frozenset(
-        str(item).strip() for item in allowed_sensitive_roots if str(item).strip()
+    allowed_roots = tuple(
+        dict.fromkeys(str(item).strip() for item in allowed_sensitive_roots if str(item).strip())
     )
     redactions = tuple(sorted({str(item).strip() for item in redact_terms if str(item).strip()}))
+    policy = _load_policy(vault_root)
+    capture_decision = _provider_decision(
+        capture_path,
+        allowed_roots=(capture_path,) if allow_sensitive_capture else (),
+        policy=policy,
+    )
+    if not capture_decision.allowed:
+        return CaptureContextPreview(
+            capture_decision.path,
+            operations,
+            external_processing_intent,
+            not external_processing_intent,
+            (),
+            (),
+            (
+                CapturePayloadOmission(
+                    capture_decision.path,
+                    capture_decision.reason,
+                    _policy_detail(capture_decision.reason),
+                ),
+            ),
+            0,
+            False,
+            _DISCLOSURE,
+        )
+    captures = CaptureArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
+    store = AttachmentStore(vault_root=vault_root, runtime_dir=runtime_dir)
+    extractor = LocalExtractionService(vault_root=vault_root, runtime_dir=runtime_dir)
+    artifact = captures.load(capture_decision.path)
     omissions: list[CapturePayloadOmission] = []
     items: list[CapturePayloadItem] = []
     remaining = max_total_bytes
@@ -209,7 +289,61 @@ def preview_capture_context(
                 )
             )
             continue
-        audit = store.audit(attachment_id)
+        attachment_manifest_path = manifest_path(attachment_id)
+        if reference.manifest_path != attachment_manifest_path:
+            omissions.append(
+                CapturePayloadOmission(
+                    reference.manifest_path,
+                    "attachment-reference-mismatch",
+                    "The capture reference does not identify the attachment's canonical manifest.",
+                )
+            )
+            continue
+        manifest_decision = _provider_decision(
+            attachment_manifest_path,
+            allowed_roots=(attachment_manifest_path,) if allow_sensitive_capture else (),
+            policy=policy,
+        )
+        if not manifest_decision.allowed:
+            omissions.append(
+                CapturePayloadOmission(
+                    manifest_decision.path,
+                    manifest_decision.reason,
+                    _policy_detail(manifest_decision.reason),
+                )
+            )
+            continue
+        manifest = store.manifests.load(manifest_decision.path)
+        attachment_decision = _provider_decision(
+            manifest.metadata.canonical_path,
+            allowed_roots=(manifest.metadata.canonical_path,) if allow_sensitive_capture else (),
+            policy=policy,
+        )
+        if not attachment_decision.allowed:
+            omissions.append(
+                CapturePayloadOmission(
+                    attachment_decision.path,
+                    attachment_decision.reason,
+                    _policy_detail(attachment_decision.reason),
+                )
+            )
+            continue
+        if (
+            manifest.metadata.attachment_id != reference.attachment_id
+            or manifest.metadata.canonical_path != reference.canonical_path
+            or manifest.metadata.content_hash != reference.content_hash
+            or manifest.metadata.byte_size != reference.byte_size
+            or manifest.metadata.media_type != reference.media_type
+        ):
+            omissions.append(
+                CapturePayloadOmission(
+                    reference.canonical_path,
+                    "attachment-reference-mismatch",
+                    "The capture reference does not match its canonical attachment manifest.",
+                )
+            )
+            continue
+        audit = store._audit_manifest(manifest.metadata)
         if audit.status != "ok":
             omissions.append(
                 CapturePayloadOmission(
@@ -282,16 +416,6 @@ def preview_capture_context(
         remaining -= included
 
     for path in selected_notes:
-        root = path.split("/", 1)[0]
-        if root in PROTECTED_ROOTS and root not in allowed_roots:
-            omissions.append(
-                CapturePayloadOmission(
-                    path,
-                    "protected-default-deny",
-                    "Protected neighboring notes require explicit per-operation root scope.",
-                )
-            )
-            continue
         if not external_processing_intent:
             omissions.append(
                 CapturePayloadOmission(
@@ -301,10 +425,22 @@ def preview_capture_context(
                 )
             )
             continue
+        note_decision = _provider_decision(path, allowed_roots=allowed_roots, policy=policy)
+        if not note_decision.allowed:
+            omissions.append(
+                CapturePayloadOmission(
+                    note_decision.path,
+                    note_decision.reason,
+                    _policy_detail(note_decision.reason),
+                )
+            )
+            continue
         try:
-            source = read_vault_markdown(vault_root, path)
+            source = read_vault_markdown(vault_root, note_decision.path)
         except VaultAccessError as exc:
-            omissions.append(CapturePayloadOmission(path, "source-unavailable", str(exc)))
+            omissions.append(
+                CapturePayloadOmission(note_decision.path, "source-unavailable", str(exc))
+            )
             continue
         visible, applied = _redact(source.content, redactions)
         allowance = min(max_item_bytes, remaining)
@@ -319,7 +455,7 @@ def preview_capture_context(
         excerpt, included, truncated = _truncate(visible, allowance)
         items.append(
             CapturePayloadItem(
-                path,
+                note_decision.path,
                 "user-selected-note",
                 "sha256:" + content_hash(source.content),
                 "note explicitly selected for this operation",
@@ -335,7 +471,6 @@ def preview_capture_context(
         any_truncated = any_truncated or truncated
 
     payload_paths = tuple(item.path for item in items)
-    disclosure = "Only the listed text excerpts or explicitly selected original files would be sent. Linked notes are not traversed automatically, and previewing this disclosure does not upload anything."
     return CaptureContextPreview(
         artifact.path,
         operations,
@@ -346,5 +481,5 @@ def preview_capture_context(
         tuple(omissions),
         sum(item.included_bytes for item in items),
         any_truncated,
-        disclosure,
+        _DISCLOSURE,
     )

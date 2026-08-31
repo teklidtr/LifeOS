@@ -317,10 +317,11 @@ voice notes. The current scopes do not all mean the same thing:
 | `protected` | External processing requires explicit operation scope, and semantic representation is default-denied |
 | `sensitive: true` | Uses the same external-processing and semantic-representation default-deny as `protected` |
 
-For explicitly selected neighboring notes, the current protected root names are
-`diary/`, `health/`, `medical/`, `private/`, `therapy/`, and `photos/`. Each root
-requires explicit per-operation scope before it can appear in an external payload.
-Links are never traversed automatically.
+Provider previews use the vault's canonical `system/retrieval-policy.yml`. An
+excluded path never enters the payload. A protected capture, attachment, or
+explicitly selected neighboring note can enter an external payload only when the
+current request grants that protected scope and the path also matches
+`external_allowed_prefixes`. Links are never traversed automatically.
 
 Before any provider operation, the workspace can preview:
 
