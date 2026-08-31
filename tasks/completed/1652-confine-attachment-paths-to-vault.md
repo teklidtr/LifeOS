@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1652
 title: Confine attachment storage paths to the vault
-status: in-progress
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1602
@@ -60,6 +60,19 @@ schema, architecture, setup, CLI, MCP, or operational contract.
 .venv/bin/pytest -q
 git diff --check
 ```
+
+# Validation evidence
+
+- Focused attachment, capture recovery, and vault traversal suite: `50 passed`.
+- Capture/bridge/cross-component compatibility selection: `61 passed, 7 deselected`.
+- Repository Ruff check: passed.
+- Source mypy check: passed with no issues in 212 source files.
+- Full local pytest attempt: `1923 passed, 57 failed, 12 skipped`. The 57 failures exactly
+  reproduce the pre-change baseline: macOS pinned-Git-directory recovery diagnostics, three tests
+  whose fixtures mistake macOS's `/private/...` temporary root for protected vault scope, and one
+  sandbox-denied Unix socket bind. The 15 new parameterized/regression cases account for the
+  increase from the baseline's 1908 passing tests.
+- `git diff --check`: passed.
 
 # Relevant decisions
 
