@@ -140,8 +140,17 @@ most recent compatible scoped cache and, after mypy runs, publish a fresh immuta
 an exact rerun of the same commit can reuse the primary key directly. Restore keys deliberately
 omit the commit suffix so incremental reuse survives source edits. Cache restoration never
 skips mypy, and a miss or eviction changes only CI speed. Ruff and pytest result caches are not
-persisted. The clean-room Docker gate currently uses no persisted layer cache so its isolated
-semantics remain unchanged.
+persisted.
+
+The Docker checkpoint keeps the clean-room setup/MCP gate and authenticated native home-node
+runtime gate uncached as behavioral integration checks. Its real `linux/arm64` home-node build
+uses a BuildKit GitHub Actions layer cache scoped to the ARM64 image. That cache contains only
+rebuildable image layers and is performance state, not validation evidence: the ARM64 build
+command still executes at every full checkpoint, a cache miss simply rebuilds the layers, and a
+failed cache-backed build is retried without remote cache. The ARM64 validation uses a
+cache-only BuildKit output because importing the image into the runner daemon solely to inspect
+the architecture would add work without increasing the guarantee already established by the
+explicit `linux/arm64` build target.
 
 `master` currently has no repository-enforced required status checks, so merge readiness is
 also governed by the PR workflow in `AGENTS.md`. If branch protection is enabled later, use
