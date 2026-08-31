@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from lifeos.planning import PlanningAction, PlanningError, build_daily_menu, load_plan_actions
+from lifeos.planning import (
+    PlanningAction,
+    PlanningError,
+    build_daily_menu,
+    format_daily_menu,
+    load_plan_actions,
+)
 
 
 def test_load_plan_actions_from_frontmatter(tmp_path: Path) -> None:
@@ -361,9 +367,123 @@ def test_daily_menu_optimizer_keeps_highest_urgency_action() -> None:
     assert menu.diagnostics.objective_order[:4] == (
         "maximum due urgency",
         "total due urgency",
-        "energy fit",
-        "motivation fit",
+        "mean energy fit",
+        "mean motivation fit",
     )
+
+
+def test_daily_menu_capacity_is_ceiling_not_fill_target() -> None:
+    actions = (
+        _optimizer_action("critical", 30, due=date(2026, 7, 15), plan="plan-a"),
+        _optimizer_action("optional-a", 20, due=None, plan="plan-b"),
+        _optimizer_action("optional-b", 20, due=None, plan="plan-c"),
+    )
+
+    menu = build_daily_menu(
+        actions=actions,
+        as_of=date(2026, 7, 15),
+        available_minutes=100,
+        energy="low",
+        motivation="medium",
+    )
+
+    assert [item.task_id for item in menu.items] == ["critical"]
+    assert menu.selected_minutes == 30
+    assert menu.diagnostics.unused_minutes == 70
+    assert "capacity used" not in menu.diagnostics.objective_order
+    assert "item count" not in menu.diagnostics.objective_order
+    rendered = format_daily_menu(menu)
+    assert "Capacity ceiling: 100 min" in rendered
+    assert "remaining: 70 min" in rendered
+    assert "unused:" not in rendered
+
+
+def test_daily_menu_increasing_capacity_alone_does_not_expand_workload() -> None:
+    actions = (
+        _optimizer_action("critical", 30, due=date(2026, 7, 15)),
+        _optimizer_action("optional", 20, due=None, plan="plan-b"),
+    )
+
+    tight = build_daily_menu(
+        actions=actions,
+        as_of=date(2026, 7, 15),
+        available_minutes=30,
+        energy="low",
+        motivation="medium",
+    )
+    roomy = build_daily_menu(
+        actions=actions,
+        as_of=date(2026, 7, 15),
+        available_minutes=120,
+        energy="low",
+        motivation="medium",
+    )
+
+    assert [item.task_id for item in tight.items] == ["critical"]
+    assert [item.task_id for item in roomy.items] == ["critical"]
+
+
+def test_daily_menu_equivalent_optional_work_prefers_lower_workload_before_id() -> None:
+    actions = (
+        _optimizer_action("a-long", 40, due=None),
+        _optimizer_action("z-short", 20, due=None),
+    )
+
+    menu = build_daily_menu(
+        actions=actions,
+        as_of=date(2026, 7, 15),
+        available_minutes=60,
+        energy="low",
+        motivation="medium",
+    )
+
+    assert [item.task_id for item in menu.items] == ["z-short"]
+    assert menu.selected_minutes == 20
+
+
+def test_daily_menu_additive_urgency_can_justify_more_work() -> None:
+    actions = (
+        _optimizer_action("due-a", 30, due=date(2026, 7, 15)),
+        _optimizer_action("due-b", 30, due=date(2026, 7, 15)),
+        _optimizer_action("optional", 20, due=None, plan="plan-b"),
+    )
+
+    menu = build_daily_menu(
+        actions=actions,
+        as_of=date(2026, 7, 15),
+        available_minutes=100,
+        energy="low",
+        motivation="medium",
+    )
+
+    assert [item.task_id for item in menu.items] == ["due-a", "due-b"]
+    assert menu.selected_minutes == 60
+
+
+def test_daily_menu_mean_fit_is_size_neutral_and_dimensions_remain_distinct() -> None:
+    one = (_optimizer_action("due-a", 20, energy="low", motivation="high"),)
+    two = (
+        *one,
+        _optimizer_action("due-b", 20, energy="low", motivation="high"),
+    )
+
+    one_menu = build_daily_menu(
+        actions=one,
+        as_of=date(2026, 7, 15),
+        available_minutes=40,
+        energy="low",
+        motivation="low",
+    )
+    two_menu = build_daily_menu(
+        actions=two,
+        as_of=date(2026, 7, 15),
+        available_minutes=40,
+        energy="low",
+        motivation="low",
+    )
+
+    assert one_menu.diagnostics.selected_score[2:4] == (3000, 1000)
+    assert two_menu.diagnostics.selected_score[2:4] == (3000, 1000)
 
 
 def test_daily_menu_optimizer_is_stable_under_shuffled_candidates() -> None:
@@ -437,3 +557,32 @@ def test_daily_menu_optimizer_uses_deterministic_fallback_above_bound() -> None:
     assert menu.diagnostics.solver == "deterministic-bounded-fallback"
     assert "exact solver candidate limit (20)" in menu.diagnostics.binding_constraints
     assert len(menu.items) == 5
+
+
+def test_daily_menu_fallback_uses_same_capacity_ceiling_policy() -> None:
+    actions = (
+        _optimizer_action("critical", 30, due=date(2026, 7, 15)),
+        *tuple(
+            _optimizer_action(f"optional-{index:02d}", 10, due=None, plan=f"plan-{index % 4}")
+            for index in range(20)
+        ),
+    )
+
+    first = build_daily_menu(
+        actions=actions,
+        as_of=date(2026, 7, 15),
+        available_minutes=100,
+        energy="low",
+        motivation="medium",
+    )
+    second = build_daily_menu(
+        actions=tuple(reversed(actions)),
+        as_of=date(2026, 7, 15),
+        available_minutes=100,
+        energy="low",
+        motivation="medium",
+    )
+
+    assert first.diagnostics.solver == "deterministic-bounded-fallback"
+    assert [item.task_id for item in first.items] == ["critical"]
+    assert first == second

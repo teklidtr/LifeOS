@@ -217,7 +217,6 @@ handling remain identical to other proposals.
 The copilot checks explicit goal facts before model use. Missing information is
 represented as unknown or a question. Clarify, experiment, link, park, pause,
 decline, and no-plan are valid outcomes.
-
 ## DD-048: Goal-to-plan context is minimized, previewed, and explicitly scoped
 
 Only bounded, traceable context is model-bound. Sensitive scopes require policy
@@ -682,3 +681,19 @@ target mutation, preserving accepted prior history and deterministic deduplicati
 Existing single-source ingestion tools remain compatibility APIs with their existing bounds and
 observable behavior. A multi-source exploration that finds no reusable durable knowledge delta
 is also a valid outcome and creates no proposal.
+
+## DD-093: Daily planning capacity is a ceiling, not a utilization target
+
+The baseline daily planner treats `available_minutes` as a hard feasibility boundary, not a
+workload target, utilization quota, or expectation that free capacity should be consumed. Raw
+selected duration and raw item count are not positive optimization objectives. Energy and
+motivation remain separate, size-neutral menu-fit dimensions, while genuine due or overdue
+urgency remains additive evidence that can justify recommending multiple actions.
+
+When higher-priority scheduling evidence is otherwise equivalent, the planner prefers the
+lower-workload menu before bounded plan variety and the stable-ID tie break. Plan variety may
+distinguish equivalent menus but cannot create an obligation to add work merely because time
+remains. The exact solver and deterministic bounded fallback apply the same ceiling-not-quota
+policy. Remaining capacity, including the public `unused_minutes` diagnostic field, is neutral
+information rather than a failure signal, productivity score, utilization deficit, or instruction
+to fill the day.

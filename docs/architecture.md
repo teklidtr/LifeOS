@@ -198,7 +198,14 @@ near-term actions detailed one or two weeks ahead
 today menu        selected from eligible actions
 ```
 
-The planner proposes a menu rather than issuing commands.
+The planner proposes a menu rather than issuing commands. `available_minutes` is a hard
+feasibility ceiling, not a workload target or utilization quota. The baseline optimizer keeps
+maximum and additive due urgency as its leading evidence, uses size-neutral mean energy and
+motivation fit, and then prefers a lower-workload equivalent before bounded plan variety and the
+stable-ID tie break. Raw selected duration and raw item count are never positive objectives.
+The exact solver and deterministic bounded fallback follow the same ceiling-not-quota contract.
+Remaining capacity is neutral diagnostic information and does not need to be consumed or
+explained as a planning failure.
 
 ## Adaptive feedback layer
 
