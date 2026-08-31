@@ -239,12 +239,23 @@ The agent can search again, follow another reference, or stop. If a selected sou
 bytes; reread and reconsider the evidence. If it proposes a durable change, the normal proposal
 boundary applies.
 
-## 15.7 Local STDIO remains the runtime
+## 15.7 Supported MCP transports share one runtime core
 
-This feature expands the capability surface, not the transport boundary. The supported MCP
-runtime remains the local STDIO server configured for a specific vault and trusted actor. A
-network-accessible or always-on home-node transport is separate work and must reuse the same
-Python contracts rather than reimplementing them.
+LifeOS supports two MCP deployment adapters over the same Python MCP/facade/business-rule core:
+
+- local `lifeos-mcp` over STDIO for a vault-scoped trusted local actor;
+- authenticated `lifeos serve` over stateless Streamable HTTP on the active home node.
+
+The home-node adapter does not create a second exploration or semantic API. Ordinary
+policy-filtered exploration and guarded proposal-building reuse the same underlying contracts in
+either mode, subject to the capability surface exposed by each adapter. The network surface is
+deliberately narrower: authenticated home-node clients do not receive `proposal_approve` or
+`proposal_apply`, while local STDIO retains the full reviewed lifecycle surface.
+
+For network binding, authentication, token configuration, Host/Origin allowlists, and the
+one-active-writer deployment model, follow
+[Setup & Installation → Run an always-on home node](04-setup-and-installation.md#415-run-an-always-on-home-node)
+rather than wrapping the STDIO server in an ad hoc HTTP service.
 
 ---
 
