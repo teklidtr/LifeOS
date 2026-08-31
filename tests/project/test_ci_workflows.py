@@ -74,15 +74,19 @@ def test_full_validation_keeps_native_docker_gates_before_arm64_setup() -> None:
     assert "platforms: arm64" in workflow
 
 
-def test_arm64_build_uses_disposable_gha_layers_and_cold_fallback() -> None:
+def test_arm64_build_uses_disposable_bounded_gha_layers_and_cold_fallback() -> None:
     workflow = _read(FULL_WORKFLOW)
 
     assert "docker/build-push-action@" in workflow
     assert "platforms: linux/arm64" in workflow
     assert "outputs: type=cacheonly" in workflow
-    assert "cache-from: type=gha,scope=lifeos-home-node-arm64" in workflow
     assert (
-        "cache-to: type=gha,mode=max,scope=lifeos-home-node-arm64,ignore-error=true"
+        "cache-from: type=gha,scope=lifeos-home-node-arm64,timeout=1m"
+        in workflow
+    )
+    assert (
+        "cache-to: type=gha,mode=max,scope=lifeos-home-node-arm64,"
+        "ignore-error=true,timeout=1m"
         in workflow
     )
     assert "continue-on-error: true" in workflow
