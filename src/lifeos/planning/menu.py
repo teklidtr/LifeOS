@@ -22,6 +22,7 @@ _ACTIVE_STATUSES = frozenset({"todo", "active", "pending"})
 _DONE_STATUSES = frozenset({"done", "completed", "archived"})
 _MAX_EXACT_CANDIDATES = 20
 _MAX_AVAILABLE_MINUTES = 1440
+_FIT_SCALE = 1000
 
 
 class PlanningError(DiagnosticError):
@@ -203,6 +204,14 @@ def _due_urgency(action: PlanningAction, *, as_of: date) -> int:
     return 0
 
 
+def _mean_fit(levels: tuple[Level, ...], *, target: Level) -> int:
+    """Return size-neutral mean fit on a stable integer scale."""
+    if not levels:
+        return 0
+    total = sum(3 - abs(_LEVELS[level] - _LEVELS[target]) for level in levels)
+    return total * _FIT_SCALE // len(levels)
+
+
 def _selection_objective(
     selected: tuple[PlanningAction, ...],
     *,
@@ -210,19 +219,17 @@ def _selection_objective(
     energy: Level,
     motivation: Level,
 ) -> tuple[int, ...]:
+    """Score menus without treating available capacity as a utilization target."""
     urgencies = tuple(_due_urgency(action, as_of=as_of) for action in selected)
-    energy_fit = sum(3 - abs(_LEVELS[action.energy] - _LEVELS[energy]) for action in selected)
-    motivation_fit = sum(
-        3 - abs(_LEVELS[action.motivation] - _LEVELS[motivation]) for action in selected
-    )
+    selected_minutes = sum(action.duration for action in selected)
     return (
         max(urgencies, default=0),
         sum(urgencies),
-        energy_fit,
-        motivation_fit,
-        sum(action.duration for action in selected),
+        _mean_fit(tuple(action.energy for action in selected), target=energy),
+        _mean_fit(tuple(action.motivation for action in selected), target=motivation),
+        -selected_minutes,
+        -len(selected),
         len({action.plan.casefold() for action in selected}),
-        len(selected),
     )
 
 
@@ -313,13 +320,22 @@ def _fallback_menu_selection(
             action.task_id,
         ),
     )
-    selected: list[PlanningAction] = []
+    selected: tuple[PlanningAction, ...] = ()
     used = 0
     for action in ranked:
-        if used + action.duration <= available_minutes:
-            selected.append(action)
+        if used + action.duration > available_minutes:
+            continue
+        candidate = (*selected, action)
+        if _better_menu_selection(
+            candidate,
+            selected,
+            as_of=as_of,
+            energy=energy,
+            motivation=motivation,
+        ):
+            selected = candidate
             used += action.duration
-    return tuple(selected)
+    return selected
 
 
 def build_daily_menu(
@@ -404,8 +420,9 @@ def build_daily_menu(
                 due_reason = "due today; "
         reason = (
             f"{due_reason}selected for {energy_level} energy and {motivation_level} motivation "
-            "by ordered urgency, energy fit, motivation fit, capacity, and plan-variety "
-            f"objectives; {remaining} minutes remained before selection"
+            "by ordered urgency, size-neutral energy fit, size-neutral motivation fit, "
+            f"and bounded plan-variety preferences within the {available_minutes}-minute "
+            "capacity ceiling"
         )
         selected.append(
             MenuItem(
@@ -436,7 +453,9 @@ def build_daily_menu(
     deferred.extend(rejected_eligible)
     deferred.sort(key=lambda item: item.task_id)
     constraints: list[str] = []
-    if rejected_eligible:
+    if any(
+        action.task_id not in selected_ids and action.duration > remaining for action in candidates
+    ):
         constraints.append("time budget")
     if solver == "deterministic-bounded-fallback":
         constraints.append(f"exact solver candidate limit ({_MAX_EXACT_CANDIDATES})")
@@ -445,11 +464,11 @@ def build_daily_menu(
         objective_order=(
             "maximum due urgency",
             "total due urgency",
-            "energy fit",
-            "motivation fit",
-            "capacity used",
-            "plan variety",
-            "item count",
+            "mean energy fit",
+            "mean motivation fit",
+            "lower selected minutes",
+            "fewer items",
+            "bounded plan variety",
             "stable task ids",
         ),
         selected_score=_selection_objective(
@@ -481,9 +500,10 @@ def serialize_daily_menu(menu: DailyMenu) -> str:
 def format_daily_menu(menu: DailyMenu) -> str:
     lines = [
         f"Proposed menu for {menu.as_of.isoformat()}",
-        f"Capacity: {menu.available_minutes} min, {menu.energy} energy, {menu.motivation} motivation",
+        f"Capacity ceiling: {menu.available_minutes} min, {menu.energy} energy, "
+        f"{menu.motivation} motivation",
         f"Selected: {menu.selected_minutes} min",
-        f"Optimizer: {menu.diagnostics.solver}; unused: {menu.diagnostics.unused_minutes} min",
+        f"Optimizer: {menu.diagnostics.solver}; remaining: {menu.diagnostics.unused_minutes} min",
         "",
     ]
     if not menu.items:
