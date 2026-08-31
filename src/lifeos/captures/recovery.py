@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.vault import iter_vault_markdown
+from lifeos.vault import VaultAccessError, iter_vault_markdown, observe_vault_file
 
 from .artifact import (
     AttachmentManifestService,
@@ -19,7 +19,7 @@ from .artifact import (
 )
 from .contracts import AttachmentManifest, CaptureArtifact, CaptureError
 from .extraction import LocalExtractionService
-from .storage import AttachmentStore, _hash_path
+from .storage import AttachmentStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,12 +230,19 @@ def rebuild_missing_manifests(*, vault_root: Path, runtime_dir: Path) -> tuple[s
         for reference in capture.metadata.attachments:
             if reference.attachment_id in existing:
                 continue
-            original = vault_root / reference.canonical_path
-            if not original.exists():
+            try:
+                observation = observe_vault_file(
+                    vault_root,
+                    reference.canonical_path,
+                    capture_limit=0,
+                )
+            except VaultAccessError:
                 continue
-            digest, byte_size, _ = _hash_path(original)
-            audit_hash = "sha256:" + digest
-            if audit_hash != reference.content_hash or byte_size != reference.byte_size:
+            audit_hash = "sha256:" + observation.content_hash
+            if (
+                audit_hash != reference.content_hash
+                or observation.size_bytes != reference.byte_size
+            ):
                 continue
             metadata = AttachmentManifest(
                 reference.attachment_id,

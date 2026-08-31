@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Mapping, Sequence
 
+from lifeos.vault import VaultAccessError, validate_vault_relative_path
+
 CAPTURE_SCHEMA_VERSION = 1
 ATTACHMENT_SCHEMA_VERSION = 1
 CaptureType = Literal["meal", "exercise", "attachment", "mixed"]
@@ -84,6 +86,30 @@ def _sha256(value: str, name: str) -> str:
     if not value.startswith("sha256:") or len(value) != 71:
         raise CaptureError("invalid_hash", f"{name} must be a sha256 digest.", {"field": name})
     return value
+
+
+def _attachment_path(value: str, name: str, *, root: str) -> str:
+    if value != value.strip():
+        raise CaptureError(
+            "invalid_attachment_path",
+            f"{name} must be a canonical vault-relative path below {root}/.",
+            {"field": name},
+        )
+    try:
+        validated = validate_vault_relative_path(value)
+    except VaultAccessError as exc:
+        raise CaptureError(
+            "invalid_attachment_path",
+            f"{name} must be a canonical vault-relative path below {root}/.",
+            {"field": name},
+        ) from exc
+    if not validated.startswith(root + "/"):
+        raise CaptureError(
+            "invalid_attachment_path",
+            f"{name} must be a canonical vault-relative path below {root}/.",
+            {"field": name},
+        )
+    return validated
 
 
 def validate_transition(current: CaptureState, target: CaptureState) -> None:
@@ -167,13 +193,21 @@ class AttachmentReference:
 
     def __post_init__(self) -> None:
         _nonblank(self.attachment_id, "attachment_id")
-        _nonblank(self.manifest_path, "manifest_path")
+        _attachment_path(
+            self.manifest_path,
+            "manifest_path",
+            root="attachments/manifests",
+        )
         _sha256(self.content_hash, "attachment content_hash")
         _nonblank(self.media_type, "media_type")
         if type(self.byte_size) is not int or self.byte_size < 0:
             raise CaptureError("invalid_attachment", "byte_size must be a non-negative integer.")
         _nonblank(self.original_filename, "original_filename")
-        _nonblank(self.canonical_path, "canonical_path")
+        _attachment_path(
+            self.canonical_path,
+            "canonical_path",
+            root="attachments/originals",
+        )
         _nonblank(self.relationship, "relationship")
 
     def to_dict(self) -> dict[str, object]:
@@ -349,7 +383,11 @@ class AttachmentManifest:
             raise CaptureError("invalid_attachment", "Attachment ID is malformed.")
         _sha256(self.content_hash, "content_hash")
         _nonblank(self.original_filename, "original_filename")
-        _nonblank(self.canonical_path, "canonical_path")
+        _attachment_path(
+            self.canonical_path,
+            "canonical_path",
+            root="attachments/originals",
+        )
         _nonblank(self.media_type, "media_type")
         _nonblank(self.capture_source, "capture_source")
         _nonblank(self.imported_at, "imported_at")

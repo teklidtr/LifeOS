@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -114,8 +115,9 @@ def test_pdf_extraction_records_page_provenance_without_real_dependency(
             return self.text
 
     class FakePdfReader:
-        def __init__(self, source: Path) -> None:
-            assert source == tmp_path / manifest.metadata.canonical_path
+        def __init__(self, source: BytesIO) -> None:
+            assert source.read() == b"%PDF-1.4\nfixture"
+            source.seek(0)
             self.pages = [FakePage("first"), FakePage("second")]
 
     module = ModuleType("pypdf")
@@ -211,6 +213,80 @@ def test_changed_and_missing_attachment_audit(tmp_path: Path) -> None:
     assert store.audit(imported.reference.attachment_id).status == "changed"
     canonical.unlink()
     assert store.audit(imported.reference.attachment_id).status == "missing"
+
+
+def test_persisted_traversal_manifest_cannot_read_or_delete_outside_vault(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    store = AttachmentStore(vault_root=vault, runtime_dir=tmp_path / "runtime")
+    source = tmp_path / "source.txt"
+    source.write_text("inside")
+    imported = store.import_file(source, capture_source="test", now=NOW)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    manifest_file = vault / imported.manifest_path
+    manifest_file.write_text(
+        manifest_file.read_text().replace(imported.reference.canonical_path, "../outside.txt")
+    )
+
+    with pytest.raises(CaptureError) as audit_error:
+        store.audit(imported.reference.attachment_id)
+    assert audit_error.value.code == "invalid_attachment_path"
+    with pytest.raises(CaptureError) as delete_error:
+        store.delete_original_if_unreferenced(imported.reference.attachment_id)
+    assert delete_error.value.code == "invalid_attachment_path"
+    assert outside.read_text() == "outside"
+
+
+def test_symlinked_original_parent_is_rejected_by_audit_extraction_and_delete(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    runtime = tmp_path / "runtime"
+    store = AttachmentStore(vault_root=vault, runtime_dir=runtime)
+    source = tmp_path / "source.txt"
+    source.write_text("secret")
+    imported = store.import_file(source, capture_source="test", now=NOW)
+    manifest = store.manifests.load(imported.manifest_path)
+    originals = vault / "attachments" / "originals"
+    outside = tmp_path / "outside-originals"
+    originals.rename(outside)
+    originals.symlink_to(outside, target_is_directory=True)
+    external_original = outside / Path(imported.reference.canonical_path).relative_to(
+        "attachments/originals"
+    )
+
+    audit = store.audit(imported.reference.attachment_id)
+    assert audit.status == "unsafe-symlink"
+    extraction = LocalExtractionService(vault_root=vault, runtime_dir=runtime).extract(
+        manifest.metadata
+    )
+    assert extraction.status == "failed"
+    assert "Unsafe directory entry" in extraction.warning
+    with pytest.raises(CaptureError) as delete_error:
+        store.delete_original_if_unreferenced(imported.reference.attachment_id)
+    assert delete_error.value.code == "unsafe-symlink"
+    assert external_original.read_text() == "secret"
+
+
+def test_import_rejects_symlinked_original_storage(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    (vault / "attachments").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (vault / "attachments" / "originals").symlink_to(outside, target_is_directory=True)
+    source = tmp_path / "source.txt"
+    source.write_text("secret")
+    store = AttachmentStore(vault_root=vault, runtime_dir=tmp_path / "runtime")
+
+    with pytest.raises(CaptureError) as exc:
+        store.import_file(source, capture_source="test", now=NOW)
+
+    assert exc.value.code == "unsafe-symlink"
+    assert list(outside.iterdir()) == []
 
 
 def test_merge_and_split_preserve_references_and_archive_sources(tmp_path: Path) -> None:

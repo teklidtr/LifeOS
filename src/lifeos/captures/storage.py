@@ -8,9 +8,20 @@ import os
 import re
 import secrets
 import stat
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO, Iterator
+
+from lifeos.vault import (
+    VaultAccessError,
+    observe_vault_file,
+    open_or_create_vault_directory,
+    open_vault_file,
+    unlink_vault_file,
+)
+
 from .artifact import AttachmentManifestService, CaptureArtifactService, manifest_path, utc_now
 from .contracts import AttachmentManifest, AttachmentReference, CaptureArtifact, CaptureError
 
@@ -92,6 +103,18 @@ def _hash_path(path: Path) -> tuple[str, int, int]:
         os.close(fd)
 
 
+def _hash_stream(source: BinaryIO) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    total = 0
+    while True:
+        chunk = source.read(_CHUNK_SIZE)
+        if not chunk:
+            break
+        digest.update(chunk)
+        total += len(chunk)
+    return digest.hexdigest(), total
+
+
 class AttachmentStore:
     def __init__(self, *, vault_root: Path, runtime_dir: Path) -> None:
         self.vault_root = vault_root
@@ -133,13 +156,22 @@ class AttachmentStore:
         moment = utc_now(now)
         suffix = f"-{secrets.token_hex(3)}" if independent_copy else ""
         relative = f"attachments/originals/{digest[:2]}/{digest}{suffix}/{_safe_name(source.name)}"
-        target = self.vault_root / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            self._copy_atomic(source, target)
-        actual, actual_size, _ = _hash_path(target)
-        if actual != digest or actual_size != byte_size:
-            target.unlink(missing_ok=True)
+        try:
+            self._copy_atomic(source, relative)
+        except VaultAccessError as exc:
+            raise CaptureError(exc.code, str(exc), {"path": relative}) from exc
+        try:
+            observation = observe_vault_file(self.vault_root, relative, capture_limit=0)
+        except VaultAccessError as exc:
+            raise CaptureError(
+                "storage_verification_failed",
+                f"Stored attachment could not be verified: {exc}",
+            ) from exc
+        if observation.content_hash != digest or observation.size_bytes != byte_size:
+            try:
+                unlink_vault_file(self.vault_root, relative, missing_ok=True)
+            except VaultAccessError:
+                pass
             raise CaptureError(
                 "storage_verification_failed", "Stored attachment did not match the original bytes."
             )
@@ -216,48 +248,84 @@ class AttachmentStore:
                 "Attachment is still referenced.",
                 {"capture_ids": references},
             )
-        original = self.vault_root / manifest.metadata.canonical_path
-        original.unlink(missing_ok=True)
+        try:
+            unlink_vault_file(
+                self.vault_root,
+                manifest.metadata.canonical_path,
+                missing_ok=True,
+            )
+        except VaultAccessError as exc:
+            raise CaptureError(
+                exc.code,
+                str(exc),
+                {"path": manifest.metadata.canonical_path},
+            ) from exc
         return True
 
     def audit(self, attachment_id: str) -> AttachmentAudit:
         manifest = self.manifests.load(manifest_path(attachment_id))
-        original = self.vault_root / manifest.metadata.canonical_path
-        if not original.exists():
-            return AttachmentAudit(
-                attachment_id,
-                "missing",
-                manifest.metadata.canonical_path,
-                manifest.metadata.content_hash,
-                details="Original file is missing.",
-            )
         try:
-            digest, size, _ = _hash_path(original)
-        except CaptureError as exc:
+            with self.open_verified(manifest.metadata):
+                pass
+        except VaultAccessError as exc:
+            if exc.code == "not-found":
+                status = "missing"
+                details = "Original file is missing."
+            elif exc.code == "unsafe-file-type":
+                status = "unsupported_file"
+                details = "Only regular files can be attached."
+            elif exc.code == "concurrent-change":
+                status = "file_changed"
+                details = "Attachment changed while it was being hashed."
+            elif exc.code == "unsafe-symlink":
+                status = exc.code
+                details = str(exc)
+            else:
+                status = "attachment_open_failed"
+                details = f"Attachment could not be opened: {exc}"
             return AttachmentAudit(
                 attachment_id,
-                exc.code,
+                status,
                 manifest.metadata.canonical_path,
                 manifest.metadata.content_hash,
-                details=exc.message,
+                details=details,
             )
-        actual = "sha256:" + digest
-        if actual != manifest.metadata.content_hash or size != manifest.metadata.byte_size:
+        except CaptureError as exc:
+            actual = exc.data.get("actual_hash")
             return AttachmentAudit(
                 attachment_id,
-                "changed",
+                "changed" if exc.code == "attachment_changed" else exc.code,
                 manifest.metadata.canonical_path,
                 manifest.metadata.content_hash,
-                actual,
-                "Original bytes changed; derivatives are stale.",
+                str(actual) if actual is not None else None,
+                details=exc.message,
             )
         return AttachmentAudit(
             attachment_id,
             "ok",
             manifest.metadata.canonical_path,
             manifest.metadata.content_hash,
-            actual,
+            manifest.metadata.content_hash,
         )
+
+    @contextmanager
+    def open_verified(self, manifest: AttachmentManifest) -> Iterator[BinaryIO]:
+        """Yield the immutable original named by a manifest through the vault boundary."""
+        with open_vault_file(self.vault_root, manifest.canonical_path) as source:
+            digest, size = _hash_stream(source)
+            actual = "sha256:" + digest
+            if actual != manifest.content_hash or size != manifest.byte_size:
+                raise CaptureError(
+                    "attachment_changed",
+                    "Original bytes changed; derivatives are stale.",
+                    {
+                        "path": manifest.canonical_path,
+                        "actual_hash": actual,
+                        "actual_size": size,
+                    },
+                )
+            source.seek(0)
+            yield source
 
     @staticmethod
     def _reference(metadata: AttachmentManifest) -> AttachmentReference:
@@ -271,40 +339,49 @@ class AttachmentStore:
             metadata.canonical_path,
         )
 
-    @staticmethod
-    def _copy_atomic(source: Path, target: Path) -> None:
-        directory_fd = os.open(target.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        temp_name = f".{target.name}.{secrets.token_hex(6)}.import"
-        temp_fd = -1
-        source_fd = -1
-        try:
-            source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-            temp_fd = os.open(
-                temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644, dir_fd=directory_fd
-            )
-            while True:
-                chunk = os.read(source_fd, _CHUNK_SIZE)
-                if not chunk:
-                    break
-                offset = 0
-                while offset < len(chunk):
-                    offset += os.write(temp_fd, chunk[offset:])
-            os.fsync(temp_fd)
-            os.close(temp_fd)
+    def _copy_atomic(self, source: Path, relative_path: str) -> None:
+        parts = PurePosixPath(relative_path).parts
+        parent = "/".join(parts[:-1])
+        target_name = parts[-1]
+        with open_or_create_vault_directory(self.vault_root, parent) as directory_fd:
+            temp_name = f".{target_name}.{secrets.token_hex(6)}.import"
             temp_fd = -1
-            os.replace(temp_name, target.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
-            os.fsync(directory_fd)
-        except OSError as exc:
+            source_fd = -1
             try:
-                os.unlink(temp_name, dir_fd=directory_fd)
-            except OSError:
-                pass
-            raise CaptureError(
-                "storage_write_failure", f"Attachment could not be stored: {exc}"
-            ) from exc
-        finally:
-            if temp_fd >= 0:
+                source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                temp_fd = os.open(
+                    temp_name,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o644,
+                    dir_fd=directory_fd,
+                )
+                while True:
+                    chunk = os.read(source_fd, _CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    offset = 0
+                    while offset < len(chunk):
+                        offset += os.write(temp_fd, chunk[offset:])
+                os.fsync(temp_fd)
                 os.close(temp_fd)
-            if source_fd >= 0:
-                os.close(source_fd)
-            os.close(directory_fd)
+                temp_fd = -1
+                os.replace(
+                    temp_name,
+                    target_name,
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                )
+                os.fsync(directory_fd)
+            except OSError as exc:
+                try:
+                    os.unlink(temp_name, dir_fd=directory_fd)
+                except OSError:
+                    pass
+                raise CaptureError(
+                    "storage_write_failure", f"Attachment could not be stored: {exc}"
+                ) from exc
+            finally:
+                if temp_fd >= 0:
+                    os.close(temp_fd)
+                if source_fd >= 0:
+                    os.close(source_fd)

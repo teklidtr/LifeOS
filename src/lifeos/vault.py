@@ -6,9 +6,10 @@ import errno
 import hashlib
 import os
 import stat
+from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
-from typing import Iterable, Iterator
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import BinaryIO, Iterable, Iterator
 
 _EXCLUDED_NAMES = frozenset({".git", ".lifeos", "__pycache__"})
 _DIRECTORY_FLAGS = (
@@ -60,15 +61,26 @@ def is_markdown_path(relative_path: str) -> bool:
     return isinstance(relative_path, str) and relative_path.casefold().endswith(".md")
 
 
-def _safe_relative_path(relative_path: str) -> tuple[str, ...]:
+def validate_vault_relative_path(relative_path: str) -> str:
+    """Validate and return one canonical, portable vault-relative path."""
     if type(relative_path) is not str or not relative_path:
         raise VaultAccessError("invalid-path", "", "Vault path must be a non-empty string")
     if "\\" in relative_path or "\x00" in relative_path:
         raise VaultAccessError("invalid-path", relative_path, "Vault path contains an invalid character")
     pure = PurePosixPath(relative_path)
-    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+    if (
+        pure.is_absolute()
+        or PureWindowsPath(relative_path).drive
+        or not pure.parts
+        or any(part in {"", ".", ".."} for part in pure.parts)
+        or pure.as_posix() != relative_path
+    ):
         raise VaultAccessError("invalid-path", relative_path, "Vault path must stay within the vault")
-    return pure.parts
+    return relative_path
+
+
+def _safe_relative_path(relative_path: str) -> tuple[str, ...]:
+    return PurePosixPath(validate_vault_relative_path(relative_path)).parts
 
 
 def _classify_open_error(exc: OSError, relative_path: str, *, kind: str) -> VaultAccessError:
@@ -273,6 +285,128 @@ def observe_vault_file(
             captured_bytes=bytes(captured),
             capture_complete=capture_limit is None or total_bytes <= capture_limit,
         )
+    finally:
+        _close_fds(opened)
+
+
+@contextmanager
+def open_vault_file(vault_root: Path, relative_path: str) -> Iterator[BinaryIO]:
+    """Yield one descriptor-pinned binary vault file and reject path or byte races."""
+    parts = _safe_relative_path(relative_path)
+    opened, before, identity_chain = _open_file_chain(vault_root, parts, relative_path)
+    duplicate_fd = -1
+    try:
+        try:
+            duplicate_fd = os.dup(opened[-1])
+        except OSError as exc:
+            raise VaultAccessError(
+                "filesystem-unavailable",
+                relative_path,
+                f"Vault file could not be opened: {relative_path}",
+            ) from exc
+        with os.fdopen(duplicate_fd, "rb", closefd=True) as source:
+            duplicate_fd = -1
+            yield source
+        try:
+            after = os.fstat(opened[-1])
+        except OSError as exc:
+            raise VaultAccessError(
+                "filesystem-unavailable",
+                relative_path,
+                f"Vault file could not be inspected: {relative_path}",
+            ) from exc
+        if (
+            before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns
+            or before.st_size != after.st_size
+        ):
+            raise _concurrent_change(relative_path)
+        _revalidate_file_chain(vault_root, parts, relative_path, identity_chain)
+    finally:
+        if duplicate_fd >= 0:
+            os.close(duplicate_fd)
+        _close_fds(opened)
+
+
+@contextmanager
+def open_or_create_vault_directory(vault_root: Path, relative_path: str) -> Iterator[int]:
+    """Yield a vault directory descriptor, creating missing regular directories safely."""
+    parts = _safe_relative_path(relative_path)
+    opened: list[int] = []
+    try:
+        root_fd = _open_root(vault_root)
+        opened.append(root_fd)
+        current_fd = root_fd
+        for index, part in enumerate(parts):
+            current_relative = "/".join(parts[: index + 1])
+            try:
+                next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(part, mode=0o755, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                except OSError as exc:
+                    raise VaultAccessError(
+                        "filesystem-unavailable",
+                        current_relative,
+                        f"Vault directory could not be created: {current_relative}",
+                    ) from exc
+                try:
+                    next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
+                except OSError as exc:
+                    raise _classify_open_error(
+                        exc,
+                        current_relative,
+                        kind="directory",
+                    ) from exc
+            except OSError as exc:
+                raise _classify_open_error(
+                    exc,
+                    current_relative,
+                    kind="directory",
+                ) from exc
+            opened.append(next_fd)
+            current_fd = next_fd
+        yield current_fd
+    finally:
+        _close_fds(opened)
+
+
+def unlink_vault_file(vault_root: Path, relative_path: str, *, missing_ok: bool = False) -> bool:
+    """Unlink one regular vault file through a symlink-safe parent descriptor."""
+    parts = _safe_relative_path(relative_path)
+    opened: list[int] = []
+    try:
+        try:
+            opened, _file_stat, _identity_chain = _open_file_chain(
+                vault_root,
+                parts,
+                relative_path,
+            )
+        except VaultAccessError as exc:
+            if missing_ok and exc.code == "not-found":
+                return False
+            raise
+        try:
+            os.unlink(parts[-1], dir_fd=opened[-2])
+        except FileNotFoundError:
+            if missing_ok:
+                return False
+            raise VaultAccessError(
+                "not-found",
+                relative_path,
+                f"Vault entry was not found: {relative_path}",
+            ) from None
+        except OSError as exc:
+            raise VaultAccessError(
+                "filesystem-unavailable",
+                relative_path,
+                f"Vault file could not be deleted: {relative_path}",
+            ) from exc
+        return True
     finally:
         _close_fds(opened)
 

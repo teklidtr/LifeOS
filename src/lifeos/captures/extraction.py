@@ -6,8 +6,11 @@ import json
 import struct
 import wave
 from dataclasses import asdict, dataclass
-from pathlib import Path
-from typing import Literal
+from io import BytesIO
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO, Literal
+
+from lifeos.vault import VaultAccessError
 
 from .contracts import AttachmentManifest, CaptureError
 from .storage import AttachmentStore
@@ -58,71 +61,62 @@ class LocalExtractionService:
     ) -> ExtractionResult:
         token = cancellation or ExtractionCancellation()
         token.checkpoint()
-        audit = self.store.audit(manifest.attachment_id)
-        if audit.status != "ok":
-            return ExtractionResult(
-                manifest.attachment_id,
-                manifest.content_hash,
-                "local",
-                "1",
-                "stale" if audit.status == "changed" else "failed",
-                warning=audit.details,
-            )
-        path = self.vault_root / manifest.canonical_path
+        suffix = PurePosixPath(manifest.canonical_path).suffix.lower()
         media = manifest.media_type
         try:
-            if media.startswith("text/") or path.suffix.lower() in {
-                ".md",
-                ".txt",
-                ".csv",
-                ".json",
-                ".yaml",
-                ".yml",
-            }:
-                raw = self._bounded_read(path)
-                token.checkpoint()
-                text = raw.decode("utf-8")
+            with self.store.open_verified(manifest) as source:
+                if media.startswith("text/") or suffix in {
+                    ".md",
+                    ".txt",
+                    ".csv",
+                    ".json",
+                    ".yaml",
+                    ".yml",
+                }:
+                    raw = self._bounded_read(source, manifest.byte_size)
+                    token.checkpoint()
+                    text = raw.decode("utf-8")
+                    return ExtractionResult(
+                        manifest.attachment_id,
+                        manifest.content_hash,
+                        "utf8-text",
+                        "1",
+                        "completed",
+                        text=text,
+                        quality="high",
+                    )
+                if media == "application/pdf" or suffix == ".pdf":
+                    return self._pdf(source, manifest, token)
+                if media.startswith("image/"):
+                    metadata = self._image_metadata(source, suffix, manifest.byte_size)
+                    return ExtractionResult(
+                        manifest.attachment_id,
+                        manifest.content_hash,
+                        "image-metadata",
+                        "1",
+                        "completed",
+                        quality="high",
+                        metadata=metadata,
+                    )
+                if media.startswith("audio/") or suffix == ".wav":
+                    metadata = self._audio_metadata(source, suffix, manifest.byte_size)
+                    return ExtractionResult(
+                        manifest.attachment_id,
+                        manifest.content_hash,
+                        "audio-metadata",
+                        "1",
+                        "completed",
+                        quality="high",
+                        metadata=metadata,
+                    )
                 return ExtractionResult(
                     manifest.attachment_id,
                     manifest.content_hash,
-                    "utf8-text",
+                    "none",
                     "1",
-                    "completed",
-                    text=text,
-                    quality="high",
+                    "unavailable",
+                    warning="The file is preserved but no local extractor supports this format.",
                 )
-            if media == "application/pdf" or path.suffix.lower() == ".pdf":
-                return self._pdf(path, manifest, token)
-            if media.startswith("image/"):
-                metadata = self._image_metadata(path)
-                return ExtractionResult(
-                    manifest.attachment_id,
-                    manifest.content_hash,
-                    "image-metadata",
-                    "1",
-                    "completed",
-                    quality="high",
-                    metadata=metadata,
-                )
-            if media.startswith("audio/") or path.suffix.lower() == ".wav":
-                metadata = self._audio_metadata(path)
-                return ExtractionResult(
-                    manifest.attachment_id,
-                    manifest.content_hash,
-                    "audio-metadata",
-                    "1",
-                    "completed",
-                    quality="high",
-                    metadata=metadata,
-                )
-            return ExtractionResult(
-                manifest.attachment_id,
-                manifest.content_hash,
-                "none",
-                "1",
-                "unavailable",
-                warning="The file is preserved but no local extractor supports this format.",
-            )
         except UnicodeDecodeError:
             return ExtractionResult(
                 manifest.attachment_id,
@@ -132,7 +126,25 @@ class LocalExtractionService:
                 "failed",
                 warning="Text attachment is not valid UTF-8.",
             )
-        except CaptureError:
+        except VaultAccessError as exc:
+            return ExtractionResult(
+                manifest.attachment_id,
+                manifest.content_hash,
+                "local",
+                "1",
+                "failed",
+                warning="Original file is missing." if exc.code == "not-found" else str(exc),
+            )
+        except CaptureError as exc:
+            if exc.code == "attachment_changed":
+                return ExtractionResult(
+                    manifest.attachment_id,
+                    manifest.content_hash,
+                    "local",
+                    "1",
+                    "stale",
+                    warning=exc.message,
+                )
             raise
         except Exception as exc:
             return ExtractionResult(
@@ -161,20 +173,19 @@ class LocalExtractionService:
         data = json.loads(target.read_text())
         return ExtractionResult(**data)
 
-    def _bounded_read(self, path: Path) -> bytes:
-        size = path.stat().st_size
+    def _bounded_read(self, source: BinaryIO, size: int) -> bytes:
         if size > self.max_text_bytes:
             raise CaptureError(
                 "oversized_for_extraction",
                 "Attachment exceeds the configured extraction limit.",
                 {"byte_size": size, "limit": self.max_text_bytes},
             )
-        return path.read_bytes()
+        return source.read()
 
     def _pdf(
-        self, path: Path, manifest: AttachmentManifest, token: ExtractionCancellation
+        self, source: BinaryIO, manifest: AttachmentManifest, token: ExtractionCancellation
     ) -> ExtractionResult:
-        raw = self._bounded_read(path)
+        raw = self._bounded_read(source, manifest.byte_size)
         token.checkpoint()
         if b"/Encrypt" in raw[:200_000]:
             return ExtractionResult(
@@ -196,7 +207,7 @@ class LocalExtractionService:
                 "unavailable",
                 warning="PDF text extraction is unavailable because the optional local parser is not installed.",
             )
-        reader = PdfReader(path)
+        reader = PdfReader(BytesIO(raw))
         pages: list[str] = []
         for index, page in enumerate(reader.pages):
             token.checkpoint()
@@ -213,26 +224,26 @@ class LocalExtractionService:
         )
 
     @staticmethod
-    def _image_metadata(path: Path) -> dict[str, object]:
-        raw = path.read_bytes()[:32]
+    def _image_metadata(source: BinaryIO, suffix: str, byte_size: int) -> dict[str, object]:
+        raw = source.read(32)
         if raw.startswith(b"\x89PNG\r\n\x1a\n") and len(raw) >= 24:
             width, height = struct.unpack(">II", raw[16:24])
             return {"format": "png", "width": width, "height": height}
         if raw.startswith(b"\xff\xd8"):
-            return {"format": "jpeg", "byte_size": path.stat().st_size}
+            return {"format": "jpeg", "byte_size": byte_size}
         return {
-            "format": path.suffix.lower().lstrip(".") or "unknown",
-            "byte_size": path.stat().st_size,
+            "format": suffix.lstrip(".") or "unknown",
+            "byte_size": byte_size,
         }
 
     @staticmethod
-    def _audio_metadata(path: Path) -> dict[str, object]:
-        if path.suffix.lower() != ".wav":
+    def _audio_metadata(source: BinaryIO, suffix: str, byte_size: int) -> dict[str, object]:
+        if suffix != ".wav":
             return {
-                "format": path.suffix.lower().lstrip(".") or "unknown",
-                "byte_size": path.stat().st_size,
+                "format": suffix.lstrip(".") or "unknown",
+                "byte_size": byte_size,
             }
-        with wave.open(str(path), "rb") as audio:
+        with wave.open(source, "rb") as audio:
             frames = audio.getnframes()
             rate = audio.getframerate()
             return {

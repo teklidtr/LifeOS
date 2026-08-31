@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from lifeos.captures.artifact import AttachmentManifestService, CaptureArtifactService
-from lifeos.captures.contracts import AttachmentManifest, CaptureError, DerivedValue
+from lifeos.captures.contracts import (
+    AttachmentManifest,
+    AttachmentReference,
+    CaptureError,
+    DerivedValue,
+)
 
 NOW = datetime(2026, 7, 16, 9, 0, tzinfo=timezone.utc)
 
@@ -77,6 +82,73 @@ def test_manifest_round_trip_and_human_annotations(tmp_path: Path) -> None:
     )
     assert updated.metadata.preview_status == "completed"
     assert "Keep original." in updated.human_body
+
+
+@pytest.mark.parametrize(
+    "canonical_path",
+    [
+        "../outside.txt",
+        "/attachments/originals/aa/hash/file.txt",
+        "C:/attachments/originals/aa/hash/file.txt",
+        "attachments/originals/aa/../file.txt",
+        "attachments/originals//aa/hash/file.txt",
+        "attachments\\originals\\aa\\hash\\file.txt",
+        "wiki/file.txt",
+    ],
+)
+def test_attachment_canonical_paths_are_confined_to_original_storage(
+    canonical_path: str,
+) -> None:
+    with pytest.raises(CaptureError) as manifest_error:
+        AttachmentManifest(
+            attachment_id="att-0123456789abcdef",
+            content_hash="sha256:" + "a" * 64,
+            original_filename="file.txt",
+            canonical_path=canonical_path,
+            media_type="text/plain",
+            byte_size=1,
+            capture_source="test",
+            imported_at=NOW.isoformat(),
+        )
+    assert manifest_error.value.code == "invalid_attachment_path"
+
+    with pytest.raises(CaptureError) as reference_error:
+        AttachmentReference(
+            attachment_id="att-0123456789abcdef",
+            manifest_path="attachments/manifests/att-0123456789abcdef.md",
+            content_hash="sha256:" + "a" * 64,
+            media_type="text/plain",
+            byte_size=1,
+            original_filename="file.txt",
+            canonical_path=canonical_path,
+        )
+    assert reference_error.value.code == "invalid_attachment_path"
+
+
+@pytest.mark.parametrize(
+    "manifest_path",
+    [
+        "../manifest.md",
+        "/attachments/manifests/att-0123456789abcdef.md",
+        "attachments/manifests/../att-0123456789abcdef.md",
+        "attachments/manifests//att-0123456789abcdef.md",
+        "captures/2026/not-a-manifest.md",
+    ],
+)
+def test_attachment_manifest_references_are_confined_to_manifest_storage(
+    manifest_path: str,
+) -> None:
+    with pytest.raises(CaptureError) as exc:
+        AttachmentReference(
+            attachment_id="att-0123456789abcdef",
+            manifest_path=manifest_path,
+            content_hash="sha256:" + "a" * 64,
+            media_type="text/plain",
+            byte_size=1,
+            original_filename="file.txt",
+            canonical_path="attachments/originals/aa/hash/file.txt",
+        )
+    assert exc.value.code == "invalid_attachment_path"
 
 
 def test_unsupported_schema_fails_without_rewriting(tmp_path: Path) -> None:
