@@ -256,6 +256,26 @@ def _better_menu_selection(
     return _selection_ids(candidate) < _selection_ids(incumbent)
 
 
+def _selection_state_key(
+    selected: tuple[PlanningAction, ...],
+    *,
+    as_of: date,
+    energy: Level,
+    motivation: Level,
+) -> tuple[int, frozenset[str], tuple[int, ...]]:
+    """Retain every aggregate that can affect a future objective comparison."""
+    return (
+        sum(action.duration for action in selected),
+        frozenset(action.plan.casefold() for action in selected),
+        _selection_objective(
+            selected,
+            as_of=as_of,
+            energy=energy,
+            motivation=motivation,
+        ),
+    )
+
+
 def _exact_menu_selection(
     candidates: tuple[PlanningAction, ...],
     *,
@@ -264,24 +284,30 @@ def _exact_menu_selection(
     energy: Level,
     motivation: Level,
 ) -> tuple[PlanningAction, ...]:
-    states: dict[tuple[int, frozenset[str]], tuple[PlanningAction, ...]] = {(0, frozenset()): ()}
+    empty_key = _selection_state_key(
+        (),
+        as_of=as_of,
+        energy=energy,
+        motivation=motivation,
+    )
+    states: dict[
+        tuple[int, frozenset[str], tuple[int, ...]],
+        tuple[PlanningAction, ...],
+    ] = {empty_key: ()}
     for action in candidates:
         next_states = dict(states)
-        for (used, plans), selected in states.items():
-            next_used = used + action.duration
-            if next_used > available_minutes:
+        for (used, _plans, _objective), selected in states.items():
+            if used + action.duration > available_minutes:
                 continue
-            next_plans = plans | {action.plan.casefold()}
-            key = (next_used, frozenset(next_plans))
             candidate = (*selected, action)
-            incumbent = next_states.get(key)
-            if incumbent is None or _better_menu_selection(
+            key = _selection_state_key(
                 candidate,
-                incumbent,
                 as_of=as_of,
                 energy=energy,
                 motivation=motivation,
-            ):
+            )
+            incumbent = next_states.get(key)
+            if incumbent is None or _selection_ids(candidate) < _selection_ids(incumbent):
                 next_states[key] = candidate
         states = next_states
     best: tuple[PlanningAction, ...] = ()
