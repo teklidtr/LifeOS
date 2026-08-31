@@ -9,6 +9,10 @@ repeated avoidance. It remains optional, bounded, explainable, and reversible.
 > Adaptive feedback is advice from recorded evidence. It is not a measure of discipline,
 > character, health, happiness, or personal worth.
 
+Daily available time is a **capacity ceiling**, not a workload target. LifeOS may recommend less
+work than fits in the declared window when there is no stronger scheduling reason to add another
+action. Remaining capacity is neutral; the planner does not treat it as a deficit to eliminate.
+
 ## Architecture and privacy boundary
 
 ```mermaid
@@ -87,7 +91,8 @@ Shadow mode is the safest starting point after you have several explicit outcome
 ### Active
 
 LifeOS may return the adaptive menu, subject to the same available-time, blocker, capacity,
-and bounded-selection rules. The baseline remains visible beside it.
+and bounded-selection rules. The available-time value remains a hard maximum, not a request to
+fill the window. The baseline remains visible beside it.
 
 Active mode never:
 
@@ -116,7 +121,7 @@ missing energy value does not become low energy. A skipped task does not prove l
 
 On a Today task, choose **Why this?**. The explanation separates:
 
-1. **Baseline reason:** urgency, capacity, available time, blockers, and plan diversity.
+1. **Baseline reason:** urgency, energy and motivation fit, blockers, bounded plan diversity, and the available-time ceiling.
 2. **Duration evidence:** declared and cautious calibrated estimates.
 3. **Capacity evidence:** energy, motivation, mode, duration band, time window, and blockers.
 4. **Avoidance questions:** tentative hypotheses based on repeated explicit outcomes.
@@ -262,6 +267,8 @@ The report keeps measures separate:
 - explanation coverage;
 - changed task IDs.
 
+Here, unused time means neutral remaining capacity inside the declared ceiling. It is not a
+planning failure, utilization deficit, or signal that LifeOS should have added more work.
 There is deliberately no combined “productivity score.” Replay uses only evidence available
 before each historical planning day, preventing the same day’s outcome from leaking into its
 morning recommendation.
@@ -271,8 +278,8 @@ morning recommendation.
 ### Morning
 
 1. Open **Today**.
-2. Record energy, motivation, and available time.
-3. Review the returned menu.
+2. Record energy, motivation, and the maximum available time you want the menu to fit within.
+3. Review the returned menu; it does not need to consume the full available-time ceiling.
 4. In Shadow or Active mode, inspect any meaningful adaptive difference.
 5. Use **Why this?** when the recommendation is surprising.
 6. Choose your actions. The menu remains a proposal, not an order.
