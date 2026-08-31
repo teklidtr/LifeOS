@@ -145,8 +145,8 @@ jobs:
           platforms: linux/arm64
           outputs: type=cacheonly
           provenance: false
-          cache-from: type=gha,scope=lifeos-home-node-arm64
-          cache-to: type=gha,mode=max,scope=lifeos-home-node-arm64,ignore-error=true
+          cache-from: type=gha,scope=lifeos-home-node-arm64,timeout=1m
+          cache-to: type=gha,mode=max,scope=lifeos-home-node-arm64,ignore-error=true,timeout=1m
 
       - name: Retry ARM64 home-node image without remote cache
         if: steps.arm64-build.outcome == 'failure'
