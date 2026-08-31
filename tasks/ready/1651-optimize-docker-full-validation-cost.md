@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1651
 title: Optimize Docker full-validation cost without weakening ARM64 coverage
-status: backlog
+status: ready
 phase: hardening
 depends_on:
   - LIFEOS-1644
