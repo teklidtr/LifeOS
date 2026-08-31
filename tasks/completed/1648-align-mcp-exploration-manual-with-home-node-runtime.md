@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1648
 title: Align MCP exploration manual with the supported home-node runtime
-status: in-progress
+status: completed
 phase: 16
 depends_on:
   - LIFEOS-1639
