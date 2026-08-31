@@ -64,6 +64,11 @@ def test_documented_fresh_vault_setup_runs_from_isolated_home(tmp_path: Path) ->
     config = load_config(vault / "lifeos.yml")
     assert config.vault_root == vault.resolve()
     assert config.runtime_dir == (vault / ".lifeos").resolve()
+    assert config.features.graphify is False
+    assert config.features.exports is False
+    config_text = (vault / "lifeos.yml").read_text(encoding="utf-8")
+    assert "  graphify: false\n" in config_text
+    assert "  exports: false\n" in config_text
     assert not config.runtime_dir.exists()
 
     # Doctor is read-only and must work before disposable runtime state exists.
