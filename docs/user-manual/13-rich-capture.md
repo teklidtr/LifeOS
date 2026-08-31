@@ -314,8 +314,8 @@ voice notes. The current scopes do not all mean the same thing:
 |---|---|
 | `standard` | Normal local processing and eligibility rules |
 | `private` | A visible canonical privacy classification; the current capture filter does not yet filter by it, and it is not equivalent to protected default-deny |
-| `protected` | External processing is blocked unless this operation explicitly allows the sensitive capture |
-| `sensitive: true` | Uses the same external-processing default-deny as `protected` |
+| `protected` | External processing requires explicit operation scope, and semantic representation is default-denied |
+| `sensitive: true` | Uses the same external-processing and semantic-representation default-deny as `protected` |
 
 For explicitly selected neighboring notes, the current protected root names are
 `diary/`, `health/`, `medical/`, `private/`, `therapy/`, and `photos/`. Each root
@@ -342,12 +342,13 @@ private notes.
 
 The canonical schema includes independent exclusions for semantic retrieval,
 knowledge conversations, reviews, and experiment analysis. The current helpers
-enforce semantic, review, and experiment exclusions. The conversation-specific
-flag is stored but is not independently checked by the current conversation
-evidence helper, which consumes an already approved semantic representation. The
-Rich Capture controller does not expose dedicated toggles. Also,
-`privacy_scope: protected` does not by itself set `exclude_from_semantic`. Do not
-assume provider protection and semantic index exclusion are the same policy.
+enforce semantic, conversation, review, and experiment exclusions. A
+conversation-excluded capture may still produce a representation for another
+approved local semantic use, but the exclusion remains attached to that
+representation and the conversation evidence boundary rejects it. Protected or
+sensitive captures are denied before semantic representation regardless of the
+separate semantic flag. The Rich Capture controller does not expose dedicated
+toggles.
 
 ## Duplicate files, duplicate captures, merge, and split
 
@@ -384,9 +385,9 @@ provenance, representation kind, hashes, stale state, and filter metadata.
 Knowledge conversations distinguish original text from extracted or confirmed
 derived text. Evidence links back to the exact capture and attachment. A stale or
 changed source is shown as stale, and a conversation cannot claim visual facts
-that are absent from approved textual evidence. The current helper does not check
-`exclude_from_conversations` independently, so the semantic representation must
-already have been approved before conversation evidence is created.
+that are absent from approved textual evidence. The conversation boundary checks
+`exclude_from_conversations` independently even after a semantic representation
+has been approved for another use.
 
 Current rich-capture indexing is an integration helper rather than an automatic
 full-vault ingestion hook. A retrieval workflow must explicitly build and supply

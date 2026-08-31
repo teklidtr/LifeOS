@@ -121,11 +121,12 @@ visible to the conversation workspace.
 
 This integration is currently an explicit helper rather than an automatic
 full-vault capture ingestion hook. The `exclude_from_semantic` flag is enforced
-when a representation is built, but the standard Rich Capture controller does
-not expose the exclusion toggle. Also, `privacy_scope: protected` controls
-external processing and does not automatically set semantic exclusion. Apply
-both policies deliberately when a protected capture should never enter the
-retrieval index. See [Rich Capture](13-rich-capture.md).
+when a representation is built, and protected or sensitive captures are
+default-denied before a semantic representation can be created. The standard
+Rich Capture controller does not expose these controls. A representation also
+carries `exclude_from_conversations`; the conversation evidence boundary rejects
+it even when the same capture remains eligible for another local semantic use.
+See [Rich Capture](13-rich-capture.md).
 
 ## Continue, branch, and revisit
 

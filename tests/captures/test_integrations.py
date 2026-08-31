@@ -81,6 +81,54 @@ def test_semantic_exclusion_and_conversation_provenance(tmp_path: Path) -> None:
     assert exc.value.code == "semantic_excluded"
 
 
+@pytest.mark.parametrize(
+    "privacy_fields",
+    [
+        {"privacy_scope": "protected"},
+        {"sensitive": True},
+    ],
+)
+def test_protected_capture_is_default_denied_from_semantic_retrieval(
+    tmp_path: Path,
+    privacy_fields: dict[str, object],
+) -> None:
+    captures = CaptureArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
+    capture = captures.create(
+        title="Private voice note",
+        capture_type="attachment",
+        description="sensitive text",
+        now=NOW,
+        **privacy_fields,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(CaptureError) as exc:
+        build_capture_representation(capture)
+
+    assert exc.value.code == "protected_semantic_denied"
+
+
+def test_conversation_exclusion_survives_semantic_representation(tmp_path: Path) -> None:
+    captures = CaptureArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
+    capture = captures.create(
+        title="Searchable but not conversational",
+        capture_type="attachment",
+        description="approved semantic text",
+        now=NOW,
+    )
+    capture = captures.save(
+        capture,
+        replace(capture.metadata, exclude_from_conversations=True),
+        expected_hash=capture.content_hash,
+    )
+
+    representation = build_capture_representation(capture)
+    chunked = chunk_capture_representation(representation, indexed_at=NOW)
+    assert chunked.document.frontmatter["exclude_from_conversations"] is True
+    with pytest.raises(CaptureError) as exc:
+        conversation_evidence(representation)
+    assert exc.value.code == "conversation_excluded"
+
+
 def test_daily_and_weekly_reviews_are_optional_and_non_moralizing(tmp_path: Path) -> None:
     captures = CaptureArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
     captures.create(title="Lunch", capture_type="meal", event_at=NOW, now=NOW)

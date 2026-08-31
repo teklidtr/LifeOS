@@ -111,6 +111,16 @@ def _enum(value: object, name: str, allowed: frozenset[str]) -> str:
     return value
 
 
+def _boolean(value: object, name: str) -> bool:
+    if type(value) is not bool:
+        raise CaptureError(
+            "invalid_field",
+            f"{name} must be a boolean.",
+            {"field": name},
+        )
+    return value
+
+
 def _attachment_path(value: str, name: str, *, root: str) -> str:
     if value != value.strip():
         raise CaptureError(
@@ -323,7 +333,15 @@ class CaptureMetadata:
         _enum(self.privacy_scope, "privacy_scope", _PRIVACY_SCOPES)
         _enum(self.extraction_status, "extraction_status", _PROCESSING_STATES)
         _enum(self.enrichment_status, "enrichment_status", _PROCESSING_STATES)
-        for name, value in (
+        for flag_name, flag_value in (
+            ("sensitive", self.sensitive),
+            ("exclude_from_semantic", self.exclude_from_semantic),
+            ("exclude_from_conversations", self.exclude_from_conversations),
+            ("exclude_from_reviews", self.exclude_from_reviews),
+            ("exclude_from_experiments", self.exclude_from_experiments),
+        ):
+            _boolean(flag_value, flag_name)
+        for text_name, text_value in (
             ("captured_at", self.captured_at),
             ("event_at", self.event_at),
             ("timezone", self.timezone),
@@ -331,7 +349,7 @@ class CaptureMetadata:
             ("created_at", self.created_at),
             ("updated_at", self.updated_at),
         ):
-            _nonblank(value, name)
+            _nonblank(text_value, text_name)
         if self.schema_version != CAPTURE_SCHEMA_VERSION:
             raise CaptureError("unsupported_schema", "Capture schema version is unsupported.")
         ids = [item.attachment_id for item in self.attachments]
@@ -515,7 +533,7 @@ def capture_metadata_from_dict(data: Mapping[str, Any]) -> CaptureMetadata:
         timezone=str(data.get("timezone", "")),
         source_entry_point=str(data.get("source_entry_point", "")),
         privacy_scope=str(data.get("privacy_scope", "standard")),  # type: ignore[arg-type]
-        sensitive=bool(data.get("sensitive", False)),
+        sensitive=data.get("sensitive", False),
         location=str(data["location"]) if data.get("location") is not None else None,
         tags=tuple(str(item) for item in _sequence(data.get("tags"), "tags")),
         attachments=attachments,
@@ -524,10 +542,10 @@ def capture_metadata_from_dict(data: Mapping[str, Any]) -> CaptureMetadata:
         domain_data=dict(_mapping(data.get("domain_data", {}), "domain_data")),
         extraction_status=str(data.get("extraction_status", "not-requested")),  # type: ignore[arg-type]
         enrichment_status=str(data.get("enrichment_status", "not-requested")),  # type: ignore[arg-type]
-        exclude_from_semantic=bool(data.get("exclude_from_semantic", False)),
-        exclude_from_conversations=bool(data.get("exclude_from_conversations", False)),
-        exclude_from_reviews=bool(data.get("exclude_from_reviews", False)),
-        exclude_from_experiments=bool(data.get("exclude_from_experiments", False)),
+        exclude_from_semantic=data.get("exclude_from_semantic", False),
+        exclude_from_conversations=data.get("exclude_from_conversations", False),
+        exclude_from_reviews=data.get("exclude_from_reviews", False),
+        exclude_from_experiments=data.get("exclude_from_experiments", False),
         provenance=provenance,
         lifecycle=lifecycle,
         merged_from=tuple(str(item) for item in _sequence(data.get("merged_from"), "merged_from")),

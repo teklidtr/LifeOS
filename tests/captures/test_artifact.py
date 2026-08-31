@@ -99,6 +99,31 @@ def test_persisted_capture_enums_fail_closed(
 
 @pytest.mark.parametrize(
     "field",
+    [
+        "sensitive",
+        "exclude_from_semantic",
+        "exclude_from_conversations",
+        "exclude_from_reviews",
+        "exclude_from_experiments",
+    ],
+)
+def test_persisted_capture_policy_flags_require_booleans(tmp_path: Path, field: str) -> None:
+    service = CaptureArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
+    capture = service.create(title="Meal", capture_type="meal", now=NOW)
+    path = tmp_path / capture.path
+    changed = path.read_text().replace(f"{field}: false", f"{field}: {{}}", 1)
+    path.write_text(changed)
+
+    with pytest.raises(CaptureError) as exc:
+        service.load(capture.path)
+
+    assert exc.value.code == "invalid_field"
+    assert exc.value.data["field"] == field
+    assert path.read_text() == changed
+
+
+@pytest.mark.parametrize(
+    "field",
     ["kind", "extraction_status", "preview_status", "transcript_status", "redaction_state"],
 )
 def test_attachment_manifest_enums_fail_closed(field: str) -> None:

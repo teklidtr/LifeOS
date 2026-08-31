@@ -26,6 +26,7 @@ class CaptureTextRepresentation:
     attachment_ids: tuple[str, ...]
     stale: bool
     metadata: dict[str, object]
+    exclude_from_conversations: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -54,6 +55,11 @@ def build_capture_representation(
 ) -> CaptureTextRepresentation:
     if capture.metadata.exclude_from_semantic:
         raise CaptureError("semantic_excluded", "Capture is excluded from semantic retrieval.")
+    if capture.metadata.privacy_scope == "protected" or capture.metadata.sensitive:
+        raise CaptureError(
+            "protected_semantic_denied",
+            "Protected or sensitive captures are excluded from semantic retrieval by default.",
+        )
     lines = [capture.metadata.title]
     kinds = ["user-description"]
     if capture.metadata.description:
@@ -102,6 +108,7 @@ def build_capture_representation(
                 {item.artifact_type for item in capture.metadata.links}
             ),
         },
+        exclude_from_conversations=capture.metadata.exclude_from_conversations,
     )
 
 
@@ -119,6 +126,7 @@ def chunk_capture_representation(
         "representation_kinds": list(representation.representation_kinds),
         "attachment_ids": list(representation.attachment_ids),
         "stale": representation.stale,
+        "exclude_from_conversations": representation.exclude_from_conversations,
     }
     content = f"---\n{yaml.safe_dump(frontmatter, sort_keys=False).rstrip()}\n---\n\n# Approved capture evidence\n\n{representation.text}\n"
     source = VaultMarkdownFile(
@@ -128,6 +136,11 @@ def chunk_capture_representation(
 
 
 def conversation_evidence(representation: CaptureTextRepresentation) -> CaptureConversationEvidence:
+    if representation.exclude_from_conversations:
+        raise CaptureError(
+            "conversation_excluded",
+            "Capture is excluded from knowledge conversations.",
+        )
     return CaptureConversationEvidence(
         f"capture:{representation.capture_id}",
         representation.capture_path,
