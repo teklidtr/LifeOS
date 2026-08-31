@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1653
 title: Enforce retrieval policy in provider previews
-status: in-progress
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1507
@@ -64,6 +64,20 @@ Status: required
 .venv/bin/pytest -q
 git diff --check
 ```
+
+# Validation evidence
+
+- Focused retrieval, capture storage/privacy, experiment privacy, bridge, and rich-capture E2E
+  suite: `51 passed`.
+- Repository Ruff check: passed.
+- Source mypy check: passed with no issues in 212 source files.
+- User-manual link validation: passed for all 19 chapters.
+- Full local pytest attempt: `1953 passed, 57 failed, 12 skipped`. The 57 failures exactly match
+  the established pre-change environment baseline: macOS pinned-Git-directory recovery checks,
+  three fixtures that mistake macOS's `/private/...` temporary root for protected vault scope, and
+  one sandbox-denied Unix socket bind. The seven new policy regressions account for the increase
+  from the prior `1946 passed` baseline.
+- `git diff --check`: passed.
 
 # Relevant decisions
 
