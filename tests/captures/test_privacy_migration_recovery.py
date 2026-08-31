@@ -86,6 +86,31 @@ def test_privacy_requires_explicit_intent_and_protected_scope(tmp_path: Path) ->
     assert {item.reason for item in protected.omissions} == {"protected-default-deny"}
 
 
+def test_invalid_privacy_scope_cannot_fall_through_provider_policy(tmp_path: Path) -> None:
+    vault, runtime, _, _, capture, reference = attached_capture(tmp_path)
+    path = vault / capture.path
+    changed = path.read_text().replace(
+        "privacy_scope: standard",
+        "privacy_scope: unrestricted",
+        1,
+    )
+    path.write_text(changed)
+
+    with pytest.raises(CaptureError) as exc:
+        preview_capture_context(
+            vault_root=vault,
+            runtime_dir=runtime,
+            capture_path=capture.path,
+            selected_attachment_ids=(reference.attachment_id,),
+            requested_operations=("document-analysis",),
+            external_processing_intent=True,
+        )
+
+    assert exc.value.code == "invalid_field"
+    assert exc.value.data["field"] == "privacy_scope"
+    assert path.read_text() == changed
+
+
 def test_privacy_payload_is_bounded_redacted_and_does_not_traverse_links(tmp_path: Path) -> None:
     vault, runtime, captures, _, capture, reference = attached_capture(tmp_path)
     (vault / "diary").mkdir()

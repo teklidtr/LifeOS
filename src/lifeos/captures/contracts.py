@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence, get_args
 
 from lifeos.vault import VaultAccessError, validate_vault_relative_path
 
@@ -42,10 +42,23 @@ ValueSource = Literal[
     "model-estimate",
     "ocr",
     "transcript",
+    "transcription",
     "imported",
     "unknown",
 ]
 Confidence = Literal["high", "medium", "low", "unknown"]
+DerivedValueStatus = Literal["suggested", "confirmed", "corrected", "rejected"]
+RedactionState = Literal["none", "previewed", "redacted"]
+
+_CAPTURE_TYPES = frozenset(get_args(CaptureType))
+_CAPTURE_STATES = frozenset(get_args(CaptureState))
+_ATTACHMENT_KINDS = frozenset(get_args(AttachmentKind))
+_PROCESSING_STATES = frozenset(get_args(ProcessingState))
+_PRIVACY_SCOPES = frozenset(get_args(PrivacyScope))
+_VALUE_SOURCES = frozenset(get_args(ValueSource))
+_CONFIDENCE_VALUES = frozenset(get_args(Confidence))
+_DERIVED_VALUE_STATUSES = frozenset(get_args(DerivedValueStatus))
+_REDACTION_STATES = frozenset(get_args(RedactionState))
 
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "captured": frozenset(
@@ -88,6 +101,16 @@ def _sha256(value: str, name: str) -> str:
     return value
 
 
+def _enum(value: object, name: str, allowed: frozenset[str]) -> str:
+    if type(value) is not str or value not in allowed:
+        raise CaptureError(
+            "invalid_field",
+            f"{name} must be one of: {', '.join(sorted(allowed))}.",
+            {"field": name, "allowed": sorted(allowed)},
+        )
+    return value
+
+
 def _attachment_path(value: str, name: str, *, root: str) -> str:
     if value != value.strip():
         raise CaptureError(
@@ -113,6 +136,8 @@ def _attachment_path(value: str, name: str, *, root: str) -> str:
 
 
 def validate_transition(current: CaptureState, target: CaptureState) -> None:
+    _enum(current, "current state", _CAPTURE_STATES)
+    _enum(target, "target state", _CAPTURE_STATES)
     if target == current:
         return
     if target not in _ALLOWED_TRANSITIONS[current]:
@@ -174,6 +199,9 @@ class LifecycleEvent:
 
     def __post_init__(self) -> None:
         _nonblank(self.event_id, "lifecycle event_id")
+        if self.from_state is not None:
+            _enum(self.from_state, "lifecycle from_state", _CAPTURE_STATES)
+        _enum(self.to_state, "lifecycle to_state", _CAPTURE_STATES)
         _nonblank(self.occurred_at, "lifecycle occurred_at")
 
     def to_dict(self) -> dict[str, object]:
@@ -225,10 +253,13 @@ class DerivedValue:
     range_high: float | None = None
     assumptions: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
-    status: Literal["suggested", "confirmed", "corrected", "rejected"] = "suggested"
+    status: DerivedValueStatus = "suggested"
 
     def __post_init__(self) -> None:
         _nonblank(self.field_name, "derived field_name")
+        _enum(self.source, "derived source", _VALUE_SOURCES)
+        _enum(self.confidence, "derived confidence", _CONFIDENCE_VALUES)
+        _enum(self.status, "derived status", _DERIVED_VALUE_STATUSES)
         if (
             self.range_low is not None
             and self.range_high is not None
@@ -287,6 +318,11 @@ class CaptureMetadata:
         if not self.capture_id.startswith("cap-"):
             raise CaptureError("invalid_capture", "Capture ID is malformed.")
         _nonblank(self.title, "title")
+        _enum(self.capture_type, "capture_type", _CAPTURE_TYPES)
+        _enum(self.state, "state", _CAPTURE_STATES)
+        _enum(self.privacy_scope, "privacy_scope", _PRIVACY_SCOPES)
+        _enum(self.extraction_status, "extraction_status", _PROCESSING_STATES)
+        _enum(self.enrichment_status, "enrichment_status", _PROCESSING_STATES)
         for name, value in (
             ("captured_at", self.captured_at),
             ("event_at", self.event_at),
@@ -374,7 +410,7 @@ class AttachmentManifest:
     duplicate_of: str | None = None
     derived_artifacts: tuple[str, ...] = ()
     provider_processing_disclosures: tuple[dict[str, object], ...] = ()
-    redaction_state: Literal["none", "previewed", "redacted"] = "none"
+    redaction_state: RedactionState = "none"
     source_modified_ns: int | None = None
     schema_version: int = ATTACHMENT_SCHEMA_VERSION
 
@@ -391,6 +427,11 @@ class AttachmentManifest:
         _nonblank(self.media_type, "media_type")
         _nonblank(self.capture_source, "capture_source")
         _nonblank(self.imported_at, "imported_at")
+        _enum(self.kind, "kind", _ATTACHMENT_KINDS)
+        _enum(self.extraction_status, "extraction_status", _PROCESSING_STATES)
+        _enum(self.preview_status, "preview_status", _PROCESSING_STATES)
+        _enum(self.transcript_status, "transcript_status", _PROCESSING_STATES)
+        _enum(self.redaction_state, "redaction_state", _REDACTION_STATES)
         if type(self.byte_size) is not int or self.byte_size < 0:
             raise CaptureError("invalid_attachment", "byte_size must be a non-negative integer.")
         if self.schema_version != ATTACHMENT_SCHEMA_VERSION:

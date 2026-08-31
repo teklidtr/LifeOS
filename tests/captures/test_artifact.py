@@ -12,6 +12,8 @@ from lifeos.captures.contracts import (
     AttachmentReference,
     CaptureError,
     DerivedValue,
+    LifecycleEvent,
+    validate_transition,
 )
 
 NOW = datetime(2026, 7, 16, 9, 0, tzinfo=timezone.utc)
@@ -60,6 +62,95 @@ def test_unknown_value_is_not_zero_or_false_precision() -> None:
     estimate = DerivedValue("calories", None, "kcal", "image-estimate", "low", 400, 700)
     assert estimate.range_low == 400
     assert estimate.range_high == 700
+
+
+@pytest.mark.parametrize(
+    ("field", "valid_value"),
+    [
+        ("capture_type", "meal"),
+        ("state", "captured"),
+        ("privacy_scope", "standard"),
+        ("extraction_status", "not-requested"),
+        ("enrichment_status", "not-requested"),
+    ],
+)
+def test_persisted_capture_enums_fail_closed(
+    tmp_path: Path,
+    field: str,
+    valid_value: str,
+) -> None:
+    service = CaptureArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
+    capture = service.create(title="Meal", capture_type="meal", now=NOW)
+    path = tmp_path / capture.path
+    changed = path.read_text().replace(
+        f"{field}: {valid_value}",
+        f"{field}: unsupported-value",
+        1,
+    )
+    path.write_text(changed)
+
+    with pytest.raises(CaptureError) as exc:
+        service.load(capture.path)
+
+    assert exc.value.code == "invalid_field"
+    assert exc.value.data["field"] == field
+    assert path.read_text() == changed
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["kind", "extraction_status", "preview_status", "transcript_status", "redaction_state"],
+)
+def test_attachment_manifest_enums_fail_closed(field: str) -> None:
+    metadata = AttachmentManifest(
+        attachment_id="att-0123456789abcdef",
+        content_hash="sha256:" + "a" * 64,
+        original_filename="file.txt",
+        canonical_path="attachments/originals/aa/hash/file.txt",
+        media_type="text/plain",
+        byte_size=1,
+        capture_source="test",
+        imported_at=NOW.isoformat(),
+    )
+
+    with pytest.raises(CaptureError) as exc:
+        replace(metadata, **{field: "unsupported-value"})
+
+    assert exc.value.code == "invalid_field"
+    assert exc.value.data["field"] == field
+
+
+@pytest.mark.parametrize(
+    ("field", "kwargs"),
+    [
+        ("derived source", {"source": "unsupported-value"}),
+        ("derived confidence", {"confidence": "unsupported-value"}),
+        ("derived status", {"status": "unsupported-value"}),
+    ],
+)
+def test_derived_value_enums_fail_closed(field: str, kwargs: dict[str, str]) -> None:
+    values = {"source": "user-entered", "confidence": "high", "status": "suggested"}
+    values.update(kwargs)
+
+    with pytest.raises(CaptureError) as exc:
+        DerivedValue("calories", 10, "kcal", **values)  # type: ignore[arg-type]
+
+    assert exc.value.code == "invalid_field"
+    assert exc.value.data["field"] == field
+
+
+def test_lifecycle_and_transition_states_fail_closed() -> None:
+    with pytest.raises(CaptureError) as from_state:
+        LifecycleEvent("life-1", "unsupported", "captured", NOW.isoformat())
+    assert from_state.value.data["field"] == "lifecycle from_state"
+
+    with pytest.raises(CaptureError) as to_state:
+        LifecycleEvent("life-1", None, "unsupported", NOW.isoformat())  # type: ignore[arg-type]
+    assert to_state.value.data["field"] == "lifecycle to_state"
+
+    with pytest.raises(CaptureError) as transition:
+        validate_transition("unsupported", "captured")  # type: ignore[arg-type]
+    assert transition.value.data["field"] == "current state"
 
 
 def test_manifest_round_trip_and_human_annotations(tmp_path: Path) -> None:
