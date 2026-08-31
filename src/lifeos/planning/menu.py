@@ -22,6 +22,7 @@ _ACTIVE_STATUSES = frozenset({"todo", "active", "pending"})
 _DONE_STATUSES = frozenset({"done", "completed", "archived"})
 _MAX_EXACT_CANDIDATES = 20
 _MAX_AVAILABLE_MINUTES = 1440
+_MAX_EXACT_STATES = 16_384
 _FIT_SCALE = 1000
 
 
@@ -283,7 +284,7 @@ def _exact_menu_selection(
     available_minutes: int,
     energy: Level,
     motivation: Level,
-) -> tuple[PlanningAction, ...]:
+) -> tuple[PlanningAction, ...] | None:
     empty_key = _selection_state_key(
         (),
         as_of=as_of,
@@ -307,7 +308,11 @@ def _exact_menu_selection(
                 motivation=motivation,
             )
             incumbent = next_states.get(key)
-            if incumbent is None or _selection_ids(candidate) < _selection_ids(incumbent):
+            if incumbent is None:
+                if len(next_states) >= _MAX_EXACT_STATES:
+                    return None
+                next_states[key] = candidate
+            elif _selection_ids(candidate) < _selection_ids(incumbent):
                 next_states[key] = candidate
         states = next_states
     best: tuple[PlanningAction, ...] = ()
@@ -415,17 +420,31 @@ def build_daily_menu(
         eligible.append(action)
 
     candidates = tuple(eligible)
+    fallback_constraint: str | None = None
     if len(candidates) <= _MAX_EXACT_CANDIDATES:
-        solver = "exact-dynamic-programming"
-        selected_actions = _exact_menu_selection(
+        exact_selection = _exact_menu_selection(
             candidates,
             as_of=as_of,
             available_minutes=available_minutes,
             energy=energy_level,
             motivation=motivation_level,
         )
+        if exact_selection is None:
+            solver = "deterministic-bounded-fallback"
+            fallback_constraint = f"exact solver state limit ({_MAX_EXACT_STATES})"
+            selected_actions = _fallback_menu_selection(
+                candidates,
+                as_of=as_of,
+                available_minutes=available_minutes,
+                energy=energy_level,
+                motivation=motivation_level,
+            )
+        else:
+            solver = "exact-dynamic-programming"
+            selected_actions = exact_selection
     else:
         solver = "deterministic-bounded-fallback"
+        fallback_constraint = f"exact solver candidate limit ({_MAX_EXACT_CANDIDATES})"
         selected_actions = _fallback_menu_selection(
             candidates,
             as_of=as_of,
@@ -483,8 +502,8 @@ def build_daily_menu(
         action.task_id not in selected_ids and action.duration > remaining for action in candidates
     ):
         constraints.append("time budget")
-    if solver == "deterministic-bounded-fallback":
-        constraints.append(f"exact solver candidate limit ({_MAX_EXACT_CANDIDATES})")
+    if fallback_constraint is not None:
+        constraints.append(fallback_constraint)
     diagnostics = MenuOptimizationDiagnostics(
         solver=solver,
         objective_order=(
