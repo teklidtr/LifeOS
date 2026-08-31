@@ -44,7 +44,9 @@ lifeos status
 
 `lifeos init` is non-destructive. It creates the supported canonical bootstrap roots and
 files, initializes Git, and refuses to overwrite a conflicting or partial vault. Re-running
-it on a recognized LifeOS vault does not restore template text over your edits.
+it on a recognized LifeOS vault does not restore template text over your edits. Fresh vaults
+leave the optional Graphify and export feature flags disabled in `lifeos.yml`; enable them
+explicitly when you want those derived features.
 
 `lifeos doctor` is diagnostic only. It checks the installed LifeOS/Python/Git environment,
 first-party vault bootstrap shape, existing vault health, and optional MCP availability. It
