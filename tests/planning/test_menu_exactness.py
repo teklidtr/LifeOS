@@ -11,6 +11,7 @@ def _action(
     *,
     energy: str,
     due: date | None = None,
+    plan: str = "plan-a",
 ) -> PlanningAction:
     return PlanningAction(
         task_id=task_id,
@@ -21,7 +22,7 @@ def _action(
         motivation="medium",
         mode="desk",
         goal="goal",
-        plan="plan-a",
+        plan=plan,
         due=due,
         blocked_by=(),
         source_path=f"plans/{task_id}.md",
@@ -54,3 +55,37 @@ def test_exact_solver_preserves_partial_states_whose_mean_fit_can_reverse() -> N
         "d-due",
     }
     assert menu.diagnostics.selected_score[:4] == (90, 180, 1750, 3000)
+
+
+def test_exact_solver_falls_back_before_state_growth_becomes_unbounded() -> None:
+    planning_day = date(2026, 7, 15)
+    actions = tuple(
+        _action(
+            f"task-{index:02d}",
+            1,
+            energy="low",
+            due=planning_day,
+            plan=f"plan-{index:02d}",
+        )
+        for index in range(15)
+    )
+
+    first = build_daily_menu(
+        actions=actions,
+        as_of=planning_day,
+        available_minutes=15,
+        energy="low",
+        motivation="medium",
+    )
+    second = build_daily_menu(
+        actions=tuple(reversed(actions)),
+        as_of=planning_day,
+        available_minutes=15,
+        energy="low",
+        motivation="medium",
+    )
+
+    assert first == second
+    assert first.diagnostics.solver == "deterministic-bounded-fallback"
+    assert "exact solver state limit (16384)" in first.diagnostics.binding_constraints
+    assert len(first.items) == 15
