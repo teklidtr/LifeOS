@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1649
 title: Treat daily planning capacity as a ceiling, not a workload target
-status: backlog
+status: ready
 phase: hardening
 depends_on:
   - LIFEOS-905
