@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1653
 title: Enforce retrieval policy in provider previews
-status: backlog
+status: in-progress
 phase: hardening
 depends_on:
   - LIFEOS-1507
