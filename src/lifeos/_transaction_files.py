@@ -547,13 +547,26 @@ def _remove_created_artifact(name: str, parent_fd: int) -> None:
         raise TransactionError(f"Failed to clean up transaction artifact {name}: {error}") from error
 
 
+def _transaction_artifact_token(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if len(value) != 32 or any(character not in "0123456789abcdef" for character in value):
+        raise TransactionError("Invalid transaction artifact token")
+    return value
+
+
 def create_staging_file(
-    target_name: str, content: bytes, parent: ParentDescriptor, intended_mode: int
+    target_name: str,
+    content: bytes,
+    parent: ParentDescriptor,
+    intended_mode: int,
+    *,
+    artifact_token: str | None = None,
 ) -> StagingFile:
     require_live_parent(parent)
     parent_binding = capture_directory_binding(parent.fd)
-    random_hex = secrets.token_hex(8)
-    staging_name = f".{target_name}.{random_hex}.staged"
+    token = _transaction_artifact_token(artifact_token) or secrets.token_hex(8)
+    staging_name = f".{target_name}.{token}.staged"
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
     live_parent_fd: int | None = None
@@ -633,10 +646,14 @@ def create_staging_file(
 
 
 def create_hardlink_backup(
-    target_name: str, parent: ParentDescriptor, original_identity: TargetIdentity
+    target_name: str,
+    parent: ParentDescriptor,
+    original_identity: TargetIdentity,
+    *,
+    artifact_token: str | None = None,
 ) -> BackupFile:
-    random_hex = secrets.token_hex(8)
-    backup_name = f".{target_name}.{random_hex}.backup"
+    token = _transaction_artifact_token(artifact_token) or secrets.token_hex(8)
+    backup_name = f".{target_name}.{token}.backup"
     live_parent_fd: int | None = None
 
     try:
@@ -688,7 +705,9 @@ def create_hardlink_backup(
     )
 
 
-def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncResult:
+def publish_creation(
+    target_name: str, staging: StagingFile, *, preserve_staging: bool = False
+) -> DirectorySyncResult:
     require_directory_binding(staging.parent.fd, staging.parent_binding)
     try:
         os.stat(target_name, dir_fd=staging.parent.fd, follow_symlinks=False)
@@ -730,18 +749,25 @@ def publish_creation(target_name: str, staging: StagingFile) -> DirectorySyncRes
     finally:
         _close_live_parent(staging.parent, live_parent_fd)
 
-    try:
-        os.unlink(staging.name, dir_fd=staging.parent.fd)
-    except OSError:
-        pass
+    if not preserve_staging:
+        try:
+            os.unlink(staging.name, dir_fd=staging.parent.fd)
+        except OSError:
+            pass
 
     return fsync_directory(staging.parent.fd)
 
 
 def _legacy_publish_replacement(
-    target_name: str, staging: StagingFile, original_identity: TargetIdentity
+    target_name: str,
+    staging: StagingFile,
+    original_identity: TargetIdentity,
+    *,
+    preserve_staging: bool,
 ) -> DirectorySyncResult:
     """Preserve historical same-fd atomic replacement for authorityless callers."""
+    if preserve_staging:
+        raise TransactionError("Preserving replacement staging requires pinned authority")
     require_directory_binding(staging.parent.fd, staging.parent_binding)
     current_target = get_target_identity(target_name, staging.parent)
     if not _content_identity_matches(current_target, original_identity):
@@ -811,10 +837,19 @@ def _legacy_publish_replacement(
 
 
 def publish_replacement(
-    target_name: str, staging: StagingFile, original_identity: TargetIdentity
+    target_name: str,
+    staging: StagingFile,
+    original_identity: TargetIdentity,
+    *,
+    preserve_staging: bool = False,
 ) -> DirectorySyncResult:
     if staging.parent.authority_fd is None:
-        return _legacy_publish_replacement(target_name, staging, original_identity)
+        return _legacy_publish_replacement(
+            target_name,
+            staging,
+            original_identity,
+            preserve_staging=preserve_staging,
+        )
 
     require_directory_binding(staging.parent.fd, staging.parent_binding)
     current_target = get_target_identity(target_name, staging.parent)
@@ -892,7 +927,8 @@ def publish_replacement(
                 finally:
                     _best_effort_remove(candidate_quarantine, live_parent_fd)
             raise binding_error
-        _best_effort_remove(staging.name, staging.parent.fd)
+        if not preserve_staging:
+            _best_effort_remove(staging.name, staging.parent.fd)
     finally:
         if quarantine_name is not None:
             _best_effort_remove(quarantine_name, live_parent_fd)

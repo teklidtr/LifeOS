@@ -27,6 +27,9 @@ attachments/
   previews/
   embeddings/
   journals/
+.lifeos/capture-mutations/
+  recovery/
+  results/
 ```
 
 Capture Markdown and attachment-manifest Markdown are canonical. Original attachment bytes are canonical evidence. Thumbnails, extracted text, OCR, transcripts, descriptions, nutrition estimates, embeddings, galleries, and indexes are derived and rebuildable.
@@ -43,6 +46,33 @@ Capture Markdown and attachment-manifest Markdown are canonical. Original attach
 | Galleries, timelines, indexes, previews, embeddings | Disposable runtime state |
 
 Managed blocks are named and versioned. Refreshes preserve human-owned sections and use optimistic hashes.
+
+## Merge and split transactions
+
+Merge and split prepare every final Markdown document in memory before mutation. One file-set
+transaction then covers all output creations and every source archive replacement. The transaction
+holds the descriptor-pinned vault mutation authority, revalidates each original content identity,
+publishes only fsynced candidates, and keeps identity-bound candidate and backup hardlinks until a
+durable commit marker exists. A handled failure rolls back every proven transaction write in reverse
+order. A later human edit is never overwritten merely to complete rollback.
+
+The merge preview fingerprint binds the ordered source paths and hashes plus all derived preview
+fields. Retryable merge and split requests carry an idempotency key; reuse with different input is a
+conflict, while an identical retry returns the original output paths. Merge takes the most
+restrictive source privacy scope and the union of sensitivity, exclusions, tags, attachments, and
+links. Split children retain the source privacy, sensitivity, tags, links, and exclusion flags.
+
+Canonical retry proof is bilateral. Each output has a request-bound mutation marker and deterministic
+lineage, while every archived source records mutation provenance containing its pre-mutation content
+hash and the matching archive lifecycle event. Disposable result receipts are lookup hints only; a
+receipt or output marker that cannot be reconciled with the complete canonical lineage fails with
+`recovery_required`.
+
+Active transaction evidence lives under `.lifeos/capture-mutations/`, separately from rebuildable
+`.lifeos/captures/` indexes and jobs. An incomplete transaction is rolled back before the next merge
+or split. A transaction that encounters a later foreign edit remains explicitly recovery-required
+instead of overwriting that edit. Active transaction evidence must not be deleted as ordinary
+derived capture state; completed journals and canonical staging/backup artifacts are removed.
 
 ## Capture lifecycle
 

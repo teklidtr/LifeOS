@@ -84,7 +84,8 @@ class Client implements BridgeClient {
     if (method === "capture.enrichment.run") return { job_id: "job-1", capture_path: this.current.path, attachment_ids: ["att-1"], state: "completed", completed_attachment_ids: ["att-1"], failed_attachment_ids: [], created_at: "now", updated_at: "now" } as T;
     if (method === "capture.enrichment.cancel") return { job_id: "job-1", capture_path: this.current.path, attachment_ids: ["att-1"], state: "cancelled", completed_attachment_ids: [], failed_attachment_ids: [], created_at: "now", updated_at: "now" } as T;
     if (method === "capture.enrichment.retry") return { job_id: "job-1", capture_path: this.current.path, attachment_ids: ["att-1"], state: "queued", completed_attachment_ids: [], failed_attachment_ids: [], created_at: "now", updated_at: "now" } as T;
-    if (method === "capture.merge.preview") return { source_paths: [this.current.path, "captures/other.md"], source_hashes: [this.current.content_hash, "sha256:other"], title: "Merged", capture_type: "meal", attachment_ids: ["att-1"], link_paths: [], warnings: ["Review"] } as T;
+    if (method === "capture.split") return [artifact({ title: "Part 1", split_from: "cap-123" }), artifact({ title: "Part 2", split_from: "cap-123" })] as T;
+    if (method === "capture.merge.preview") return { source_paths: [this.current.path, "captures/other.md"], source_hashes: [this.current.content_hash, "sha256:other"], title: "Merged", capture_type: "meal", attachment_ids: ["att-1"], link_paths: [], warnings: ["Review"], fingerprint: `sha256:${"a".repeat(64)}` } as T;
     if (method === "capture.merge.apply") return artifact({ title: "Merged", merged_from: ["cap-1", "cap-2"] }) as T;
     if (method === "capture.proposal.preview") return { proposal_id: "prop-1", target_path: "notes/x.md", operation: "create_file", source_capture_id: "cap-123", source_capture_hash: this.current.content_hash, attachment_ids: [], included_actions: [], excluded_actions: [] } as T;
     if (method === "capture.proposal.create") return { proposal_id: "prop-1", proposal_path: "proposals/prop-1", preview: { proposal_id: "prop-1", target_path: "notes/x.md", operation: "create_file", source_capture_id: "cap-123", source_capture_hash: this.current.content_hash, attachment_ids: [], included_actions: [], excluded_actions: [] } } as T;
@@ -125,10 +126,28 @@ test("review supports explicit inference decisions, links, filters, merge previe
   const preview: CaptureMergePreview = await controller.previewMerge([client.current.path, "captures/other.md"]);
   assert.equal(preview.warnings[0], "Review");
   await controller.applyMerge(preview);
+  await controller.applyMerge(preview);
+  const mergeCalls = client.calls.filter(([method]) => method === "capture.merge.apply");
+  assert.equal(mergeCalls.length, 2);
+  assert.equal(mergeCalls[0]?.[1].idempotency_key, mergeCalls[1]?.[1].idempotency_key);
   await controller.previewProposal({ action: "create-note", targetPath: "notes/x.md", content: "# X", createTarget: true });
   await controller.createProposal({ action: "create-note", targetPath: "notes/x.md", content: "# X", createTarget: true });
   assert.equal(controller.state.stage, "proposal-created");
   assert.equal(client.calls.some(([method]) => method.includes("execute") || method.includes("apply-proposal")), false);
+});
+
+test("split retries derive the same request-bound idempotency key", async () => {
+  const firstClient = new Client(); const first = new RichCaptureWorkspaceController(firstClient);
+  const secondClient = new Client(); const second = new RichCaptureWorkspaceController(secondClient);
+  await first.load("captures/2026/lunch-cap-123.md");
+  await second.load("captures/2026/lunch-cap-123.md");
+  const groups = [["att-1"], ["att-2"]];
+  await first.split(groups);
+  await second.split(groups);
+  const firstCall = firstClient.calls.find(([method]) => method === "capture.split");
+  const secondCall = secondClient.calls.find(([method]) => method === "capture.split");
+  assert.match(String(firstCall?.[1].idempotency_key), /^capture-split-[a-f0-9]{32}$/);
+  assert.equal(firstCall?.[1].idempotency_key, secondCall?.[1].idempotency_key);
 });
 
 test("degraded states remain explicit and preserve recovery guidance", async () => {

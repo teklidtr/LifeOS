@@ -818,7 +818,7 @@ class BridgeApplication:
             if method == "capture.split":
                 data = strict_object(
                     params,
-                    allowed={"path", "groups", "expected_hash", "now"},
+                    allowed={"path", "groups", "expected_hash", "idempotency_key", "now"},
                     required={"path", "groups", "expected_hash"},
                 )
                 groups = data["groups"]
@@ -829,6 +829,10 @@ class BridgeApplication:
                     raise ProtocolError(
                         "invalid_params", "groups must be a list of attachment ID lists."
                     )
+                if data.get("idempotency_key") is not None and not isinstance(
+                    data["idempotency_key"], str
+                ):
+                    raise ProtocolError("invalid_params", "idempotency_key must be a string.")
                 moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
                 return [
                     item.to_dict()
@@ -836,6 +840,9 @@ class BridgeApplication:
                         str(data["path"]),
                         tuple(tuple(group) for group in groups),
                         expected_hash=str(data["expected_hash"]),
+                        idempotency_key=str(data["idempotency_key"])
+                        if data.get("idempotency_key") is not None
+                        else None,
                         now=moment,
                     )
                 ]
@@ -848,11 +855,36 @@ class BridgeApplication:
                     raise ProtocolError("invalid_params", "source_paths must be a list of strings.")
                 return self.capture_processing.merge_preview(tuple(source_paths)).to_dict()
             if method == "capture.merge.apply":
-                data = strict_object(params, allowed={"preview", "now"}, required={"preview"})
+                data = strict_object(
+                    params,
+                    allowed={"preview", "idempotency_key", "now"},
+                    required={"preview"},
+                )
                 preview = data["preview"]
                 if not isinstance(preview, dict):
                     raise ProtocolError("invalid_params", "preview must be an object.")
-                normalized = dict(preview)
+                normalized = strict_object(
+                    preview,
+                    allowed={
+                        "source_paths",
+                        "source_hashes",
+                        "title",
+                        "capture_type",
+                        "attachment_ids",
+                        "link_paths",
+                        "warnings",
+                        "fingerprint",
+                    },
+                    required={
+                        "source_paths",
+                        "source_hashes",
+                        "title",
+                        "capture_type",
+                        "attachment_ids",
+                        "link_paths",
+                        "warnings",
+                    },
+                )
                 for key in (
                     "source_paths",
                     "source_hashes",
@@ -868,9 +900,24 @@ class BridgeApplication:
                             "invalid_params", f"preview.{key} must be a list of strings."
                         )
                     normalized[key] = tuple(value)
+                for key in ("title", "capture_type"):
+                    if not isinstance(normalized.get(key), str):
+                        raise ProtocolError("invalid_params", f"preview.{key} must be a string.")
+                fingerprint = normalized.get("fingerprint", "")
+                if not isinstance(fingerprint, str):
+                    raise ProtocolError("invalid_params", "preview.fingerprint must be a string.")
+                normalized["fingerprint"] = fingerprint
+                if data.get("idempotency_key") is not None and not isinstance(
+                    data["idempotency_key"], str
+                ):
+                    raise ProtocolError("invalid_params", "idempotency_key must be a string.")
                 moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
                 return self.capture_processing.apply_merge(
-                    MergePreview(**normalized), now=moment
+                    MergePreview(**normalized),
+                    idempotency_key=str(data["idempotency_key"])
+                    if data.get("idempotency_key") is not None
+                    else None,
+                    now=moment,
                 ).to_dict()
             if method in {"capture.proposal.preview", "capture.proposal.create"}:
                 data = strict_object(

@@ -99,8 +99,28 @@ def test_capture_bridge_links_merges_and_proposals_are_guarded(tmp_path: Path) -
     )
     assert linked["metadata"]["links"][0]["relation"] == "supports"
     preview = bridge.call("capture.merge.preview", source_paths=[linked["path"], second["path"]])
-    merged = bridge.call("capture.merge.apply", preview=preview, now=NOW)
+    assert preview["fingerprint"].startswith("sha256:")
+    tampered = {**preview, "title": "Unreviewed title"}
+    with pytest.raises(ProtocolError) as invalid_preview:
+        bridge.call(
+            "capture.merge.apply",
+            preview=tampered,
+            idempotency_key="bridge-merge",
+            now=NOW,
+        )
+    assert invalid_preview.value.code == "invalid_merge_preview"
+    with pytest.raises(ProtocolError) as extra_preview:
+        bridge.call("capture.merge.apply", preview={**preview, "unexpected": True}, now=NOW)
+    assert extra_preview.value.code == "extra_fields"
+
+    merged = bridge.call(
+        "capture.merge.apply", preview=preview, idempotency_key="bridge-merge", now=NOW
+    )
     assert len(merged["metadata"]["merged_from"]) == 2
+    retried = bridge.call(
+        "capture.merge.apply", preview=preview, idempotency_key="bridge-merge", now=NOW
+    )
+    assert retried["path"] == merged["path"]
 
     proposal = bridge.call(
         "capture.proposal.preview",
@@ -140,6 +160,15 @@ def test_capture_bridge_rejects_extra_fields_stale_writes_and_bad_shapes(tmp_pat
             groups="bad",
         )
     assert malformed.value.code == "invalid_params"
+    with pytest.raises(ProtocolError) as invalid_key:
+        bridge.call(
+            "capture.split",
+            path=created["path"],
+            expected_hash=created["content_hash"],
+            groups=[["att-one"], ["att-two"]],
+            idempotency_key=123,
+        )
+    assert invalid_key.value.code == "invalid_params"
 
 
 def test_capture_processing_can_be_cancelled_and_retried(tmp_path: Path) -> None:

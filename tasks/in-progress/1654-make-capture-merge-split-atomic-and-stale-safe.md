@@ -70,6 +70,8 @@ Status: required
 - `docs/rich-capture-protocol.md`: document bound previews and idempotent retry inputs.
 - `docs/user-manual/13-rich-capture.md`: document all-or-nothing behavior, recovery, validation,
   and monotonic privacy propagation.
+- `docs/architecture.md`: distinguish active capture-mutation evidence from disposable capture
+  runtime state.
 
 # Validation
 
@@ -82,6 +84,24 @@ npm --prefix packages/obsidian-plugin test -- --run rich-capture-workspace.test.
 .venv/bin/pytest -q
 git diff --check
 ```
+
+# Validation evidence
+
+- Focused capture transaction, storage/processing, and bridge suite: `68 passed`.
+- Shared proposal transaction/recovery compatibility suite: `184 passed`.
+- Obsidian plugin compile and test suite: `54 passed`.
+- Repository Ruff check: passed.
+- Source mypy check: passed with no issues in 213 source files.
+- User-manual link validation: passed for all 19 chapters.
+- Full local pytest attempt: `2002 passed, 57 failed, 12 skipped`. The 57 failures exactly match
+  the established pre-change environment baseline: macOS pinned-Git-directory recovery checks,
+  three fixtures that mistake macOS's `/private/...` temporary root for protected vault scope, and
+  one sandbox-denied Unix socket bind. The 49 new transaction regressions account for the increase
+  from the prior `1953 passed` baseline.
+- Consolidation audit: the file-set state machine is isolated in one capture transaction module,
+  reuses the shared descriptor-pinned mutation primitives and vault lock, and keeps semantic retry
+  proof in canonical capture lineage rather than duplicating it in disposable runtime receipts.
+- `git diff --check`: passed.
 
 # Relevant decisions
 

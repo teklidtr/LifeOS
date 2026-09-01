@@ -115,6 +115,7 @@ export interface CaptureMergePreview {
   attachment_ids: string[];
   link_paths: string[];
   warnings: string[];
+  fingerprint?: string;
 }
 
 export interface CaptureProposalPreview {

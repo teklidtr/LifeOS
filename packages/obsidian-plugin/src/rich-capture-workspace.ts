@@ -111,6 +111,10 @@ function errorState(current: RichCaptureWorkspaceState, error: unknown): RichCap
     stale_capture: ["stale-artifact", "Reload canonical Markdown before retrying the edit."],
     stale_manifest: ["stale-artifact", "Reload the attachment manifest before retrying."],
     stale_merge: ["merge-conflict", "Refresh the merge preview because a source capture changed."],
+    invalid_merge_preview: ["merge-conflict", "Refresh the merge preview before applying it."],
+    idempotency_conflict: ["stale-artifact", "Retry with the original action or start a new mutation."],
+    transaction_locked: ["storage-failure", "Wait for the current canonical mutation, then retry."],
+    recovery_required: ["storage-failure", "Resolve the retained capture transaction before retrying."],
     malformed_artifact: ["malformed-artifact", "Repair the canonical Markdown or inspect it outside managed editing."],
     unsupported_schema: ["unsupported-schema", "Preview migration or open the canonical Markdown read-only."],
     missing_attachment: ["missing-attachment", "Locate the original file or remove the broken reference deliberately."],
@@ -370,22 +374,52 @@ export class RichCaptureWorkspaceController {
     } catch (error) { return this.fail(error); }
   }
 
-  async applyMerge(preview = this.state.mergePreview, now?: string): Promise<CaptureArtifact> {
+  async applyMerge(
+    preview = this.state.mergePreview,
+    now?: string,
+    idempotencyKey?: string,
+  ): Promise<CaptureArtifact> {
     if (!preview) throw new Error("A merge preview is required.");
     try {
-      return this.accept(await this.client.call<CaptureArtifact>("capture.merge.apply", { preview, now }), "Captures merged with source history preserved.");
+      const key = idempotencyKey ?? this.mutationKey("merge", preview);
+      return this.accept(await this.client.call<CaptureArtifact>("capture.merge.apply", {
+        preview, idempotency_key: key, now,
+      }), "Captures merged with source history preserved.");
     } catch (error) { return this.fail(error); }
   }
 
-  async split(groups: string[][], now?: string): Promise<CaptureArtifact[]> {
+  async split(groups: string[][], now?: string, idempotencyKey?: string): Promise<CaptureArtifact[]> {
     const artifact = this.requireArtifact();
     try {
+      const key = idempotencyKey ?? this.mutationKey("split", {
+        path: artifact.path, expected_hash: artifact.content_hash, groups,
+      });
       const created = await this.client.call<CaptureArtifact[]>("capture.split", {
-        path: artifact.path, expected_hash: artifact.content_hash, groups, now,
+        path: artifact.path, expected_hash: artifact.content_hash, groups,
+        idempotency_key: key, now,
       });
       this.state = { ...this.state, captures: created, artifact: created[0], mode: "review", stage: "ready", focusTarget: "rich-capture-split-result", statusAnnouncement: `${created.length} captures created; source archived.` };
       return created;
     } catch (error) { return this.fail(error); }
+  }
+
+  private mutationKey(operation: "merge" | "split", payload: unknown): string {
+    const request = `${operation}:${JSON.stringify(payload)}`;
+    let first = 0x811c9dc5;
+    let second = 0x9e3779b9;
+    let third = 0x85ebca6b;
+    let fourth = 0xc2b2ae35;
+    for (let index = 0; index < request.length; index += 1) {
+      const code = request.charCodeAt(index);
+      first = Math.imul(first ^ code, 0x01000193);
+      second = Math.imul(second ^ code, 0x85ebca6b);
+      third = Math.imul(third ^ code, 0xc2b2ae35);
+      fourth = Math.imul(fourth ^ code, 0x27d4eb2f);
+    }
+    const digest = [first, second, third, fourth]
+      .map((value) => (value >>> 0).toString(16).padStart(8, "0"))
+      .join("");
+    return `capture-${operation}-${digest}`;
   }
 
   async previewProviderContext(input: {

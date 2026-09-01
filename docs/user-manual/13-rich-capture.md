@@ -361,14 +361,38 @@ copy when separate lineage matters.
 Visual or semantic similarity is only a suggestion. It never proves that two
 meals, screenshots, or workouts are duplicates.
 
-Merge preview shows source hashes, attachments, links, warnings, and preservation
-behavior. Application fails if a source changed after preview. A merge creates a
-new capture, copies every source annotation into a **Merged source annotations**
-section, records `merged_from`, and archives the sources.
+Merge preview shows source hashes, attachments, links, warnings, preservation
+behavior, and a server-computed fingerprint over those exact fields. Application
+recomputes the preview from canonical Markdown and fails if a source or preview
+field changed. A merge creates a new capture, copies every source annotation into
+a **Merged source annotations** section, records `merged_from`, and archives the
+sources. The merged capture keeps the most restrictive source privacy scope,
+becomes sensitive if any source is sensitive, and retains the union of all four
+retrieval exclusions, tags, attachments, and links.
 
-Split groups attachments into new records, records `split_from`, and archives the
-mixed source. Attachments omitted from every split group are not copied into the
-new captures, so review the grouping carefully before applying it.
+Split requires at least two non-empty attachment groups. Duplicate assignments and
+unknown attachment IDs are rejected before anything is written. It creates the new
+records, records `split_from`, preserves the source privacy, sensitivity, tags,
+links, and retrieval exclusions on every child, and archives the mixed source.
+The archived source retains its human annotations; LifeOS does not guess which
+annotation belongs in which child. Attachments omitted from every split group are
+not copied into the new captures, so review the grouping carefully before applying
+it.
+
+Merge and split are all-or-nothing canonical transactions. LifeOS prepares every
+output and source archive first, checks the exact source hashes again, and then
+publishes them as one recoverable file set. A handled storage failure restores the
+pre-operation state. After an interruption, the next merge or split recovers the
+unfinished transaction before proceeding. If a later Obsidian edit makes safe
+rollback ambiguous, LifeOS preserves that edit and reports `recovery_required`
+instead of overwriting it.
+
+The workspace sends one idempotency key with each merge or split. Retrying the
+same action returns the original output paths without creating duplicate captures
+or lifecycle events. Reusing that key for different input is rejected. LifeOS
+proves a retry from matching output lineage and source archive history in canonical
+Markdown; a disposable cache record alone is never treated as proof that the
+operation completed.
 
 ## Links, retrieval, and knowledge conversations
 

@@ -12,14 +12,29 @@ Rich capture is exposed through additive, capability-discovered JSON-RPC methods
 | `capture.enrichment.start`, `capture.enrichment.run`, `capture.enrichment.cancel`, `capture.enrichment.retry` | Represent resumable local extraction work | Capture is saved first; processing state is derived and recoverable. |
 | `capture.inference.decide` | Confirm, reject, or correct a suggested field | Source and confidence remain visible after confirmation. |
 | `capture.link`, `capture.unlink` | Link captures to LifeOS artifacts | Relationships are explicit and stale-write protected. |
-| `capture.split`, `capture.merge.preview`, `capture.merge.apply` | Repair mixed or duplicate captures | Merge application requires an unchanged preview fingerprint and preserves source history. |
+| `capture.split`, `capture.merge.preview`, `capture.merge.apply` | Repair mixed or duplicate captures | A server-bound preview/source fingerprint, optimistic source hashes, idempotency key, and recoverable file-set transaction protect every output and source archive. |
 | `capture.proposal.preview`, `capture.proposal.create` | Turn reviewed evidence into external changes | External canonical artifacts are never mutated directly. |
 | `capture.privacy.preview` | Preview exact bounded local or external processing context | Protected scopes default deny; linking never authorizes neighboring-note traversal. |
 | `capture.rebuild`, `capture.migration.preview`, `capture.migration.apply` | Recovery and conservative migration entry points | Implementations are deterministic and fail closed on changed sources. |
 
 ## Parameter rules
 
-Bridge request objects reject unknown fields. Datetimes must be timezone-aware ISO 8601 strings. Mutable capture operations require the current canonical `expected_hash`. File-import paths are local inputs only; canonical records store vault-relative paths and content hashes.
+Bridge request objects reject unknown fields. Datetimes must be timezone-aware ISO 8601 strings.
+Mutable capture operations require the current canonical `expected_hash`. File-import paths are
+local inputs only; canonical records store vault-relative paths and content hashes.
+
+`capture.merge.preview` returns a `fingerprint` over the exact ordered source paths and hashes,
+title, type, attachment IDs, link paths, and warnings. `capture.merge.apply` recomputes those fields
+from canonical sources and rejects both stale sources and altered preview fields. `capture.split`
+requires at least two non-empty groups and rejects duplicate or unknown attachment assignments.
+
+`capture.merge.apply` and `capture.split` accept an additive `idempotency_key`. Keys use 1–128
+lowercase letters, digits, dots, underscores, or hyphens. An identical retry returns the original
+result paths; reuse for different input fails. Older clients may omit the field, in which case
+Python derives a request-bound compatibility key. Active recovery state is resolved or reported as
+`recovery_required` before either operation begins. Cached result receipts never authorize success
+by themselves: Python reconciles the complete output markers, result lineage, source pre-mutation
+hash provenance, and archive events in canonical Markdown before returning an earlier result.
 
 ## Provider neutrality
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -195,6 +195,12 @@ def parse_manifest(path: Path, relative_path: str, content: str) -> AttachmentMa
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedCapture:
+    artifact: CaptureArtifact
+    content: str
+
+
 class CaptureArtifactService:
     def __init__(self, *, vault_root: Path, runtime_dir: Path) -> None:
         self.vault_root = vault_root
@@ -214,13 +220,70 @@ class CaptureArtifactService:
         attachments: tuple[AttachmentReference, ...] = (),
         links: tuple[ArtifactLink, ...] = (),
         tags: tuple[str, ...] = (),
+        exclude_from_semantic: bool = False,
+        exclude_from_conversations: bool = False,
+        exclude_from_reviews: bool = False,
+        exclude_from_experiments: bool = False,
         now: datetime | None = None,
     ) -> CaptureArtifact:
+        prepared = self.prepare_create(
+            title=title,
+            capture_type=capture_type,
+            description=description,
+            event_at=event_at,
+            timezone_name=timezone_name,
+            source_entry_point=source_entry_point,
+            privacy_scope=privacy_scope,
+            sensitive=sensitive,
+            attachments=attachments,
+            links=links,
+            tags=tags,
+            exclude_from_semantic=exclude_from_semantic,
+            exclude_from_conversations=exclude_from_conversations,
+            exclude_from_reviews=exclude_from_reviews,
+            exclude_from_experiments=exclude_from_experiments,
+            now=now,
+        )
+        _atomic_write(
+            self.vault_root,
+            prepared.artifact.path,
+            prepared.content,
+            expected_hash=None,
+            create=True,
+        )
+        return self.load(prepared.artifact.path)
+
+    def prepare_create(
+        self,
+        *,
+        title: str,
+        capture_type: CaptureType,
+        description: str = "",
+        event_at: datetime | None = None,
+        timezone_name: str = "UTC",
+        source_entry_point: str = "unknown",
+        privacy_scope: PrivacyScope = "standard",
+        sensitive: bool = False,
+        attachments: tuple[AttachmentReference, ...] = (),
+        links: tuple[ArtifactLink, ...] = (),
+        tags: tuple[str, ...] = (),
+        exclude_from_semantic: bool = False,
+        exclude_from_conversations: bool = False,
+        exclude_from_reviews: bool = False,
+        exclude_from_experiments: bool = False,
+        capture_id: str | None = None,
+        merged_from: tuple[str, ...] = (),
+        split_from: str | None = None,
+        human_body: str = "## User annotations\n\n",
+        now: datetime | None = None,
+    ) -> PreparedCapture:
         moment = utc_now(now)
         event = event_at or moment
         if event.tzinfo is None:
             raise CaptureError("invalid_timestamp", "Event timestamp must include a timezone.")
-        capture_id = f"cap-{moment.strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(4)}"
+        selected_capture_id = capture_id or (
+            f"cap-{moment.strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(4)}"
+        )
         lifecycle = LifecycleEvent(
             f"life-{secrets.token_hex(6)}", None, "captured", moment.isoformat(), "created"
         )
@@ -228,7 +291,7 @@ class CaptureArtifactService:
             "capture", source_entry_point, moment.isoformat(), "Original user capture preserved."
         )
         metadata = CaptureMetadata(
-            capture_id=capture_id,
+            capture_id=selected_capture_id,
             title=title.strip() or "Untitled capture",
             description=description.strip(),
             capture_type=capture_type,
@@ -244,18 +307,52 @@ class CaptureArtifactService:
             links=links,
             provenance=(provenance,),
             lifecycle=(lifecycle,),
+            merged_from=merged_from,
+            split_from=split_from,
+            exclude_from_semantic=exclude_from_semantic,
+            exclude_from_conversations=exclude_from_conversations,
+            exclude_from_reviews=exclude_from_reviews,
+            exclude_from_experiments=exclude_from_experiments,
             created_at=moment.isoformat(),
             updated_at=moment.isoformat(),
         )
         path = capture_path(metadata)
-        _atomic_write(
-            self.vault_root,
-            path,
-            _capture_document(metadata, "## User annotations\n\n"),
-            expected_hash=None,
-            create=True,
+        content = _capture_document(metadata, human_body)
+        return PreparedCapture(parse_capture(self.vault_root / path, path, content), content)
+
+    def prepare_transition(
+        self,
+        artifact: CaptureArtifact,
+        target: CaptureState,
+        *,
+        reason: str = "",
+        provenance_record: ProvenanceRecord | None = None,
+        now: datetime | None = None,
+    ) -> PreparedCapture:
+        validate_transition(artifact.metadata.state, target)
+        moment = utc_now(now)
+        event = LifecycleEvent(
+            f"life-{secrets.token_hex(6)}",
+            artifact.metadata.state,
+            target,
+            moment.isoformat(),
+            reason.strip(),
         )
-        return self.load(path)
+        metadata = replace(
+            artifact.metadata,
+            state=target,
+            updated_at=moment.isoformat(),
+            lifecycle=(*artifact.metadata.lifecycle, event),
+            provenance=(
+                artifact.metadata.provenance
+                if provenance_record is None
+                else (*artifact.metadata.provenance, provenance_record)
+            ),
+        )
+        content = _capture_document(metadata, artifact.human_body)
+        return PreparedCapture(
+            parse_capture(self.vault_root / artifact.path, artifact.path, content), content
+        )
 
     def load(self, relative_path: str) -> CaptureArtifact:
         try:
@@ -350,22 +447,8 @@ class CaptureArtifactService:
         now: datetime | None = None,
     ) -> CaptureArtifact:
         artifact = self.load(relative_path)
-        validate_transition(artifact.metadata.state, target)
-        moment = utc_now(now)
-        event = LifecycleEvent(
-            f"life-{secrets.token_hex(6)}",
-            artifact.metadata.state,
-            target,
-            moment.isoformat(),
-            reason.strip(),
-        )
-        metadata = replace(
-            artifact.metadata,
-            state=target,
-            updated_at=moment.isoformat(),
-            lifecycle=(*artifact.metadata.lifecycle, event),
-        )
-        return self.save(artifact, metadata, expected_hash=expected_hash)
+        prepared = self.prepare_transition(artifact, target, reason=reason, now=now)
+        return self.save(artifact, prepared.artifact.metadata, expected_hash=expected_hash)
 
 
 class AttachmentManifestService:

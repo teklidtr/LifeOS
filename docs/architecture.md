@@ -466,7 +466,10 @@ capabilities.
 Runtime state under `.lifeos/captures/` is disposable. It includes extraction
 results, processing jobs, indexes, checkpoints, previews, embeddings, galleries,
 timelines, and charts. Deleting it cannot delete canonical Markdown or original
-files. See [Rich Capture Architecture](rich-capture-architecture.md),
+files. Active merge/split recovery evidence is kept separately under
+`.lifeos/capture-mutations/`; it is retained only until the canonical file-set
+transaction commits or rolls back and is not ordinary rebuildable capture state.
+See [Rich Capture Architecture](rich-capture-architecture.md),
 [Rich Capture Protocol](rich-capture-protocol.md), and
 [Rich Capture User Manual](user-manual/13-rich-capture.md).
 
