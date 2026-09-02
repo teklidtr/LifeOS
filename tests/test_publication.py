@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -216,6 +217,177 @@ def test_recovery_is_idempotent_for_prepared_published_and_complete_phases(
         assert second.recovery_state == "none"
         assert (new / "payload").read_text(encoding="utf-8") == "new"
         assert not old.exists()
+
+
+def _write_prepared_journal(
+    root: Path,
+    *,
+    generation_id: object = "new",
+    staging_name: object = ".staging-new-test",
+    previous_generation: object = "old",
+) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "transaction.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation_id": generation_id,
+                "staging_name": staging_name,
+                "previous_generation": previous_generation,
+                "phase": "prepared",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("generation_id", ""),
+        ("generation_id", "."),
+        ("generation_id", ".."),
+        ("generation_id", "../victim"),
+        ("generation_id", "/absolute"),
+        ("generation_id", "nested/name"),
+        ("generation_id", "nested\\name"),
+        ("generation_id", "nul\x00name"),
+        ("generation_id", 7),
+        ("staging_name", ""),
+        ("staging_name", ".staging-new-"),
+        ("staging_name", ".staging-new-."),
+        ("staging_name", ".staging-new-.."),
+        ("staging_name", ".staging-new-../victim"),
+        ("staging_name", ".staging-new-/absolute"),
+        ("staging_name", "/.staging-new-test"),
+        ("staging_name", ".staging-new-test\\victim"),
+        ("staging_name", ".staging-new-test\x00victim"),
+        ("staging_name", [".staging-new-test"]),
+        ("previous_generation", ""),
+        ("previous_generation", "."),
+        ("previous_generation", ".."),
+        ("previous_generation", "../victim"),
+        ("previous_generation", "/absolute"),
+        ("previous_generation", "nested/name"),
+        ("previous_generation", "nested\\name"),
+        ("previous_generation", "nul\x00name"),
+        ("previous_generation", {"generation": "old"}),
+    ],
+)
+def test_recovery_rejects_untrusted_journal_path_components_before_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    root = tmp_path / "publication"
+    generations = root / "generations"
+    (generations / "new").mkdir(parents=True)
+    (generations / ".staging-new-test").mkdir()
+    outside = tmp_path / "victim"
+    outside.write_bytes(b"outside-sentinel")
+    journal: dict[str, object] = {
+        "generation_id": "new",
+        "staging_name": ".staging-new-test",
+        "previous_generation": "old",
+    }
+    journal[field] = value
+    _write_prepared_journal(root, **journal)
+
+    cleanup_calls: list[tuple[object, object]] = []
+
+    def intercepted_cleanup(
+        path: object,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        cleanup_calls.append((path, kwargs.get("dir_fd")))
+
+    monkeypatch.setattr(shutil, "rmtree", intercepted_cleanup)
+    with PublicationLock(root), pytest.raises(PublicationError, match="journal fields"):
+        recover_publication(root)
+
+    assert cleanup_calls == []
+    assert outside.read_bytes() == b"outside-sentinel"
+    assert (root / "transaction.json").exists()
+
+
+def test_recovery_rejects_journal_candidate_with_unexpected_file_type(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "publication"
+    generations = root / "generations"
+    staging = generations / ".staging-new-test"
+    staging.mkdir(parents=True)
+    (generations / "new").write_bytes(b"not-a-directory")
+    _write_prepared_journal(root)
+
+    with PublicationLock(root), pytest.raises(PublicationError, match="entry is invalid"):
+        recover_publication(root)
+
+    assert staging.is_dir()
+    assert (generations / "new").read_bytes() == b"not-a-directory"
+    assert (root / "transaction.json").exists()
+
+
+def test_recovery_rejects_symlinked_generations_directory(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "publication"
+    outside = tmp_path / "outside-generations"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_bytes(b"outside-sentinel")
+    root.mkdir()
+    (root / "generations").symlink_to(outside, target_is_directory=True)
+    _write_prepared_journal(root)
+
+    with PublicationLock(root), pytest.raises(PublicationError, match="directory is invalid"):
+        recover_publication(root)
+
+    assert sentinel.read_bytes() == b"outside-sentinel"
+    assert (root / "transaction.json").exists()
+
+
+def test_recovery_symlink_replacement_cannot_redirect_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "publication"
+    generations = root / "generations"
+    staging = generations / ".staging-new-test"
+    staging.mkdir(parents=True)
+    (staging / "payload").write_bytes(b"staged")
+    _write_prepared_journal(root)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_bytes(b"outside-sentinel")
+    original_rmtree = shutil.rmtree
+
+    def replace_with_symlink(
+        path: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        assert Path(path) == Path(".staging-new-test")
+        directory_fd = kwargs.get("dir_fd")
+        assert isinstance(directory_fd, int)
+        os.rename(
+            ".staging-new-test",
+            ".staging-new-swapped",
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+        os.symlink(outside, ".staging-new-test", dir_fd=directory_fd)
+        original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", replace_with_symlink)
+    with PublicationLock(root), pytest.raises(PublicationError, match="cleanup failed"):
+        recover_publication(root)
+
+    assert sentinel.read_bytes() == b"outside-sentinel"
+    assert (root / "transaction.json").exists()
 
 
 def test_identical_builds_use_same_generation_and_bytes(tmp_path: Path) -> None:

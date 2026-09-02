@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1655
 title: Confine derived publication recovery paths
-status: backlog
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-902
@@ -88,6 +88,18 @@ rtk .venv/bin/mypy src/lifeos
 rtk .venv/bin/pytest -q
 rtk git diff --check
 ```
+
+Local validation on 2026-09-02:
+
+- Focused publication and integrity suite: 62 passed.
+- Ruff, mypy, and diff checks passed.
+- The full suite was attempted. Its remaining failures are the pre-existing macOS
+  recovery-readiness cases tracked by LIFEOS-1659 (including tests whose
+  protected-path assertion mistakes macOS's `/private/var/...` temporary root
+  for a vault `private/` scope). The broad suite passed when those already
+  tracked cases were deselected; the full suite will be rerun after LIFEOS-1659.
+- GitHub review checkpoints could not be requested locally because the `gh`
+  executable is unavailable. Security review remains required before merge.
 
 # Relevant decisions
 

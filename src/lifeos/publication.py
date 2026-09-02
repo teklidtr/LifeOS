@@ -19,6 +19,7 @@ PublicationPhase = Literal["prepared", "published", "complete"]
 RecoveryState = Literal["none", "prepared", "published", "complete", "corrupt"]
 IntegrityState = Literal["valid", "unsupported", "corrupt", "unavailable"]
 _INTEGRITY_FILE = "integrity.json"
+_RMTREE_AVOIDS_SYMLINK_ATTACKS = shutil.rmtree.avoids_symlink_attacks
 FaultInjector = Callable[[str], None]
 
 
@@ -160,6 +161,38 @@ def _validate_generation_name(value: str) -> None:
         raise PublicationError("active generation id is invalid")
 
 
+def _validate_journal_identifiers(
+    generation_id: object,
+    staging_name: object,
+    previous_generation: object,
+) -> tuple[str, str, str | None]:
+    if (
+        not isinstance(generation_id, str)
+        or not isinstance(staging_name, str)
+        or previous_generation is not None
+        and not isinstance(previous_generation, str)
+    ):
+        raise PublicationError("publication journal fields are invalid")
+
+    try:
+        _validate_generation_name(generation_id)
+        _validate_generation_name(staging_name)
+        if previous_generation is not None:
+            _validate_generation_name(previous_generation)
+    except PublicationError as exc:
+        raise PublicationError("publication journal fields are invalid") from exc
+
+    staging_suffix = staging_name.removeprefix(
+        f".staging-{generation_id[:16]}-"
+    )
+    if (
+        staging_suffix == staging_name
+        or staging_suffix in {"", ".", ".."}
+    ):
+        raise PublicationError("publication journal fields are invalid")
+    return generation_id, staging_name, previous_generation
+
+
 def _read_active(root: Path) -> ActiveGeneration | None:
     path = root / "active.json"
     if not path.exists():
@@ -183,19 +216,13 @@ def _read_journal(root: Path) -> PublicationJournal | None:
     raw = _read_json(path)
     if not isinstance(raw, dict) or raw.get("schema_version") != 1:
         raise PublicationError("publication journal is invalid")
-    generation_id = raw.get("generation_id")
-    staging_name = raw.get("staging_name")
-    previous_generation = raw.get("previous_generation")
+    generation_id, staging_name, previous_generation = _validate_journal_identifiers(
+        raw.get("generation_id"),
+        raw.get("staging_name"),
+        raw.get("previous_generation"),
+    )
     phase = raw.get("phase")
-    if (
-        not isinstance(generation_id, str)
-        or not generation_id
-        or not isinstance(staging_name, str)
-        or not staging_name.startswith(".staging-")
-        or previous_generation is not None
-        and not isinstance(previous_generation, str)
-        or phase not in {"prepared", "published", "complete"}
-    ):
+    if phase not in {"prepared", "published", "complete"}:
         raise PublicationError("publication journal fields are invalid")
     return PublicationJournal(1, generation_id, staging_name, previous_generation, phase)
 
@@ -490,36 +517,119 @@ def _validate_generation(generation: Path, files: Mapping[str, bytes]) -> None:
         ):
             raise PublicationError("derived generation content verification failed")
 
-def _cleanup_generations(root: Path, active_generation: str | None) -> bool:
-    generations = root / "generations"
+def _open_generations_directory(root: Path) -> int | None:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        directory_fd = os.open(root / "generations", flags)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise PublicationError("publication generations directory is invalid") from exc
+    try:
+        metadata = os.fstat(directory_fd)
+    except OSError as exc:
+        os.close(directory_fd)
+        raise PublicationError(
+            "publication generations directory cannot be inspected"
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode):
+        os.close(directory_fd)
+        raise PublicationError("publication generations directory is invalid")
+    return directory_fd
+
+
+def _generation_directory_metadata(
+    generations_fd: int,
+    generation_name: str,
+) -> os.stat_result | None:
+    _validate_generation_name(generation_name)
+    try:
+        metadata = os.stat(
+            generation_name,
+            dir_fd=generations_fd,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise PublicationError("publication generation cannot be inspected") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise PublicationError("publication generation entry is invalid")
+    return metadata
+
+
+def _remove_generation_directory(generations_fd: int, generation_name: str) -> None:
+    if _generation_directory_metadata(generations_fd, generation_name) is None:
+        return
+    if not _RMTREE_AVOIDS_SYMLINK_ATTACKS:
+        raise PublicationError("safe publication cleanup is unavailable")
+    try:
+        shutil.rmtree(generation_name, dir_fd=generations_fd)
+    except OSError as exc:
+        raise PublicationError("publication generation cleanup failed") from exc
+
+
+def _cleanup_generations_fd(
+    generations_fd: int,
+    active_generation: str | None,
+) -> bool:
+    try:
+        generation_names = sorted(os.listdir(generations_fd))
+    except OSError:
+        return True
+
     stale_cleanup = False
-    if not generations.exists():
-        return False
-    for child in sorted(generations.iterdir(), key=lambda item: item.name):
-        if child.name == active_generation:
+    for generation_name in generation_names:
+        if generation_name == active_generation:
             continue
         try:
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-        except OSError:
+            _remove_generation_directory(generations_fd, generation_name)
+        except (OSError, PublicationError):
             stale_cleanup = True
     return stale_cleanup
+
+
+def _cleanup_generations(root: Path, active_generation: str | None) -> bool:
+    generations_fd = _open_generations_directory(root)
+    if generations_fd is None:
+        return False
+    try:
+        return _cleanup_generations_fd(generations_fd, active_generation)
+    finally:
+        os.close(generations_fd)
+
+
+def _has_stale_generations(root: Path, active_generation: str | None) -> bool:
+    generations_fd = _open_generations_directory(root)
+    if generations_fd is None:
+        return False
+    try:
+        generation_names = sorted(os.listdir(generations_fd))
+        for generation_name in generation_names:
+            _generation_directory_metadata(generations_fd, generation_name)
+        return any(name != active_generation for name in generation_names)
+    except OSError as exc:
+        raise PublicationError("publication generations cannot be inspected") from exc
+    finally:
+        os.close(generations_fd)
 
 
 def inspect_publication(root: Path) -> PublicationInspection:
     try:
         active = _read_active(root)
         journal = _read_journal(root)
+        stale_cleanup = _has_stale_generations(
+            root,
+            active.generation_id if active else None,
+        )
     except PublicationError:
         return PublicationInspection(None, "corrupt", True)
     recovery_state: RecoveryState = "none" if journal is None else journal.phase
-    stale_cleanup = False
-    generations = root / "generations"
-    if generations.exists():
-        active_id = active.generation_id if active else None
-        stale_cleanup = any(path.name != active_id for path in generations.iterdir())
     return PublicationInspection(
         active_generation=active.generation_id if active else None,
         recovery_state=recovery_state,
@@ -531,38 +641,64 @@ def recover_publication(root: Path) -> PublicationInspection:
     """Recover an interrupted publication. Caller must hold PublicationLock."""
     journal = _read_journal(root)
     active = _read_active(root)
-    if journal is None:
-        stale = _cleanup_generations(root, active.generation_id if active else None)
-        return PublicationInspection(active.generation_id if active else None, "none", stale)
-
     active_id = active.generation_id if active else None
-    generations = root / "generations"
-    staging = generations / journal.staging_name
-    final = generations / journal.generation_id
+    generations_fd = _open_generations_directory(root)
+    try:
+        if journal is None:
+            stale = (
+                _cleanup_generations_fd(generations_fd, active_id)
+                if generations_fd is not None
+                else False
+            )
+            return PublicationInspection(active_id, "none", stale)
 
-    if journal.phase == "prepared" and active_id != journal.generation_id:
-        for candidate in (staging, final):
-            if candidate.exists():
-                shutil.rmtree(candidate)
-        (root / "transaction.json").unlink(missing_ok=True)
-        stale = _cleanup_generations(root, active_id)
-        return PublicationInspection(active_id, "none", stale)
+        if journal.staging_name == active_id:
+            raise PublicationError("publication journal selects the active generation")
 
-    if active_id != journal.generation_id:
-        if not final.is_dir():
-            raise PublicationError("published generation is missing during recovery")
-        _write_active(root, journal.generation_id)
-        active_id = journal.generation_id
+        if generations_fd is not None:
+            _generation_directory_metadata(generations_fd, journal.staging_name)
+            final_metadata = _generation_directory_metadata(
+                generations_fd,
+                journal.generation_id,
+            )
+        else:
+            final_metadata = None
 
-    stale = _cleanup_generations(root, active_id)
-    if staging.exists():
-        try:
-            shutil.rmtree(staging)
-        except OSError:
-            stale = True
-    if not stale:
-        (root / "transaction.json").unlink(missing_ok=True)
-    return PublicationInspection(active_id, "published" if stale else "none", stale)
+        if journal.phase == "prepared" and active_id != journal.generation_id:
+            if generations_fd is not None:
+                _remove_generation_directory(
+                    generations_fd,
+                    journal.staging_name,
+                )
+                _remove_generation_directory(
+                    generations_fd,
+                    journal.generation_id,
+                )
+            (root / "transaction.json").unlink(missing_ok=True)
+            stale = (
+                _cleanup_generations_fd(generations_fd, active_id)
+                if generations_fd is not None
+                else False
+            )
+            return PublicationInspection(active_id, "none", stale)
+
+        if active_id != journal.generation_id:
+            if final_metadata is None:
+                raise PublicationError("published generation is missing during recovery")
+            _write_active(root, journal.generation_id)
+            active_id = journal.generation_id
+
+        stale = (
+            _cleanup_generations_fd(generations_fd, active_id)
+            if generations_fd is not None
+            else False
+        )
+        if not stale:
+            (root / "transaction.json").unlink(missing_ok=True)
+        return PublicationInspection(active_id, "published" if stale else "none", stale)
+    finally:
+        if generations_fd is not None:
+            os.close(generations_fd)
 
 
 def publish_generation(
