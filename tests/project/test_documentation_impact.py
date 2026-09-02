@@ -192,6 +192,10 @@ def test_legacy_reconciliation_requires_selected_task_declaration() -> None:
             _legacy_task("ready"),
             _legacy_task("completed", final_newline=False),
         ),
+        (
+            _legacy_task("ready"),
+            _legacy_task("completed").replace("status: completed", "status:   completed"),
+        ),
     ],
 )
 def test_legacy_exception_rejects_substantive_or_byte_changes(
