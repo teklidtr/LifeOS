@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1001
 title: Add typed daily-interaction contracts and mutation primitives
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1000
