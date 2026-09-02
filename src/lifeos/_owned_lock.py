@@ -25,12 +25,29 @@ class OwnedLock:
         self.lock_fd: Optional[int] = None
         self.token: bytes = b""
 
+    def _cleanup_failed_acquisition(self, fd: int) -> None:
+        try:
+            held_stat = os.fstat(fd)
+            current_stat = os.stat(self.filename, dir_fd=self.dir_fd, follow_symlinks=False)
+            if held_stat.st_ino == current_stat.st_ino and held_stat.st_dev == current_stat.st_dev:
+                os.unlink(self.filename, dir_fd=self.dir_fd)
+        except OSError:
+            pass
+
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+        self.lock_fd = None
+        self.token = b""
+
     def acquire(self) -> None:
         if self.lock_fd is not None:
             raise LockError("Lock already acquired")
 
-        token_str = secrets.token_hex(16)
-        self.token = token_str.encode("utf-8")
+        self.token = b""
+        token = secrets.token_hex(16).encode("utf-8")
 
         try:
             fd = os.open(
@@ -43,12 +60,19 @@ class OwnedLock:
             raise LockError("Failed to acquire lock: already exists or permission denied") from e
 
         try:
-            os.write(fd, self.token)
+            written = 0
+            while written < len(token):
+                chunk = os.write(fd, token[written:])
+                if chunk <= 0:
+                    raise OSError("write returned 0 bytes")
+                written += chunk
             os.fsync(fd)
-            self.lock_fd = fd
-        except OSError as e:
-            os.close(fd)
-            raise e
+        except OSError:
+            self._cleanup_failed_acquisition(fd)
+            raise
+
+        self.token = token
+        self.lock_fd = fd
 
     def release(self) -> LockReleaseResult:
         if self.lock_fd is None:
