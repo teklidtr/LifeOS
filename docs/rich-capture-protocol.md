@@ -23,6 +23,14 @@ Bridge request objects reject unknown fields. Datetimes must be timezone-aware I
 Mutable capture operations require the current canonical `expected_hash`. File-import paths are
 local inputs only; canonical records store vault-relative paths and content hashes.
 
+The capture-mutation lineage namespace is internal to the Python transaction engine. Public
+`capture.create` calls reject `source_entry_point` values beginning with `capture-mutation:` or
+`capture-mutation-source:`, and public `capture.transition` calls reject the archive-lineage reasons
+`merged into ...` and `split into ...`. Rejection uses the typed `reserved_capture_lineage` error
+before a canonical write. Internal merge/split preparation may still write those values. Existing
+canonical Markdown remains readable, but reserved-looking text never proves a completed mutation by
+itself; retry success still requires the complete bilateral canonical lineage described below.
+
 `capture.merge.preview` returns a `fingerprint` over the exact ordered source paths and hashes,
 title, type, attachment IDs, link paths, and warnings. `capture.merge.apply` recomputes those fields
 from canonical sources and rejects both stale sources and altered preview fields. `capture.split`
