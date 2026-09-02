@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-004
 title: Create the initial registry schema
-status: ready
+status: completed
 milestone: phase-1-deterministic-foundation
 depends_on: [LIFEOS-003]
 affected_paths:

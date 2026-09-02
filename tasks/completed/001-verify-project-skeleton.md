@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-001
 title: Verify the project skeleton
-status: ready
+status: completed
 milestone: phase-0-project-skeleton
 depends_on: []
 affected_paths:
