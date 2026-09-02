@@ -12,6 +12,7 @@ from lifeos.exports import ExportError, export_status
 from lifeos.graph import GraphError, graph_view_status
 from lifeos.lint import lint_vault
 from lifeos.ownership import GeneratedOwnership, ManifestError, PathSafetyError
+from lifeos.ownership.manifest import DEFAULT_OWNERSHIP_MANIFEST_PATH
 from lifeos.proposals.recovery import (
     RecoveryCorruptStateError,
     RecoveryUnavailableError,
@@ -263,7 +264,7 @@ def _registry_content_status(
 
 
 def _lint_status(config: LifeOSConfig) -> tuple[LintStatusCounts | None, SubsystemStatus]:
-    manifest_path = config.runtime_dir / "ownership.json"
+    manifest_path = config.vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
     try:
         scanned_files = scan_vault(config.vault_root)
         lint_result = lint_vault(
@@ -306,7 +307,7 @@ def _lint_status(config: LifeOSConfig) -> tuple[LintStatusCounts | None, Subsyst
 
 
 def _ownership_status(config: LifeOSConfig) -> SubsystemStatus:
-    manifest_path = config.vault_root / "system" / "generated-ownership.json"
+    manifest_path = config.vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
     if not manifest_path.exists():
         return SubsystemStatus(
             "ownership",
