@@ -25,22 +25,61 @@ class OwnedLock:
         self.lock_fd: Optional[int] = None
         self.token: bytes = b""
 
+    def _restore_quarantined_entry(self, quarantine_name: str) -> None:
+        try:
+            os.link(
+                quarantine_name,
+                self.filename,
+                src_dir_fd=self.dir_fd,
+                dst_dir_fd=self.dir_fd,
+                follow_symlinks=False,
+            )
+        except OSError:
+            return
+
+        try:
+            os.unlink(quarantine_name, dir_fd=self.dir_fd)
+        except OSError:
+            pass
+
     def _cleanup_failed_acquisition(self, fd: int) -> None:
         try:
             held_stat = os.fstat(fd)
-            current_stat = os.stat(self.filename, dir_fd=self.dir_fd, follow_symlinks=False)
-            if held_stat.st_ino == current_stat.st_ino and held_stat.st_dev == current_stat.st_dev:
-                os.unlink(self.filename, dir_fd=self.dir_fd)
-        except OSError:
+            quarantine_name = (
+                f".{self.filename}.{secrets.token_hex(16)}.failed-acquire-quarantine"
+            )
+            os.replace(
+                self.filename,
+                quarantine_name,
+                src_dir_fd=self.dir_fd,
+                dst_dir_fd=self.dir_fd,
+            )
+            quarantined_stat = os.stat(
+                quarantine_name,
+                dir_fd=self.dir_fd,
+                follow_symlinks=False,
+            )
+            if (
+                held_stat.st_ino == quarantined_stat.st_ino
+                and held_stat.st_dev == quarantined_stat.st_dev
+            ):
+                try:
+                    os.unlink(quarantine_name, dir_fd=self.dir_fd)
+                except OSError:
+                    pass
+            else:
+                self._restore_quarantined_entry(quarantine_name)
+        except Exception:
+            # Cleanup must not mask the token-write/fsync error that caused acquisition to fail.
             pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-
-        self.lock_fd = None
-        self.token = b""
+            self.lock_fd = None
+            self.token = b""
 
     def acquire(self) -> None:
         if self.lock_fd is not None:
