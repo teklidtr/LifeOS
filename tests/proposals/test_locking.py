@@ -217,7 +217,7 @@ def test_staging_cleanup_failure_preserves_primary_error_and_resets_state(lock_d
 
     with (
         mock.patch("os.write", side_effect=fail_write),
-        mock.patch("os.unlink", side_effect=OSError(errno.EACCES, "cleanup denied")),
+        mock.patch("os.replace", side_effect=OSError(errno.EACCES, "cleanup denied")),
     ):
         with pytest.raises(OSError) as exc_info:
             lock.acquire()
@@ -233,6 +233,78 @@ def test_staging_cleanup_failure_preserves_primary_error_and_resets_state(lock_d
         os.fstat(failed_fd)
 
     residues[0].unlink()
+
+
+def test_failed_cleanup_preserves_replacement_of_random_staging_path(lock_dir):
+    lock_path, fd = lock_dir
+    lock = OwnedLock(fd, "test.lock")
+    original_replace = os.replace
+    primary_error = OSError(errno.EIO, "write failed")
+    replaced_name = None
+
+    def replace_with_foreign(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+        nonlocal replaced_name
+        if str(src).endswith(".acquiring") and replaced_name is None:
+            replaced_name = str(src)
+            path = lock_path / replaced_name
+            os.unlink(path)
+            path.write_bytes(b"foreign-staging")
+        return original_replace(
+            src,
+            dst,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    with (
+        mock.patch("os.write", side_effect=primary_error),
+        mock.patch("os.replace", side_effect=replace_with_foreign),
+    ):
+        with pytest.raises(OSError) as exc_info:
+            lock.acquire()
+
+    assert exc_info.value is primary_error
+    assert replaced_name is not None
+    assert (lock_path / replaced_name).read_bytes() == b"foreign-staging"
+    assert lock.lock_fd is None
+    assert lock.token == b""
+    assert not (lock_path / "test.lock").exists()
+    assert [path for path in lock_path.iterdir() if path.name.endswith(".cleanup")] == []
+
+    (lock_path / replaced_name).unlink()
+
+
+def test_successful_alias_cleanup_preserves_replacement_of_random_staging_path(lock_dir):
+    lock_path, fd = lock_dir
+    lock = OwnedLock(fd, "test.lock")
+    original_replace = os.replace
+    replaced_name = None
+
+    def replace_with_foreign(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+        nonlocal replaced_name
+        if str(src).endswith(".acquiring") and replaced_name is None:
+            replaced_name = str(src)
+            path = lock_path / replaced_name
+            os.unlink(path)
+            path.write_bytes(b"foreign-staging")
+        return original_replace(
+            src,
+            dst,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    with mock.patch("os.replace", side_effect=replace_with_foreign):
+        lock.acquire()
+
+    assert replaced_name is not None
+    assert lock.lock_fd is not None
+    assert (lock_path / "test.lock").read_bytes() == lock.token
+    assert (lock_path / replaced_name).read_bytes() == b"foreign-staging"
+    assert [path for path in lock_path.iterdir() if path.name.endswith(".cleanup")] == []
+    assert lock.release().released is True
+
+    (lock_path / replaced_name).unlink()
 
 
 def test_competing_regular_file_wins_atomic_publication(lock_dir):
