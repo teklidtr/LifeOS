@@ -663,3 +663,27 @@ def test_status_external_runtime_still_uses_canonical_ownership(tmp_path: Path) 
     assert payload["lint"]["errors"] == 1
     assert _check(payload, "lint")["code"] == "lint-errors"
     assert _check(payload, "ownership")["code"] == "ownership-valid"
+
+
+def test_status_path_safety_failure_preserves_partial_diagnostics(
+    empty_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(empty_vault)
+    canonical_manifest = empty_vault / "system" / "generated-ownership.json"
+    _write_ownership_manifest(canonical_manifest, {})
+
+    from lifeos.ownership import GeneratedOwnership, PathSafetyError
+
+    def unsafe_load(*_args: object, **_kwargs: object) -> None:
+        raise PathSafetyError("unsafe canonical ownership path")
+
+    monkeypatch.setattr(GeneratedOwnership, "load", unsafe_load)
+
+    code, out, err = run_cli("status", "--json")
+
+    assert code == 0
+    assert err == ""
+    payload = json.loads(out)
+    assert payload["lint"] is None
+    assert _check(payload, "lint")["code"] == "lint-unavailable"
+    assert _check(payload, "ownership")["code"] == "ownership-unsafe-path"
