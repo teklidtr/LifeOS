@@ -40,7 +40,7 @@ _ITEM_MARKER = re.compile(
     rf"(?P<fingerprint>{_FINGERPRINT_PATTERN}) -->"
 )
 _ITEM_LINE = re.compile(
-    rf"^-[ \t]+\[ \][ \t]+.+?[ \t]+<!-- lifeos:item (?P<item>{_ITEM_ID_PATTERN}) "
+    rf"^- \[ \] .+? <!-- lifeos:item (?P<item>{_ITEM_ID_PATTERN}) "
     rf"(?P<fingerprint>{_FINGERPRINT_PATTERN}) -->[ \t]*$"
 )
 _ALLOWED_NOTE_STATUS = {"inbox", "active", "paused", "completed", "cancelled", "archived", "seed"}
