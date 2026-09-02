@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1011
 title: Deliver attention notifications while Obsidian is closed
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1002
