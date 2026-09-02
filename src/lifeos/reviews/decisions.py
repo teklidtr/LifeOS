@@ -43,6 +43,22 @@ _ITEM_LINE = re.compile(
     rf"^- \[ \] .+? <!-- lifeos:item (?P<item>{_ITEM_ID_PATTERN}) "
     rf"(?P<fingerprint>{_FINGERPRINT_PATTERN}) -->[ \t]*$"
 )
+_RAW_HTML_LITERAL_START = re.compile(
+    r"^ {0,3}<(?P<tag>script|pre|style|textarea)(?=[ \t>/]|$)", re.IGNORECASE
+)
+_RAW_HTML_BLOCK_TAGS = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|"
+    "details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|"
+    "h1|h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|"
+    "noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|"
+    "thead|title|tr|track|ul"
+)
+_RAW_HTML_BLOCK_START = re.compile(
+    rf"^ {{0,3}}</?(?:{_RAW_HTML_BLOCK_TAGS})(?=[ \t>/]|$)", re.IGNORECASE
+)
+_RAW_HTML_COMPLETE_TAG = re.compile(
+    r"^ {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?/?>[ \t]*$"
+)
 _ALLOWED_NOTE_STATUS = {"inbox", "active", "paused", "completed", "cancelled", "archived", "seed"}
 _ALLOWED_TASK_STATUS = {"todo", "active", "done", "cancelled", "blocked", "pending"}
 
@@ -92,14 +108,45 @@ class ReviewProposalResult:
         }
 
 
+def _advance_raw_html_state(line: str, state: str | None) -> str | None:
+    """Track raw HTML regions that can hide marker-looking Markdown lines."""
+    clean = line.rstrip("\r\n")
+    if state is not None:
+        if state == "blank":
+            return None if not clean.strip() else state
+        return None if state in clean.casefold() else state
+
+    literal = _RAW_HTML_LITERAL_START.match(clean)
+    if literal is not None:
+        delimiter = f"</{literal.group('tag').casefold()}>"
+        return None if delimiter in clean[literal.end() :].casefold() else delimiter
+    if re.match(r"^ {0,3}<!--", clean):
+        return None if "-->" in clean[clean.find("<!--") + 4 :] else "-->"
+    if re.match(r"^ {0,3}<\?", clean):
+        return None if "?>" in clean[clean.find("<?") + 2 :] else "?>"
+    if re.match(r"^ {0,3}<!\[CDATA\[", clean):
+        return None if "]]>" in clean[clean.find("<![CDATA[") + 9 :] else "]]>"
+    if re.match(r"^ {0,3}<![A-Z]", clean):
+        return None if ">" in clean[clean.find("<!") + 2 :] else ">"
+    if _RAW_HTML_BLOCK_START.match(clean) or _RAW_HTML_COMPLETE_TAG.fullmatch(clean):
+        return "blank"
+    return None
+
+
 def artifact_item_fingerprints(artifact: ReviewArtifact) -> dict[str, str]:
     items = extract_managed_block(artifact.body, "items")
     result: dict[str, str] = {}
     fenced_code: FenceState = None
+    raw_html: str | None = None
     for line in items.splitlines():
         previous_fence = fenced_code
         fenced_code = advance_fenced_code_state(line, fenced_code)
         if previous_fence is not None or fenced_code is not None:
+            continue
+
+        previous_html = raw_html
+        raw_html = _advance_raw_html_state(line, raw_html)
+        if previous_html is not None or raw_html is not None:
             continue
 
         structural = _ITEM_LINE.fullmatch(line)
