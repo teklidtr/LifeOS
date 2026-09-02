@@ -38,6 +38,27 @@ _MANIFEST_START = "<!-- lifeos:managed:start attachment-manifest -->"
 _MANIFEST_END = "<!-- lifeos:managed:end attachment-manifest -->"
 _CAPTURE_ID_RE = re.compile(r"^cap-(\d{8}T\d{6}Z)-[a-f0-9]{8}$")
 _ATTACHMENT_ID_RE = re.compile(r"^att-[a-f0-9]{16}$")
+_RESERVED_SOURCE_ENTRY_PREFIXES = ("capture-mutation:", "capture-mutation-source:")
+_RESERVED_ARCHIVE_REASONS = ("merged into", "split into")
+
+
+def _validate_public_capture_lineage(value: str, *, field: str) -> None:
+    normalized = value.strip()
+    if field == "source_entry_point":
+        reserved = any(normalized.startswith(prefix) for prefix in _RESERVED_SOURCE_ENTRY_PREFIXES)
+    elif field == "reason":
+        reserved = any(
+            normalized == prefix or normalized.startswith(prefix + " ")
+            for prefix in _RESERVED_ARCHIVE_REASONS
+        )
+    else:
+        raise ValueError(f"Unsupported capture lineage field: {field}")
+    if reserved:
+        raise CaptureError(
+            "reserved_capture_lineage",
+            f"{field} uses a reserved capture mutation lineage value.",
+            {"field": field},
+        )
 
 
 def utc_now(value: datetime | None = None) -> datetime:
@@ -246,6 +267,7 @@ class CaptureArtifactService:
         exclude_from_experiments: bool = False,
         now: datetime | None = None,
     ) -> CaptureArtifact:
+        _validate_public_capture_lineage(source_entry_point, field="source_entry_point")
         prepared = self.prepare_create(
             title=title,
             capture_type=capture_type,
@@ -474,6 +496,7 @@ class CaptureArtifactService:
         reason: str = "",
         now: datetime | None = None,
     ) -> CaptureArtifact:
+        _validate_public_capture_lineage(reason, field="reason")
         artifact = self.load(relative_path)
         prepared = self.prepare_transition(artifact, target, reason=reason, now=now)
         return self.save(artifact, prepared.artifact.metadata, expected_hash=expected_hash)

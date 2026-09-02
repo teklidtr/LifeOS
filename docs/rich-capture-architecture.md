@@ -68,6 +68,16 @@ hash and the matching archive lifecycle event. Disposable result receipts are lo
 receipt or output marker that cannot be reconciled with the complete canonical lineage fails with
 `recovery_required`.
 
+The corresponding lineage values are reserved to the Python transaction engine. Output
+`source_entry_point` values use the `capture-mutation:` namespace, source archive provenance uses
+`capture-mutation-source:` with provenance kind `capture-mutation`, and source lifecycle reasons use
+`merged into ...` or `split into ...`. Public capture creation and transition boundaries, including
+the Obsidian bridge, cannot mint those values. The internal `prepare_create` and
+`prepare_transition` paths remain available to the atomic merge/split transaction. Existing or
+manually edited canonical notes containing reserved-looking values remain readable, but those values
+do not gain authority and must still reconcile against the complete bilateral lineage before a retry
+can succeed.
+
 Active transaction evidence lives under `.lifeos/capture-mutations/`, separately from rebuildable
 `.lifeos/captures/` indexes and jobs. An incomplete transaction is rolled back before the next merge
 or split. A transaction that encounters a later foreign edit remains explicitly recovery-required
