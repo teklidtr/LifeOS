@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-008
 title: Implement generated-file ownership
-status: ready
+status: completed
 milestone: phase-1-deterministic-foundation
 depends_on: [LIFEOS-004, LIFEOS-007]
 affected_paths:
