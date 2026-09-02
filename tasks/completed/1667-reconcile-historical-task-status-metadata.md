@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1667
 title: Reconcile historical task status metadata
-status: in-progress
+status: completed
 phase: hardening
 depends_on: []
 risk: low
@@ -104,3 +104,23 @@ No behavioral pytest run is required for status-field-only changes.
 - **Reason for the recommendation:** This is a deterministic, status-field-only correction
   with a known mismatch inventory and clear directory-based checks. It requires neither
   production debugging nor new architectural or semantic decisions.
+
+# Validation results
+
+- The pre-change read-only GitHub inventory reproduced the recorded mismatch set exactly:
+  17 completed-directory files with `status: ready` and 15 with `status: backlog`.
+- The final comparison against master after reconciliation shows those 32 historical task
+  files changed by exactly one removed line and one added line each. No source, test,
+  architecture, user-manual, or unrelated documentation file changed.
+- Stable IDs, filenames, dependencies, and historical task bodies were preserved. The diff
+  contains no historical ID/dependency edits or historical task moves; one accidental final
+  newline change in LIFEOS-109 was detected during diff review and restored before completion.
+- A local checkout could not be acquired in the execution environment because GitHub DNS
+  resolution failed (`Temporary failure in name resolution` / `Could not resolve host`).
+  Therefore the listed `rtk` commands and the standalone local YAML inventory could not be
+  executed here. The closest available static validation used the complete pre-change mismatch
+  inventory, direct branch reads, and GitHub's master-to-branch comparison. Because this task
+  neither adds nor edits any task ID, it cannot introduce a duplicate ID relative to the audited
+  base; PR CI remains the independent repository check.
+- No behavioral pytest run was performed, as the task explicitly does not require one for
+  status-field-only changes.
