@@ -136,3 +136,81 @@ Validated locally on macOS on 2026-09-02:
 - Documentation impact was reviewed against the vision, architecture, accepted decisions, and
   ownership policy: this restores the already documented boundary, so no user or data-contract
   documentation requires a behavior change.
+
+# Review handoff
+
+The user requested that this partially completed task be finished first, followed by
+backlog capture only. Implementation was committed as `dfdeb02` and the completed task
+state as `fe4eb1c`. No remaining backlog task was promoted or implemented during the
+handoff. The full-suite macOS limitation above is now recorded in LIFEOS-1659.
+
+The remaining verified findings are preserved below in severity order. LIFEOS-1655 and
+LIFEOS-1656 already existed and were enriched rather than duplicated; LIFEOS-1658 was
+created during the managed-marker work and its contract was corrected to preserve the
+actual top-level checkbox renderer. LIFEOS-1659 through LIFEOS-1666 are new follow-ups.
+LIFEOS-1667 records the historical status-metadata inconsistency found during handoff validation.
+Within a severity group, this is suggested triage order, not a new dependency rule.
+
+| Risk | Backlog task | Purpose | Recommended model / reasoning effort |
+|---|---|---|---|
+| Critical | [LIFEOS-1655](../backlog/1655-confine-derived-publication-recovery-paths.md) | Confine persisted publication recovery paths and destructive cleanup. | `gpt-5.6-sol` / `xhigh` |
+| High | [LIFEOS-1658](../backlog/1658-confine-review-item-decision-markers-to-structural-lines.md) | Restrict review decision/proposal-reference authorization to real rendered items. | `gpt-5.6-sol` / `high` |
+| High | [LIFEOS-1659](../backlog/1659-restore-safe-macos-recovery-readiness.md) | Restore supported macOS recovery diagnostics without weakening Git/filesystem safety. | `gpt-5.6-sol` / `xhigh` |
+| High | [LIFEOS-1660](../backlog/1660-make-bridge-cancellation-reach-active-work.md) | Make cancellation reach active bridge work while preserving safe mutation serialization. | `gpt-5.6-sol` / `xhigh` |
+| High | [LIFEOS-1664](../backlog/1664-clean-up-failed-owned-lock-acquisition.md) | Avoid abandoned locks after failed or partial token initialization. | `gpt-5.6-sol` / `high` |
+| Medium | [LIFEOS-1656](../backlog/1656-reserve-capture-mutation-lineage-namespace.md) | Prevent public capture inputs from impersonating reserved mutation lineage. | `gpt-5.6-terra` / `high` |
+| Medium | [LIFEOS-1661](../backlog/1661-use-canonical-generated-ownership-in-status-lint.md) | Diagnose generated-file integrity using the canonical ownership manifest. | `gpt-5.6-luna` / `medium` |
+| Medium | [LIFEOS-1662](../backlog/1662-report-unhashable-frontmatter-keys-as-parse-findings.md) | Convert composite YAML-key crashes into structured parser findings. | `gpt-5.6-luna` / `medium` |
+| Medium | [LIFEOS-1663](../backlog/1663-resume-source-guarded-capture-and-experiment-index-rebuilds.md) | Resume the two write-only derived-index checkpoints with source validation. | `gpt-5.6-sol` / `high` |
+| Medium | [LIFEOS-1666](../backlog/1666-preserve-human-markdown-in-metadata-only-updates.md) | Preserve existing body bytes in remaining metadata writers and proposal builders. | `gpt-5.6-terra` / `high` |
+| Low | [LIFEOS-1665](../backlog/1665-align-registry-schema-documentation.md) | Correct stale version-3 registry documentation to the shipped version-4 contract. | `gpt-5.6-luna` / `medium` |
+| Low | [LIFEOS-1667](../backlog/1667-reconcile-historical-task-status-metadata.md) | Reconcile 32 historical completed-task status fields without changing completion evidence. | `gpt-5.6-luna` / `low` |
+
+Each backlog task contains its reproduction/current behavior, affected code and tests,
+source-of-authority references, preservation boundaries, acceptance criteria, validation,
+documentation impact, dependencies, and a task-specific model rationale. The capture and
+experiment checkpoint findings are grouped because they share the write-only checkpoint
+root cause; they are explicitly separate from canonical capture-mutation recovery.
+
+Resolved or unconfirmed findings were not duplicated as new work:
+
+- Attachment path confinement: LIFEOS-1652, `f0a4ec4`.
+- Persisted capture enum validation: `f4894ca`.
+- Capture retrieval exclusions: `52d85b0`.
+- Provider preview retrieval-policy enforcement: LIFEOS-1653, `df08168`.
+- Transactional, stale-safe capture merge/split: LIFEOS-1654, `4619804`.
+- Structural managed-block authorization and exact managed-refresh preservation:
+  this task, `dfdeb02`.
+- The former whole-file image-metadata allocation is already resolved by LIFEOS-1652:
+  `LocalExtractionService._image_metadata` in `src/lifeos/captures/extraction.py` reads
+  only 32 header bytes. Streaming integrity hashing is separate and intentional.
+- No separate custom research-delimiter task was created: inspection did not establish
+  a concrete remaining contract violation. The invalid standalone-review-marker assumption
+  was corrected in LIFEOS-1658 rather than promoted into a new requirement. That task
+  changes decision/proposal-reference authorization, not separate draft-creation authority.
+- Temporary-directory/protected-path and parent-Git-discovery fixture artifacts were
+  avoided by the documented test isolation; they were not attributed to this implementation.
+
+Model recommendations use options actually exposed by the Codex environment on
+2026-09-02: `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, with the listed available
+reasoning efforts. OpenAI Docs was used to check the
+[official model-selection guidance](https://developers.openai.com/api/docs/guides/latest-model)
+and the [Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol),
+[Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra), and
+[Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) model references.
+The task-specific recommendations are engineering judgments based on risk, ambiguity,
+compatibility, and exploration needs, not promises about future account availability.
+Recheck availability in a future session; do not invent an unavailable configuration.
+
+No implementation-critical review context is intentionally left only in the conversation.
+Future work should use these tasks and current authoritative repository sources, not
+conversation recollection. Unrelated local `.serena/` state was left untouched.
+
+Handoff validation checked unique task IDs, required task sections, documentation-impact
+declarations, available model/effort combinations, local file references, relative handoff
+links, and empty ready/in-progress queues. Dependency IDs resolve to task files already
+under `tasks/completed/`, as required by the promotion rule. Three referenced historical
+dependencies have stale frontmatter among the 32 mismatches now recorded in LIFEOS-1667;
+their metadata was not silently changed or presented as consistent. Manual links in all
+19 chapters and `git diff --check` passed. No source/test/plugin changes were made after
+the LIFEOS-1657 implementation commit.
