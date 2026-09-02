@@ -217,7 +217,7 @@ def test_staging_cleanup_failure_preserves_primary_error_and_resets_state(lock_d
 
     with (
         mock.patch("os.write", side_effect=fail_write),
-        mock.patch("os.replace", side_effect=OSError(errno.EACCES, "cleanup denied")),
+        mock.patch("os.rename", side_effect=OSError(errno.EACCES, "cleanup denied")),
     ):
         with pytest.raises(OSError) as exc_info:
             lock.acquire()
@@ -238,18 +238,18 @@ def test_staging_cleanup_failure_preserves_primary_error_and_resets_state(lock_d
 def test_failed_cleanup_preserves_replacement_of_random_staging_path(lock_dir):
     lock_path, fd = lock_dir
     lock = OwnedLock(fd, "test.lock")
-    original_replace = os.replace
+    original_rename = os.rename
     primary_error = OSError(errno.EIO, "write failed")
     replaced_name = None
 
-    def replace_with_foreign(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+    def rename_foreign(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
         nonlocal replaced_name
         if str(src).endswith(".acquiring") and replaced_name is None:
             replaced_name = str(src)
             path = lock_path / replaced_name
             os.unlink(path)
             path.write_bytes(b"foreign-staging")
-        return original_replace(
+        return original_rename(
             src,
             dst,
             src_dir_fd=src_dir_fd,
@@ -258,7 +258,7 @@ def test_failed_cleanup_preserves_replacement_of_random_staging_path(lock_dir):
 
     with (
         mock.patch("os.write", side_effect=primary_error),
-        mock.patch("os.replace", side_effect=replace_with_foreign),
+        mock.patch("os.rename", side_effect=rename_foreign),
     ):
         with pytest.raises(OSError) as exc_info:
             lock.acquire()
@@ -277,24 +277,24 @@ def test_failed_cleanup_preserves_replacement_of_random_staging_path(lock_dir):
 def test_successful_alias_cleanup_preserves_replacement_of_random_staging_path(lock_dir):
     lock_path, fd = lock_dir
     lock = OwnedLock(fd, "test.lock")
-    original_replace = os.replace
+    original_rename = os.rename
     replaced_name = None
 
-    def replace_with_foreign(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+    def rename_foreign(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
         nonlocal replaced_name
         if str(src).endswith(".acquiring") and replaced_name is None:
             replaced_name = str(src)
             path = lock_path / replaced_name
             os.unlink(path)
             path.write_bytes(b"foreign-staging")
-        return original_replace(
+        return original_rename(
             src,
             dst,
             src_dir_fd=src_dir_fd,
             dst_dir_fd=dst_dir_fd,
         )
 
-    with mock.patch("os.replace", side_effect=replace_with_foreign):
+    with mock.patch("os.rename", side_effect=rename_foreign):
         lock.acquire()
 
     assert replaced_name is not None
