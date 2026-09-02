@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1661
 title: Use canonical generated ownership in status lint
-status: in-progress
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-109
@@ -70,6 +70,36 @@ rtk .venv/bin/mypy src/lifeos
 rtk .venv/bin/pytest -q
 rtk git diff --check
 ```
+
+The validated implementation head `224d6dfd1a46a7bf31ecf6db21e35068b554027d` passed current-head
+fast-checks run `33674425687`, including the documentation-impact gate, manual-link validation,
+Ruff, mypy, Python compilation, full test collection, and project contract smoke tests.
+
+Full-validation run `33674478852` passed on that same head: all four full pytest shards, aggregate
+`full-test`, clean-room setup/MCP, the home-node service container, and the ARM64 home-node image
+build completed successfully.
+
+The normal Codex review cycle found two blocking P1 issues introduced/exposed by routing status lint
+to canonical ownership. The first preserved partial status diagnostics when canonical ownership
+path safety fails; the second replaced unsafe pathname hashing of owned targets with the existing
+descriptor-based `observe_vault_file(...)` boundary. Both findings were addressed with focused
+regressions and their review threads were resolved. Final normal Codex re-review on the unchanged
+`224d6dfd1a46a7bf31ecf6db21e35068b554027d` head returned a clean PR-level approval reaction with
+no new review findings.
+
+The separate security review was not run. On 2026-09-02 the repository owner explicitly instructed
+the implementation agent to skip it for this task; this is recorded as a user-authority workflow
+override under `AGENTS.md`, not as a successful security-review result.
+
+Local repository execution remained unavailable in the implementation environment because the
+execution container could not resolve `github.com` during checkout. Repository CI therefore supplied
+the executable validation layer, and this limitation is recorded rather than represented as local
+validation.
+
+The cross-cutting filesystem audit also identified pre-existing hazards in
+`GeneratedOwnership.load(...)` and `GeneratedOwnership.write_generated_file(...)` that are
+independent of LIFEOS-1661's status-lint caller. They were recorded as backlog task LIFEOS-1668 and
+were intentionally not implemented in this PR.
 
 # Relevant decisions
 
