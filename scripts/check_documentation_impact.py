@@ -253,18 +253,32 @@ def git_changes_from_git(base_ref: str) -> tuple[GitChange, ...]:
     return parse_name_status_z(result.stdout)
 
 
-def read_text_from_git_ref(base_ref: str, path: str) -> str:
+def merge_base_from_git(base_ref: str) -> str:
     result = subprocess.run(
-        ["git", "show", f"{base_ref}:{path}"],
+        ["git", "merge-base", base_ref, "HEAD"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def read_worktree_text(path: str) -> str:
+    with (REPO_ROOT / path).open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def read_text_from_git_ref(ref: str, path: str) -> str:
+    result = subprocess.run(
+        ["git", "show", f"{ref}:{path}"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
     )
     if result.returncode != 0:
-        raise OSError(f"unable to read {path!r} from {base_ref!r}")
-    return result.stdout
+        raise OSError(f"unable to read {path!r} from {ref!r}")
+    return result.stdout.decode("utf-8")
 
 
 def _write_ci_scope(path: Path, *, base_ref: str) -> None:
@@ -305,10 +319,11 @@ def main() -> int:
             return 0
 
     changed_paths = changed_paths_from_git(args.base_ref)
+    merge_base = merge_base_from_git(args.base_ref)
     errors = evaluate_documentation_impact(
         changed_paths,
-        lambda path: (REPO_ROOT / path).read_text(encoding="utf-8"),
-        lambda path: read_text_from_git_ref(args.base_ref, path),
+        read_worktree_text,
+        lambda path: read_text_from_git_ref(merge_base, path),
     )
     if errors:
         print("Documentation impact gate failed:")
