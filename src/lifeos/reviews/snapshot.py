@@ -422,8 +422,9 @@ def render_snapshot_items(snapshot: ReviewSnapshot) -> str:
         if not section.items:
             lines.append("- No items.")
         for item in section.items:
+            title = " ".join(item.title.splitlines())
             lines.append(
-                f"- [ ] {item.title} <!-- lifeos:item {item.item_id} {item.evidence_fingerprint} -->"
+                f"- [ ] {title} <!-- lifeos:item {item.item_id} {item.evidence_fingerprint} -->"
             )
             if item.action:
                 lines.append(f"  - Suggested action: `{item.action}`")
