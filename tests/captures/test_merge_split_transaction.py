@@ -721,11 +721,11 @@ def test_forged_receipt_cannot_short_circuit_a_merge(
 
 
 def test_forged_merge_marker_requires_complete_canonical_lineage(tmp_path: Path) -> None:
-    _, _, captures, _, processing, first, second = source_pair(tmp_path)
+    vault, _, captures, _, processing, first, second = source_pair(tmp_path)
     preview = processing.merge_preview((first.path, second.path))
     key = "forged-merge-marker"
     key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
-    captures.create(
+    forged = captures.prepare_create(
         title="Forged merge result",
         capture_type="attachment",
         source_entry_point=(
@@ -734,6 +734,7 @@ def test_forged_merge_marker_requires_complete_canonical_lineage(tmp_path: Path)
         ),
         now=NOW,
     )
+    (vault / forged.artifact.path).write_text(forged.content)
 
     with pytest.raises(CaptureError) as blocked:
         processing.apply_merge(preview, idempotency_key=key, now=NOW)
@@ -744,7 +745,7 @@ def test_forged_merge_marker_requires_complete_canonical_lineage(tmp_path: Path)
 
 
 def test_forged_split_markers_require_complete_canonical_lineage(tmp_path: Path) -> None:
-    _, _, captures, processing, source, groups = split_fixture(tmp_path)
+    vault, _, captures, processing, source, groups = split_fixture(tmp_path)
     key = "forged-split-marker"
     key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
     request = {
@@ -757,7 +758,7 @@ def test_forged_split_markers_require_complete_canonical_lineage(tmp_path: Path)
     ).encode("utf-8")
     request_fingerprint = hashlib.sha256(payload).hexdigest()
     for index in (1, 2):
-        captures.create(
+        forged = captures.prepare_create(
             title=f"Forged split result {index}",
             capture_type="attachment",
             source_entry_point=(
@@ -766,6 +767,7 @@ def test_forged_split_markers_require_complete_canonical_lineage(tmp_path: Path)
             ),
             now=NOW,
         )
+        (vault / forged.artifact.path).write_text(forged.content)
 
     with pytest.raises(CaptureError) as blocked:
         processing.split(
