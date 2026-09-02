@@ -25,6 +25,10 @@ class OwnedLock:
         self.lock_fd: Optional[int] = None
         self.token: bytes = b""
 
+    @staticmethod
+    def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
+        return left.st_ino == right.st_ino and left.st_dev == right.st_dev
+
     def _cleanup_staging_alias(self, fd: int, staging_name: str) -> None:
         try:
             cleanup_name = f".{staging_name}.{secrets.token_hex(16)}.cleanup"
@@ -40,10 +44,7 @@ class OwnedLock:
                 dir_fd=self.dir_fd,
                 follow_symlinks=False,
             )
-            if (
-                held_stat.st_ino == cleanup_stat.st_ino
-                and held_stat.st_dev == cleanup_stat.st_dev
-            ):
+            if self._same_identity(held_stat, cleanup_stat):
                 try:
                     os.unlink(cleanup_name, dir_fd=self.dir_fd)
                 except OSError:
@@ -84,11 +85,21 @@ class OwnedLock:
             self.lock_fd = None
             self.token = b""
 
+    def _require_canonical_absent(self) -> None:
+        try:
+            os.stat(self.filename, dir_fd=self.dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            raise LockError("Failed to acquire lock: already exists or permission denied") from e
+        raise LockError("Failed to acquire lock: already exists or permission denied")
+
     def acquire(self) -> None:
         if self.lock_fd is not None:
             raise LockError("Lock already acquired")
 
         self.token = b""
+        self._require_canonical_absent()
         token = secrets.token_hex(16).encode("utf-8")
         staging_name = f".{self.filename}.{secrets.token_hex(16)}.acquiring"
 
@@ -126,8 +137,23 @@ class OwnedLock:
             self._cleanup_unpublished_acquisition(fd, staging_name)
             raise LockError("Failed to acquire lock: already exists or permission denied") from e
 
-        # The canonical name is now authoritative. Record ownership before any best-effort alias
-        # cleanup so no cleanup failure can strand a published lock outside instance state.
+        try:
+            held_stat = os.fstat(fd)
+            canonical_stat = os.stat(
+                self.filename,
+                dir_fd=self.dir_fd,
+                follow_symlinks=False,
+            )
+        except OSError as e:
+            self._cleanup_unpublished_acquisition(fd, staging_name)
+            raise LockError("Failed to acquire lock: already exists or permission denied") from e
+        if not self._same_identity(held_stat, canonical_stat):
+            self._cleanup_unpublished_acquisition(fd, staging_name)
+            raise LockError("Failed to acquire lock: already exists or permission denied")
+
+        # The canonical name now verifiably selects the held descriptor. Record ownership before
+        # any best-effort alias cleanup so no cleanup failure can strand a published lock outside
+        # instance state.
         self.token = token
         self.lock_fd = fd
         self._cleanup_staging_alias(fd, staging_name)
@@ -145,7 +171,7 @@ class OwnedLock:
             held_stat = os.fstat(self.lock_fd)
             current_stat = os.stat(self.filename, dir_fd=self.dir_fd, follow_symlinks=False)
 
-            if held_stat.st_ino == current_stat.st_ino and held_stat.st_dev == current_stat.st_dev:
+            if self._same_identity(held_stat, current_stat):
                 os.lseek(self.lock_fd, 0, os.SEEK_SET)
                 current_token = os.read(self.lock_fd, 1024)
                 if current_token == self.token:
