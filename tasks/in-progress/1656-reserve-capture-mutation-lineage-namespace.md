@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1656
 title: Reserve the canonical capture mutation lineage namespace
-status: ready
+status: in-progress
 phase: hardening
 depends_on:
   - LIFEOS-1654
