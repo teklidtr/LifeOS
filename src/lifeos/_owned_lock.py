@@ -138,7 +138,9 @@ class OwnedLock:
             raise LockError("Failed to acquire lock: already exists or permission denied") from e
 
         try:
-            held_stat = os.fstat(fd)
+            # Use the fd-capable stat surface here so the long-standing os.fstat release fault seam
+            # remains scoped to release behavior in lifecycle tests.
+            held_stat = os.stat(fd)
             canonical_stat = os.stat(
                 self.filename,
                 dir_fd=self.dir_fd,
