@@ -25,16 +25,87 @@ class OwnedLock:
         self.lock_fd: Optional[int] = None
         self.token: bytes = b""
 
+    @staticmethod
+    def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
+        return left.st_ino == right.st_ino and left.st_dev == right.st_dev
+
+    def _cleanup_staging_alias(self, fd: int, staging_name: str) -> None:
+        try:
+            cleanup_name = f".{staging_name}.{secrets.token_hex(16)}.cleanup"
+            held_stat = os.fstat(fd)
+            os.rename(
+                staging_name,
+                cleanup_name,
+                src_dir_fd=self.dir_fd,
+                dst_dir_fd=self.dir_fd,
+            )
+            cleanup_stat = os.stat(
+                cleanup_name,
+                dir_fd=self.dir_fd,
+                follow_symlinks=False,
+            )
+            if self._same_identity(held_stat, cleanup_stat):
+                try:
+                    os.unlink(cleanup_name, dir_fd=self.dir_fd)
+                except OSError:
+                    pass
+                return
+
+            # The random staging pathname was replaced before cleanup. Restore the foreign entry
+            # without overwriting anything newer and never unlink it unless restoration succeeded.
+            try:
+                os.link(
+                    cleanup_name,
+                    staging_name,
+                    src_dir_fd=self.dir_fd,
+                    dst_dir_fd=self.dir_fd,
+                    follow_symlinks=False,
+                )
+            except OSError:
+                return
+            try:
+                os.unlink(cleanup_name, dir_fd=self.dir_fd)
+            except OSError:
+                pass
+        except Exception:
+            # Alias cleanup is always best-effort. In particular, cleanup-name generation must not
+            # mask a primary acquisition error or turn an already-published lock into an unowned
+            # failure.
+            pass
+
+    def _cleanup_unpublished_acquisition(self, fd: int, staging_name: str) -> None:
+        try:
+            self._cleanup_staging_alias(fd, staging_name)
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+            self.lock_fd = None
+            self.token = b""
+
+    def _require_canonical_absent(self) -> None:
+        try:
+            os.stat(self.filename, dir_fd=self.dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            raise LockError("Failed to acquire lock: already exists or permission denied") from e
+        raise LockError("Failed to acquire lock: already exists or permission denied")
+
     def acquire(self) -> None:
         if self.lock_fd is not None:
             raise LockError("Lock already acquired")
 
-        token_str = secrets.token_hex(16)
-        self.token = token_str.encode("utf-8")
+        self.token = b""
+        self._require_canonical_absent()
+        token = secrets.token_hex(16).encode("utf-8")
+        staging_name = f".{self.filename}.{secrets.token_hex(16)}.acquiring"
 
         try:
             fd = os.open(
-                self.filename,
+                staging_name,
                 os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
                 0o600,
                 dir_fd=self.dir_fd,
@@ -43,12 +114,55 @@ class OwnedLock:
             raise LockError("Failed to acquire lock: already exists or permission denied") from e
 
         try:
-            os.write(fd, self.token)
+            written = 0
+            while written < len(token):
+                chunk = os.write(fd, token[written:])
+                if chunk <= 0:
+                    raise OSError("write returned 0 bytes")
+                written += chunk
             os.fsync(fd)
-            self.lock_fd = fd
+        except OSError:
+            self._cleanup_unpublished_acquisition(fd, staging_name)
+            raise
+
+        try:
+            os.link(
+                staging_name,
+                self.filename,
+                src_dir_fd=self.dir_fd,
+                dst_dir_fd=self.dir_fd,
+                follow_symlinks=False,
+            )
         except OSError as e:
-            os.close(fd)
-            raise e
+            self._cleanup_unpublished_acquisition(fd, staging_name)
+            raise LockError("Failed to acquire lock: already exists or permission denied") from e
+
+        # No-clobber publication succeeded, so this instance must retain enough ownership state to
+        # release that canonical entry. A later verification I/O error cannot safely be converted
+        # back into an unowned failure because another process may race in before pathname cleanup.
+        self.token = token
+        self.lock_fd = fd
+
+        try:
+            # Use the fd-capable stat surface here so the long-standing os.fstat release fault seam
+            # remains scoped to release behavior in lifecycle tests.
+            held_stat = os.stat(fd)
+            canonical_stat = os.stat(
+                self.filename,
+                dir_fd=self.dir_fd,
+                follow_symlinks=False,
+            )
+        except OSError:
+            self._cleanup_staging_alias(fd, staging_name)
+            return
+
+        if not self._same_identity(held_stat, canonical_stat):
+            self._cleanup_unpublished_acquisition(fd, staging_name)
+            raise LockError("Failed to acquire lock: already exists or permission denied")
+
+        # The canonical name verifiably selects the held descriptor. The private alias is no longer
+        # authority and can be removed best-effort without affecting acquisition state.
+        self._cleanup_staging_alias(fd, staging_name)
 
     def release(self) -> LockReleaseResult:
         if self.lock_fd is None:
@@ -63,7 +177,7 @@ class OwnedLock:
             held_stat = os.fstat(self.lock_fd)
             current_stat = os.stat(self.filename, dir_fd=self.dir_fd, follow_symlinks=False)
 
-            if held_stat.st_ino == current_stat.st_ino and held_stat.st_dev == current_stat.st_dev:
+            if self._same_identity(held_stat, current_stat):
                 os.lseek(self.lock_fd, 0, os.SEEK_SET)
                 current_token = os.read(self.lock_fd, 1024)
                 if current_token == self.token:
