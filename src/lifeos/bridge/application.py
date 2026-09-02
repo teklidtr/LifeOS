@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from collections import deque
+from dataclasses import asdict, dataclass, field
 import json
 from datetime import datetime
 from datetime import date
 from pathlib import Path
+from threading import Lock
 from typing import Any, Callable, Literal, cast
 
 from lifeos.attention import evaluate_attention, save_preference
@@ -113,7 +115,7 @@ from lifeos.conversations import (
     ConversationProposalService,
     KnowledgeConversationService,
 )
-from lifeos.retrieval import RetrievalError, RetrievalRequest
+from lifeos.retrieval import CancellationToken, RetrievalError, RetrievalRequest
 from lifeos.conversations.contracts import scope_from_dict
 from lifeos.experiments import (
     ExperimentArtifactService,
@@ -140,6 +142,7 @@ from lifeos.experiments.design import evaluate_design
 from lifeos.captures import CaptureArtifactService, CaptureError
 from lifeos.captures.contracts import ArtifactLink, CaptureState, CaptureType, PrivacyScope
 from lifeos.captures.enrichment import CaptureEnrichmentService
+from lifeos.captures.extraction import ExtractionCancellation
 from lifeos.captures.integrations import CaptureLinkService
 from lifeos.captures.processing import CaptureProcessingService, MergePreview
 from lifeos.captures.proposals import CaptureProposalRequest, CaptureProposalService
@@ -170,6 +173,36 @@ from lifeos.feedback import (
 )
 
 NotificationSink = Callable[[dict[str, Any]], None]
+
+_CANCELLABLE_BRIDGE_METHODS = frozenset(
+    {
+        "retrieval.index.recover",
+        "retrieval.index.rebuild",
+        "retrieval.index.sync",
+        "retrieval.search",
+        "conversation.ask",
+        "capture.enrichment.run",
+    }
+)
+_COMPLETED_REQUEST_LIMIT = 256
+
+
+@dataclass(slots=True)
+class _BridgeRequestState:
+    method: str
+    phase: Literal["queued", "active"] = "queued"
+    cancellation_requested: bool = False
+    retrieval: CancellationToken = field(default_factory=CancellationToken)
+    extraction: ExtractionCancellation = field(default_factory=ExtractionCancellation)
+
+    @property
+    def cancellable(self) -> bool:
+        return self.method in _CANCELLABLE_BRIDGE_METHODS
+
+    def cancel(self) -> None:
+        self.cancellation_requested = True
+        self.retrieval.cancel()
+        self.extraction.cancel()
 
 
 def _iso_date(value: object, field: str) -> date:
@@ -251,8 +284,136 @@ class BridgeApplication:
             vault_root, runtime_dir, FeatureFlags(graphify=True, exports=True)
         )
         self._notify = notify
-        self._cancelled: set[str] = set()
+        self._request_lock = Lock()
+        self._requests: dict[str, _BridgeRequestState] = {}
+        self._completed_requests: set[str] = set()
+        self._completed_request_order: deque[str] = deque()
+        self._active_request_id: str | None = None
         self.shutdown_requested = False
+
+    def register_request(self, request_id: object, method: str) -> None:
+        """Register one transport request before it enters the serialized worker."""
+
+        if not isinstance(request_id, str) or not request_id:
+            return
+        with self._request_lock:
+            if request_id in self._requests:
+                raise ProtocolError(
+                    "invalid_request",
+                    "A request with this ID is already queued or active.",
+                )
+            if request_id in self._completed_requests:
+                self._completed_requests.discard(request_id)
+                self._completed_request_order.remove(request_id)
+            self._requests[request_id] = _BridgeRequestState(method)
+
+    def dispatch_registered(self, request_id: object, method: str, params: object) -> object:
+        """Dispatch one registered request while exposing its cooperative tokens."""
+
+        if not isinstance(request_id, str) or not request_id:
+            return self.dispatch(method, params)
+
+        with self._request_lock:
+            state = self._requests.get(request_id)
+            if state is None:
+                state = _BridgeRequestState(method)
+                self._requests[request_id] = state
+            if state.cancellation_requested:
+                cancelled_before_start = True
+            else:
+                cancelled_before_start = False
+                if self._active_request_id is not None:
+                    raise RuntimeError("Bridge requests must remain serialized")
+                state.phase = "active"
+                self._active_request_id = request_id
+
+        if cancelled_before_start:
+            self._finish_registered_request(request_id, state)
+            raise ProtocolError(
+                "request_cancelled",
+                "The bridge request was cancelled before it started.",
+                {"request_id": request_id},
+            )
+
+        try:
+            return self.dispatch(method, params)
+        finally:
+            self._finish_registered_request(request_id, state)
+
+    def _finish_registered_request(
+        self,
+        request_id: str,
+        state: _BridgeRequestState,
+    ) -> None:
+        with self._request_lock:
+            if self._requests.get(request_id) is state:
+                self._requests.pop(request_id, None)
+            if self._active_request_id == request_id:
+                self._active_request_id = None
+            if request_id not in self._completed_requests:
+                self._completed_requests.add(request_id)
+                self._completed_request_order.append(request_id)
+            while len(self._completed_request_order) > _COMPLETED_REQUEST_LIMIT:
+                expired = self._completed_request_order.popleft()
+                self._completed_requests.discard(expired)
+
+    def cancel_request(self, request_id: str) -> dict[str, object]:
+        """Request cancellation and report what was actually possible."""
+
+        with self._request_lock:
+            state = self._requests.get(request_id)
+            if state is None:
+                outcome = (
+                    "already-completed"
+                    if request_id in self._completed_requests
+                    else "unknown-request"
+                )
+                accepted = False
+            elif state.cancellation_requested:
+                outcome = "already-requested"
+                accepted = True
+            elif state.phase == "queued":
+                state.cancel()
+                outcome = "cancelled-before-start"
+                accepted = True
+            elif state.cancellable:
+                state.cancel()
+                outcome = "cancellation-requested"
+                accepted = True
+            else:
+                outcome = "not-cancellable"
+                accepted = False
+        return {
+            "request_id": request_id,
+            "outcome": outcome,
+            "accepted": accepted,
+        }
+
+    def signal_shutdown(self) -> None:
+        """Stop accepting work and cooperatively interrupt safe active operations."""
+
+        self.shutdown_requested = True
+        with self._request_lock:
+            for state in self._requests.values():
+                if state.phase == "queued" or state.cancellable:
+                    state.cancel()
+
+    def signal_disconnect(self) -> None:
+        """Interrupt cancellable work after the transport input disconnects."""
+
+        with self._request_lock:
+            for state in self._requests.values():
+                if state.cancellable:
+                    state.cancel()
+
+    def _active_request_state(self) -> _BridgeRequestState | None:
+        with self._request_lock:
+            if self._active_request_id is None:
+                return None
+            return self._requests.get(self._active_request_id)
+
+    def set_notification_sink(self, notify: NotificationSink | None) -> None:
+        self._notify = notify
 
     def _feedback_context(
         self, as_of: date
@@ -343,8 +504,10 @@ class BridgeApplication:
                 return self.knowledge.retriever.index_service.recovery_plan().to_dict()
             if method == "retrieval.index.recover":
                 strict_object(params, allowed=set())
+                request_state = self._active_request_state()
                 return self.knowledge.retriever.index_service.recover(
-                    progress=self._retrieval_progress
+                    cancellation=request_state.retrieval if request_state else None,
+                    progress=self._retrieval_progress,
                 ).to_dict()
             if method == "retrieval.index.rebuild":
                 data = strict_object(params, allowed={"resume", "batch_size"})
@@ -355,13 +518,19 @@ class BridgeApplication:
                         "invalid_params",
                         "resume must be boolean and batch_size must be an integer.",
                     )
+                request_state = self._active_request_state()
                 return self.knowledge.retriever.index_service.rebuild(
-                    resume=resume, batch_size=batch_size, progress=self._retrieval_progress
+                    cancellation=request_state.retrieval if request_state else None,
+                    resume=resume,
+                    batch_size=batch_size,
+                    progress=self._retrieval_progress,
                 ).to_dict()
             if method == "retrieval.index.sync":
                 strict_object(params, allowed=set())
+                request_state = self._active_request_state()
                 return self.knowledge.retriever.index_service.incremental_sync(
-                    progress=self._retrieval_progress
+                    cancellation=request_state.retrieval if request_state else None,
+                    progress=self._retrieval_progress,
                 ).to_dict()
             if method == "retrieval.search":
                 data = strict_object(
@@ -379,7 +548,11 @@ class BridgeApplication:
                     context_budget=data.get("context_budget", 12000),
                     timeout_seconds=data.get("timeout_seconds", 30.0),
                 )
-                return self.knowledge.retriever.search(request).to_dict()
+                request_state = self._active_request_state()
+                return self.knowledge.retriever.search(
+                    request,
+                    cancellation=request_state.retrieval if request_state else None,
+                ).to_dict()
             if method == "conversation.create":
                 data = strict_object(params, allowed={"title", "scope", "now"}, required={"title"})
                 scope_value = data.get("scope", {})
@@ -420,6 +593,7 @@ class BridgeApplication:
                 if type(evidence_only) is not bool:
                     raise ProtocolError("invalid_params", "evidence_only must be boolean.")
                 moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                request_state = self._active_request_state()
                 return self.knowledge.ask(
                     str(data["path"]),
                     query=str(data["query"]),
@@ -428,6 +602,7 @@ class BridgeApplication:
                     limit=data.get("limit", 8),
                     context_budget=data.get("context_budget", 12000),
                     timeout_seconds=data.get("timeout_seconds", 30.0),
+                    cancellation=request_state.retrieval if request_state else None,
                     now=moment,
                 ).to_dict()
             if method == "conversation.scope.update":
@@ -744,9 +919,16 @@ class BridgeApplication:
                 ).to_dict()
             if method == "capture.enrichment.run":
                 data = strict_object(params, allowed={"job_id", "now"}, required={"job_id"})
-                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
+                moment = (
+                    _iso_datetime(data["now"], "now")
+                    if data.get("now") is not None
+                    else None
+                )
+                request_state = self._active_request_state()
                 return self.capture_processing.run_extraction(
-                    str(data["job_id"]), now=moment
+                    str(data["job_id"]),
+                    cancellation=request_state.extraction if request_state else None,
+                    now=moment,
                 ).to_dict()
             if method == "capture.enrichment.cancel":
                 data = strict_object(params, allowed={"job_id", "now"}, required={"job_id"})
@@ -3009,15 +3191,14 @@ class BridgeApplication:
             }
         if method == "system.shutdown":
             strict_object(params, allowed=set())
-            self.shutdown_requested = True
+            self.signal_shutdown()
             return {"accepted": True}
         if method == "request.cancel":
             data = strict_object(params, allowed={"request_id"}, required={"request_id"})
             request_id = data["request_id"]
             if not isinstance(request_id, str) or not request_id:
                 raise ProtocolError("invalid_params", "request_id must be a non-empty string.")
-            self._cancelled.add(request_id)
-            return {"cancelled": request_id}
+            return self.cancel_request(request_id)
         try:
             daily_result = self._dispatch_daily(method, params)
         except DailyInteractionError as exc:

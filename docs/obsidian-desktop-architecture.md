@@ -46,6 +46,21 @@ trusted interactive authorization in Python.
 
 A second plugin instance discovers the lock owner and connects only when the configured
 transport supports it; v1 otherwise fails clearly rather than launching a duplicate writer.
+The STDIO reader and dispatcher have deliberately different concurrency roles. Ordinary requests
+enter one serialized worker, so canonical mutations never overlap. The reader may handle only the
+`request.cancel` control method while that worker is busy. Each string request ID is registered as
+queued, active, or recently completed. Cancellation can prevent queued work from starting or set
+the existing cooperative retrieval/extraction token for an active cancellable method; it reports
+`not-cancellable`, `already-completed`, `already-requested`, or `unknown-request` without claiming
+that work was interrupted. Progress notifications and responses share one locked protocol writer,
+so complete JSON lines may interleave but cannot corrupt STDOUT framing.
+
+Shutdown and STDIN disconnect signal cancellable active work and drain the serialized worker.
+Already-started non-cancellable mutations finish their authorized commit or use their existing
+recovery contract; they are never interrupted by a second mutation thread. The plugin's ordinary
+Promise-returning `call()` remains compatible, while optional work can retain a correlated handle
+whose cancel action targets the exact bridge request ID.
+
 Logs go to `.lifeos/logs/desktop-bridge.log`, never to protocol STDOUT.
 
 ## Protocol envelope

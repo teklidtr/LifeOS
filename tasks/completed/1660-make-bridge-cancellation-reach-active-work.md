@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1660
 title: Make bridge cancellation reach active work
-status: backlog
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1002
@@ -92,6 +92,21 @@ rtk .venv/bin/pytest -q
 rtk .venv/bin/python scripts/validate_manual_links.py
 rtk git diff --check
 ```
+
+Local validation on 2026-09-02:
+
+- Bridge, retrieval, conversation, and capture suites passed, including real
+  event-blocked transport cancellation, queued/active/completed outcome coverage,
+  shutdown/disconnect cleanup, progress-frame interleaving, and capture processing.
+- Obsidian plugin tests passed: 55 tests. TypeScript type checking passed.
+- Ruff passed for `src` and `tests`; mypy passed for all 213 source files.
+- The full isolated macOS pytest suite passed from a neutral sibling temporary
+  root. An initial `/tmp` run reproduced only the three known macOS fixture-path
+  false positives caused by `/tmp` resolving through `/private`; no production
+  failure remained in the neutral rerun.
+- Manual links passed for all 19 chapters, and `git diff --check` passed.
+- GitHub normal and security review checkpoints could not be requested locally
+  because the `gh` executable is unavailable. Both remain required before merge.
 
 # Relevant decisions
 

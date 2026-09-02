@@ -23,9 +23,33 @@ export interface HandshakeResult {
   actor_id: string;
 }
 
+export type RequestCancellationOutcome =
+  | "cancelled-before-start"
+  | "cancellation-requested"
+  | "already-requested"
+  | "already-completed"
+  | "unknown-request"
+  | "not-cancellable";
+
+export interface RequestCancellationResult {
+  request_id: string;
+  outcome: RequestCancellationOutcome;
+  accepted: boolean;
+}
+
+export interface CancelableBridgeRequest<T> {
+  requestId: string;
+  result: Promise<T>;
+  cancel(): Promise<RequestCancellationResult>;
+}
+
 export interface BridgeClient {
   start(settings: LifeOSSettings): Promise<HandshakeResult>;
   call<T>(method: string, params: Record<string, unknown>): Promise<T>;
+  callCancelable?<T>(
+    method: string,
+    params: Record<string, unknown>,
+  ): CancelableBridgeRequest<T>;
   onNotification(listener: (method: string, params: Record<string, unknown>) => void): () => void;
   stop(): Promise<void>;
 }

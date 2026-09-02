@@ -196,6 +196,7 @@ def test_interrupted_processing_resumes_without_losing_capture(tmp_path: Path) -
     token.cancel()
     stopped = processing.run_extraction(job.job_id, cancellation=token, now=NOW)
     assert stopped.state == "cancelled"
+    assert captures.load(capture.path).metadata.state == "processing"
     retried = processing.retry(job.job_id, now=NOW)
     finished = processing.run_extraction(retried.job_id, now=NOW)
     assert finished.state == "completed"

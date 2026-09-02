@@ -73,6 +73,9 @@ A low-friction capture follows this order:
 
 Interrupted or unavailable processing does not erase the capture. You may cancel,
 retry, or continue using the original record.
+While extraction is active, the desktop plugin targets cancellation to that exact
+bridge request instead of merely changing the stored job record. The resulting job
+state confirms whether processing actually stopped.
 
 The processing-job state and the capture lifecycle are related but distinct. A
 cancelled job remains recorded as cancelled. In the current implementation, the

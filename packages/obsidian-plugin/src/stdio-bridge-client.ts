@@ -3,11 +3,13 @@ import { dirname, resolve } from "node:path";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 
 import {
+  type CancelableBridgeRequest,
   type BridgeClient,
   type BridgeError,
   type HandshakeResult,
   type LifeOSSettings,
   PROTOCOL_VERSION,
+  type RequestCancellationResult,
 } from "./protocol.js";
 
 interface PendingRequest {
@@ -93,14 +95,26 @@ export class StdioBridgeClient implements BridgeClient {
   }
 
   call<T>(method: string, params: Record<string, unknown>): Promise<T> {
+    return this.callCancelable<T>(method, params).result;
+  }
+
+  callCancelable<T>(
+    method: string,
+    params: Record<string, unknown>,
+  ): CancelableBridgeRequest<T> {
     const child = this.child;
     if (!child || child.stdin.destroyed || !child.stdin.writable) {
-      return Promise.reject(new Error("The LifeOS bridge is not running."));
+      const result = Promise.reject<T>(new Error("The LifeOS bridge is not running."));
+      return {
+        requestId: "",
+        result,
+        cancel: () => Promise.reject(new Error("The LifeOS bridge is not running.")),
+      };
     }
 
     const id = `obsidian-${++this.sequence}`;
     const frame = JSON.stringify({ jsonrpc: "2.0", id, method, params });
-    return new Promise<T>((accept, reject) => {
+    const result = new Promise<T>((accept, reject) => {
       this.pending.set(id, {
         resolve: (value) => accept(value as T),
         reject,
@@ -111,6 +125,11 @@ export class StdioBridgeClient implements BridgeClient {
         reject(error);
       });
     });
+    return {
+      requestId: id,
+      result,
+      cancel: () => this.call<RequestCancellationResult>("request.cancel", { request_id: id }),
+    };
   }
 
   onNotification(

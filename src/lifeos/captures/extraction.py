@@ -8,6 +8,7 @@ import wave
 from dataclasses import asdict, dataclass
 from io import BytesIO
 from pathlib import Path, PurePosixPath
+from threading import Event
 from typing import BinaryIO, Literal
 
 from lifeos.vault import VaultAccessError
@@ -37,10 +38,14 @@ class ExtractionResult:
 
 class ExtractionCancellation:
     def __init__(self) -> None:
-        self.cancelled = False
+        self._event = Event()
 
     def cancel(self) -> None:
-        self.cancelled = True
+        self._event.set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
 
     def checkpoint(self) -> None:
         if self.cancelled:

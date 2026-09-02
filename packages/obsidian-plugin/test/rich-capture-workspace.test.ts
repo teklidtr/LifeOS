@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   BridgeClient,
+  CancelableBridgeRequest,
   CaptureArtifact,
   CaptureMergePreview,
   HandshakeResult,
   LifeOSSettings,
+  RequestCancellationResult,
   RichCaptureWorkspaceController,
 } from "../src/index.js";
 
@@ -99,6 +101,42 @@ class Client implements BridgeClient {
   async stop(): Promise<void> {}
 }
 
+class CancelableClient extends Client {
+  readonly cancellationTargets: string[] = [];
+
+  callCancelable<T>(
+    method: string,
+    _params: Record<string, unknown>,
+  ): CancelableBridgeRequest<T> {
+    assert.equal(method, "capture.enrichment.run");
+    const requestId = "capture-work-1";
+    let finish!: (value: T) => void;
+    const result = new Promise<T>((accept) => { finish = accept; });
+    return {
+      requestId,
+      result,
+      cancel: async (): Promise<RequestCancellationResult> => {
+        this.cancellationTargets.push(requestId);
+        finish({
+          job_id: "job-1",
+          capture_path: "captures/2026/lunch-cap-123.md",
+          attachment_ids: ["att-1"],
+          state: "cancelled",
+          completed_attachment_ids: [],
+          failed_attachment_ids: [],
+          created_at: "now",
+          updated_at: "now",
+        } as T);
+        return {
+          request_id: requestId,
+          outcome: "cancellation-requested",
+          accepted: true,
+        };
+      },
+    };
+  }
+}
+
 test("quick capture saves first and supports delayed attachment processing", async () => {
   const client = new Client(); const opened: string[] = [];
   const controller = new RichCaptureWorkspaceController(client, (path) => opened.push(path));
@@ -115,6 +153,24 @@ test("quick capture saves first and supports delayed attachment processing", asy
   controller.openOriginal("att-1");
   assert.deepEqual(opened, ["captures/2026/lunch-cap-123.md", "attachments/originals/meal.png"]);
   assert.equal(client.calls[0]?.[0], "capture.create");
+});
+
+test("active processing uses its correlated request cancellation handle", async () => {
+  const client = new CancelableClient();
+  const controller = new RichCaptureWorkspaceController(client);
+  await controller.load("captures/2026/lunch-cap-123.md");
+  await controller.startProcessing();
+
+  const running = controller.runProcessing();
+  const cancelled = await controller.cancelProcessing();
+  assert.equal(cancelled.state, "cancelled");
+  assert.equal((await running).state, "cancelled");
+  assert.deepEqual(client.cancellationTargets, ["capture-work-1"]);
+  assert.equal(
+    client.calls.some(([method]) => method === "capture.enrichment.cancel"),
+    false,
+  );
+  assert.equal(controller.state.stage, "processing-cancelled");
 });
 
 test("review supports explicit inference decisions, links, filters, merge previews, and proposals", async () => {

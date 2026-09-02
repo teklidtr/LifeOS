@@ -1,4 +1,4 @@
-import { BridgeClient } from "./protocol.js";
+import { BridgeClient, type CancelableBridgeRequest } from "./protocol.js";
 import {
   ArtifactLink,
   AttachmentAudit,
@@ -134,6 +134,8 @@ function errorState(current: RichCaptureWorkspaceState, error: unknown): RichCap
 }
 
 export class RichCaptureWorkspaceController {
+  private activeProcessing?: CancelableBridgeRequest<ProcessingJob>;
+
   state: RichCaptureWorkspaceState = {
     stage: "idle",
     mode: "quick",
@@ -318,8 +320,15 @@ export class RichCaptureWorkspaceController {
   async runProcessing(now?: string): Promise<ProcessingJob> {
     const job = this.requireJob();
     this.state = { ...this.state, stage: "processing", statusAnnouncement: "Processing started.", focusTarget: "rich-capture-processing" };
+    let active: CancelableBridgeRequest<ProcessingJob> | undefined;
     try {
-      const result = await this.client.call<ProcessingJob>("capture.enrichment.run", { job_id: job.job_id, now });
+      active = this.client.callCancelable?.<ProcessingJob>("capture.enrichment.run", {
+        job_id: job.job_id,
+        now,
+      });
+      if (active) this.activeProcessing = active;
+      const result = await (active?.result
+        ?? this.client.call<ProcessingJob>("capture.enrichment.run", { job_id: job.job_id, now }));
       this.state = {
         ...this.state,
         processingJob: result,
@@ -329,13 +338,39 @@ export class RichCaptureWorkspaceController {
         statusAnnouncement: result.state === "completed" ? "Processing completed." : `Processing ${result.state}. Original files remain preserved.`,
       };
       return result;
-    } catch (error) { return this.fail(error); }
+    } catch (error) {
+      return this.fail(error);
+    } finally {
+      if (this.activeProcessing === active) this.activeProcessing = undefined;
+    }
   }
 
   async cancelProcessing(now?: string): Promise<ProcessingJob> {
     const job = this.requireJob();
-    const result = await this.client.call<ProcessingJob>("capture.enrichment.cancel", { job_id: job.job_id, now });
-    this.state = { ...this.state, stage: "processing-cancelled", processingJob: result, statusAnnouncement: "Processing cancelled. Capture remains saved.", focusTarget: "rich-capture-processing" };
+    const active = this.activeProcessing;
+    let result: ProcessingJob;
+    if (active) {
+      await active.cancel();
+      result = await active.result;
+    } else {
+      result = await this.client.call<ProcessingJob>("capture.enrichment.cancel", {
+        job_id: job.job_id,
+        now,
+      });
+    }
+    this.state = {
+      ...this.state,
+      stage: result.state === "cancelled"
+        ? "processing-cancelled"
+        : result.state === "completed"
+          ? "ready"
+          : "failed-processing",
+      processingJob: result,
+      statusAnnouncement: result.state === "cancelled"
+        ? "Processing cancelled. Capture remains saved."
+        : `Processing already ${result.state}.`,
+      focusTarget: "rich-capture-processing",
+    };
     return result;
   }
 

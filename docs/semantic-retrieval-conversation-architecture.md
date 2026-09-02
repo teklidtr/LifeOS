@@ -246,6 +246,14 @@ context budgets. A staging rebuild may resume after interruption. The active ind
 stays readable until publication. Incremental synchronization is idempotent and
 can fall back to a full rebuild after incompatible schema or corruption.
 
+For desktop bridge calls, request IDs are registered before serialized dispatch.
+`request.cancel` is the only control frame processed concurrently with ordinary
+work; it signals the existing token used by index recovery/rebuild/sync, hybrid
+search, and conversation answering. Cancellation acknowledgements describe only
+whether the signal was accepted. The operation's own result or typed error records
+whether it actually stopped. Disconnect and shutdown use the same cooperative
+signal, leaving the active index readable and resumable staging intact.
+
 ## Privacy and removal
 
 Built-in protected prefixes and optional `system/retrieval-policy.yml` exclusions
