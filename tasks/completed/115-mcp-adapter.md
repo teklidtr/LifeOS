@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-115
 title: MCP Adapter
-status: backlog
+status: completed
 depends_on: [LIFEOS-113.4]
 ---
 
