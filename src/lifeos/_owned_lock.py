@@ -26,8 +26,8 @@ class OwnedLock:
         self.token: bytes = b""
 
     def _cleanup_staging_alias(self, fd: int, staging_name: str) -> None:
-        cleanup_name = f".{staging_name}.{secrets.token_hex(16)}.cleanup"
         try:
+            cleanup_name = f".{staging_name}.{secrets.token_hex(16)}.cleanup"
             held_stat = os.fstat(fd)
             os.rename(
                 staging_name,
@@ -66,7 +66,10 @@ class OwnedLock:
                 os.unlink(cleanup_name, dir_fd=self.dir_fd)
             except OSError:
                 pass
-        except OSError:
+        except Exception:
+            # Alias cleanup is always best-effort. In particular, cleanup-name generation must not
+            # mask a primary acquisition error or turn an already-published lock into an unowned
+            # failure.
             pass
 
     def _cleanup_unpublished_acquisition(self, fd: int, staging_name: str) -> None:
@@ -123,11 +126,11 @@ class OwnedLock:
             self._cleanup_unpublished_acquisition(fd, staging_name)
             raise LockError("Failed to acquire lock: already exists or permission denied") from e
 
-        # Publication is complete. The private alias is no longer authority, so cleanup can be
-        # best-effort, but it still must not delete a pathname that raced in under the random name.
-        self._cleanup_staging_alias(fd, staging_name)
+        # The canonical name is now authoritative. Record ownership before any best-effort alias
+        # cleanup so no cleanup failure can strand a published lock outside instance state.
         self.token = token
         self.lock_fd = fd
+        self._cleanup_staging_alias(fd, staging_name)
 
     def release(self) -> LockReleaseResult:
         if self.lock_fd is None:
