@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1669
 title: Allow status-only historical task reconciliation through the documentation-impact gate
-status: backlog
+status: ready
 phase: hardening
 depends_on: []
 risk: medium
