@@ -193,11 +193,11 @@ def test_fsync_failure_cleans_lock_closes_descriptor_and_allows_retry(lock_dir):
         assert lock.lock_fd is None
         assert lock.token == b""
         assert not (lock_path / "test.lock").exists()
+        assert failed_fd is not None
+        with pytest.raises(OSError):
+            os.fstat(failed_fd)
         lock.acquire()
 
-    assert failed_fd is not None
-    with pytest.raises(OSError):
-        os.fstat(failed_fd)
     assert lock.release().released is True
 
 
@@ -214,7 +214,7 @@ def test_failed_acquisition_cleanup_preserves_primary_error(lock_dir):
 
     with (
         mock.patch("os.write", side_effect=fail_write),
-        mock.patch("os.unlink", side_effect=OSError(errno.EACCES, "cleanup denied")),
+        mock.patch("os.replace", side_effect=OSError(errno.EACCES, "cleanup denied")),
     ):
         with pytest.raises(OSError) as exc_info:
             lock.acquire()
@@ -247,6 +247,40 @@ def test_failed_acquisition_does_not_unlink_replacement_path(lock_dir):
     assert lock.lock_fd is None
     assert lock.token == b""
     assert path.read_bytes() == b"replacement-owner"
+
+
+def test_failed_acquisition_preserves_replacement_racing_with_cleanup(lock_dir):
+    lock_path, fd = lock_dir
+    path = lock_path / "test.lock"
+    lock = OwnedLock(fd, "test.lock")
+    original_replace = os.replace
+    raced = False
+
+    def race_before_quarantine(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+        nonlocal raced
+        if src == "test.lock" and not raced:
+            raced = True
+            os.unlink(path)
+            path.write_bytes(b"racing-owner")
+        return original_replace(
+            src,
+            dst,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    with (
+        mock.patch("os.fsync", side_effect=OSError(errno.EIO, "sync failed")),
+        mock.patch("os.replace", side_effect=race_before_quarantine),
+    ):
+        with pytest.raises(OSError, match="sync failed"):
+            lock.acquire()
+
+    assert raced is True
+    assert lock.lock_fd is None
+    assert lock.token == b""
+    assert path.read_bytes() == b"racing-owner"
+    assert list(lock_path.glob("*.failed-acquire-quarantine")) == []
 
 
 def test_failed_acquisition_does_not_unlink_replacement_symlink(lock_dir):
