@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1658
 title: Confine review-item decision markers to structural lines
-status: backlog
+status: ready
 phase: hardening
 depends_on:
   - LIFEOS-1302
