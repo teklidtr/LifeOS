@@ -249,6 +249,28 @@ def test_failed_acquisition_does_not_unlink_replacement_path(lock_dir):
     assert path.read_bytes() == b"replacement-owner"
 
 
+def test_failed_acquisition_does_not_unlink_replacement_symlink(lock_dir):
+    lock_path, fd = lock_dir
+    path = lock_path / "test.lock"
+    replacement_target = lock_path / "replacement-target"
+    replacement_target.write_bytes(b"replacement-owner")
+    lock = OwnedLock(fd, "test.lock")
+
+    def replace_then_fail(_sync_fd):
+        os.unlink(path)
+        os.symlink(replacement_target.name, path)
+        raise OSError(errno.EIO, "sync failed")
+
+    with mock.patch("os.fsync", side_effect=replace_then_fail):
+        with pytest.raises(OSError, match="sync failed"):
+            lock.acquire()
+
+    assert lock.lock_fd is None
+    assert lock.token == b""
+    assert path.is_symlink()
+    assert path.read_bytes() == b"replacement-owner"
+
+
 def test_preexisting_lock_is_never_removed_by_failed_acquisition(lock_dir):
     lock_path, fd = lock_dir
     owner = OwnedLock(fd, "test.lock")
