@@ -5,8 +5,8 @@ from typing import Any, Iterable, Literal
 
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.ownership import GeneratedOwnership, ManifestError
-from lifeos.ownership.manifest import stream_sha256
 from lifeos.scanner import VaultFile
+from lifeos.vault import VaultAccessError, observe_vault_file
 
 SEVERITY_ORDER = {
     "error": 0,
@@ -128,36 +128,40 @@ def lint_vault(
             try:
                 ownership = GeneratedOwnership.load(manifest_path, vault_root)
                 for rel_path, entry in ownership.entries.items():
-                    target_abs = vault_root / rel_path
-                    if not target_abs.exists():
+                    portable_rel_path = Path(rel_path).as_posix()
+                    try:
+                        observation = observe_vault_file(
+                            vault_root,
+                            portable_rel_path,
+                            capture_limit=0,
+                        )
+                    except VaultAccessError as e:
+                        if e.code == "not-found":
+                            code = "ownership-file-missing"
+                            message = "Owned generated file is missing from disk."
+                        elif e.code in {"invalid-path", "unsafe-symlink", "unsafe-file-type"}:
+                            code = "ownership-path-unsafe"
+                            message = "Owned generated file is not a safe regular vault file."
+                        else:
+                            code = "ownership-file-missing"
+                            message = "Failed to read generated file for hash verification."
                         findings.append(
                             LintFinding(
-                                path=Path(rel_path),
-                                code="ownership-file-missing",
+                                path=Path(portable_rel_path),
+                                code=code,
                                 severity="error",
-                                message="Owned generated file is missing from disk.",
+                                message=message,
                             )
                         )
                         continue
 
-                    try:
-                        current_hash = stream_sha256(target_abs)
-                        if current_hash != entry.content_hash:
-                            findings.append(
-                                LintFinding(
-                                    path=Path(rel_path),
-                                    code="ownership-hash-mismatch",
-                                    severity="error",
-                                    message="Generated file content hash does not match ownership manifest.",
-                                )
-                            )
-                    except OSError:
+                    if observation.content_hash != entry.content_hash:
                         findings.append(
                             LintFinding(
-                                path=Path(rel_path),
-                                code="ownership-file-missing",
+                                path=Path(portable_rel_path),
+                                code="ownership-hash-mismatch",
                                 severity="error",
-                                message="Failed to read generated file for hash verification.",
+                                message="Generated file content hash does not match ownership manifest.",
                             )
                         )
             except ManifestError as e:
