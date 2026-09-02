@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-104
 title: Target-hash, managed-block, and ownership preflight
-status: ready
+status: completed
 milestone: phase-2-proposal-engine
 depends_on: [LIFEOS-103, LIFEOS-109]
 risk: high

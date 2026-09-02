@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-105
 title: Approval and lifecycle transitions
-status: ready
+status: completed
 milestone: phase-2-proposal-engine
 depends_on: [LIFEOS-104]
 risk: low
