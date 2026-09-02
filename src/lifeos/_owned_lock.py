@@ -137,6 +137,12 @@ class OwnedLock:
             self._cleanup_unpublished_acquisition(fd, staging_name)
             raise LockError("Failed to acquire lock: already exists or permission denied") from e
 
+        # No-clobber publication succeeded, so this instance must retain enough ownership state to
+        # release that canonical entry. A later verification I/O error cannot safely be converted
+        # back into an unowned failure because another process may race in before pathname cleanup.
+        self.token = token
+        self.lock_fd = fd
+
         try:
             # Use the fd-capable stat surface here so the long-standing os.fstat release fault seam
             # remains scoped to release behavior in lifecycle tests.
@@ -146,18 +152,16 @@ class OwnedLock:
                 dir_fd=self.dir_fd,
                 follow_symlinks=False,
             )
-        except OSError as e:
-            self._cleanup_unpublished_acquisition(fd, staging_name)
-            raise LockError("Failed to acquire lock: already exists or permission denied") from e
+        except OSError:
+            self._cleanup_staging_alias(fd, staging_name)
+            return
+
         if not self._same_identity(held_stat, canonical_stat):
             self._cleanup_unpublished_acquisition(fd, staging_name)
             raise LockError("Failed to acquire lock: already exists or permission denied")
 
-        # The canonical name now verifiably selects the held descriptor. Record ownership before
-        # any best-effort alias cleanup so no cleanup failure can strand a published lock outside
-        # instance state.
-        self.token = token
-        self.lock_fd = fd
+        # The canonical name verifiably selects the held descriptor. The private alias is no longer
+        # authority and can be removed best-effort without affecting acquisition state.
         self._cleanup_staging_alias(fd, staging_name)
 
     def release(self) -> LockReleaseResult:
