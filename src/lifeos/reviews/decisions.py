@@ -16,7 +16,7 @@ from typing import Any, Literal
 from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.daily.service import _frontmatter_document, content_hash
-from lifeos.markdown.parser import parse_markdown_note
+from lifeos.markdown.parser import FenceState, advance_fenced_code_state, parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.loader import load_proposal_directory
 from lifeos.proposals.patches import PatchDocumentV2, PatchHumanFile, serialize_patch_json_bytes
@@ -33,9 +33,15 @@ ReviewProposalAction = Literal[
     "append_review_reference",
 ]
 
+_ITEM_ID_PATTERN = r"[a-z0-9][a-z0-9._:-]{0,191}"
+_FINGERPRINT_PATTERN = r"sha256:[0-9a-f]{64}"
 _ITEM_MARKER = re.compile(
-    r"<!-- lifeos:item (?P<item>[a-z0-9][a-z0-9._:-]{0,191}) "
-    r"(?P<fingerprint>sha256:[0-9a-f]{64}) -->"
+    rf"<!-- lifeos:item (?P<item>{_ITEM_ID_PATTERN}) "
+    rf"(?P<fingerprint>{_FINGERPRINT_PATTERN}) -->"
+)
+_ITEM_LINE = re.compile(
+    rf"^-[ \t]+\[ \][ \t]+.+?[ \t]+<!-- lifeos:item (?P<item>{_ITEM_ID_PATTERN}) "
+    rf"(?P<fingerprint>{_FINGERPRINT_PATTERN}) -->[ \t]*$"
 )
 _ALLOWED_NOTE_STATUS = {"inbox", "active", "paused", "completed", "cancelled", "archived", "seed"}
 _ALLOWED_TASK_STATUS = {"todo", "active", "done", "cancelled", "blocked", "pending"}
@@ -89,13 +95,34 @@ class ReviewProposalResult:
 def artifact_item_fingerprints(artifact: ReviewArtifact) -> dict[str, str]:
     items = extract_managed_block(artifact.body, "items")
     result: dict[str, str] = {}
-    for match in _ITEM_MARKER.finditer(items):
-        item_id = match.group("item")
-        fingerprint = match.group("fingerprint")
-        if item_id in result and result[item_id] != fingerprint:
+    fenced_code: FenceState = None
+    for line in items.splitlines():
+        previous_fence = fenced_code
+        fenced_code = advance_fenced_code_state(line, fenced_code)
+        if previous_fence is not None or fenced_code is not None:
+            continue
+
+        structural = _ITEM_LINE.fullmatch(line)
+        if structural is None:
+            continue
+        markers = tuple(_ITEM_MARKER.finditer(line))
+        item_id = structural.group("item")
+        fingerprint = structural.group("fingerprint")
+        if len(markers) != 1:
             raise DailyInteractionError(
                 "duplicate_review_item",
-                f"Review item {item_id} appears with multiple fingerprints.",
+                f"Review item {item_id} contains ambiguous marker structure.",
+                "Refresh or repair the managed review items block.",
+            )
+        if item_id in result:
+            message = (
+                f"Review item {item_id} appears with multiple fingerprints."
+                if result[item_id] != fingerprint
+                else f"Review item {item_id} appears more than once."
+            )
+            raise DailyInteractionError(
+                "duplicate_review_item",
+                message,
                 "Refresh or repair the managed review items block.",
             )
         result[item_id] = fingerprint
