@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import runpy
+import subprocess
 from typing import Any, Callable
 
 import pytest
@@ -18,6 +19,8 @@ is_ci_documentation_path: Callable[[str], bool] = _NAMESPACE["is_ci_documentatio
 is_legacy_completed_status_only_change: Callable[[str, str], bool] = _NAMESPACE[
     "is_legacy_completed_status_only_change"
 ]
+merge_base_from_git: Callable[[str], str] = _NAMESPACE["merge_base_from_git"]
+read_text_from_git_ref: Callable[[str, str], str] = _NAMESPACE["read_text_from_git_ref"]
 
 
 def _task(status: str, reason: str | None = None) -> str:
@@ -196,6 +199,10 @@ def test_legacy_reconciliation_requires_selected_task_declaration() -> None:
             _legacy_task("ready"),
             _legacy_task("completed").replace("status: completed", "status:   completed"),
         ),
+        (
+            _legacy_task("ready"),
+            _legacy_task("completed").replace("\n", "\r\n"),
+        ),
     ],
 )
 def test_legacy_exception_rejects_substantive_or_byte_changes(
@@ -228,6 +235,26 @@ def test_legacy_status_helper_requires_transition_to_completed() -> None:
         _legacy_task("backlog"),
         _legacy_task("ready"),
     )
+
+
+def test_merge_base_reader_resolves_against_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(args: list[str], **_kwargs: object) -> object:
+        assert args == ["git", "merge-base", "origin/master", "HEAD"]
+        return type("Result", (), {"stdout": "abc123\n"})()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert merge_base_from_git("origin/master") == "abc123"
+
+
+def test_git_ref_reader_preserves_raw_line_endings(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(args: list[str], **_kwargs: object) -> object:
+        assert args == ["git", "show", "abc123:tasks/completed/007.md"]
+        return type("Result", (), {"returncode": 0, "stdout": b"a\r\nb\r\n"})()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert read_text_from_git_ref("abc123", "tasks/completed/007.md") == "a\r\nb\r\n"
 
 
 def test_ci_documentation_allowlist_rejects_implementation_owned_markdown() -> None:
