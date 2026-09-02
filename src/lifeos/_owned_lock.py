@@ -25,61 +25,22 @@ class OwnedLock:
         self.lock_fd: Optional[int] = None
         self.token: bytes = b""
 
-    def _restore_quarantined_entry(self, quarantine_name: str) -> None:
+    def _cleanup_unpublished_acquisition(self, fd: int, staging_name: str) -> None:
         try:
-            os.link(
-                quarantine_name,
-                self.filename,
-                src_dir_fd=self.dir_fd,
-                dst_dir_fd=self.dir_fd,
-                follow_symlinks=False,
-            )
-        except OSError:
-            return
-
-        try:
-            os.unlink(quarantine_name, dir_fd=self.dir_fd)
+            os.close(fd)
         except OSError:
             pass
 
-    def _cleanup_failed_acquisition(self, fd: int) -> None:
+        # The canonical lock name has not been published yet. Cleanup is intentionally confined
+        # to this acquisition's random staging name so a replacement canonical owner is never
+        # hidden or unlinked while we recover from a token-write or fsync failure.
         try:
-            held_stat = os.fstat(fd)
-            quarantine_name = (
-                f".{self.filename}.{secrets.token_hex(16)}.failed-acquire-quarantine"
-            )
-            os.replace(
-                self.filename,
-                quarantine_name,
-                src_dir_fd=self.dir_fd,
-                dst_dir_fd=self.dir_fd,
-            )
-            quarantined_stat = os.stat(
-                quarantine_name,
-                dir_fd=self.dir_fd,
-                follow_symlinks=False,
-            )
-            if (
-                held_stat.st_ino == quarantined_stat.st_ino
-                and held_stat.st_dev == quarantined_stat.st_dev
-            ):
-                try:
-                    os.unlink(quarantine_name, dir_fd=self.dir_fd)
-                except OSError:
-                    pass
-            else:
-                self._restore_quarantined_entry(quarantine_name)
-        except Exception:
-            # Cleanup must not mask the token-write/fsync error that caused acquisition to fail.
+            os.unlink(staging_name, dir_fd=self.dir_fd)
+        except OSError:
             pass
-        finally:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
 
-            self.lock_fd = None
-            self.token = b""
+        self.lock_fd = None
+        self.token = b""
 
     def acquire(self) -> None:
         if self.lock_fd is not None:
@@ -87,10 +48,11 @@ class OwnedLock:
 
         self.token = b""
         token = secrets.token_hex(16).encode("utf-8")
+        staging_name = f".{self.filename}.{secrets.token_hex(16)}.acquiring"
 
         try:
             fd = os.open(
-                self.filename,
+                staging_name,
                 os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
                 0o600,
                 dir_fd=self.dir_fd,
@@ -107,8 +69,28 @@ class OwnedLock:
                 written += chunk
             os.fsync(fd)
         except OSError:
-            self._cleanup_failed_acquisition(fd)
+            self._cleanup_unpublished_acquisition(fd, staging_name)
             raise
+
+        try:
+            os.link(
+                staging_name,
+                self.filename,
+                src_dir_fd=self.dir_fd,
+                dst_dir_fd=self.dir_fd,
+                follow_symlinks=False,
+            )
+        except OSError as e:
+            self._cleanup_unpublished_acquisition(fd, staging_name)
+            raise LockError("Failed to acquire lock: already exists or permission denied") from e
+
+        # Publication is now complete and the open descriptor refers to the same inode selected by
+        # the canonical name. Failure to remove the private alias cannot make acquisition fail after
+        # publication, because doing so would strand a valid canonical lock with no owned state.
+        try:
+            os.unlink(staging_name, dir_fd=self.dir_fd)
+        except OSError:
+            pass
 
         self.token = token
         self.lock_fd = fd
