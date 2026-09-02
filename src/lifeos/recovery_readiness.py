@@ -48,6 +48,7 @@ _PREVIOUS_BUILD_REPORT = _impl_original("_build_report")
 _DEFAULT_PINNED_OBJECT_FILES = 1024
 _MAX_PINNED_OBJECT_FILES = 4096
 _PINNED_OBJECT_FD_RESERVE = 64
+_MAX_GIT_METADATA_BYTES = 2_000_000
 
 
 def _pinned_object_file_budget() -> int:
@@ -136,8 +137,7 @@ def _parse_git_bool(value: str, *, key: str) -> bool:
     raise _base.RecoveryGitError(f"Git {key} configuration is malformed")
 
 
-def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
-    raw = _impl._read_small_metadata(config_path)
+def _parse_config_snapshot(raw: bytes) -> tuple[bytes, bool, bool, bool]:
     text = raw.decode("utf-8-sig", errors="surrogateescape")
     section = ""
     subsection: str | None = None
@@ -191,6 +191,10 @@ def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
     return raw, contains_includes, filemode, ignorecase
 
 
+def _config_snapshot(config_path: Path) -> tuple[bytes, bool, bool, bool]:
+    return _parse_config_snapshot(_impl._read_small_metadata(config_path))
+
+
 @dataclass(slots=True)
 class _GitMetadataSandbox:
     temporary: tempfile.TemporaryDirectory[str]
@@ -229,7 +233,7 @@ class _GitMetadataSandbox:
 
 def _discover_pinned_git_directory(
     vault: Path,
-) -> tuple[Path, Path, int, os.stat_result, str] | None:
+) -> tuple[Path, Path, int, os.stat_result, None] | None:
     for root in (vault, *vault.parents):
         marker = root / ".git"
         try:
@@ -250,8 +254,7 @@ def _discover_pinned_git_directory(
                 raise _base.RecoveryGitError(
                     "Git repository metadata changed during safe root pinning"
                 )
-            pinned_path = _impl._pinned_fd_path(metadata_fd, observed)
-            return root, marker, metadata_fd, observed, pinned_path
+            return root, marker, metadata_fd, observed, None
         except Exception:
             os.close(metadata_fd)
             raise
@@ -285,6 +288,91 @@ def _open_named_directory(
     return child_fd
 
 
+def _same_regular_snapshot(before: os.stat_result, after: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(after.st_mode)
+        and before.st_dev == after.st_dev
+        and before.st_ino == after.st_ino
+        and before.st_nlink == after.st_nlink == 1
+        and before.st_size == after.st_size
+        and before.st_mtime_ns == after.st_mtime_ns
+        and before.st_ctime_ns == after.st_ctime_ns
+    )
+
+
+def _read_named_regular_metadata(
+    directory_fd: int,
+    name: str,
+    *,
+    limit: int = _MAX_GIT_METADATA_BYTES,
+) -> bytes:
+    expected = _stat_child(directory_fd, name)
+    if expected is None:
+        return b""
+    child_fd, observed = _impl._open_metadata_child(directory_fd, name, expected)
+    if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
+        os.close(child_fd)
+        raise _base.RecoveryGitError("Git metadata uses an unsupported entry")
+    if observed.st_size > limit:
+        os.close(child_fd)
+        raise _base.RecoveryGitError("Git metadata is too large to inspect safely")
+    try:
+        with os.fdopen(child_fd, "rb", closefd=True) as handle:
+            child_fd = -1
+            content = handle.read(limit + 1)
+            after = os.fstat(handle.fileno())
+    except OSError as exc:
+        raise _base.RecoveryGitError("Could not read Git metadata safely") from exc
+    finally:
+        if child_fd >= 0:
+            os.close(child_fd)
+    if len(content) > limit or len(content) != observed.st_size:
+        raise _base.RecoveryGitError("Git metadata changed during safe snapshot")
+    if not _same_regular_snapshot(observed, after):
+        raise _base.RecoveryGitError("Git metadata changed during safe snapshot")
+    return content
+
+
+def _copy_named_regular_metadata(
+    directory_fd: int,
+    name: str,
+    destination: Path,
+) -> None:
+    expected = _stat_child(directory_fd, name)
+    if expected is None:
+        return
+    child_fd, observed = _impl._open_metadata_child(directory_fd, name, expected)
+    try:
+        _copy_pinned_regular_fd(child_fd, observed, destination)
+    finally:
+        os.close(child_fd)
+
+
+def _copy_named_metadata_tree(
+    directory_fd: int,
+    name: str,
+    destination: Path,
+) -> None:
+    child_fd = _open_named_directory(directory_fd, name, missing_ok=True)
+    if child_fd is None:
+        return
+    try:
+        _impl._copy_metadata_directory(child_fd, destination)
+    finally:
+        os.close(child_fd)
+
+
+def _reject_split_index_fd(metadata_fd: int) -> None:
+    try:
+        names = os.listdir(metadata_fd)
+    except OSError as exc:
+        raise _base.RecoveryGitError("Could not inspect Git index topology") from exc
+    if any(name.startswith("sharedindex.") for name in names):
+        raise _base.RecoveryGitError(
+            "Split-index Git metadata is not supported by recovery diagnostics"
+        )
+
+
 def _copy_open_regular_fd(fd: int, destination: Path) -> None:
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -297,6 +385,29 @@ def _copy_open_regular_fd(fd: int, destination: Path) -> None:
     finally:
         if fd >= 0:
             os.close(fd)
+
+
+def _copy_pinned_regular_fd(
+    fd: int,
+    observed: os.stat_result,
+    destination: Path,
+) -> None:
+    try:
+        copy_fd = os.dup(fd)
+    except OSError as exc:
+        raise _base.RecoveryGitError("Could not snapshot Git metadata") from exc
+    _copy_open_regular_fd(copy_fd, destination)
+    try:
+        after = os.fstat(fd)
+        copied = destination.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise _base.RecoveryGitError("Could not verify Git metadata snapshot") from exc
+    if (
+        not _same_regular_snapshot(observed, after)
+        or not stat.S_ISREG(copied.st_mode)
+        or copied.st_size != observed.st_size
+    ):
+        raise _base.RecoveryGitError("Git metadata changed during safe snapshot")
 
 
 def _copy_repository_exclude(metadata_fd: int, destination: Path) -> None:
@@ -316,24 +427,6 @@ def _copy_repository_exclude(metadata_fd: int, destination: Path) -> None:
         _copy_open_regular_fd(exclude_fd, destination)
     finally:
         os.close(info_fd)
-
-
-def _pinned_regular_fd_path(fd: int, observed: os.stat_result) -> str:
-    for root in ("/proc/self/fd", "/dev/fd"):
-        candidate = f"{root}/{fd}"
-        try:
-            candidate_state = os.stat(candidate)
-        except OSError:
-            continue
-        if (
-            stat.S_ISREG(candidate_state.st_mode)
-            and (candidate_state.st_dev, candidate_state.st_ino)
-            == (observed.st_dev, observed.st_ino)
-        ):
-            return candidate
-    raise _base.RecoveryGitError(
-        "Platform cannot expose pinned Git object files safely"
-    )
 
 
 def _snapshot_object_directory(
@@ -389,12 +482,10 @@ def _snapshot_object_directory(
             )
 
         try:
-            target.symlink_to(_pinned_regular_fd_path(child_fd, observed))
-        except OSError as exc:
+            _copy_pinned_regular_fd(child_fd, observed, target)
+        except Exception:
             os.close(child_fd)
-            raise _base.RecoveryGitError(
-                "Could not create read-only Git object-store view"
-            ) from exc
+            raise
         pinned_fds.append(child_fd)
 
 
@@ -411,6 +502,23 @@ def _open_object_store_root(git_dir: Path) -> tuple[Path, int, os.stat_result]:
     assert object_fd is not None
     try:
         return object_dir, object_fd, os.fstat(object_fd)
+    except Exception:
+        os.close(object_fd)
+        raise
+
+
+def _open_object_store_root_fd(
+    metadata_fd: int,
+) -> tuple[int, os.stat_result]:
+    try:
+        object_fd = _open_named_directory(metadata_fd, "objects")
+    except _base.RecoveryGitError as exc:
+        raise _base.RecoveryGitError(
+            "Redirected Git object stores are not supported by recovery diagnostics"
+        ) from exc
+    assert object_fd is not None
+    try:
+        return object_fd, os.fstat(object_fd)
     except Exception:
         os.close(object_fd)
         raise
@@ -457,7 +565,6 @@ def _fingerprint_refs(digest: Any, metadata_fd: int) -> None:
 
 def _metadata_fingerprint_from_fd(
     metadata_fd: int,
-    metadata_fd_path: str,
     *,
     object_state: os.stat_result | None = None,
 ) -> str:
@@ -467,9 +574,7 @@ def _metadata_fingerprint_from_fd(
     _fingerprint_repository_exclude(digest, metadata_fd)
     _fingerprint_refs(digest, metadata_fd)
     if object_state is None:
-        _object_dir, object_fd, object_state = _open_object_store_root(
-            Path(metadata_fd_path)
-        )
+        object_fd, object_state = _open_object_store_root_fd(metadata_fd)
         os.close(object_fd)
     digest.update(f"objects\0{object_state.st_dev}:{object_state.st_ino}\0".encode())
     return digest.hexdigest()
@@ -483,8 +588,7 @@ def _metadata_fingerprint(
     sandbox = cast(Any, _impl._ACTIVE_SANDBOX.get())
     if sandbox is not None and getattr(sandbox, "metadata_fd", None) is not None:
         metadata_fd = sandbox.metadata_fd
-        metadata_fd_path = sandbox.metadata_fd_path
-        assert metadata_fd is not None and metadata_fd_path is not None
+        assert metadata_fd is not None
         try:
             live = os.lstat(sandbox.root / ".git")
             pinned = os.fstat(metadata_fd)
@@ -500,18 +604,14 @@ def _metadata_fingerprint(
             )
         return _metadata_fingerprint_from_fd(
             metadata_fd,
-            metadata_fd_path,
             object_state=object_state,
         )
 
     metadata_fd = _impl._open_metadata_directory(git_dir)
     assert metadata_fd is not None
     try:
-        metadata_state = os.fstat(metadata_fd)
-        metadata_fd_path = _impl._pinned_fd_path(metadata_fd, metadata_state)
         return _metadata_fingerprint_from_fd(
             metadata_fd,
-            metadata_fd_path,
             object_state=object_state,
         )
     finally:
@@ -523,29 +623,24 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
     if discovered is None:
         return None
     root, _git_dir, metadata_fd, _metadata_state, metadata_fd_path = discovered
-    pinned_git_dir = Path(metadata_fd_path)
 
     temporary: tempfile.TemporaryDirectory[str] | None = None
     object_fd: int | None = None
     pinned_object_fds: list[int] = []
     try:
-        _impl._reject_split_index(pinned_git_dir)
-        _config_bytes, contains_includes, filemode, ignorecase = _config_snapshot(
-            pinned_git_dir / "config"
+        _reject_split_index_fd(metadata_fd)
+        _config_bytes, contains_includes, filemode, ignorecase = _parse_config_snapshot(
+            _read_named_regular_metadata(metadata_fd, "config")
         )
-        _object_dir, object_fd, object_state = _open_object_store_root(pinned_git_dir)
+        object_fd, object_state = _open_object_store_root_fd(metadata_fd)
         fingerprint = _metadata_fingerprint_from_fd(
             metadata_fd,
-            metadata_fd_path,
             object_state=object_state,
         )
 
-        try:
-            index_state = os.lstat(pinned_git_dir / "index")
-        except FileNotFoundError:
+        index_state = _stat_child(metadata_fd, "index")
+        if index_state is None:
             index_mtime_ns = None
-        except OSError as exc:
-            raise _base.RecoveryGitError("Could not inspect Git index metadata") from exc
         else:
             if stat.S_ISLNK(index_state.st_mode) or not stat.S_ISREG(index_state.st_mode):
                 raise _base.RecoveryGitError("Git index metadata uses an unsafe entry")
@@ -560,8 +655,8 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
             fake = Path(temporary.name) / "git"
             fake.mkdir(parents=True)
             for name in ("HEAD", "index", "packed-refs", "shallow"):
-                _impl._copy_regular_metadata(pinned_git_dir / name, fake / name)
-            _impl._copy_metadata_tree(pinned_git_dir / "refs", fake / "refs")
+                _copy_named_regular_metadata(metadata_fd, name, fake / name)
+            _copy_named_metadata_tree(metadata_fd, "refs", fake / "refs")
             _copy_repository_exclude(
                 metadata_fd,
                 fake / "info" / "exclude",
@@ -910,7 +1005,7 @@ def _build_report(config: Any, **kwargs: Any) -> Any:
 
 
 def _validate_sandbox_stability(sandbox: _GitMetadataSandbox) -> bool:
-    if sandbox.metadata_fd is None or sandbox.metadata_fd_path is None:
+    if sandbox.metadata_fd is None:
         raise _base.RecoveryGitError("Git metadata sandbox is missing its pinned root")
     try:
         live = os.lstat(sandbox.root / ".git")
@@ -924,7 +1019,7 @@ def _validate_sandbox_stability(sandbox: _GitMetadataSandbox) -> bool:
     ):
         return False
 
-    _impl._reject_split_index(Path(sandbox.metadata_fd_path))
+    _reject_split_index_fd(sandbox.metadata_fd)
     return _metadata_fingerprint(sandbox.root / ".git") == sandbox.fingerprint
 
 

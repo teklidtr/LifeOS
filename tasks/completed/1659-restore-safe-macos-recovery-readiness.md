@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1659
 title: Restore safe macOS recovery-readiness diagnostics
-status: backlog
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1647
@@ -85,6 +85,23 @@ rtk .venv/bin/pytest -q
 rtk .venv/bin/python scripts/validate_manual_links.py
 rtk git diff --check
 ```
+
+Local validation on 2026-09-02:
+
+- Doctor-recovery CLI selection: 95 passed, 54 deselected.
+- Full isolated macOS suite: 2,152 passed. The suite used a neutral sibling
+  temporary root so macOS's resolved `/private/...` prefix could not be mistaken
+  for a vault-relative protected `private/` scope.
+- Real Darwin clean-repository doctor smoke: ready, Git repository coverage
+  `pass`, current canonical Git gaps empty, and the vault remained Git-clean.
+- Ruff, mypy, manual-link validation (19 chapters), and diff checks passed.
+- Local `scripts/validate-setup-integration.sh` passed when run with the
+  repository virtual environment first on `PATH`.
+- The Linux Docker clean-room gate could not run because the Docker client is
+  installed but no local daemon/socket is available. It remains an explicit CI
+  checkpoint.
+- GitHub normal and security review checkpoints could not be requested locally
+  because the `gh` executable is unavailable. Both remain required before merge.
 
 Also run a real macOS doctor smoke and the repository's Linux clean-room/setup
 validation. Record unavailable platform checks explicitly.

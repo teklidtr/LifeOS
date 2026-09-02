@@ -137,6 +137,18 @@ severities, remediation, and exposed relative paths. Recovery diagnostics are
 reported separately from ordinary application readiness, so a vault may be
 usable while still having a recovery warning.
 
+The general CLI recovery check supports macOS and Linux and does not require
+`/proc/self/fd` or `/dev/fd`. It snapshots the required Git metadata and object
+files through no-follow, descriptor-relative reads before running bounded Git
+queries. If Git coverage is `unknown`, first make sure the repository is on a
+supported local POSIX filesystem and retry while `.git` is stable. Symlinked or
+redirected Git metadata, alternate object stores, hard-linked metadata, split
+indexes, unsupported special files, and metadata that changes during inspection
+remain deliberate fail-closed conditions; repair that repository topology or use
+separate Git integrity tooling instead of treating `unknown` as clean. The
+Linux-only `/proc` requirement documented for `lifeos serve` applies to the
+long-lived home-node runtime authority, not to this CLI diagnostic.
+
 The recovery section distinguishes three layers:
 
 1. **Canonical Git coverage.** LifeOS checks whether the configured vault is

@@ -63,6 +63,9 @@ Linux path satisfy this requirement.
 
 This Linux requirement is specific to the current always-on service implementation. Canonical
 Markdown remains portable and does not depend on `/proc` or SQLite.
+The read-only `lifeos doctor` recovery-readiness collector is also separate: it
+uses portable descriptor-relative snapshots and is supported on macOS and Linux
+without `/proc`.
 
 ## Recovery after runtime replacement
 

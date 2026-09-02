@@ -590,6 +590,17 @@ authority, not an independent writer. See DD-091 and
 commit, push, restore, scan, repair, or create a backup. Recovery diagnostics operate on path,
 filesystem, and Git metadata and do not need canonical note bodies to determine coverage.
 
+On supported macOS and Linux hosts, the recovery collector opens the repository metadata root
+with no-follow descriptor operations and builds its Git sandbox from descriptor-relative
+snapshots. Selected metadata and the bounded set of regular object-store files are copied from
+already-open, identity-checked descriptors; Git never receives an unchecked live repository
+pathname, and the collector does not depend on `/proc/self/fd` or `/dev/fd`. The original
+metadata and object roots remain pinned while queries run, then topology and metadata
+fingerprints are revalidated before results are accepted. A platform or filesystem that cannot
+provide these descriptor-relative guarantees remains `unknown` rather than being treated as
+clean. This portable CLI diagnostic boundary is separate from the Linux-only descriptor
+reopening contract of the long-lived home-node service.
+
 Recovery has three independent evidence classes:
 
 - **Canonical Git coverage** reports whether the configured vault is inside a Git repository,

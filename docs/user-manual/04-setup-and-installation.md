@@ -231,6 +231,11 @@ lifeos doctor \
   --json
 ```
 
+The recovery-readiness portion of this CLI check uses the supported macOS and
+Linux descriptor-safety model without requiring `/proc`. The later Linux-only
+requirement applies to the long-lived `lifeos serve` home-node runtime, not to
+ordinary `lifeos doctor` use on macOS.
+
 Doctor checks the installed LifeOS version, Python support, Git availability, configuration,
 the current first-party vault bootstrap shape, and the existing read-only vault health
 reported by `lifeos status`. It also reports whether the optional MCP SDK and `lifeos-mcp`

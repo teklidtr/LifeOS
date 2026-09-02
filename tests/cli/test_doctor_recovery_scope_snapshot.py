@@ -143,12 +143,16 @@ def test_protected_git_scope_is_excluded_before_recursive_queries(
     assert "secrets/private.md" not in rendered
     index_queries = [call for call in calls if "ls-files" in call]
     assert index_queries
-    assert any(":(top,exclude,literal)secrets" in call for call in index_queries)
+    protected_exclusions = {
+        ":(top,exclude,literal)secrets",
+        ":(top,exclude,icase,literal)secrets",
+    }
+    assert any(protected_exclusions.intersection(call) for call in index_queries)
     recursive_tree_queries = [call for call in calls if "ls-tree" in call and "-r" in call]
     assert recursive_tree_queries == []
     history_queries = [call for call in calls if "rev-list" in call or "diff-tree" in call]
     assert history_queries
-    assert all(":(top,exclude,literal)secrets" in call for call in history_queries)
+    assert all(protected_exclusions.intersection(call) for call in history_queries)
 
 
 def test_working_tree_snapshot_drift_fails_closed(

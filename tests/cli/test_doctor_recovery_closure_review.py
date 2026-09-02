@@ -79,6 +79,44 @@ def test_repository_info_symlink_fails_closed_before_exclude_copy(tmp_path: Path
         original_info.rename(live_info)
 
 
+def test_recovery_snapshot_does_not_require_fd_pseudo_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    (repository / "wiki").mkdir()
+    (repository / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
+    _commit_all(repository, "baseline")
+
+    def unavailable_fd_path(_fd: int, _observed: os.stat_result) -> str:
+        raise recovery_readiness.RecoveryGitError(
+            "Platform cannot expose pinned Git object directory safely"
+        )
+
+    monkeypatch.setattr(recovery_readiness, "_pinned_fd_path", unavailable_fd_path)
+    sandbox = recovery_readiness._build_sandbox(repository)
+    assert sandbox is not None
+    assert sandbox.metadata_fd is not None
+    assert sandbox.metadata_fd_path is None
+    assert all(not path.is_symlink() for path in sandbox.object_dir.rglob("*"))
+
+    token = recovery_readiness._ACTIVE_SANDBOX.set(sandbox)
+    try:
+        git = recovery_readiness._resolve_git_executable()
+        assert git is not None
+        result = recovery_readiness._run_git(
+            git,
+            cwd=repository,
+            arguments=("cat-file", "-t", "HEAD"),
+        )
+        assert result.stdout.strip() == b"commit"
+    finally:
+        recovery_readiness._ACTIVE_SANDBOX.reset(token)
+        sandbox.close()
+
+
 def test_final_topology_check_uses_pinned_metadata_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -88,16 +126,17 @@ def test_final_topology_check_uses_pinned_metadata_root(
     _git(repository, "init", "-q")
     sandbox = recovery_readiness._build_sandbox(repository)
     assert sandbox is not None
-    assert sandbox.metadata_fd_path is not None
+    assert sandbox.metadata_fd is not None
+    metadata_fd = sandbox.metadata_fd
 
-    seen: list[Path] = []
-    original = recovery_readiness._reject_split_index
+    seen: list[int] = []
+    original = recovery_readiness._reject_split_index_fd
 
-    def recording_reject(path: Path) -> None:
-        seen.append(path)
-        original(path)
+    def recording_reject(metadata_fd: int) -> None:
+        seen.append(metadata_fd)
+        original(metadata_fd)
 
-    monkeypatch.setattr(recovery_readiness, "_reject_split_index", recording_reject)
+    monkeypatch.setattr(recovery_readiness, "_reject_split_index_fd", recording_reject)
     token = recovery_readiness._ACTIVE_SANDBOX.set(sandbox)
     try:
         assert recovery_readiness._validate_sandbox_stability(sandbox) is True
@@ -105,7 +144,7 @@ def test_final_topology_check_uses_pinned_metadata_root(
         recovery_readiness._ACTIVE_SANDBOX.reset(token)
         sandbox.close()
 
-    assert seen == [Path(sandbox.metadata_fd_path)]
+    assert seen == [metadata_fd]
 
 
 def test_check_ignore_uses_snapshotted_sources_after_live_path_swap(
