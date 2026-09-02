@@ -29,7 +29,7 @@ class OwnedLock:
         cleanup_name = f".{staging_name}.{secrets.token_hex(16)}.cleanup"
         try:
             held_stat = os.fstat(fd)
-            os.replace(
+            os.rename(
                 staging_name,
                 cleanup_name,
                 src_dir_fd=self.dir_fd,
