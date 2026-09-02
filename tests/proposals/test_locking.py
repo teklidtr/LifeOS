@@ -403,6 +403,62 @@ def test_competing_symlink_wins_atomic_publication(lock_dir):
     assert list(lock_path.glob("*.acquiring")) == []
 
 
+def test_replaced_staging_before_publication_is_not_reported_as_acquired(lock_dir):
+    lock_path, fd = lock_dir
+    path = lock_path / "test.lock"
+    lock = OwnedLock(fd, "test.lock")
+    original_link = os.link
+    replaced_name = None
+
+    def replace_staging_before_publish(
+        src, dst, *, src_dir_fd=None, dst_dir_fd=None, follow_symlinks=True
+    ):
+        nonlocal replaced_name
+        if dst == "test.lock" and replaced_name is None:
+            replaced_name = str(src)
+            staging_path = lock_path / replaced_name
+            os.unlink(staging_path)
+            staging_path.write_bytes(b"foreign-staging")
+        return original_link(
+            src,
+            dst,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+
+    with mock.patch("os.link", side_effect=replace_staging_before_publish):
+        with pytest.raises(LockError, match="Failed to acquire lock"):
+            lock.acquire()
+
+    assert replaced_name is not None
+    assert lock.lock_fd is None
+    assert lock.token == b""
+    assert path.read_bytes() == b"foreign-staging"
+    assert (lock_path / replaced_name).read_bytes() == b"foreign-staging"
+    assert [entry for entry in lock_path.iterdir() if entry.name.endswith(".cleanup")] == []
+
+    path.unlink()
+    (lock_path / replaced_name).unlink()
+
+
+def test_preexisting_lock_fails_before_token_io(lock_dir):
+    lock_path, fd = lock_dir
+    owner = OwnedLock(fd, "test.lock")
+    owner.acquire()
+    owner_token = owner.token
+
+    contender = OwnedLock(fd, "test.lock")
+    with mock.patch("os.write", side_effect=AssertionError("token I/O must not start")):
+        with pytest.raises(LockError, match="Failed to acquire lock"):
+            contender.acquire()
+
+    assert contender.lock_fd is None
+    assert contender.token == b""
+    assert (lock_path / "test.lock").read_bytes() == owner_token
+    assert owner.release().released is True
+
+
 def test_preexisting_lock_is_never_removed_by_failed_acquisition(lock_dir):
     lock_path, fd = lock_dir
     owner = OwnedLock(fd, "test.lock")
