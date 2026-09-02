@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1656
 title: Reserve the canonical capture mutation lineage namespace
-status: in-progress
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1654
@@ -76,6 +76,14 @@ Status: required
 - Review `docs/user-manual/13-rich-capture.md` for any user-facing validation/error guidance affected
   by rejecting previously accepted reserved inputs; do not suggest editing lineage to bypass checks.
 
+Completion:
+
+- Updated `docs/rich-capture-protocol.md` and `docs/rich-capture-architecture.md` with the reserved
+  lineage ownership and public-write boundary.
+- Reviewed `docs/user-manual/13-rich-capture.md`; no user-facing workflow change was required because
+  the restriction protects an internal transaction namespace rather than introducing a user action
+  or supported bypass procedure.
+
 # Validation
 
 ```bash
@@ -85,6 +93,34 @@ rtk .venv/bin/mypy src/lifeos
 rtk .venv/bin/pytest -q
 rtk git diff --check
 ```
+
+## Completion evidence
+
+- Local checkout/test execution was attempted, but this execution environment could not resolve
+  `github.com`; the repository's local `rtk`/`uv` commands therefore could not be executed here.
+  Per `AGENTS.md`, the closest static substitute included repository-wide seam searches, current-head
+  diff review, and explicit inspection of the public service, bridge facade, internal `prepare_*`
+  callers, mutation marker generation, and existing recovery/idempotency regressions.
+- PR `fast-checks` passed on the material implementation head and again after the test-fixture
+  compatibility correction. The checks included documentation impact, manual links, Ruff, mypy,
+  Python compilation, pytest collection, and project contract smoke tests.
+- The first full-validation run exposed two deterministic legacy regression fixtures that forged
+  reserved markers through the newly protected public `create()` method. They were corrected without
+  changing production behavior: the tests now persist forged canonical artifacts through the internal
+  preparation seam, preserving the original fail-closed attack model.
+- Final full-validation run `33646600326` passed on head
+  `062dbb1c8c9c9b1e31ad75b847b8967331a031e2`: all four full pytest shards and aggregate `full-test`
+  were green; `docker-setup-e2e` also passed the clean-room setup/MCP gate, home-node container gate,
+  and ARM64 image build.
+- Normal `@codex review` completed on material implementation head
+  `4272769736183e9721da8e5f0c266e234be58b5a` with no major issues. The subsequent head change was a
+  mechanical test-fixture compatibility correction only, so no additional normal review was required
+  by the repository review rules.
+- `@codex security review` was requested once on the stabilized security-sensitive implementation but
+  produced no result. On 2026-09-02 the user explicitly instructed the implementation agent to skip
+  the non-responsive security-review step for this run. This current-task user instruction overrides
+  that workflow requirement; no security-review result is claimed.
+- No independent follow-up work was discovered that requires a new backlog task.
 
 # Relevant decisions
 
