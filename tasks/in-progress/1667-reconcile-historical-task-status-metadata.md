@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1667
 title: Reconcile historical task status metadata
-status: ready
+status: in-progress
 phase: hardening
 depends_on: []
 risk: low
