@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-101
 title: Proposal schema, stable IDs, lifecycle, and tracked layout
-status: ready
+status: completed
 milestone: phase-2-proposal-engine
 depends_on: [LIFEOS-100]
 risk: low

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-010
 title: Implement `lifeos status`
-status: ready
+status: completed
 milestone: phase-1-deterministic-foundation
 depends_on: [LIFEOS-006, LIFEOS-009]
 affected_paths:
