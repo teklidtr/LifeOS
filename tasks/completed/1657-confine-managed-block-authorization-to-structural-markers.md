@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1657
 title: Confine managed-block authorization to structural markers
-status: in-progress
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-007
