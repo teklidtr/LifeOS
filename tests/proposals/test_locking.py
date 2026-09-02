@@ -307,6 +307,37 @@ def test_successful_alias_cleanup_preserves_replacement_of_random_staging_path(l
     (lock_path / replaced_name).unlink()
 
 
+def test_cleanup_name_failure_after_publication_keeps_lock_owned_and_releasable(lock_dir):
+    lock_path, fd = lock_dir
+    lock = OwnedLock(fd, "test.lock")
+    calls = 0
+
+    def token_hex(_n):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "a" * 32
+        if calls == 2:
+            return "b" * 32
+        raise RuntimeError("cleanup random failed")
+
+    with mock.patch("lifeos._owned_lock.secrets.token_hex", side_effect=token_hex):
+        lock.acquire()
+
+    assert calls == 3
+    assert lock.lock_fd is not None
+    assert lock.token == b"a" * 32
+    assert (lock_path / "test.lock").read_bytes() == lock.token
+    residues = list(lock_path.glob("*.acquiring"))
+    assert len(residues) == 1
+
+    result = lock.release()
+    assert result.released is True
+    assert result.descriptor_closed is True
+    assert not (lock_path / "test.lock").exists()
+    residues[0].unlink()
+
+
 def test_competing_regular_file_wins_atomic_publication(lock_dir):
     lock_path, fd = lock_dir
     path = lock_path / "test.lock"
