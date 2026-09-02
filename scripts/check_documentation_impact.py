@@ -27,10 +27,13 @@ _SECTION_PATTERN = re.compile(
 )
 _STATUS_PATTERN = re.compile(r"(?mi)^Status:\s*(required|none)\s*$")
 _REASON_PATTERN = re.compile(r"(?mi)^Reason:\s*(\S.*)$")
-_FRONTMATTER_STATUS_PATTERN = re.compile(
-    r"^status:\s*(backlog|ready|in-progress|completed)\s*$"
-)
 _LEGACY_COMPLETED_PREFIX = "tasks/completed/"
+_LEGACY_SOURCE_STATUS_LINES = {
+    "status: backlog",
+    "status: ready",
+    "status: in-progress",
+}
+_LEGACY_TARGET_STATUS_LINE = "status: completed"
 
 
 @dataclass(frozen=True)
@@ -161,12 +164,10 @@ def is_legacy_completed_status_only_change(before: str, after: str) -> bool:
 
     before_core = before_line[: -len(before_ending)] if before_ending else before_line
     after_core = after_line[: -len(after_ending)] if after_ending else after_line
-    before_match = _FRONTMATTER_STATUS_PATTERN.fullmatch(before_core)
-    after_match = _FRONTMATTER_STATUS_PATTERN.fullmatch(after_core)
-    if before_match is None or after_match is None:
-        return False
-
-    return before_match.group(1) != "completed" and after_match.group(1) == "completed"
+    return (
+        before_core in _LEGACY_SOURCE_STATUS_LINES
+        and after_core == _LEGACY_TARGET_STATUS_LINE
+    )
 
 
 def evaluate_documentation_impact(
