@@ -12,8 +12,8 @@ from pathlib import Path
 import yaml
 
 from lifeos.daily.service import _atomic_write, content_hash
-from lifeos.markdown.parser import parse_markdown_note
-from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
+from lifeos.markdown.parser import parse_markdown_note, replace_managed_block, splice_managed_block
+from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown, read_vault_markdown
 
 from .contracts import (
     ExperimentArtifact,
@@ -32,7 +32,6 @@ from .contracts import (
 
 _MANAGED_START = "<!-- lifeos:managed:start personal-experiment -->"
 _MANAGED_END = "<!-- lifeos:managed:end personal-experiment -->"
-_MANAGED_RE = re.compile(re.escape(_MANAGED_START) + r".*?" + re.escape(_MANAGED_END), re.S)
 _ID_RE = re.compile(r"^exp-(\d{8}T\d{6}Z)-[a-f0-9]{8}$")
 
 
@@ -133,6 +132,13 @@ def _document(metadata: ExperimentMetadata, human_body: str) -> str:
     return f"---\n{dumped}\n---\n\n{_render_managed(metadata)}\n\n{human}\n"
 
 
+def _read_source(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
+    try:
+        return read_vault_markdown(vault_root, relative_path)
+    except VaultAccessError as exc:
+        raise ExperimentError(exc.code, str(exc), {"path": relative_path}) from exc
+
+
 def parse_experiment(path: Path, relative_path: str, content: str) -> ExperimentArtifact:
     parsed = parse_markdown_note(path, content=content)
     error = next((item for item in parsed.findings if item.severity == "error"), None)
@@ -141,13 +147,12 @@ def parse_experiment(path: Path, relative_path: str, content: str) -> Experiment
     frontmatter = dict(parsed.frontmatter)
     if frontmatter.get("type") != "personal-experiment":
         raise ExperimentError("unsupported_artifact", "The note is not a personal experiment.")
-    matches = list(_MANAGED_RE.finditer(parsed.body))
-    if len(matches) != 1:
+    matches = [block for block in parsed.managed_blocks if block.name == "personal-experiment"]
+    if len(matches) != 1 or len(parsed.managed_blocks) != 1:
         raise ExperimentError(
             "malformed_artifact", "The managed experiment block must appear exactly once."
         )
-    match = matches[0]
-    human_body = (parsed.body[: match.start()] + parsed.body[match.end() :]).strip("\n") + "\n"
+    human_body = splice_managed_block(parsed.body, matches[0], "").strip("\n") + "\n"
     metadata = metadata_from_dict(frontmatter)
     return ExperimentArtifact(
         relative_path, "sha256:" + content_hash(content), metadata, human_body
@@ -193,10 +198,12 @@ class ExperimentArtifactService:
             repeated_from_experiment_id=repeated_from_experiment_id,
         )
         relative_path = _path(metadata)
+        document = _document(metadata, "## User annotations\n\n")
+        parse_experiment(self.vault_root / relative_path, relative_path, document)
         _atomic_write(
             self.vault_root,
             relative_path,
-            _document(metadata, "## User annotations\n\n"),
+            document,
             expected_hash=None,
             create=True,
         )
@@ -205,20 +212,19 @@ class ExperimentArtifactService:
     def create_imported(self, metadata: ExperimentMetadata, human_body: str) -> ExperimentArtifact:
         """Create one canonical artifact from a validated migration preview."""
         relative_path = _path(metadata)
+        document = _document(metadata, human_body)
+        parse_experiment(self.vault_root / relative_path, relative_path, document)
         _atomic_write(
             self.vault_root,
             relative_path,
-            _document(metadata, human_body),
+            document,
             expected_hash=None,
             create=True,
         )
         return self.load(relative_path)
 
     def load(self, relative_path: str) -> ExperimentArtifact:
-        try:
-            source = read_vault_markdown(self.vault_root, relative_path)
-        except VaultAccessError as exc:
-            raise ExperimentError(exc.code, str(exc), {"path": relative_path}) from exc
+        source = _read_source(self.vault_root, relative_path)
         return parse_experiment(source.path, source.relative_path, source.content)
 
     def list(self, *, states: frozenset[str] | None = None) -> tuple[ExperimentArtifact, ...]:
@@ -257,17 +263,28 @@ class ExperimentArtifactService:
     def save(
         self, artifact: ExperimentArtifact, metadata: ExperimentMetadata, *, expected_hash: str
     ) -> ExperimentArtifact:
-        current = self.load(artifact.path)
+        source = _read_source(self.vault_root, artifact.path)
+        current = parse_experiment(source.path, source.relative_path, source.content)
         if current.content_hash != expected_hash:
             raise ExperimentError(
                 "stale_artifact",
                 "Experiment changed after it was opened.",
                 {"actual_hash": current.content_hash},
             )
+        parsed = parse_markdown_note(source.path, content=source.content)
+        try:
+            body = replace_managed_block(
+                parsed.body, parsed.managed_blocks[0], _render_managed(metadata)
+            )
+        except ValueError as error:
+            raise ExperimentError("malformed_artifact", str(error)) from error
+        dumped = yaml.safe_dump(metadata.to_frontmatter(), sort_keys=False, allow_unicode=True).rstrip()
+        document = f"---\n{dumped}\n---\n{body}"
+        parse_experiment(self.vault_root / artifact.path, artifact.path, document)
         _atomic_write(
             self.vault_root,
             artifact.path,
-            _document(metadata, current.human_body),
+            document,
             expected_hash=expected_hash.removeprefix("sha256:"),
             create=False,
         )

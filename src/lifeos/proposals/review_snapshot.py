@@ -11,7 +11,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from lifeos._secure_io import open_directory_secure, read_file_secure
-from lifeos.markdown.parser import parse_markdown_note
+from lifeos.markdown.parser import (
+    parse_markdown_note,
+    replace_managed_block,
+)
 from .patches import (
     AnyPatchDocument,
     PatchOperation,
@@ -173,6 +176,12 @@ def operation_unified_diff(vault_root: Path, operation: PatchOperation) -> str:
         candidate = operation.new_content
     elif operation.op == "replace_managed_block":
         parsed = parse_markdown_note(vault_root / target_path, content=original)
+        if any(finding.severity == "error" for finding in parsed.findings):
+            raise ReviewSnapshotError(
+                "managed_block_mismatch",
+                target_path,
+                "target Markdown has invalid managed-block structure",
+            )
         matching_blocks = [
             block for block in parsed.managed_blocks if block.name == operation.block_name
         ]
@@ -183,10 +192,17 @@ def operation_unified_diff(vault_root: Path, operation: PatchOperation) -> str:
                 f"managed block '{operation.block_name}' is not present exactly once",
             )
         target_block = matching_blocks[0]
-        lines = original.splitlines(keepends=True)
-        before = "".join(lines[: target_block.start_line])
-        after = "".join(lines[target_block.end_line - 1 :])
-        candidate = before + operation.new_content + after
+        prefix = original[: len(original) - len(parsed.body)]
+        try:
+            candidate = prefix + replace_managed_block(
+                parsed.body, target_block, operation.new_content, content_only=True
+            )
+        except ValueError as error:
+            raise ReviewSnapshotError(
+                "managed_block_mismatch",
+                target_path,
+                f"managed block '{operation.block_name}' not preserved exactly once",
+            ) from error
     else:
         raise ReviewSnapshotError(
             "unsupported_operation",

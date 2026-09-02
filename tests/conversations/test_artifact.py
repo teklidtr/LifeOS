@@ -10,6 +10,7 @@ from lifeos.conversations import (
     ConversationParagraph,
     ConversationTurn,
 )
+from lifeos.markdown.parser import parse_markdown_note
 from lifeos.retrieval import RetrievalScope
 
 NOW = datetime(2026, 7, 16, 9, 0, tzinfo=timezone.utc)
@@ -65,6 +66,58 @@ def test_create_append_load_and_preserve_human_annotations(tmp_path: Path) -> No
     assert updated.turns[0].answer[0].citations == ("chunk:one",)
     assert "Human note stays byte-for-byte." in updated.human_body
     assert "[[wiki/source.md#Evidence]]" in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_update_preserves_exact_body_around_real_managed_block(
+    tmp_path: Path, newline: str,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    service = ConversationArtifactService(vault_root=vault, runtime_dir=vault / ".lifeos")
+    created = service.create(title="Session", now=NOW)
+    path = vault / created.relative_path
+    real_start = "<!-- lifeos:managed:start knowledge-conversation -->"
+    fake_prefix = (
+        "\n\n\n```md\n"
+        "<!-- lifeos:managed:start knowledge-conversation -->\n"
+        "```\n"
+        "Human conversation text outside the real block.  \n\n"
+    )
+    original = path.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(path, content=original)
+    block = parsed.managed_blocks[0]
+    body = (
+        fake_prefix
+        + parsed.body[block.start_offset : block.end_offset]
+        + "\n\n## Annotations\n\nKeep this trailing text.  \n\n\n"
+    ).replace("\n", newline)
+    original = original[: len(original) - len(parsed.body)] + body
+    path.write_bytes(original.encode("utf-8"))
+    parsed = parse_markdown_note(path, content=original)
+    block = parsed.managed_blocks[0]
+    expected_prefix = parsed.body[: block.start_offset].encode("utf-8")
+    expected_suffix = parsed.body[block.end_offset :].encode("utf-8")
+    current = service.load(created.relative_path)
+
+    service.update(
+        current.relative_path,
+        expected_hash=current.content_hash,
+        title="Updated session",
+        turns=(turn(),),
+        now=NOW,
+    )
+
+    updated = path.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(path, content=updated)
+    assert not parsed.findings
+    assert len(parsed.managed_blocks) == 1
+    block = parsed.managed_blocks[0]
+    assert parsed.body[: block.start_offset].encode("utf-8") == expected_prefix
+    assert parsed.body[block.end_offset :].encode("utf-8") == expected_suffix
+    assert updated.count(real_start) == 2
+    assert "title: Updated session" in updated
+    assert "## Turn turn-001" in block.content
 
 
 def test_scope_pin_exclude_rename_archive_and_stale_write(tmp_path: Path) -> None:

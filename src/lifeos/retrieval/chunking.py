@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from lifeos.context.search import token_sequence
-from lifeos.markdown.parser import FENCED_CODE_RE, parse_markdown_note
+from lifeos.markdown.parser import FenceState, advance_fenced_code_state, parse_markdown_note
 from lifeos.retrieval.contracts import RetrievalError
 from lifeos.retrieval.models import ChunkedNote, IndexedChunk, IndexedDocument
 from lifeos.vault import VaultMarkdownFile
@@ -162,7 +162,7 @@ def _sections(
     current_path: tuple[str, ...] = ()
     current_start = body_start_line
     current_lines: list[str] = []
-    fence: tuple[str, int] | None = None
+    fence: FenceState = None
 
     def flush() -> None:
         nonlocal current_lines
@@ -172,17 +172,13 @@ def _sections(
 
     for offset, line in enumerate(lines):
         line_no = body_start_line + offset
-        fence_match = FENCED_CODE_RE.match(line)
-        if fence_match:
-            marker = fence_match.group(2)
-            char = marker[0]
-            if fence is None:
-                fence = (char, len(marker))
-            elif fence[0] == char and len(marker) >= fence[1]:
-                fence = None
-            current_lines.append(line)
-            continue
-        match = _HEADING_RE.match(line) if fence is None else None
+        previous_fence = fence
+        fence = advance_fenced_code_state(line, fence)
+        match = (
+            _HEADING_RE.match(line)
+            if previous_fence is None and fence is None
+            else None
+        )
         if match:
             flush()
             level = len(match.group(1))
@@ -206,9 +202,7 @@ def _bounded_structural_parts(
     blocks: list[tuple[int, int, str]] = []
     buffer: list[str] = []
     block_start = start_line
-    in_fence = False
-    fence_char = ""
-    fence_len = 0
+    fence: FenceState = None
 
     def flush(line_no: int) -> None:
         nonlocal buffer, block_start
@@ -220,18 +214,10 @@ def _bounded_structural_parts(
 
     for offset, line in enumerate(lines):
         line_no = start_line + offset
-        match = FENCED_CODE_RE.match(line)
-        if match:
-            marker = match.group(2)
-            if not in_fence:
-                in_fence = True
-                fence_char = marker[0]
-                fence_len = len(marker)
-            elif marker[0] == fence_char and len(marker) >= fence_len:
-                in_fence = False
+        fence = advance_fenced_code_state(line, fence)
         if not buffer:
             block_start = line_no
-        if not line.strip() and not in_fence:
+        if not line.strip() and fence is None:
             flush(line_no - 1)
         else:
             buffer.append(line)

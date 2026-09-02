@@ -1,6 +1,9 @@
+import hashlib
 import json
 import os
 from pathlib import Path
+
+import pytest
 
 
 from lifeos.ownership import DEFAULT_OWNERSHIP_MANIFEST_PATH
@@ -337,7 +340,7 @@ def test_replace_managed_block_boundaries(tmp_path: Path) -> None:
         target_path="block.md",
         block_name="foo",
         base_hash=original_hash,
-        new_content="new\nmulti"
+        new_content="new\nmulti\n"
     )
     prop = _make_dummy_proposal([op1])
     res = preflight_proposal(prop, vault_root=tmp_path)
@@ -359,34 +362,99 @@ def test_replace_managed_block_boundaries(tmp_path: Path) -> None:
     # 3. Candidate size limit
     # The original file is 81 bytes long.
     # We will read it with max_inspection_bytes=100.
-    # "human\n<!-- lifeos:managed:start foo -->\n" = 40
-    # + new_content + "\n"
-    # + "<!-- lifeos:managed:end foo -->\nhuman" = 37
-    # Total = 77 + len(new_content)
-    # 15 bytes -> 92 bytes < 100 bytes limit
+    # The unchanged marker and human spans total 77 bytes.
+    # 15 payload bytes + a newline -> 93 bytes < 100 bytes limit
     op3 = ReplaceManagedBlock(
         id="op-3",
         target_path="block.md",
         block_name="foo",
         base_hash=original_hash,
-        new_content="1"*15
+        new_content="1"*15 + "\n"
     )
     prop = _make_dummy_proposal([op3])
     res = preflight_proposal(prop, vault_root=tmp_path, max_inspection_bytes=100)
     assert res.operations[0].state == "valid"
 
-    # 25 bytes -> 102 bytes > 100 bytes limit
+    # 25 payload bytes + a newline -> 103 bytes > 100 bytes limit
     op4 = ReplaceManagedBlock(
         id="op-4",
         target_path="block.md",
         block_name="foo",
         base_hash=original_hash,
-        new_content="1"*25
+        new_content="1"*25 + "\n"
     )
     prop = _make_dummy_proposal([op4])
     res = preflight_proposal(prop, vault_root=tmp_path, max_inspection_bytes=100)
     assert res.operations[0].state == "invalid"
     assert res.operations[0].findings[0].code == "candidate_too_large_for_inspection"
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "Replacement without a terminating newline",
+        "<!--lifeos:managed:start nested -->\n",
+        "```md\n",
+        "<!--lifeos:managed:end summary -->\n```md\n",
+    ],
+    ids=["missing-newline", "nested-marker", "unclosed-fence", "early-end-hidden-original"],
+)
+def test_managed_block_preflight_rejects_changed_content_boundaries(
+    tmp_path: Path, replacement: str,
+) -> None:
+    manifest_path = tmp_path / DEFAULT_OWNERSHIP_MANIFEST_PATH
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text('{"schema_version": 1, "owned_files": {}}')
+    original = (
+        "Human before.\n<!-- lifeos:managed:start summary -->\n"
+        "Old summary.\n"
+        "<!-- lifeos:managed:end summary -->\nHuman after.\n"
+    )
+    target = tmp_path / "managed.md"
+    target.write_bytes(original.encode("utf-8"))
+    operation = ReplaceManagedBlock(
+        id="op-boundary-change",
+        target_path="managed.md",
+        block_name="summary",
+        base_hash=f"sha256:{hashlib.sha256(original.encode('utf-8')).hexdigest()}",
+        new_content=replacement,
+    )
+
+    result = preflight_proposal(_make_dummy_proposal([operation]), vault_root=tmp_path)
+
+    assert result.operations[0].state == "invalid"
+    assert target.read_bytes() == original.encode("utf-8")
+
+
+def test_fenced_marker_example_cannot_authorize_managed_block_replacement(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / DEFAULT_OWNERSHIP_MANIFEST_PATH
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text('{"schema_version": 1, "owned_files": {}}')
+    original = (
+        "```md\n"
+        "```not-a-closing-fence\n"
+        "<!-- lifeos:managed:start example -->\n"
+        "human-owned code\n"
+        "<!-- lifeos:managed:end example -->\n"
+        "```\n"
+    )
+    target = tmp_path / "example.md"
+    target.write_text(original, encoding="utf-8")
+    operation = ReplaceManagedBlock(
+        id="op-fenced-example",
+        target_path="example.md",
+        block_name="example",
+        base_hash=f"sha256:{hashlib.sha256(original.encode('utf-8')).hexdigest()}",
+        new_content="replacement",
+    )
+
+    result = preflight_proposal(_make_dummy_proposal([operation]), vault_root=tmp_path)
+
+    assert result.operations[0].state == "invalid"
+    assert result.operations[0].findings[0].code == "managed_block_not_found"
+    assert target.read_text(encoding="utf-8") == original
 
 
 def test_symlink_parent_safety(tmp_path: Path) -> None:

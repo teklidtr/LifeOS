@@ -15,8 +15,20 @@ from lifeos.captures.contracts import (
     LifecycleEvent,
     validate_transition,
 )
+from lifeos.markdown.parser import parse_markdown_note
 
 NOW = datetime(2026, 7, 16, 9, 0, tzinfo=timezone.utc)
+
+
+def body_edges(path: Path, content: str) -> tuple[bytes, bytes]:
+    parsed = parse_markdown_note(path, content=content)
+    assert not parsed.findings
+    assert len(parsed.managed_blocks) == 1
+    block = parsed.managed_blocks[0]
+    return (
+        parsed.body[: block.start_offset].encode("utf-8"),
+        parsed.body[block.end_offset :].encode("utf-8"),
+    )
 
 
 def test_create_load_and_human_annotations_survive_managed_update(tmp_path: Path) -> None:
@@ -36,6 +48,51 @@ def test_create_load_and_human_annotations_survive_managed_update(tmp_path: Path
     assert updated.metadata.description == "Soup and bread"
     assert "Tasted salty." in updated.human_body
     assert updated.metadata.capture_type == "meal"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_capture_update_preserves_exact_body_around_real_block(
+    tmp_path: Path, newline: str,
+) -> None:
+    service = CaptureArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
+    capture = service.create(title="Lunch", capture_type="meal", now=NOW)
+    path = tmp_path / capture.path
+    real_start = "<!-- lifeos:managed:start rich-capture -->"
+    fake_prefix = (
+        "\n\n\n```md\n"
+        "<!-- lifeos:managed:start rich-capture -->\n"
+        "```\n"
+        "Human capture text outside the real block.  \n\n"
+    )
+    original = path.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(path, content=original)
+    block = parsed.managed_blocks[0]
+    body = (
+        fake_prefix
+        + parsed.body[block.start_offset : block.end_offset]
+        + "\n\n## User annotations\n\nKeep this trailing text.  \n\n\n"
+    ).replace("\n", newline)
+    original = original[: len(original) - len(parsed.body)] + body
+    path.write_bytes(original.encode("utf-8"))
+    expected_edges = body_edges(path, original)
+    current = service.load(capture.path)
+
+    prepared = service.prepare_transition(current, "archived", now=NOW)
+    assert body_edges(path, prepared.content) == expected_edges
+    assert "**State:** `archived`" in prepared.content
+    assert path.read_bytes() == original.encode("utf-8")
+
+    service.update_user_fields(
+        current.path,
+        expected_hash=current.content_hash,
+        description="Updated description",
+        now=NOW,
+    )
+
+    updated = path.read_bytes().decode("utf-8")
+    assert body_edges(path, updated) == expected_edges
+    assert updated.count(real_start) == 2
+    assert "description: Updated description" in updated
 
 
 def test_capture_stale_write_and_invalid_transition_fail_closed(tmp_path: Path) -> None:
@@ -198,6 +255,55 @@ def test_manifest_round_trip_and_human_annotations(tmp_path: Path) -> None:
     )
     assert updated.metadata.preview_status == "completed"
     assert "Keep original." in updated.human_body
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_manifest_update_preserves_exact_body_around_real_block(
+    tmp_path: Path, newline: str,
+) -> None:
+    service = AttachmentManifestService(vault_root=tmp_path)
+    metadata = AttachmentManifest(
+        attachment_id="att-0123456789abcdef",
+        content_hash="sha256:" + "a" * 64,
+        original_filename="meal.jpg",
+        canonical_path="attachments/originals/aa/hash/meal.jpg",
+        media_type="image/jpeg",
+        byte_size=123,
+        capture_source="clipboard",
+        imported_at=NOW.isoformat(),
+    )
+    created = service.create(metadata)
+    path = tmp_path / created.path
+    real_start = "<!-- lifeos:managed:start attachment-manifest -->"
+    fake_prefix = (
+        "\n\n\n```md\n"
+        "<!-- lifeos:managed:start attachment-manifest -->\n"
+        "```\n"
+        "Human manifest text outside the real block.  \n\n"
+    )
+    original = path.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(path, content=original)
+    block = parsed.managed_blocks[0]
+    body = (
+        fake_prefix
+        + parsed.body[block.start_offset : block.end_offset]
+        + "\n\n## User annotations\n\nKeep this trailing text.  \n\n\n"
+    ).replace("\n", newline)
+    original = original[: len(original) - len(parsed.body)] + body
+    path.write_bytes(original.encode("utf-8"))
+    expected_edges = body_edges(path, original)
+    current = service.load(created.path)
+
+    service.save(
+        current,
+        replace(current.metadata, preview_status="completed"),
+        expected_hash=current.content_hash,
+    )
+
+    updated = path.read_bytes().decode("utf-8")
+    assert body_edges(path, updated) == expected_edges
+    assert updated.count(real_start) == 2
+    assert "preview_status: completed" in updated
 
 
 @pytest.mark.parametrize(

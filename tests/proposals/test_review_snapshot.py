@@ -1,3 +1,4 @@
+import difflib
 import hashlib
 import json
 from pathlib import Path
@@ -186,3 +187,108 @@ def test_human_patch_snapshot_requires_current_reviewed_target(tmp_path: Path) -
         build_review_snapshot(vault_root=tmp_path, patch_document=document)
 
     assert error.value.code == "stale_base_hash"
+
+
+@pytest.mark.parametrize("separator", ["\u2028", "\v"], ids=["unicode-line-separator", "vertical-tab"])
+def test_managed_snapshot_replaces_exact_content_span(
+    tmp_path: Path, separator: str
+) -> None:
+    prefix = (
+        "---\ntype: note\n---\n"
+        "Human prefix stays.\n"
+        "<!-- lifeos:managed:start summary -->\n"
+    )
+    suffix = "<!-- lifeos:managed:end summary -->\nHuman suffix stays.\n"
+    original = prefix + f"Old first{separator}Old second\n" + suffix
+    replacement = "New summary.\n"
+    expected = prefix + replacement + suffix
+    target = tmp_path / "wiki/managed.md"
+    target.parent.mkdir()
+    target.write_text(original, encoding="utf-8")
+    operation = ReplaceManagedBlock(
+        "op-managed", "wiki/managed.md", _hash(original), "summary", replacement
+    )
+
+    snapshot = build_review_snapshot(
+        vault_root=tmp_path,
+        patch_document=PatchDocumentV2(2, PROPOSAL_ID, (operation,)),
+    )
+
+    expected_diff = "\n".join(
+        difflib.unified_diff(
+            original.splitlines(),
+            expected.splitlines(),
+            fromfile="a/wiki/managed.md",
+            tofile="b/wiki/managed.md",
+            lineterm="",
+        )
+    )
+    assert snapshot.operations[0].unified_diff == expected_diff
+    assert target.read_bytes() == original.encode("utf-8")
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        (
+            "<!-- lifeos:managed:start nested -->\n"
+            "Nested content.\n"
+            "<!-- lifeos:managed:end nested -->\n"
+        ),
+        "<!-- lifeos:managed:end summary -->\nOutside content.\n",
+        "<!-- lifeos:managed:end summary -->\n```markdown\nOutside content.\n",
+        "```markdown\nUnclosed code example.\n",
+    ],
+    ids=["nested-marker", "early-end-marker", "early-end-hides-real-end", "unclosed-fence"],
+)
+def test_managed_snapshot_rejects_replacement_that_changes_structural_boundaries(
+    tmp_path: Path, replacement: str
+) -> None:
+    original = (
+        "Human prefix stays.\n"
+        "<!-- lifeos:managed:start summary -->\n"
+        "Old summary.\n"
+        "<!-- lifeos:managed:end summary -->\n"
+        "Human suffix stays.\n"
+    )
+    target = tmp_path / "wiki/managed.md"
+    target.parent.mkdir()
+    target.write_text(original, encoding="utf-8")
+    operation = ReplaceManagedBlock(
+        "op-managed", "wiki/managed.md", _hash(original), "summary", replacement
+    )
+
+    with pytest.raises(ReviewSnapshotError):
+        build_review_snapshot(
+            vault_root=tmp_path,
+            patch_document=PatchDocumentV2(2, PROPOSAL_ID, (operation,)),
+        )
+
+    assert target.read_bytes() == original.encode("utf-8")
+
+
+def test_fenced_marker_example_cannot_authorize_managed_snapshot(tmp_path: Path) -> None:
+    original = (
+        "# Human note\n\n"
+        "```markdown\n"
+        "```not-a-closing-fence\n"
+        "<!-- lifeos:managed:start summary -->\n"
+        "Human-owned code example.\n"
+        "<!-- lifeos:managed:end summary -->\n"
+        "```\n"
+    )
+    target = tmp_path / "wiki/managed.md"
+    target.parent.mkdir()
+    target.write_text(original, encoding="utf-8")
+    operation = ReplaceManagedBlock(
+        "op-managed", "wiki/managed.md", _hash(original), "summary", "New summary.\n"
+    )
+
+    with pytest.raises(ReviewSnapshotError) as error:
+        build_review_snapshot(
+            vault_root=tmp_path,
+            patch_document=PatchDocumentV2(2, PROPOSAL_ID, (operation,)),
+        )
+
+    assert error.value.code == "managed_block_mismatch"
+    assert target.read_bytes() == original.encode("utf-8")

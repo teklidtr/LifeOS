@@ -15,6 +15,7 @@ from lifeos.experiments import (
     Observation,
     SafetyClassification,
 )
+from lifeos.markdown.parser import parse_markdown_note
 
 NOW = datetime(2026, 7, 16, 9, tzinfo=timezone.utc)
 
@@ -70,6 +71,55 @@ def test_create_round_trip_and_preserve_human_annotations(tmp_path: Path) -> Non
     drafted = api.transition(created.path, "drafting", expected_hash=loaded.content_hash, now=NOW)
     assert "Keep this sentence." in drafted.human_body
     assert drafted.metadata.lifecycle[-1].to_state == "drafting"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_transition_preserves_exact_body_around_real_managed_block(
+    tmp_path: Path, newline: str,
+) -> None:
+    api = service(tmp_path)
+    created = api.create(
+        title="Morning walk",
+        description="Small focus experiment",
+        category="productivity",
+        protocol=protocol(),
+        now=NOW,
+    )
+    path = tmp_path / created.path
+    real_start = "<!-- lifeos:managed:start personal-experiment -->"
+    fake_prefix = (
+        "\n\n\n```md\n"
+        "<!-- lifeos:managed:start personal-experiment -->\n"
+        "```\n"
+        "Human experiment text outside the real block.  \n\n"
+    )
+    original = path.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(path, content=original)
+    block = parsed.managed_blocks[0]
+    body = (
+        fake_prefix
+        + parsed.body[block.start_offset : block.end_offset]
+        + "\n\n## User annotations\n\nKeep this trailing text.  \n\n\n"
+    ).replace("\n", newline)
+    original = original[: len(original) - len(parsed.body)] + body
+    path.write_bytes(original.encode("utf-8"))
+    parsed = parse_markdown_note(path, content=original)
+    block = parsed.managed_blocks[0]
+    expected_prefix = parsed.body[: block.start_offset].encode("utf-8")
+    expected_suffix = parsed.body[block.end_offset :].encode("utf-8")
+    current = api.load(created.path)
+
+    api.transition(current.path, "drafting", expected_hash=current.content_hash, now=NOW)
+
+    updated = path.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(path, content=updated)
+    assert not parsed.findings
+    assert len(parsed.managed_blocks) == 1
+    block = parsed.managed_blocks[0]
+    assert parsed.body[: block.start_offset].encode("utf-8") == expected_prefix
+    assert parsed.body[block.end_offset :].encode("utf-8") == expected_suffix
+    assert updated.count(real_start) == 2
+    assert "state: drafting" in updated
 
 
 def test_invalid_transition_and_unsafe_activation_fail_closed(tmp_path: Path) -> None:

@@ -32,7 +32,10 @@ from .._transaction_files import (
     rollback_replacement,
 )
 from ..config import runtime_overlaps_reserved_canonical
-from ..markdown.parser import parse_markdown_note
+from ..markdown.parser import (
+    parse_markdown_note,
+    replace_managed_block,
+)
 from ..wiki.layout import is_emergent_generated_parent
 from ..ownership.manifest import (
     DEFAULT_OWNERSHIP_MANIFEST_PATH,
@@ -616,22 +619,23 @@ def _candidate_for_operation(
         assert original_content is not None
         original_text = original_content.decode("utf-8")
         parsed = parse_markdown_note(vault_root / target_path, content=original_text)
+        if any(finding.severity == "error" for finding in parsed.findings):
+            raise TransactionError("Markdown target has invalid managed-block structure")
         matching_blocks = [
             block for block in parsed.managed_blocks if block.name == operation.block_name
         ]
-        if not matching_blocks:
+        if len(matching_blocks) != 1:
             raise TransactionError(f"Block '{operation.block_name}' not found")
         target_block = matching_blocks[0]
-        lines = original_text.splitlines(keepends=True)
-        before = "".join(lines[: target_block.start_line])
-        after = "".join(lines[target_block.end_line - 1 :])
-        new_content = before + operation.new_content + after
-        reparsed = parse_markdown_note(vault_root / target_path, content=new_content)
-        if (
-            len([block for block in reparsed.managed_blocks if block.name == operation.block_name])
-            != 1
-        ):
-            raise TransactionError(f"Block '{operation.block_name}' not preserved exactly once")
+        prefix = original_text[: len(original_text) - len(parsed.body)]
+        try:
+            new_content = prefix + replace_managed_block(
+                parsed.body, target_block, operation.new_content, content_only=True
+            )
+        except ValueError as error:
+            raise TransactionError(
+                f"Block '{operation.block_name}' not preserved exactly once"
+            ) from error
         candidate_content = new_content.encode("utf-8")
     else:
         raise TransactionError("Unsupported operation type")

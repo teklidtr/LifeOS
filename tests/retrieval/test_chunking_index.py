@@ -55,6 +55,29 @@ A conflicting account exists.
     assert note.chunks[0].metadata["source"] == "textbook"
 
 
+def test_false_fence_closer_does_not_create_retrieval_headings(
+    tmp_path: Path,
+) -> None:
+    note = chunk_markdown_file(
+        source(
+            tmp_path,
+            "wiki/fenced.md",
+            "# Outside\n\n"
+            "```md\n"
+            "```not-a-closing-fence\n"
+            "## Inside code\n"
+            "example\n"
+            "```\n\n"
+            "## Real section\n\n"
+            "Real text.\n",
+        )
+    )
+
+    assert "Inside code" not in {chunk.heading for chunk in note.chunks}
+    assert "Real section" in {chunk.heading for chunk in note.chunks}
+    assert any("## Inside code" in chunk.text for chunk in note.chunks)
+
+
 def test_structural_chunking_suppresses_duplicate_passages_and_bounds_large_notes(
     tmp_path: Path,
 ) -> None:

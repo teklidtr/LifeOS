@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from lifeos.markdown.parser import parse_markdown_note
+
 from lifeos.daily import (
     CheckInRequest,
     DailyInteractionError,
@@ -92,6 +94,72 @@ def test_review_update_preserves_reflection(tmp_path: Path) -> None:
     text = path.read_text()
     assert "- new fact" in text
     assert "My reflection" in text
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_review_update_does_not_bridge_from_fenced_example_to_real_facts(
+    tmp_path: Path, newline: str,
+) -> None:
+    app = service(tmp_path)
+    created = app.create_review_note(
+        ReviewNoteRequest("review-bridge-1", "weekly", date(2026, 7, 16), "- fact")
+    )
+    path = app.vault_root / created.reference.path
+    real_start = "<!-- lifeos:managed:start facts -->"
+    fake_prefix = (
+        "```md\n"
+        "<!-- lifeos:managed:start facts -->\n"
+        "```\n"
+        "Human review text outside the real block.\n"
+    )
+    original = path.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(path, content=original)
+    body = "\n\n" + parsed.body.replace(real_start, fake_prefix + real_start, 1) + "\n  \n\n"
+    original = original[: len(original) - len(parsed.body)] + body.replace("\n", newline)
+    path.write_bytes(original.encode("utf-8"))
+    before = parse_markdown_note(path, content=original)
+    before_block = before.managed_blocks[0]
+    expected_hash = content_hash(original)
+
+    app.create_review_note(
+        ReviewNoteRequest(
+            "review-bridge-2",
+            "weekly",
+            date(2026, 7, 16),
+            "- new fact",
+            expected_hash,
+        )
+    )
+
+    updated = path.read_bytes().decode("utf-8")
+    after = parse_markdown_note(path, content=updated)
+    after_block = after.managed_blocks[0]
+    assert before.body[: before_block.start_offset] == after.body[: after_block.start_offset]
+    assert before.body[before_block.end_offset :] == after.body[after_block.end_offset :]
+    assert fake_prefix.replace("\n", newline) in updated
+    assert updated.count(real_start) == 2
+    assert "- new fact" in updated
+
+
+def test_review_update_rejects_early_end_that_hides_rendered_boundary(tmp_path: Path) -> None:
+    app = service(tmp_path)
+    created = app.create_review_note(
+        ReviewNoteRequest("review-boundary-1", "weekly", date(2026, 7, 16), "- fact")
+    )
+    path = app.vault_root / created.reference.path
+    original = path.read_bytes()
+
+    with pytest.raises(DailyInteractionError) as error:
+        app.create_review_note(
+            ReviewNoteRequest(
+                "review-boundary-2", "weekly", date(2026, 7, 16),
+                "<!--lifeos:managed:end facts -->\n~~~markdown\n",
+                content_hash(original),
+            )
+        )
+
+    assert error.value.code == "invalid_note"
+    assert path.read_bytes() == original
 
 
 def test_invalid_path_fails_closed(tmp_path: Path) -> None:

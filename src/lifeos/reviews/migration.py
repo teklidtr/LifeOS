@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.daily.service import content_hash
-from lifeos.markdown.parser import parse_markdown_note
+from lifeos.markdown.parser import parse_markdown_note, splice_managed_block
 from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate
 from lifeos.reviews.history import list_review_history
 from lifeos.reviews.progress import rebuild_progress_cache
@@ -22,9 +22,7 @@ MigrationState = Literal["ready", "resumable", "already_migrated", "conflict", "
 _LEGACY = re.compile(
     r"^reviews/(?P<kind>morning|evening)-(?P<day>\d{4}-\d{2}-\d{2})\.md$|^reviews/weekly-(?P<year>\d{4})-W(?P<week>\d{2})\.md$"
 )
-_MANAGED_FACTS = re.compile(
-    r"<!-- lifeos:managed:start facts -->.*?<!-- lifeos:managed:end facts -->", re.S
-)
+_CANONICAL_MANAGED_NAMES = {"facts", "items", "continuity", "completion-summary"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,12 +100,21 @@ def _legacy_identity(match: re.Match[str]) -> tuple[str, date, str]:
 
 def _reflection(content: str, path: Path) -> tuple[str, tuple[str, ...]]:
     parsed = parse_markdown_note(path, content=content)
-    diagnostics = tuple(item.message for item in parsed.findings if item.severity == "error")
-    body = _MANAGED_FACTS.sub("", parsed.body).strip()
+    diagnostics = [item.message for item in parsed.findings if item.severity == "error"]
+    facts = [block for block in parsed.managed_blocks if block.name == "facts"]
+    if len(facts) != 1:
+        diagnostics.append(
+            f"Review managed block 'facts' must appear exactly once; found {len(facts)}."
+        )
+    if len(parsed.managed_blocks) != len(facts):
+        diagnostics.append("Legacy review contains unsupported managed blocks.")
+    if diagnostics:
+        return parsed.body.strip(), tuple(diagnostics)
+    body = splice_managed_block(parsed.body, facts[0], "").strip()
     # Remove the legacy title and reflection heading, while retaining all human-owned text.
     body = re.sub(r"^# .+?\n+", "", body, count=1).strip()
     body = re.sub(r"^## Reflection\s*\n*", "", body, count=1).strip()
-    return body, diagnostics
+    return body, ()
 
 
 def _is_pristine(service: ReviewArtifactService, review_id: str) -> bool:
@@ -127,10 +134,17 @@ def _is_pristine(service: ReviewArtifactService, review_id: str) -> bool:
     ):
         return False
     # Initial managed content and empty reflection headings are the only safe resumable target.
-    human = artifact.body
-    human = re.sub(
-        r"<!-- lifeos:managed:start .*?<!-- lifeos:managed:end .*?-->", "", human, flags=re.S
-    )
+    parsed = parse_markdown_note(Path(artifact.path), content=f"---\n---\n{artifact.body}")
+    if any(item.severity == "error" for item in parsed.findings):
+        return False
+    if (
+        len(parsed.managed_blocks) != len(_CANONICAL_MANAGED_NAMES)
+        or {block.name for block in parsed.managed_blocks} != _CANONICAL_MANAGED_NAMES
+    ):
+        return False
+    human = parsed.body
+    for block in sorted(parsed.managed_blocks, key=lambda item: item.start_offset, reverse=True):
+        human = splice_managed_block(human, block, "")
     meaningful = [
         line.strip() for line in human.splitlines() if line.strip() and not line.startswith("#")
     ]
@@ -222,7 +236,7 @@ def _insert_import(body: str, heading: str, label: str, reflection: str) -> str:
     next_heading = re.search(r"(?m)^##\s+", body[match.end() :])
     end = match.end() + (next_heading.start() if next_heading else len(body[match.end() :]))
     insertion = f"\n\n{marker}\n\n{reflection.strip()}\n"
-    return body[:end].rstrip() + insertion + "\n" + body[end:].lstrip("\n")
+    return body[:end] + insertion + "\n" + body[end:]
 
 
 def apply_review_migration(

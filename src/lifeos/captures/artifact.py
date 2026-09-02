@@ -11,8 +11,8 @@ from pathlib import Path
 import yaml
 
 from lifeos.daily.service import _atomic_write, content_hash
-from lifeos.markdown.parser import parse_markdown_note
-from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
+from lifeos.markdown.parser import parse_markdown_note, replace_managed_block, splice_managed_block
+from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown, read_vault_markdown
 
 from .contracts import (
     ArtifactLink,
@@ -34,10 +34,8 @@ from .contracts import (
 
 _CAPTURE_START = "<!-- lifeos:managed:start rich-capture -->"
 _CAPTURE_END = "<!-- lifeos:managed:end rich-capture -->"
-_CAPTURE_RE = re.compile(re.escape(_CAPTURE_START) + r".*?" + re.escape(_CAPTURE_END), re.S)
 _MANIFEST_START = "<!-- lifeos:managed:start attachment-manifest -->"
 _MANIFEST_END = "<!-- lifeos:managed:end attachment-manifest -->"
-_MANIFEST_RE = re.compile(re.escape(_MANIFEST_START) + r".*?" + re.escape(_MANIFEST_END), re.S)
 _CAPTURE_ID_RE = re.compile(r"^cap-(\d{8}T\d{6}Z)-[a-f0-9]{8}$")
 _ATTACHMENT_ID_RE = re.compile(r"^att-[a-f0-9]{16}$")
 
@@ -157,8 +155,27 @@ def _manifest_document(metadata: AttachmentManifest, human_body: str) -> str:
     return f"---\n{dumped}\n---\n\n{_render_manifest(metadata)}\n\n{human}\n"
 
 
+def _read_source(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
+    try:
+        return read_vault_markdown(vault_root, relative_path)
+    except VaultAccessError as exc:
+        raise CaptureError(exc.code, str(exc), {"path": relative_path}) from exc
+
+
+def _updated_document(
+    source: VaultMarkdownFile, frontmatter: dict[str, object], managed: str
+) -> str:
+    parsed = parse_markdown_note(source.path, content=source.content)
+    try:
+        body = replace_managed_block(parsed.body, parsed.managed_blocks[0], managed)
+    except ValueError as error:
+        raise CaptureError("malformed_artifact", str(error), {"path": source.relative_path}) from error
+    dumped = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).rstrip()
+    return f"---\n{dumped}\n---\n{body}"
+
+
 def _parse(
-    path: Path, relative_path: str, content: str, *, expected_type: str, block_re: re.Pattern[str]
+    path: Path, relative_path: str, content: str, *, expected_type: str, block_name: str
 ) -> tuple[dict[str, object], str]:
     parsed = parse_markdown_note(path, content=content)
     error = next((item for item in parsed.findings if item.severity == "error"), None)
@@ -167,19 +184,18 @@ def _parse(
     frontmatter = dict(parsed.frontmatter)
     if frontmatter.get("type") != expected_type:
         raise CaptureError("unsupported_artifact", f"The note is not a {expected_type}.")
-    matches = list(block_re.finditer(parsed.body))
-    if len(matches) != 1:
+    matches = [block for block in parsed.managed_blocks if block.name == block_name]
+    if len(matches) != 1 or len(parsed.managed_blocks) != 1:
         raise CaptureError(
             "malformed_artifact", f"The managed {expected_type} block must appear exactly once."
         )
-    match = matches[0]
-    human = (parsed.body[: match.start()] + parsed.body[match.end() :]).strip("\n") + "\n"
+    human = splice_managed_block(parsed.body, matches[0], "").strip("\n") + "\n"
     return frontmatter, human
 
 
 def parse_capture(path: Path, relative_path: str, content: str) -> CaptureArtifact:
     data, human = _parse(
-        path, relative_path, content, expected_type="rich-capture", block_re=_CAPTURE_RE
+        path, relative_path, content, expected_type="rich-capture", block_name="rich-capture"
     )
     return CaptureArtifact(
         relative_path, "sha256:" + content_hash(content), capture_metadata_from_dict(data), human
@@ -188,7 +204,11 @@ def parse_capture(path: Path, relative_path: str, content: str) -> CaptureArtifa
 
 def parse_manifest(path: Path, relative_path: str, content: str) -> AttachmentManifestArtifact:
     data, human = _parse(
-        path, relative_path, content, expected_type="attachment-manifest", block_re=_MANIFEST_RE
+        path,
+        relative_path,
+        content,
+        expected_type="attachment-manifest",
+        block_name="attachment-manifest",
     )
     return AttachmentManifestArtifact(
         relative_path, "sha256:" + content_hash(content), attachment_manifest_from_dict(data), human
@@ -329,6 +349,14 @@ class CaptureArtifactService:
         provenance_record: ProvenanceRecord | None = None,
         now: datetime | None = None,
     ) -> PreparedCapture:
+        source = _read_source(self.vault_root, artifact.path)
+        current = parse_capture(source.path, source.relative_path, source.content)
+        if current.content_hash != artifact.content_hash:
+            raise CaptureError(
+                "stale_capture",
+                "Capture changed after it was opened.",
+                {"actual_hash": current.content_hash},
+            )
         validate_transition(artifact.metadata.state, target)
         moment = utc_now(now)
         event = LifecycleEvent(
@@ -349,16 +377,13 @@ class CaptureArtifactService:
                 else (*artifact.metadata.provenance, provenance_record)
             ),
         )
-        content = _capture_document(metadata, artifact.human_body)
+        content = _updated_document(source, metadata.to_frontmatter(), _render_capture(metadata))
         return PreparedCapture(
             parse_capture(self.vault_root / artifact.path, artifact.path, content), content
         )
 
     def load(self, relative_path: str) -> CaptureArtifact:
-        try:
-            source = read_vault_markdown(self.vault_root, relative_path)
-        except VaultAccessError as exc:
-            raise CaptureError(exc.code, str(exc), {"path": relative_path}) from exc
+        source = _read_source(self.vault_root, relative_path)
         return parse_capture(source.path, source.relative_path, source.content)
 
     def list(
@@ -390,17 +415,20 @@ class CaptureArtifactService:
     def save(
         self, artifact: CaptureArtifact, metadata: CaptureMetadata, *, expected_hash: str
     ) -> CaptureArtifact:
-        current = self.load(artifact.path)
+        source = _read_source(self.vault_root, artifact.path)
+        current = parse_capture(source.path, source.relative_path, source.content)
         if current.content_hash != expected_hash:
             raise CaptureError(
                 "stale_capture",
                 "Capture changed after it was opened.",
                 {"actual_hash": current.content_hash},
             )
+        document = _updated_document(source, metadata.to_frontmatter(), _render_capture(metadata))
+        parse_capture(self.vault_root / artifact.path, artifact.path, document)
         _atomic_write(
             self.vault_root,
             artifact.path,
-            _capture_document(metadata, current.human_body),
+            document,
             expected_hash=expected_hash.removeprefix("sha256:"),
             create=False,
         )
@@ -459,20 +487,19 @@ class AttachmentManifestService:
         self, metadata: AttachmentManifest, *, human_body: str = "## User annotations\n\n"
     ) -> AttachmentManifestArtifact:
         path = manifest_path(metadata.attachment_id)
+        document = _manifest_document(metadata, human_body)
+        parse_manifest(self.vault_root / path, path, document)
         _atomic_write(
             self.vault_root,
             path,
-            _manifest_document(metadata, human_body),
+            document,
             expected_hash=None,
             create=True,
         )
         return self.load(path)
 
     def load(self, relative_path: str) -> AttachmentManifestArtifact:
-        try:
-            source = read_vault_markdown(self.vault_root, relative_path)
-        except VaultAccessError as exc:
-            raise CaptureError(exc.code, str(exc), {"path": relative_path}) from exc
+        source = _read_source(self.vault_root, relative_path)
         return parse_manifest(source.path, source.relative_path, source.content)
 
     def list(self) -> tuple[AttachmentManifestArtifact, ...]:
@@ -495,17 +522,20 @@ class AttachmentManifestService:
         *,
         expected_hash: str,
     ) -> AttachmentManifestArtifact:
-        current = self.load(artifact.path)
+        source = _read_source(self.vault_root, artifact.path)
+        current = parse_manifest(source.path, source.relative_path, source.content)
         if current.content_hash != expected_hash:
             raise CaptureError(
                 "stale_manifest",
                 "Attachment manifest changed after it was opened.",
                 {"actual_hash": current.content_hash},
             )
+        document = _updated_document(source, metadata.to_frontmatter(), _render_manifest(metadata))
+        parse_manifest(self.vault_root / artifact.path, artifact.path, document)
         _atomic_write(
             self.vault_root,
             artifact.path,
-            _manifest_document(metadata, current.human_body),
+            document,
             expected_hash=expected_hash.removeprefix("sha256:"),
             create=False,
         )

@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Literal
 
 from .._secure_io import SecureIOError, hash_file_secure, open_directory_secure, read_file_secure
-from ..markdown.parser import parse_markdown_note
+from ..markdown.parser import (
+    parse_markdown_note,
+    replace_managed_block,
+)
 from ..ownership import DEFAULT_OWNERSHIP_MANIFEST_PATH
 from ..ownership.manifest import GeneratedOwnership, ManifestError
 from ..wiki.layout import is_emergent_generated_parent
@@ -920,28 +923,15 @@ def _evaluate_operation(
                     ),
                 )
 
-            # Construct candidate in memory using boundaries
-            # Preserve opening marker, closing marker, existing surrounding line endings.
-
-            lines = content_str.split("\n")
-
-            # The target_block gives us start_line and end_line (1-indexed).
-            # The body is between start_line and end_line exclusively.
-
-            # We want to replace lines[target_block.start_line : target_block.end_line - 1]
-            # with the new content (split into lines).
-            # If new_content is empty, we just insert no lines.
-
-            # However, parser lines are 1-indexed.
-            start_idx = target_block.start_line
-            end_idx = target_block.end_line - 1
-
-            new_lines = new_content.split("\n") if new_content else []
-            candidate_lines = lines[:start_idx] + new_lines + lines[end_idx:]
-            candidate_str = "\n".join(candidate_lines)
-            candidate_bytes = candidate_str.encode("utf-8")
-
-            if len(candidate_bytes) > max_bytes:
+            original_inner = parsed.body[
+                target_block.content_start_offset : target_block.content_end_offset
+            ]
+            candidate_size = (
+                len(content_str.encode("utf-8"))
+                - len(original_inner.encode("utf-8"))
+                + len(new_content.encode("utf-8"))
+            )
+            if candidate_size > max_bytes:
                 return OperationPreflightResult(
                     operation_id=op.id,
                     target_path=target_path,
@@ -958,8 +948,9 @@ def _evaluate_operation(
                     ),
                 )
 
-            candidate_parsed = parse_markdown_note(vault_root / norm_p, content=candidate_str)
-            if any(f.severity == "error" for f in candidate_parsed.findings):
+            try:
+                replace_managed_block(parsed.body, target_block, new_content, content_only=True)
+            except ValueError:
                 return OperationPreflightResult(
                     operation_id=op.id,
                     target_path=target_path,
@@ -972,24 +963,6 @@ def _evaluate_operation(
                             target_path=target_path,
                             field_path=None,
                             message="Candidate Markdown structure is invalid",
-                        ),
-                    ),
-                )
-
-            candidate_matches = [b for b in candidate_parsed.managed_blocks if b.name == block_name]
-            if len(candidate_matches) != 1:
-                return OperationPreflightResult(
-                    operation_id=op.id,
-                    target_path=target_path,
-                    state="invalid",
-                    findings=(
-                        PreflightFinding(
-                            severity="error",
-                            code="candidate_block_error",
-                            operation_id=op.id,
-                            target_path=target_path,
-                            field_path=None,
-                            message="Candidate must retain the managed block exactly once",
                         ),
                     ),
                 )

@@ -1,15 +1,16 @@
 import difflib
+import os
+import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
+
 import yaml
-import shutil
-import os
-import re
 
 from lifeos.ingestion.drafts import SourceSnapshot, WikiProposalContent
+from lifeos.markdown.parser import FenceState, advance_fenced_code_state, parse_markdown_note
 from lifeos.wiki.layout import infer_wiki_page_kind
-from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.schema import (
     ProposalMetadata,
     ProposalStatus,
@@ -158,15 +159,10 @@ class _WikiFrontmatterDumper(yaml.SafeDumper):
 
 
 _ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:\r?\n)?$")
-_FENCE_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
-
-
 def _scan_atx_headings(lines: list[str], *, skip_frontmatter: bool) -> list[tuple[int, int, str]]:
     headings: list[tuple[int, int, str]] = []
     in_frontmatter = False
-    in_fence = False
-    fence_char = ""
-    fence_length = 0
+    fence_state: FenceState = None
 
     for index, line in enumerate(lines):
         clean = line.rstrip("\r\n")
@@ -178,17 +174,11 @@ def _scan_atx_headings(lines: list[str], *, skip_frontmatter: bool) -> list[tupl
                 in_frontmatter = False
             continue
 
-        fence = _FENCE_RE.match(clean)
-        if fence:
-            marker = fence.group(1)
-            if not in_fence:
-                in_fence = True
-                fence_char = marker[0]
-                fence_length = len(marker)
-            elif marker[0] == fence_char and len(marker) >= fence_length:
-                in_fence = False
+        previous_fence = fence_state
+        fence_state = advance_fenced_code_state(clean, fence_state)
+        if previous_fence != fence_state:
             continue
-        if in_fence:
+        if fence_state is not None:
             continue
 
         match = _ATX_HEADING_RE.match(line)

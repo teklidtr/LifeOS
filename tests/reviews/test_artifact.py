@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from lifeos.daily import DailyInteractionError
+from lifeos.markdown.parser import parse_markdown_note
 from lifeos.reviews.artifact import (
     ReviewArtifactService,
     ReviewArtifactUpdate,
@@ -75,6 +76,85 @@ def test_missing_or_duplicate_managed_block_is_rejected_without_write(tmp_path: 
         app.load_id(artifact.metadata.review_id)
     assert invalid.value.code == "invalid_review_artifact"
     assert path.read_text() == malformed
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_managed_refresh_does_not_bridge_from_fenced_example_to_real_block(
+    tmp_path: Path, newline: str,
+) -> None:
+    app = service(tmp_path)
+    artifact = app.open_or_create(
+        kind="daily",
+        day=date(2026, 7, 16),
+        timezone="UTC",
+        now=NOW,
+        idempotency_key="open",
+    )
+    path = app.vault_root / artifact.path
+    fake_prefix = (
+        "```md\n"
+        "<!-- lifeos:managed:start facts -->\n"
+        "```\n"
+        "Human text between the example and real block must survive.\n"
+    )
+    real_start = "<!-- lifeos:managed:start facts -->"
+    original = path.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(path, content=original)
+    body = "\n\n" + parsed.body.replace(real_start, fake_prefix + real_start, 1) + "\n  \n\n"
+    original = original[: len(original) - len(parsed.body)] + body.replace("\n", newline)
+    path.write_bytes(original.encode("utf-8"))
+    before = parse_markdown_note(path, content=original)
+    before_block = next(block for block in before.managed_blocks if block.name == "facts")
+    current = app.load_id(artifact.metadata.review_id)
+
+    app.update(
+        review_id=current.metadata.review_id,
+        expected_hash=current.content_hash,
+        idempotency_key="refresh",
+        now=NOW,
+        update=ReviewArtifactUpdate(managed_blocks={"facts": "## Review facts\n\n- New fact"}),
+    )
+
+    updated = path.read_bytes().decode("utf-8")
+    after = parse_markdown_note(path, content=updated)
+    after_block = next(block for block in after.managed_blocks if block.name == "facts")
+    assert before.body[: before_block.start_offset] == after.body[: after_block.start_offset]
+    assert before.body[before_block.end_offset :] == after.body[after_block.end_offset :]
+    assert fake_prefix.replace("\n", newline) in updated
+    assert updated.count(real_start) == 2
+    assert "- New fact" in updated
+
+
+def test_fenced_marker_example_cannot_substitute_for_missing_review_block(
+    tmp_path: Path,
+) -> None:
+    app = service(tmp_path)
+    artifact = app.open_or_create(
+        kind="daily",
+        day=date(2026, 7, 16),
+        timezone="UTC",
+        now=NOW,
+        idempotency_key="open",
+    )
+    path = app.vault_root / artifact.path
+    original = path.read_text(encoding="utf-8")
+    block_start = original.index("<!-- lifeos:managed:start facts -->")
+    block_end = original.index("<!-- lifeos:managed:end facts -->") + len(
+        "<!-- lifeos:managed:end facts -->"
+    )
+    malformed = (
+        original[:block_start]
+        + "```md\n<!-- lifeos:managed:start facts -->\nexample\n"
+        "<!-- lifeos:managed:end facts -->\n```"
+        + original[block_end:]
+    )
+    path.write_text(malformed, encoding="utf-8")
+
+    with pytest.raises(DailyInteractionError) as invalid:
+        app.load_id(artifact.metadata.review_id)
+
+    assert invalid.value.code == "invalid_review_artifact"
+    assert path.read_text(encoding="utf-8") == malformed
 
 
 def test_duplicate_review_identity_outside_expected_path_is_rejected(tmp_path: Path) -> None:

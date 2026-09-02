@@ -12,9 +12,9 @@ from typing import Mapping
 import yaml
 
 from lifeos.daily.service import _atomic_write, content_hash
-from lifeos.markdown.parser import parse_markdown_note
+from lifeos.markdown.parser import parse_markdown_note, replace_managed_block, splice_managed_block
 from lifeos.retrieval import RetrievalScope
-from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
+from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown, read_vault_markdown
 
 from .contracts import (
     CONVERSATION_SCHEMA_VERSION,
@@ -28,7 +28,6 @@ from .contracts import (
 
 _MANAGED_START = "<!-- lifeos:managed:start knowledge-conversation -->"
 _MANAGED_END = "<!-- lifeos:managed:end knowledge-conversation -->"
-_MANAGED_RE = re.compile(re.escape(_MANAGED_START) + r".*?" + re.escape(_MANAGED_END), re.S)
 _ID_RE = re.compile(r"^conv-(\d{8}T\d{6}Z)-[a-f0-9]{8}$")
 
 
@@ -91,6 +90,13 @@ def _document(metadata: ConversationMetadata, turns: tuple[ConversationTurn, ...
     return f"---\n{dumped}\n---\n\n{_managed_body(turns)}\n\n{annotations}\n"
 
 
+def _read_source(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
+    try:
+        return read_vault_markdown(vault_root, relative_path)
+    except VaultAccessError as exc:
+        raise ConversationError(exc.code, str(exc), {"path": relative_path}) from exc
+
+
 def _parse(source_path: Path, relative_path: str, content: str) -> ConversationArtifact:
     parsed = parse_markdown_note(source_path, content=content)
     error = next((item for item in parsed.findings if item.severity == "error"), None)
@@ -105,11 +111,10 @@ def _parse(source_path: Path, relative_path: str, content: str) -> ConversationA
         raise ConversationError("unsupported_schema", "Conversation schema is malformed.") from exc
     if schema != CONVERSATION_SCHEMA_VERSION:
         raise ConversationError("unsupported_schema", "Conversation schema version is unsupported.")
-    matches = list(_MANAGED_RE.finditer(parsed.body))
-    if len(matches) != 1:
+    matches = [block for block in parsed.managed_blocks if block.name == "knowledge-conversation"]
+    if len(matches) != 1 or len(parsed.managed_blocks) != 1:
         raise ConversationError("malformed_artifact", "The managed conversation block must appear exactly once.")
-    match = matches[0]
-    human_body = (parsed.body[: match.start()] + parsed.body[match.end() :]).strip("\n") + "\n"
+    human_body = splice_managed_block(parsed.body, matches[0], "").strip("\n") + "\n"
     raw_turns = fm.get("turns", [])
     if not isinstance(raw_turns, list):
         raise ConversationError("invalid_turn", "Conversation turns must be a list.")
@@ -157,14 +162,12 @@ class ConversationArtifactService:
         )
         relative_path = _path(metadata)
         document = _document(metadata, turns, "## Annotations\n\n")
+        _parse(self.vault_root / relative_path, relative_path, document)
         _atomic_write(self.vault_root, relative_path, document, expected_hash=None, create=True)
         return self.load(relative_path)
 
     def load(self, relative_path: str) -> ConversationArtifact:
-        try:
-            source = read_vault_markdown(self.vault_root, relative_path)
-        except VaultAccessError as exc:
-            raise ConversationError(exc.code, str(exc), {"path": relative_path}) from exc
+        source = _read_source(self.vault_root, relative_path)
         return _parse(source.path, source.relative_path, source.content)
 
     def list(self, *, include_archived: bool = True) -> tuple[ConversationArtifact, ...]:
@@ -204,7 +207,8 @@ class ConversationArtifactService:
         turns: tuple[ConversationTurn, ...] | None = None,
         now: datetime | None = None,
     ) -> ConversationArtifact:
-        current = self.load(relative_path)
+        source = _read_source(self.vault_root, relative_path)
+        current = _parse(source.path, source.relative_path, source.content)
         if current.content_hash != expected_hash:
             raise ConversationError("stale_artifact", "Conversation changed since it was loaded.")
         moment = _now(now)
@@ -217,7 +221,17 @@ class ConversationArtifactService:
             excluded_sources=excluded_sources if excluded_sources is not None else current.metadata.excluded_sources,
             updated_at=moment.isoformat(),
         )
-        output = _document(metadata, turns if turns is not None else current.turns, current.human_body)
+        selected_turns = turns if turns is not None else current.turns
+        parsed = parse_markdown_note(source.path, content=source.content)
+        try:
+            body = replace_managed_block(
+                parsed.body, parsed.managed_blocks[0], _managed_body(selected_turns)
+            )
+        except ValueError as error:
+            raise ConversationError("malformed_artifact", str(error)) from error
+        dumped = yaml.safe_dump(metadata.to_frontmatter(selected_turns), sort_keys=False, allow_unicode=True).rstrip()
+        output = f"---\n{dumped}\n---\n{body}"
+        _parse(self.vault_root / relative_path, relative_path, output)
         _atomic_write(
             self.vault_root,
             relative_path,

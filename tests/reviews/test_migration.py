@@ -7,6 +7,7 @@ from lifeos.reviews import (
     preview_review_migration,
     rebuild_review_state,
 )
+from lifeos.reviews.migration import _insert_import
 
 NOW = datetime.fromisoformat("2026-07-16T12:00:00+03:00")
 
@@ -31,6 +32,17 @@ status: active
 
 {reflection}
 """
+
+
+def test_import_insertion_preserves_existing_human_bytes() -> None:
+    prefix = "\n\n## Reflection\n\nKeep trailing spaces.  \n\n\n"
+    suffix = "## Next\n\nKeep the final whitespace.  \n\n"
+
+    updated = _insert_import(prefix + suffix, "## Reflection", "Daily", "Imported reflection.")
+
+    assert updated.startswith(prefix)
+    assert updated.endswith(suffix)
+    assert "### Imported Daily reflection\n\nImported reflection." in updated
 
 
 def test_preview_and_apply_merge_daily_reflections_without_deleting_sources(tmp_path: Path) -> None:
@@ -77,6 +89,37 @@ def test_preview_and_apply_merge_daily_reflections_without_deleting_sources(tmp_
     )
     assert repeated.already_migrated == ("daily-2026-07-16",)
     assert repeated.migrated == ()
+
+
+def test_migration_does_not_bridge_from_fenced_example_to_real_facts(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
+    reviews = vault / "reviews"
+    reviews.mkdir(parents=True)
+    source = reviews / "morning-2026-07-16.md"
+    real_start = "<!-- lifeos:managed:start facts -->"
+    fake_prefix = (
+        "```md\n"
+        "<!-- lifeos:managed:start facts -->\n"
+        "```\n"
+        "Human legacy text outside the real facts block.\n"
+    )
+    original = legacy("morning", "2026-07-16", "Legacy reflection.").replace(
+        real_start,
+        fake_prefix + real_start,
+        1,
+    )
+    source.write_text(original, encoding="utf-8")
+
+    preview = preview_review_migration(vault_root=vault, runtime_dir=runtime)
+
+    migrated_source = preview.candidates[0].sources[0]
+    assert fake_prefix in migrated_source.reflection
+    assert "Human legacy text outside the real facts block." in migrated_source.reflection
+    assert "Managed old fact" not in migrated_source.reflection
+    assert source.read_text(encoding="utf-8") == original
 
 
 def test_weekly_legacy_note_uses_iso_week_identity(tmp_path: Path) -> None:

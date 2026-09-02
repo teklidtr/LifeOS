@@ -23,7 +23,7 @@ from lifeos.daily.contracts import (
     TaskOutcomeRequest,
 )
 from lifeos.daily.errors import DailyInteractionError
-from lifeos.markdown.parser import parse_markdown_note
+from lifeos.markdown.parser import ManagedBlock, parse_markdown_note, replace_managed_block
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
 _SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
@@ -57,8 +57,12 @@ def _slug(value: str) -> str:
     return slug[:80] or "capture"
 
 
-def _frontmatter_document(frontmatter: dict[str, Any], body: str) -> str:
+def _frontmatter_document(
+    frontmatter: dict[str, Any], body: str, *, preserve_body: bool = False
+) -> str:
     dumped = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).rstrip()
+    if preserve_body:
+        return f"---\n{dumped}\n---\n{body}"
     normalized_body = body.lstrip("\n")
     return f"---\n{dumped}\n---\n\n{normalized_body}".rstrip() + "\n"
 
@@ -81,6 +85,35 @@ def _read_existing(vault_root: Path, relative_path: str) -> tuple[str, dict[str,
             "invalid_note", error.message, "Repair the note before changing it."
         )
     return source.content, dict(parsed.frontmatter), parsed.body
+
+
+def _review_managed_block(body: str, name: str, path: str) -> ManagedBlock:
+    parsed = parse_markdown_note(Path(path), content=f"---\n---\n{body}")
+    error = next((finding for finding in parsed.findings if finding.severity == "error"), None)
+    if error is not None:
+        raise DailyInteractionError(
+            "invalid_note", error.message, "Restore the managed block before updating."
+        )
+    matches = [block for block in parsed.managed_blocks if block.name == name]
+    if len(matches) != 1 or len(parsed.managed_blocks) != 1:
+        raise DailyInteractionError(
+            "invalid_note",
+            f"Review {name} managed block must be the only managed block; found {len(matches)} matching and {len(parsed.managed_blocks)} total.",
+            "Restore the managed block before updating.",
+        )
+    return matches[0]
+
+
+def _replace_review_managed_block(body: str, name: str, replacement: str, path: str) -> str:
+    block = _review_managed_block(body, name, path)
+    try:
+        result = replace_managed_block(body, block, replacement)
+    except ValueError as error:
+        raise DailyInteractionError(
+            "invalid_note", str(error), "Restore the managed block before updating."
+        ) from error
+    _review_managed_block(result, name, path)
+    return result
 
 
 def _ensure_expected(actual: str, expected: str | None, path: str) -> None:
@@ -631,22 +664,14 @@ class DailyInteractionService:
                     "status": "active",
                 }
                 body = f"# {request.kind.title()} review\n\n{managed}\n\n## Reflection\n\n"
+                _review_managed_block(body, "facts", path)
                 old_hash = None
             else:
                 old, fm, body = _read_existing(self.vault_root, path)
                 old_hash = content_hash(old)
                 _ensure_expected(old_hash, request.expected_hash, path)
-                pattern = re.compile(
-                    r"<!-- lifeos:managed:start facts -->.*?<!-- lifeos:managed:end facts -->", re.S
-                )
-                if not pattern.search(body):
-                    raise DailyInteractionError(
-                        "invalid_note",
-                        "Review facts managed block is missing.",
-                        "Restore the managed block before updating.",
-                    )
-                body = pattern.sub(managed, body, count=1)
-            document = _frontmatter_document(fm, body)
+                body = _replace_review_managed_block(body, "facts", managed, path)
+            document = _frontmatter_document(fm, body, preserve_body=not created)
             _atomic_write(self.vault_root, path, document, expected_hash=old_hash, create=created)
             ref = CanonicalReference(path, content_hash(document), None, "facts")
             return MutationResult(

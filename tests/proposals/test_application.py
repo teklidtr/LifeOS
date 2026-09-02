@@ -397,6 +397,73 @@ def test_managed_block_exact_boundaries(tmp_path):
     assert final_content == expected
 
 
+@pytest.mark.parametrize("separator", ["\u2028", "\v"], ids=["line-separator", "vertical-tab"])
+def test_managed_block_replacement_uses_exact_content_span(tmp_path, separator):
+    meta = _make_meta()
+    prefix = "Human before.\n<!-- lifeos:managed:start summary -->\n"
+    suffix = "<!-- lifeos:managed:end summary -->\nHuman after."
+    original = prefix + f"Old first part{separator}Old second part\n" + suffix
+    replacement = "New summary.\n"
+    operation = ReplaceManagedBlock(
+        "op-exact-span",
+        "human.md",
+        f"sha256:{hashlib.sha256(original.encode('utf-8')).hexdigest()}",
+        "summary",
+        replacement,
+    )
+    document = PatchDocumentV2(2, meta.id, (operation,))
+    vault_root, proposals_root, proposal_dir = _setup_proposal(tmp_path, meta, document)
+    target = vault_root / "human.md"
+    target.write_bytes(original.encode("utf-8"))
+    loaded = load_proposal_directory(proposal_dir, proposals_root=proposals_root)
+    assert loaded.proposal is not None
+
+    apply_proposal(
+        loaded.proposal,
+        vault_root=vault_root,
+        applied_by="admin",
+        applied_at="2026-07-13T03:00:00Z",
+    )
+
+    assert target.read_bytes() == (prefix + replacement + suffix).encode("utf-8")
+
+
+def test_fenced_marker_example_cannot_be_applied_as_managed_block(tmp_path):
+    meta = _make_meta()
+    original = (
+        "```md\n"
+        "```not-a-closing-fence\n"
+        "<!-- lifeos:managed:start example -->\n"
+        "human-owned code\n"
+        "<!-- lifeos:managed:end example -->\n"
+        "```\n"
+    )
+    operation = ReplaceManagedBlock(
+        "op-fenced-example",
+        "human.md",
+        f"sha256:{hashlib.sha256(original.encode('utf-8')).hexdigest()}",
+        "example",
+        "replacement",
+    )
+    document = PatchDocumentV2(2, meta.id, (operation,))
+    vault_root, proposals_root, proposal_dir = _setup_proposal(tmp_path, meta, document)
+    target = vault_root / "human.md"
+    target.write_text(original, encoding="utf-8")
+    loaded = load_proposal_directory(proposal_dir, proposals_root=proposals_root)
+    assert loaded.proposal is not None
+
+    with pytest.raises(ApplicationError) as caught:
+        apply_proposal(
+            loaded.proposal,
+            vault_root=vault_root,
+            applied_by="admin",
+            applied_at="2026-07-13T03:00:00Z",
+        )
+
+    assert caught.value.code == ApplicationErrorCode.PREFLIGHT_FAILED
+    assert target.read_text(encoding="utf-8") == original
+
+
 # 9. Rollback refusal after external modification
 def test_rollback_refusal_on_external_mutation(tmp_path, monkeypatch):
     meta = _make_meta()

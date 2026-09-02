@@ -33,6 +33,10 @@ class ManagedBlock:
     start_line: int
     end_line: int
     content: str
+    start_offset: int = -1
+    content_start_offset: int = -1
+    content_end_offset: int = -1
+    end_offset: int = -1
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,9 +49,73 @@ class ParsedNote:
     findings: tuple[ParseFinding, ...]
 
 
-START_MARKER_RE = re.compile(r"^\s*<!--\s*lifeos:managed:start\s+([^\s>]+)\s*-->\s*$")
-END_MARKER_RE = re.compile(r"^\s*<!--\s*lifeos:managed:end\s+([^\s>]+)\s*-->\s*$")
-FENCED_CODE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})")
+START_MARKER_RE = re.compile(
+    r"^<!--[ \t]*lifeos:managed:start[ \t]+([^ \t>]+)[ \t]*-->[ \t]*$"
+)
+END_MARKER_RE = re.compile(
+    r"^<!--[ \t]*lifeos:managed:end[ \t]+([^ \t>]+)[ \t]*-->[ \t]*$"
+)
+FENCED_CODE_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})([^\r\n]*)$")
+FenceState = tuple[str, int] | None
+
+
+def advance_fenced_code_state(line: str, state: FenceState) -> FenceState:
+    """Advance a top-level CommonMark fenced-code state by one complete line."""
+    match = FENCED_CODE_RE.fullmatch(line.rstrip("\r\n"))
+    if match is None:
+        return state
+
+    marker = match.group(2)
+    suffix = match.group(3)
+    marker_char = marker[0]
+    marker_length = len(marker)
+    if state is not None:
+        opening_char, opening_length = state
+        if (
+            marker_char == opening_char
+            and marker_length >= opening_length
+            and not suffix.strip(" \t")
+        ):
+            return None
+        return state
+
+    if marker_char == "`" and "`" in suffix:
+        return None
+    return marker_char, marker_length
+
+
+def splice_managed_block(body: str, block: ManagedBlock, replacement: str) -> str:
+    """Replace one parser-issued full managed-block span in a Markdown body."""
+    if not (
+        0 <= block.start_offset <= block.content_start_offset
+        <= block.content_end_offset <= block.end_offset <= len(body)
+    ):
+        raise ValueError("Managed block offsets do not belong to this Markdown body")
+    return body[: block.start_offset] + replacement + body[block.end_offset :]
+
+
+def replace_managed_block(
+    body: str, block: ManagedBlock, replacement: str, *, content_only: bool = False
+) -> str:
+    """Replace a managed block only when its complete structural boundary survives."""
+    if content_only:
+        replacement = (
+            body[block.start_offset : block.content_start_offset]
+            + replacement
+            + body[block.content_end_offset : block.end_offset]
+        )
+    candidate = splice_managed_block(body, block, replacement)
+    parsed = parse_markdown_note(Path("<managed-block>"), content=f"---\n---\n{replacement}")
+    matches = parsed.managed_blocks
+    if (
+        any(finding.severity == "error" for finding in parsed.findings)
+        or len(matches) != 1
+        or matches[0].name != block.name
+        or matches[0].start_offset != 0
+        or matches[0].end_offset != len(replacement)
+    ):
+        raise ValueError("Replacement must retain one complete managed block")
+    return candidate
 
 
 def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote:
@@ -195,12 +263,19 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
 
     body = "\n".join(lines[body_start_idx:])
 
-    in_fenced_code = False
-    fenced_char = None
-    fenced_len = 0
+    body_lines = lines[body_start_idx:]
+    body_line_offsets: list[int] = []
+    body_cursor = 0
+    for body_line in body_lines:
+        body_line_offsets.append(body_cursor)
+        body_cursor += len(body_line) + 1
+
+    fenced_code: FenceState = None
 
     open_block_name = None
     open_block_start_line = -1
+    open_block_start_offset = -1
+    open_block_content_start_offset = -1
     open_block_content_lines: list[str] = []
 
     managed_blocks: list[ManagedBlock] = []
@@ -209,22 +284,15 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
     for i in range(body_start_idx, len(lines)):
         line = lines[i]
         line_num = i + 1
+        body_line_index = i - body_start_idx
+        line_offset = body_line_offsets[body_line_index]
 
         # Fenced code and markers must be checked against line without \r
         clean_line = line.rstrip('\r')
 
-        m_fence = FENCED_CODE_RE.match(clean_line)
-        if m_fence:
-            marker = m_fence.group(2)
-            if not in_fenced_code:
-                in_fenced_code = True
-                fenced_char = marker[0]
-                fenced_len = len(marker)
-            else:
-                if marker[0] == fenced_char and len(marker) >= fenced_len:
-                    in_fenced_code = False
-
-        if in_fenced_code:
+        previous_fence = fenced_code
+        fenced_code = advance_fenced_code_state(clean_line, fenced_code)
+        if previous_fence is not None or fenced_code is not None:
             if open_block_name:
                 open_block_content_lines.append(line)
             continue
@@ -258,6 +326,8 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
                     )
                 open_block_name = name
                 open_block_start_line = line_num
+                open_block_start_offset = line_offset
+                open_block_content_start_offset = line_offset + len(line) + 1
                 open_block_content_lines = []
                 seen_block_names.add(name)
         elif m_end:
@@ -289,6 +359,10 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
                         start_line=open_block_start_line,
                         end_line=line_num,
                         content="\n".join(open_block_content_lines),
+                        start_offset=open_block_start_offset,
+                        content_start_offset=open_block_content_start_offset,
+                        content_end_offset=line_offset,
+                        end_offset=line_offset + len(line),
                     )
                 )
                 open_block_name = None

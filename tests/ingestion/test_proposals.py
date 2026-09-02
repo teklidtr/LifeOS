@@ -297,6 +297,30 @@ def test_replace_wiki_section_ignores_headings_inside_fenced_code() -> None:
     assert updated.endswith("## Ekipman notları\n\nNew.\n")
 
 
+def test_replace_wiki_section_ignores_heading_after_false_fence_closer() -> None:
+    fenced_example = (
+        "```markdown\n"
+        "```not-a-closing-fence\n"
+        "## Ekipman notları\n"
+        "Human-owned code example.\n"
+        "```"
+    )
+    original = (
+        f"# Note\n\n{fenced_example}\n\n"
+        "## Ekipman notları\n\n"
+        "Old.\n"
+    )
+
+    updated = replace_wiki_section(
+        target_content=original,
+        heading="Ekipman notları",
+        section_body="New.",
+    )
+
+    assert fenced_example in updated
+    assert updated.endswith("## Ekipman notları\n\nNew.\n")
+
+
 @pytest.mark.parametrize(
     ("target", "message"),
     [

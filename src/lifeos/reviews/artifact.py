@@ -14,7 +14,7 @@ import yaml
 
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.daily.service import _atomic_write, content_hash
-from lifeos.markdown.parser import parse_markdown_note
+from lifeos.markdown.parser import ManagedBlock, parse_markdown_note, replace_managed_block
 from lifeos.reviews.contracts import (
     REVIEW_SCHEMA_VERSION,
     ReviewAnswer,
@@ -60,8 +60,12 @@ class ReviewArtifactUpdate:
         return payload
 
 
-def _frontmatter_document(frontmatter: Mapping[str, Any], body: str) -> str:
+def _frontmatter_document(
+    frontmatter: Mapping[str, Any], body: str, *, preserve_body: bool = False
+) -> str:
     dumped = yaml.safe_dump(dict(frontmatter), sort_keys=False, allow_unicode=True).rstrip()
+    if preserve_body:
+        return f"---\n{dumped}\n---\n{body}"
     return f"---\n{dumped}\n---\n\n{body.lstrip()}".rstrip() + "\n"
 
 
@@ -106,17 +110,27 @@ def _managed_block(name: str, content: str) -> str:
     )
 
 
-def _block_pattern(name: str) -> re.Pattern[str]:
-    return re.compile(
-        rf"<!-- lifeos:managed:start {re.escape(name)} -->.*?"
-        rf"<!-- lifeos:managed:end {re.escape(name)} -->",
-        re.S,
-    )
-
-
-def validate_managed_blocks(body: str) -> None:
+def _review_managed_blocks(body: str) -> dict[str, ManagedBlock]:
+    parsed = parse_markdown_note(Path("review-body.md"), content=f"---\n---\n{body}")
+    error = next((item for item in parsed.findings if item.severity == "error"), None)
+    if error is not None:
+        raise DailyInteractionError(
+            "invalid_review_artifact",
+            error.message,
+            "Restore the managed boundary before refreshing or updating the review.",
+        )
+    unexpected = [block.name for block in parsed.managed_blocks if block.name not in _MANAGED_NAMES]
+    if unexpected:
+        raise DailyInteractionError(
+            "invalid_review_artifact",
+            f"Review contains unsupported managed blocks: {', '.join(sorted(unexpected))}.",
+            "Restore the managed boundary before refreshing or updating the review.",
+            {"blocks": sorted(unexpected)},
+        )
+    blocks: dict[str, ManagedBlock] = {}
     for name in _MANAGED_NAMES:
-        count = len(_block_pattern(name).findall(body))
+        matches = [block for block in parsed.managed_blocks if block.name == name]
+        count = len(matches)
         if count != 1:
             raise DailyInteractionError(
                 "invalid_review_artifact",
@@ -124,30 +138,49 @@ def validate_managed_blocks(body: str) -> None:
                 "Restore the managed boundary before refreshing or updating the review.",
                 {"block": name, "count": count},
             )
+        blocks[name] = matches[0]
+    return blocks
+
+
+def validate_managed_blocks(body: str) -> None:
+    _review_managed_blocks(body)
 
 
 def replace_managed_blocks(body: str, updates: Mapping[str, str]) -> str:
-    validate_managed_blocks(body)
-    result = body
-    for name, content in sorted(updates.items()):
+    blocks = _review_managed_blocks(body)
+    replacements: list[tuple[ManagedBlock, str]] = []
+    for name, content in updates.items():
         if name not in _MANAGED_NAMES:
             raise DailyInteractionError(
                 "invalid_managed_block",
                 f"Unsupported review managed block: {name}",
                 "Use one of the documented review block names.",
             )
-        result = _block_pattern(name).sub(_managed_block(name, content), result, count=1)
+        replacements.append((blocks[name], _managed_block(name, content)))
+    result = body
+    for block, replacement in sorted(
+        replacements, key=lambda item: item[0].start_offset, reverse=True
+    ):
+        try:
+            result = replace_managed_block(result, block, replacement)
+        except ValueError as error:
+            raise DailyInteractionError(
+                "invalid_review_artifact", str(error),
+                "Restore the managed boundary before refreshing or updating the review.",
+            ) from error
+    validate_managed_blocks(result)
     return result
 
 
 def extract_managed_block(body: str, name: str) -> str:
-    validate_managed_blocks(body)
-    match = _block_pattern(name).search(body)
-    assert match is not None
-    text = match.group(0)
-    start = f"<!-- lifeos:managed:start {name} -->\n"
-    end = f"\n<!-- lifeos:managed:end {name} -->"
-    return text.removeprefix(start).removesuffix(end)
+    blocks = _review_managed_blocks(body)
+    if name not in blocks:
+        raise DailyInteractionError(
+            "invalid_managed_block",
+            f"Unsupported review managed block: {name}",
+            "Use one of the documented review block names.",
+        )
+    return blocks[name].content
 
 
 def _initial_body(metadata: ReviewArtifactMetadata) -> str:
@@ -453,7 +486,7 @@ class ReviewArtifactService:
                 body = replace_managed_blocks(current.body, update.managed_blocks)
             else:
                 body = current.body
-            document = _frontmatter_document(frontmatter, body)
+            document = _frontmatter_document(frontmatter, body, preserve_body=True)
             _atomic_write(
                 self.vault_root,
                 current.path,

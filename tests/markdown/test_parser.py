@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from lifeos.markdown.parser import parse_markdown_note
+from lifeos.markdown.parser import parse_markdown_note, replace_managed_block, splice_managed_block
 
 
 def test_valid_frontmatter(tmp_path: Path) -> None:
@@ -89,12 +89,47 @@ def test_frontmatter_body_separation(tmp_path: Path) -> None:
 
 def test_valid_managed_block(tmp_path: Path) -> None:
     file = tmp_path / "block.md"
-    file.write_text("a\n<!-- lifeos:managed:start m1 -->\nb\n<!-- lifeos:managed:end m1 -->\nc")
+    original = "a\n<!-- lifeos:managed:start m1 -->\nb\n<!-- lifeos:managed:end m1 -->\nc"
+    file.write_text(original)
 
     result = parse_markdown_note(file)
     assert len(result.managed_blocks) == 1
-    assert result.managed_blocks[0].name == "m1"
-    assert result.managed_blocks[0].content == "b"
+    block = result.managed_blocks[0]
+    assert block.name == "m1"
+    assert block.content == "b"
+    assert result.body[block.start_offset : block.end_offset] == (
+        "<!-- lifeos:managed:start m1 -->\nb\n<!-- lifeos:managed:end m1 -->"
+    )
+    assert splice_managed_block(result.body, block, "replacement") == "a\nreplacement\nc"
+    assert replace_managed_block(result.body, block, "new\n", content_only=True) == (
+        "a\n<!-- lifeos:managed:start m1 -->\nnew\n<!-- lifeos:managed:end m1 -->\nc"
+    )
+
+
+@pytest.mark.parametrize("content_only", [False, True])
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "<!--lifeos:managed:end m1 -->\n~~~markdown\n",
+        "~~~markdown\nUnclosed example\n",
+        "<!-- lifeos:managed:start nested -->\nnested\n<!-- lifeos:managed:end nested -->\n",
+    ],
+    ids=["early-end-hides-real-end", "unclosed-fence", "nested-marker"],
+)
+def test_managed_replacement_keeps_the_complete_structural_boundary(
+    tmp_path: Path, replacement: str, content_only: bool
+) -> None:
+    start = "<!-- lifeos:managed:start m1 -->\n"
+    end = "<!-- lifeos:managed:end m1 -->"
+    body = "Human prefix\n" + start + "old\n" + end + "\nHuman suffix\n"
+    parsed = parse_markdown_note(tmp_path / "block.md", content=body)
+    if not content_only:
+        replacement = start + replacement + end
+
+    with pytest.raises(ValueError, match="complete managed block"):
+        replace_managed_block(
+            parsed.body, parsed.managed_blocks[0], replacement, content_only=content_only
+        )
 
 
 def test_unmatched_start_marker(tmp_path: Path) -> None:
@@ -249,6 +284,123 @@ def test_fenced_code_blocks(tmp_path: Path) -> None:
     result = parse_markdown_note(file)
     assert not result.findings
     assert not result.managed_blocks
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        (
+            "```md\n"
+            "```not-a-closing-fence\n"
+            "<!-- lifeos:managed:start m1 -->\n"
+            "example\n"
+            "<!-- lifeos:managed:end m1 -->\n"
+            "```\n"
+        ),
+        (
+            "~~~md\n"
+            "~~~not-a-closing-fence\n"
+            "<!-- lifeos:managed:start m1 -->\n"
+            "example\n"
+            "<!-- lifeos:managed:end m1 -->\n"
+            "~~~\n"
+        ),
+        (
+            "````md\n"
+            "```\n"
+            "<!-- lifeos:managed:start m1 -->\n"
+            "example\n"
+            "<!-- lifeos:managed:end m1 -->\n"
+            "````\n"
+        ),
+        (
+            "```md\n"
+            "    ```\n"
+            "<!-- lifeos:managed:start m1 -->\n"
+            "example\n"
+            "<!-- lifeos:managed:end m1 -->\n"
+            "```\n"
+        ),
+        (
+            "```md\n"
+            "\t```\n"
+            "<!-- lifeos:managed:start m1 -->\n"
+            "example\n"
+            "<!-- lifeos:managed:end m1 -->\n"
+            "```\n"
+        ),
+        (
+            "    <!-- lifeos:managed:start m1 -->\n"
+            "    example\n"
+            "    <!-- lifeos:managed:end m1 -->\n"
+        ),
+        (
+            "\t<!-- lifeos:managed:start m1 -->\n"
+            "\texample\n"
+            "\t<!-- lifeos:managed:end m1 -->\n"
+        ),
+        (
+            "- example\n"
+            "  <!-- lifeos:managed:start m1 -->\n"
+            "  nested text\n"
+            "  <!-- lifeos:managed:end m1 -->\n"
+        ),
+        (
+            "> <!-- lifeos:managed:start m1 -->\n"
+            "> quoted text\n"
+            "> <!-- lifeos:managed:end m1 -->\n"
+        ),
+    ],
+    ids=[
+        "backtick-false-closer",
+        "tilde-false-closer",
+        "shorter-backtick-run",
+        "four-space-indented-closer",
+        "tab-indented-closer",
+        "indented-code",
+        "tab-indented-code",
+        "list-nested",
+        "block-quoted",
+    ],
+)
+def test_managed_marker_examples_in_non_structural_markdown_are_ignored(
+    tmp_path: Path,
+    example: str,
+) -> None:
+    file = tmp_path / "marker-example.md"
+    file.write_text(example, encoding="utf-8")
+
+    result = parse_markdown_note(file)
+
+    assert not result.findings
+    assert not result.managed_blocks
+
+
+def test_fence_open_and_close_grammar_controls_marker_visibility(tmp_path: Path) -> None:
+    file = tmp_path / "fence-grammar.md"
+    file.write_text(
+        "```language`invalid-opener\n"
+        "<!-- lifeos:managed:start visible-before -->\n"
+        "value\n"
+        "<!-- lifeos:managed:end visible-before -->\n"
+        "```md\n"
+        "<!-- lifeos:managed:start hidden -->\n"
+        "example\n"
+        "<!-- lifeos:managed:end hidden -->\n"
+        "``` \t\n"
+        "<!-- lifeos:managed:start visible-after -->\n"
+        "value\n"
+        "<!-- lifeos:managed:end visible-after -->\n",
+        encoding="utf-8",
+    )
+
+    result = parse_markdown_note(file)
+
+    assert not result.findings
+    assert [block.name for block in result.managed_blocks] == [
+        "visible-before",
+        "visible-after",
+    ]
 
 
 def test_malformed_markers(tmp_path: Path) -> None:
