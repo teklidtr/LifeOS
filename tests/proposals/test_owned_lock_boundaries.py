@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from lifeos._owned_lock import OwnedLock
 import lifeos.proposals.application as application_module
 from lifeos.proposals.application import apply_proposal
 from lifeos.proposals.lifecycle import serialize_proposal_markdown, submit_proposal_for_review
@@ -208,3 +209,52 @@ def test_application_lock_initialization_failure_preserves_canonical_state_and_a
     assert (vault_root / "output.txt").read_text() == "generated"
     assert result.vault_lock_released is True
     assert result.proposal_lock_released is True
+
+
+def test_post_publication_verification_io_error_keeps_lock_owned_and_releasable(tmp_path):
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir()
+    dir_fd = os.open(lock_dir, os.O_RDONLY | os.O_DIRECTORY)
+    lock = OwnedLock(dir_fd, "test.lock")
+    original_link = os.link
+    original_stat = os.stat
+    published = False
+
+    def publish(src, dst, *, src_dir_fd=None, dst_dir_fd=None, follow_symlinks=True):
+        nonlocal published
+        result = original_link(
+            src,
+            dst,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+        if dst == "test.lock":
+            published = True
+        return result
+
+    def fail_verification(path, *args, **kwargs):
+        if published and path == "test.lock":
+            raise OSError("publication verification failed")
+        return original_stat(path, *args, **kwargs)
+
+    try:
+        with (
+            mock.patch("lifeos._owned_lock.os.link", side_effect=publish),
+            mock.patch("lifeos._owned_lock.os.stat", side_effect=fail_verification),
+        ):
+            lock.acquire()
+
+        assert lock.lock_fd is not None
+        assert lock.token
+        assert (lock_dir / "test.lock").read_bytes() == lock.token
+        assert list(lock_dir.glob("*.acquiring")) == []
+
+        result = lock.release()
+        assert result.released is True
+        assert result.ownership_verified is True
+        assert result.path_unlinked is True
+        assert result.descriptor_closed is True
+        assert not (lock_dir / "test.lock").exists()
+    finally:
+        os.close(dir_fd)
