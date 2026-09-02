@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1669
 title: Allow status-only historical task reconciliation through the documentation-impact gate
-status: in-progress
+status: completed
 phase: hardening
 depends_on: []
 risk: medium
@@ -74,6 +74,20 @@ pytest -q tests/project/test_documentation_impact.py
 python scripts/check_documentation_impact.py --base-ref <known-good-base>
 git diff --check
 ```
+
+# Results
+
+- The candidate checker and exact regression file were executed in an isolated Python harness:
+  `19 passed`.
+- PR #32 fast-checks run 726 passed the documentation-impact gate, manual-link validation,
+  Ruff, mypy, source compilation, pytest collection, and `tests/project` smoke suite on head
+  `a05db4337e9ae9bff1c3d0f04e86d1064bfd7a33`.
+- The PR diff was inspected through GitHub before completion; it contains only the checker,
+  its project regression tests, and this task. Added-line inspection found no incidental
+  historical task edits.
+- A repository-local checkout remains unavailable in the current execution environment, so the
+  literal local `git diff --check` command could not be run. The GitHub unified diff was used as
+  the closest static substitute, and the independent CI checks above passed.
 
 # Relevant decisions
 
