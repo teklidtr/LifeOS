@@ -25,22 +25,61 @@ class OwnedLock:
         self.lock_fd: Optional[int] = None
         self.token: bytes = b""
 
+    def _cleanup_staging_alias(self, fd: int, staging_name: str) -> None:
+        cleanup_name = f".{staging_name}.{secrets.token_hex(16)}.cleanup"
+        try:
+            held_stat = os.fstat(fd)
+            os.replace(
+                staging_name,
+                cleanup_name,
+                src_dir_fd=self.dir_fd,
+                dst_dir_fd=self.dir_fd,
+            )
+            cleanup_stat = os.stat(
+                cleanup_name,
+                dir_fd=self.dir_fd,
+                follow_symlinks=False,
+            )
+            if (
+                held_stat.st_ino == cleanup_stat.st_ino
+                and held_stat.st_dev == cleanup_stat.st_dev
+            ):
+                try:
+                    os.unlink(cleanup_name, dir_fd=self.dir_fd)
+                except OSError:
+                    pass
+                return
+
+            # The random staging pathname was replaced before cleanup. Restore the foreign entry
+            # without overwriting anything newer and never unlink it unless restoration succeeded.
+            try:
+                os.link(
+                    cleanup_name,
+                    staging_name,
+                    src_dir_fd=self.dir_fd,
+                    dst_dir_fd=self.dir_fd,
+                    follow_symlinks=False,
+                )
+            except OSError:
+                return
+            try:
+                os.unlink(cleanup_name, dir_fd=self.dir_fd)
+            except OSError:
+                pass
+        except OSError:
+            pass
+
     def _cleanup_unpublished_acquisition(self, fd: int, staging_name: str) -> None:
         try:
-            os.close(fd)
-        except OSError:
-            pass
+            self._cleanup_staging_alias(fd, staging_name)
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
-        # The canonical lock name has not been published yet. Cleanup is intentionally confined
-        # to this acquisition's random staging name so a replacement canonical owner is never
-        # hidden or unlinked while we recover from a token-write or fsync failure.
-        try:
-            os.unlink(staging_name, dir_fd=self.dir_fd)
-        except OSError:
-            pass
-
-        self.lock_fd = None
-        self.token = b""
+            self.lock_fd = None
+            self.token = b""
 
     def acquire(self) -> None:
         if self.lock_fd is not None:
@@ -84,14 +123,9 @@ class OwnedLock:
             self._cleanup_unpublished_acquisition(fd, staging_name)
             raise LockError("Failed to acquire lock: already exists or permission denied") from e
 
-        # Publication is now complete and the open descriptor refers to the same inode selected by
-        # the canonical name. Failure to remove the private alias cannot make acquisition fail after
-        # publication, because doing so would strand a valid canonical lock with no owned state.
-        try:
-            os.unlink(staging_name, dir_fd=self.dir_fd)
-        except OSError:
-            pass
-
+        # Publication is complete. The private alias is no longer authority, so cleanup can be
+        # best-effort, but it still must not delete a pathname that raced in under the random name.
+        self._cleanup_staging_alias(fd, staging_name)
         self.token = token
         self.lock_fd = fd
 
