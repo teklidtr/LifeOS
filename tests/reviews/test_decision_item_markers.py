@@ -8,6 +8,7 @@ from lifeos.reviews import ReviewArtifactService
 from lifeos.reviews.artifact import ReviewArtifactUpdate
 from lifeos.reviews.contracts import ReviewArtifact
 from lifeos.reviews.decisions import ReviewDecisionService, artifact_item_fingerprints
+from lifeos.reviews.snapshot import refresh_review_snapshot
 
 NOW = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
 FP_A = "sha256:" + "a" * 64
@@ -61,6 +62,8 @@ def test_item_scanner_accepts_only_structural_top_level_checkbox_lines(tmp_path:
             f"  - [ ] Nested list example {marker('nested')}",
             f"    - [ ] Indented code example {marker('indented')}",
             f"\t- [ ] Tab-indented example {marker('tabbed')}",
+            f"-     [ ] Code-like list content {marker('wide-separator')}",
+            f"-\t[ ] Tab-separated list content {marker('tab-separator')}",
             f"- [ ] Marker is not trailing {marker('middle')} extra text",
             "````markdown",
             f"- [ ] Fenced example {marker('fenced')}",
@@ -179,3 +182,38 @@ def test_fenced_fake_marker_cannot_attach_proposal_reference(tmp_path: Path) -> 
     reloaded = artifacts.load_id(artifact.metadata.review_id)
     assert reloaded.metadata.item_decisions == before_decisions
     assert reloaded.metadata.proposal_refs == before_refs
+
+
+def test_multiline_source_title_keeps_rendered_item_authorizable(tmp_path: Path) -> None:
+    vault, artifacts, artifact = setup_artifact(tmp_path)
+    raw = vault / "raw" / "idea.md"
+    raw.parent.mkdir(parents=True)
+    raw.write_text(
+        "---\ntype: raw\ntitle: |-\n  First line\n  Second line\nstatus: inbox\n---\n",
+        encoding="utf-8",
+    )
+    artifact, _ = refresh_review_snapshot(
+        service=artifacts,
+        artifact=artifact,
+        runtime_dir=tmp_path / "runtime",
+        generated_at=NOW,
+        idempotency_key="multiline-refresh",
+    )
+    items = artifact_item_fingerprints(artifact)
+    item_id, fingerprint = next(
+        (item_id, fingerprint)
+        for item_id, fingerprint in items.items()
+        if item_id.startswith("inbox:")
+    )
+
+    assert "- [ ] First line Second line <!-- lifeos:item " in artifact.body
+    updated = ReviewDecisionService(artifacts).decide(
+        review_id=artifact.metadata.review_id,
+        item_id=item_id,
+        evidence_fingerprint=fingerprint,
+        decision="acknowledge",
+        expected_hash=artifact.content_hash,
+        idempotency_key="multiline-decision",
+        now=NOW,
+    )
+    assert any(decision.item_id == item_id for decision in updated.metadata.item_decisions)
