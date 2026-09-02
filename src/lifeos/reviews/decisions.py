@@ -56,8 +56,10 @@ _RAW_HTML_BLOCK_TAGS = (
 _RAW_HTML_BLOCK_START = re.compile(
     rf"^ {{0,3}}</?(?:{_RAW_HTML_BLOCK_TAGS})(?=[ \t>/]|$)", re.IGNORECASE
 )
+# Conservative type-7 tag recognition. Quoted attribute values may contain angle
+# brackets; text outside quotes may not consume the tag-closing `>`.
 _RAW_HTML_COMPLETE_TAG = re.compile(
-    r"^ {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?/?>[ \t]*$"
+    r'''^ {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[^<>"']|"[^"]*"|'[^']*')*>[ \t]*$'''
 )
 _ALLOWED_NOTE_STATUS = {"inbox", "active", "paused", "completed", "cancelled", "archived", "seed"}
 _ALLOWED_TASK_STATUS = {"todo", "active", "done", "cancelled", "blocked", "pending"}
