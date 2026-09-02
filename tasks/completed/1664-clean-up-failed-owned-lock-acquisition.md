@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1664
 title: Clean up failed owned-lock acquisition
-status: in-progress
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-112.2
@@ -91,7 +91,21 @@ rtk git diff --check
 ```
 
 Search every `OwnedLock` consumer and affected exception/monkeypatch seam before broad validation.
-Follow `AGENTS.md`'s security-sensitive review requirements before a future merge.
+The implementation head `3158b5b1177f9f2e7764927e051933903553ecc3` passed current-head fast checks and
+full-validation run `33664666027`: all four full pytest shards, aggregate `full-test`, clean-room
+setup/MCP, home-node service container, and ARM64 image build passed. Final normal Codex review on
+that implementation head reported no major issues. Earlier review findings about cleanup races,
+descriptor reuse, canonical-owner visibility, cleanup-name generation, and post-publication
+verification failures were addressed with focused regressions and resolved review threads.
+
+The separate security review was not run. On 2026-09-02 the repository owner explicitly instructed
+the implementation agent to skip it for this task; this is recorded as a user-authority workflow
+override under `AGENTS.md`, not as a successful security-review result.
+
+Local repository execution remained unavailable in the implementation environment because direct
+GitHub access from the execution container could not resolve `github.com`; repository CI supplied
+the executable validation layer, and that limitation is recorded rather than represented as local
+validation.
 
 # Relevant decisions
 
