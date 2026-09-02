@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1661
 title: Use canonical generated ownership in status lint
-status: backlog
+status: ready
 phase: hardening
 depends_on:
   - LIFEOS-109
