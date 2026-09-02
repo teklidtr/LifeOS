@@ -201,6 +201,99 @@ def test_ownership_hash_mismatch_and_missing(tmp_path: Path) -> None:
     assert any(f.code == "ownership-file-missing" for f in res.findings)
 
 
+def test_ownership_symlink_target_is_rejected(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside", encoding="utf-8")
+    (vault / "gen.md").symlink_to(outside)
+
+    manifest_path = vault / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owned_files": {
+                    "gen.md": {
+                        "generator_id": "gen1",
+                        "generator_version": "1",
+                        "content_hash": "31207a206c6785d3e49db37c685d5a87786817a505ec3778bf7e5f422c28e221",
+                        "created_at": "1",
+                        "updated_at": "1",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    res = lint_vault(vault, [], manifest_path)
+
+    assert any(f.code == "ownership-path-unsafe" for f in res.findings)
+    assert not any(f.code == "ownership-hash-mismatch" for f in res.findings)
+
+
+def test_ownership_parent_symlink_is_rejected(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "gen.md").write_text("outside", encoding="utf-8")
+    (vault / "linked").symlink_to(outside, target_is_directory=True)
+
+    manifest_path = vault / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owned_files": {
+                    "linked/gen.md": {
+                        "generator_id": "gen1",
+                        "generator_version": "1",
+                        "content_hash": "31207a206c6785d3e49db37c685d5a87786817a505ec3778bf7e5f422c28e221",
+                        "created_at": "1",
+                        "updated_at": "1",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    res = lint_vault(vault, [], manifest_path)
+
+    assert any(f.code == "ownership-path-unsafe" for f in res.findings)
+
+
+def test_ownership_special_target_is_rejected(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "gen.md").mkdir()
+
+    manifest_path = vault / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owned_files": {
+                    "gen.md": {
+                        "generator_id": "gen1",
+                        "generator_version": "1",
+                        "content_hash": "a" * 64,
+                        "created_at": "1",
+                        "updated_at": "1",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    res = lint_vault(vault, [], manifest_path)
+
+    assert any(f.code == "ownership-path-unsafe" for f in res.findings)
+
+
 def test_ownership_manifest_malformed_no_crash(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
