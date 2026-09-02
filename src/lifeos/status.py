@@ -272,7 +272,7 @@ def _lint_status(config: LifeOSConfig) -> tuple[LintStatusCounts | None, Subsyst
             files=scanned_files,
             manifest_path=manifest_path,
         )
-    except (ScannerError, OSError, UnicodeError):
+    except (ScannerError, PathSafetyError, OSError, UnicodeError):
         return None, SubsystemStatus(
             "lint",
             "unavailable",
