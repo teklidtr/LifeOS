@@ -549,3 +549,141 @@ def test_status_sanitizes_external_runtime_path(tmp_path: Path) -> None:
     payload = json.loads(serialize_status_json(result))
     assert payload["registry"]["database_path"] == "<external-runtime>/registry.db"
     assert str(tmp_path) not in serialize_status_json(result)
+
+
+def _write_ownership_manifest(manifest_path: Path, entries: dict[str, str]) -> None:
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owned_files": {
+                    path: {
+                        "generator_id": "status-test",
+                        "generator_version": "1",
+                        "content_hash": content_hash,
+                        "created_at": "1",
+                        "updated_at": "1",
+                    }
+                    for path, content_hash in entries.items()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_status_lint_uses_canonical_ownership_and_is_read_only(
+    empty_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(empty_vault)
+    target = empty_vault / "generated.md"
+    target.write_text("modified", encoding="utf-8")
+    canonical_manifest = empty_vault / "system" / "generated-ownership.json"
+    _write_ownership_manifest(
+        canonical_manifest,
+        {"generated.md": hashlib.sha256(b"original").hexdigest()},
+    )
+    runtime_manifest = empty_vault / ".lifeos" / "ownership.json"
+    _write_ownership_manifest(
+        runtime_manifest,
+        {"generated.md": hashlib.sha256(b"modified").hexdigest()},
+    )
+    snapshot_before = snapshot_dir(empty_vault)
+
+    code, out, err = run_cli("status", "--json")
+
+    assert code == 0
+    assert err == ""
+    payload = json.loads(out)
+    assert payload["lint"]["errors"] == 1
+    assert _check(payload, "lint")["code"] == "lint-errors"
+    assert _check(payload, "ownership")["code"] == "ownership-valid"
+    assert snapshot_dir(empty_vault) == snapshot_before
+
+
+def test_status_lint_reports_missing_canonical_owned_file(
+    empty_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(empty_vault)
+    canonical_manifest = empty_vault / "system" / "generated-ownership.json"
+    _write_ownership_manifest(canonical_manifest, {"missing.md": "a" * 64})
+    runtime_manifest = empty_vault / ".lifeos" / "ownership.json"
+    _write_ownership_manifest(runtime_manifest, {})
+
+    code, out, err = run_cli("status", "--json")
+
+    assert code == 0
+    assert err == ""
+    payload = json.loads(out)
+    assert payload["lint"]["errors"] == 1
+    assert _check(payload, "lint")["code"] == "lint-errors"
+    assert _check(payload, "ownership")["code"] == "ownership-valid"
+
+
+def test_status_lint_ignores_malformed_runtime_manifest_when_canonical_is_absent(
+    empty_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(empty_vault)
+    runtime_manifest = empty_vault / ".lifeos" / "ownership.json"
+    runtime_manifest.parent.mkdir()
+    runtime_manifest.write_text("not-json", encoding="utf-8")
+
+    code, out, err = run_cli("status", "--json")
+
+    assert code == 0
+    assert err == ""
+    payload = json.loads(out)
+    assert payload["lint"]["errors"] == 0
+    assert _check(payload, "lint")["code"] == "lint-clean"
+    assert _check(payload, "ownership")["code"] == "ownership-absent"
+
+
+def test_status_external_runtime_still_uses_canonical_ownership(tmp_path: Path) -> None:
+    from lifeos.config import FeatureFlags, LifeOSConfig
+    from lifeos.status import collect_status, serialize_status_json
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    target = vault / "generated.md"
+    target.write_text("modified", encoding="utf-8")
+    _write_ownership_manifest(
+        vault / "system" / "generated-ownership.json",
+        {"generated.md": hashlib.sha256(b"original").hexdigest()},
+    )
+    external = tmp_path / "external-runtime"
+    _write_ownership_manifest(
+        external / "ownership.json",
+        {"generated.md": hashlib.sha256(b"modified").hexdigest()},
+    )
+    config = LifeOSConfig(vault, external, FeatureFlags())
+
+    payload = json.loads(serialize_status_json(collect_status(config, Registry(external / "registry.db"))))
+
+    assert payload["lint"]["errors"] == 1
+    assert _check(payload, "lint")["code"] == "lint-errors"
+    assert _check(payload, "ownership")["code"] == "ownership-valid"
+
+
+def test_status_path_safety_failure_preserves_partial_diagnostics(
+    empty_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(empty_vault)
+    canonical_manifest = empty_vault / "system" / "generated-ownership.json"
+    _write_ownership_manifest(canonical_manifest, {})
+
+    from lifeos.ownership import GeneratedOwnership, PathSafetyError
+
+    def unsafe_load(*_args: object, **_kwargs: object) -> None:
+        raise PathSafetyError("unsafe canonical ownership path")
+
+    monkeypatch.setattr(GeneratedOwnership, "load", unsafe_load)
+
+    code, out, err = run_cli("status", "--json")
+
+    assert code == 0
+    assert err == ""
+    payload = json.loads(out)
+    assert payload["lint"] is None
+    assert _check(payload, "lint")["code"] == "lint-unavailable"
+    assert _check(payload, "ownership")["code"] == "ownership-unsafe-path"
