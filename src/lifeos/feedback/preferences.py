@@ -543,7 +543,7 @@ class FeedbackControlService:
         if request.reason:
             event["reason"] = request.reason.strip()
         history.append(event)
-        document = _frontmatter_document(frontmatter, body)
+        document = _frontmatter_document(frontmatter, body, preserve_body=True)
         _atomic_write(
             self.vault_root, request.plan_path, document, expected_hash=actual_hash, create=False
         )
