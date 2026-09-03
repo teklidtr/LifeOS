@@ -6,15 +6,44 @@ Canonical recovery inputs are capture Markdown, attachment-manifest Markdown,
 and original attachment bytes. Everything under `.lifeos/captures/` is derived
 and may be deleted.
 
-A rebuild scans canonical captures in bounded batches, checkpoints progress, and
-publishes a derived index. It reports malformed or unsupported artifacts,
-duplicate stable identities, moved capture paths, missing manifests, missing or
-changed originals, stale extraction, orphan manifests, and orphan originals.
-Where a capture reference and unchanged original bytes contain enough evidence,
-a missing manifest may be rebuilt without changing the capture or original file.
+A rebuild discovers canonical Markdown in deterministic order using content-free
+filesystem metadata, then opens and parses only the source files selected for the
+current processing batch. The checkpoint stores the metadata-based source-set
+fingerprint, next source position, partial index entries, and diagnostics. A later
+bounded invocation resumes only when the current canonical source paths and file
+identity/version metadata still match that fingerprint. Processed entries retain
+their canonical content hashes; the metadata scan is discovery/invalidating work,
+not a replacement source of truth.
 
-Interrupted rebuilds leave a checkpoint and can be resumed. Rebuild and audit do
-not rewrite human annotations merely to refresh derived state.
+This distinction is intentional: discovery still walks the applicable path set so
+additions, moves, deletions, and ordinary file edits invalidate stale progress, but
+it does not open and hash every Markdown file before honoring `interrupt_after`.
+Actual Markdown byte reads and parsing are bounded to the current invocation's
+source-processing budget.
+
+If canonical Markdown is edited, added, moved, or deleted between invocations, the stale
+checkpoint is discarded and the rebuild starts fresh from the current source set. A
+missing, truncated, corrupt, or unsupported checkpoint is handled the same way. Runtime
+checkpoint state never repairs or overrides canonical Markdown, attachment manifests, or
+original bytes.
+
+A complete rebuild reports malformed or unsupported artifacts, duplicate stable
+identities, moved capture paths, missing manifests, missing or changed originals, stale
+extraction, orphan manifests, and orphan originals. Where a capture reference and
+unchanged original bytes contain enough evidence, a missing manifest may be rebuilt
+without changing the capture or original file.
+
+Interrupted rebuilds leave a disposable checkpoint and can be resumed while sources are
+unchanged. The public recovery path returns the interrupted index immediately; manifest
+reconstruction and the broader capture/attachment audit are deferred until the index
+rebuild reaches a non-interrupted state. Completion publishes the same sorted index and
+diagnostics as a fresh rebuild and removes the checkpoint. Rebuild and audit do not
+rewrite human annotations merely to refresh derived state.
+
+These derived index checkpoints are separate from canonical capture merge/split mutation
+recovery records under `.lifeos/capture-mutations/`. Deleting `.lifeos/captures/` may
+remove rebuild progress and derived indexes, but it does not authorize discarding an
+active canonical-mutation recovery record.
 
 ## Attachment changes
 

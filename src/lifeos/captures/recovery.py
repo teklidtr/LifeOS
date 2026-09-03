@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.vault import VaultAccessError, iter_vault_markdown, observe_vault_file
+from lifeos.vault import (
+    VaultAccessError,
+    VaultMarkdownFile,
+    observe_vault_file,
+    read_vault_markdown,
+)
+from lifeos.vault_paths import VaultPathMetadata, iter_vault_markdown_metadata
 
 from .artifact import (
     AttachmentManifestService,
@@ -17,9 +25,11 @@ from .artifact import (
     manifest_path,
     parse_capture,
 )
-from .contracts import AttachmentManifest, CaptureArtifact, CaptureError
+from .contracts import AttachmentManifest, CaptureError
 from .extraction import LocalExtractionService
 from .storage import AttachmentStore
+
+_CHECKPOINT_SCHEMA = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,22 +93,185 @@ def _checkpoint_path(runtime_dir: Path) -> Path:
     return runtime_dir / "captures" / "rebuild-checkpoint.json"
 
 
-def _all_capture_artifacts(
-    vault_root: Path,
-) -> tuple[tuple[CaptureArtifact, ...], tuple[dict[str, object], ...]]:
-    found: list[CaptureArtifact] = []
-    diagnostics: list[dict[str, object]] = []
-    for source in iter_vault_markdown(vault_root):
-        parsed = parse_markdown_note(source.path, content=source.content)
-        if parsed.frontmatter.get("type") != "rich-capture":
-            continue
-        try:
-            found.append(parse_capture(source.path, source.relative_path, source.content))
-        except CaptureError as exc:
-            diagnostics.append(
-                {"code": "malformed_capture", "path": source.relative_path, "detail": exc.message}
-            )
-    return tuple(found), tuple(diagnostics)
+def _source_signature(sources: tuple[VaultPathMetadata, ...]) -> str:
+    """Fingerprint source identity without opening or hashing source contents."""
+    digest = hashlib.sha256()
+    for source in sources:
+        fields = (
+            source.relative_path,
+            str(source.size_bytes),
+            str(source.mtime_ns),
+            str(source.ctime_ns),
+            str(source.device),
+            str(source.inode),
+        )
+        digest.update("\0".join(fields).encode("utf-8"))
+        digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
+
+
+def _checkpoint_digest(payload: dict[str, object]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _discard_checkpoint(checkpoint: Path) -> None:
+    checkpoint.unlink(missing_ok=True)
+    checkpoint.with_suffix(".tmp").unlink(missing_ok=True)
+
+
+def _checkpoint_entry(raw: object) -> CaptureIndexEntry:
+    if not isinstance(raw, dict):
+        raise ValueError("Checkpoint entry must be an object.")
+    string_fields = (
+        "capture_id",
+        "path",
+        "content_hash",
+        "title",
+        "capture_type",
+        "state",
+        "event_at",
+    )
+    values: dict[str, str] = {}
+    for field in string_fields:
+        value = raw.get(field)
+        if not isinstance(value, str):
+            raise ValueError(f"Checkpoint entry field {field} must be a string.")
+        values[field] = value
+    attachment_ids = raw.get("attachment_ids")
+    tags = raw.get("tags")
+    sensitive = raw.get("sensitive")
+    if (
+        not isinstance(attachment_ids, list)
+        or any(not isinstance(value, str) for value in attachment_ids)
+        or not isinstance(tags, list)
+        or any(not isinstance(value, str) for value in tags)
+        or type(sensitive) is not bool
+    ):
+        raise ValueError("Checkpoint entry has invalid collection fields.")
+    return CaptureIndexEntry(
+        values["capture_id"],
+        values["path"],
+        values["content_hash"],
+        values["title"],
+        values["capture_type"],
+        values["state"],
+        values["event_at"],
+        tuple(attachment_ids),
+        tuple(tags),
+        sensitive,
+    )
+
+
+def _load_rebuild_checkpoint(
+    *, checkpoint: Path, sources: tuple[VaultPathMetadata, ...], source_signature: str
+) -> tuple[int, list[CaptureIndexEntry], list[dict[str, object]]]:
+    if not checkpoint.exists():
+        return 0, [], []
+    try:
+        raw = json.loads(checkpoint.read_text())
+        if not isinstance(raw, dict) or raw.get("schema") != _CHECKPOINT_SCHEMA:
+            raise ValueError("Unsupported capture rebuild checkpoint schema.")
+        checkpoint_digest = raw.get("checkpoint_digest")
+        unsigned = {key: value for key, value in raw.items() if key != "checkpoint_digest"}
+        if (
+            not isinstance(checkpoint_digest, str)
+            or checkpoint_digest != _checkpoint_digest(unsigned)
+        ):
+            raise ValueError("Capture rebuild checkpoint integrity is invalid.")
+        if raw.get("source_signature") != source_signature or raw.get("source_count") != len(
+            sources
+        ):
+            raise ValueError("Capture rebuild checkpoint sources changed.")
+        next_index = raw.get("next_index")
+        raw_entries = raw.get("entries")
+        raw_diagnostics = raw.get("diagnostics")
+        if (
+            type(next_index) is not int
+            or not 0 <= next_index <= len(sources)
+            or not isinstance(raw_entries, list)
+            or not isinstance(raw_diagnostics, list)
+        ):
+            raise ValueError("Capture rebuild checkpoint shape is invalid.")
+        entries = [_checkpoint_entry(item) for item in raw_entries]
+        diagnostics: list[dict[str, object]] = []
+        for item in raw_diagnostics:
+            if not isinstance(item, dict) or not isinstance(item.get("code"), str):
+                raise ValueError("Capture rebuild checkpoint diagnostic is invalid.")
+            diagnostics.append(dict(item))
+        processed_paths = {source.relative_path for source in sources[:next_index]}
+        if any(entry.path not in processed_paths for entry in entries):
+            raise ValueError("Capture rebuild checkpoint entries do not match processed sources.")
+        return next_index, entries, diagnostics
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        _discard_checkpoint(checkpoint)
+        return 0, [], []
+
+
+def _write_rebuild_checkpoint(
+    *,
+    checkpoint: Path,
+    source_signature: str,
+    source_count: int,
+    next_index: int,
+    entries: list[CaptureIndexEntry],
+    diagnostics: list[dict[str, object]],
+) -> None:
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": _CHECKPOINT_SCHEMA,
+        "source_signature": source_signature,
+        "source_count": source_count,
+        "next_index": next_index,
+        "entries": [item.to_dict() for item in entries],
+        "diagnostics": diagnostics,
+    }
+    payload["checkpoint_digest"] = _checkpoint_digest(payload)
+    temp = checkpoint.with_suffix(".tmp")
+    temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    os.replace(temp, checkpoint)
+
+
+def _process_capture_source(
+    source: VaultMarkdownFile,
+) -> tuple[CaptureIndexEntry | None, str | None, dict[str, object] | None]:
+    parsed = parse_markdown_note(source.path, content=source.content)
+    if parsed.frontmatter.get("type") != "rich-capture":
+        return None, None, None
+    try:
+        artifact = parse_capture(source.path, source.relative_path, source.content)
+    except CaptureError as exc:
+        return (
+            None,
+            None,
+            {
+                "code": "malformed_capture",
+                "path": source.relative_path,
+                "detail": exc.message,
+            },
+        )
+    metadata = artifact.metadata
+    return (
+        CaptureIndexEntry(
+            metadata.capture_id,
+            artifact.path,
+            artifact.content_hash,
+            metadata.title,
+            metadata.capture_type,
+            metadata.state,
+            metadata.event_at,
+            tuple(item.attachment_id for item in metadata.attachments),
+            metadata.tags,
+            metadata.sensitive,
+        ),
+        capture_path(metadata),
+        None,
+    )
 
 
 def rebuild_capture_index(
@@ -106,56 +279,57 @@ def rebuild_capture_index(
 ) -> CaptureIndexReport:
     if batch_size < 1:
         raise CaptureError("invalid_batch_size", "Capture rebuild batch size must be positive.")
-    artifacts, parse_diagnostics = _all_capture_artifacts(vault_root)
-    entries: list[CaptureIndexEntry] = []
-    diagnostics: list[dict[str, object]] = list(parse_diagnostics)
-    identities: dict[str, str] = {}
+    sources = iter_vault_markdown_metadata(vault_root)
     checkpoint = _checkpoint_path(runtime_dir)
-    for index, artifact in enumerate(artifacts):
-        metadata = artifact.metadata
-        if metadata.capture_id in identities:
-            diagnostics.append(
-                {
-                    "code": "duplicate_identity",
-                    "capture_id": metadata.capture_id,
-                    "paths": [identities[metadata.capture_id], artifact.path],
-                }
-            )
-        else:
-            identities[metadata.capture_id] = artifact.path
-        expected = capture_path(metadata)
-        if artifact.path != expected:
-            diagnostics.append(
-                {
-                    "code": "moved_artifact",
-                    "capture_id": metadata.capture_id,
-                    "path": artifact.path,
-                    "expected_path": expected,
-                }
-            )
-        entries.append(
-            CaptureIndexEntry(
-                metadata.capture_id,
-                artifact.path,
-                artifact.content_hash,
-                metadata.title,
-                metadata.capture_type,
-                metadata.state,
-                metadata.event_at,
-                tuple(item.attachment_id for item in metadata.attachments),
-                metadata.tags,
-                metadata.sensitive,
-            )
-        )
-        if interrupt_after is not None and index + 1 >= interrupt_after:
-            checkpoint.parent.mkdir(parents=True, exist_ok=True)
-            checkpoint.write_text(
-                json.dumps(
-                    {"schema": 1, "processed": index + 1, "total": len(artifacts)},
-                    indent=2,
-                    sort_keys=True,
+    source_signature = _source_signature(sources)
+    next_index, entries, diagnostics = _load_rebuild_checkpoint(
+        checkpoint=checkpoint,
+        sources=sources,
+        source_signature=source_signature,
+    )
+    identities: dict[str, str] = {}
+    for existing_entry in entries:
+        identities.setdefault(existing_entry.capture_id, existing_entry.path)
+
+    processed_this_run = 0
+    for source_index in range(next_index, len(sources)):
+        source_metadata = sources[source_index]
+        source = read_vault_markdown(vault_root, source_metadata.relative_path)
+        entry, expected_path, diagnostic = _process_capture_source(source)
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
+        if entry is not None:
+            if entry.capture_id in identities:
+                diagnostics.append(
+                    {
+                        "code": "duplicate_identity",
+                        "capture_id": entry.capture_id,
+                        "paths": [identities[entry.capture_id], entry.path],
+                    }
                 )
-                + "\n"
+            else:
+                identities[entry.capture_id] = entry.path
+            if entry.path != expected_path:
+                diagnostics.append(
+                    {
+                        "code": "moved_artifact",
+                        "capture_id": entry.capture_id,
+                        "path": entry.path,
+                        "expected_path": expected_path,
+                    }
+                )
+            entries.append(entry)
+
+        next_index = source_index + 1
+        processed_this_run += 1
+        if interrupt_after is not None and processed_this_run >= interrupt_after:
+            _write_rebuild_checkpoint(
+                checkpoint=checkpoint,
+                source_signature=source_signature,
+                source_count=len(sources),
+                next_index=next_index,
+                entries=entries,
+                diagnostics=diagnostics,
             )
             return CaptureIndexReport(
                 "interrupted",
@@ -163,16 +337,16 @@ def rebuild_capture_index(
                 tuple(diagnostics),
                 str(checkpoint.relative_to(runtime_dir)),
             )
-        if (index + 1) % batch_size == 0:
-            checkpoint.parent.mkdir(parents=True, exist_ok=True)
-            checkpoint.write_text(
-                json.dumps(
-                    {"schema": 1, "processed": index + 1, "total": len(artifacts)},
-                    indent=2,
-                    sort_keys=True,
-                )
-                + "\n"
+        if next_index % batch_size == 0:
+            _write_rebuild_checkpoint(
+                checkpoint=checkpoint,
+                source_signature=source_signature,
+                source_count=len(sources),
+                next_index=next_index,
+                entries=entries,
+                diagnostics=diagnostics,
             )
+
     ordered = tuple(
         sorted(entries, key=lambda item: (item.event_at, item.capture_id), reverse=True)
     )
@@ -190,7 +364,7 @@ def rebuild_capture_index(
         )
         + "\n"
     )
-    checkpoint.unlink(missing_ok=True)
+    _discard_checkpoint(checkpoint)
     return CaptureIndexReport("ready", ordered, tuple(diagnostics))
 
 
@@ -273,11 +447,6 @@ def audit_capture_recovery(
 ) -> CaptureRecoveryReport:
     if delete_runtime:
         shutil.rmtree(runtime_dir / "captures", ignore_errors=True)
-    rebuilt = (
-        rebuild_missing_manifests(vault_root=vault_root, runtime_dir=runtime_dir)
-        if rebuild_manifests
-        else ()
-    )
     index = (
         rebuild_capture_index(
             vault_root=vault_root,
@@ -287,6 +456,14 @@ def audit_capture_recovery(
         )
         if rebuild
         else load_capture_index(runtime_dir=runtime_dir)
+    )
+    if index.state == "interrupted":
+        return CaptureRecoveryReport("interrupted", index, tuple(index.diagnostics))
+
+    rebuilt = (
+        rebuild_missing_manifests(vault_root=vault_root, runtime_dir=runtime_dir)
+        if rebuild_manifests
+        else ()
     )
     diagnostics: list[dict[str, object]] = list(index.diagnostics)
     captures = CaptureArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
@@ -362,11 +539,5 @@ def audit_capture_recovery(
             relative = path.relative_to(vault_root).as_posix()
             if relative not in canonical_paths:
                 diagnostics.append({"code": "orphan_original", "path": relative})
-    state = (
-        "interrupted"
-        if index.state == "interrupted"
-        else "needs-review"
-        if diagnostics
-        else "ready"
-    )
+    state = "needs-review" if diagnostics else "ready"
     return CaptureRecoveryReport(state, index, tuple(diagnostics), rebuilt)

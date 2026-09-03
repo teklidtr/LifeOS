@@ -35,6 +35,18 @@ def audit_experiment_recovery(
     interrupt_after: int | None = None,
 ) -> ExperimentRecoveryReport:
     previous = load_experiment_index(runtime_dir=runtime_dir)
+    index = (
+        rebuild_experiment_index(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            interrupt_after=interrupt_after,
+        )
+        if rebuild
+        else previous
+    )
+    if index.state == "interrupted":
+        return ExperimentRecoveryReport("interrupted", index, ())
+
     diagnostics: list[dict[str, object]] = []
     artifacts: dict[str, ExperimentArtifact] = {}
     paths: set[str] = set()
@@ -125,18 +137,5 @@ def audit_experiment_recovery(
                     "experiment_id": identity or None,
                 }
             )
-    index = (
-        rebuild_experiment_index(
-            vault_root=vault_root, runtime_dir=runtime_dir, interrupt_after=interrupt_after
-        )
-        if rebuild
-        else previous
-    )
-    state = (
-        "interrupted"
-        if index.state == "interrupted"
-        else "attention"
-        if diagnostics
-        else index.state
-    )
+    state = "attention" if diagnostics else index.state
     return ExperimentRecoveryReport(state, index, tuple(diagnostics))

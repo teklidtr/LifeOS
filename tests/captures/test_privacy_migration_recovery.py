@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+import lifeos.captures.recovery as capture_recovery
 from lifeos.captures.artifact import CaptureArtifactService
 from lifeos.captures.contracts import CaptureError
 from lifeos.captures.extraction import ExtractionResult, LocalExtractionService
@@ -406,4 +408,182 @@ def test_runtime_deletion_and_interrupted_large_rebuild_are_recoverable(tmp_path
     )
     assert recovered.index.state == "ready"
     assert len(recovered.index.entries) == 70
+    assert not (runtime / "captures" / "rebuild-checkpoint.json").exists()
+
+
+def _capture_source_bytes(vault: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in sorted(vault.rglob("*.md"))
+    }
+
+
+def _seed_capture_history(tmp_path: Path, count: int):
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
+    vault.mkdir()
+    api = CaptureArtifactService(vault_root=vault, runtime_dir=runtime)
+    created = [
+        api.create(
+            title=f"Capture {index}",
+            capture_type="meal" if index % 2 == 0 else "exercise",
+            now=NOW + timedelta(seconds=index),
+        )
+        for index in range(count)
+    ]
+    return vault, runtime, api, created
+
+
+def test_rebuild_resumes_verified_capture_progress_and_bounds_processing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault, runtime, _api, _created = _seed_capture_history(tmp_path, 3)
+    canonical_before = _capture_source_bytes(vault)
+    processed: list[str] = []
+    real_process = capture_recovery._process_capture_source
+
+    def recording_process(source):
+        processed.append(source.relative_path)
+        return real_process(source)
+
+    monkeypatch.setattr(capture_recovery, "_process_capture_source", recording_process)
+
+    first = rebuild_capture_index(
+        vault_root=vault, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    second = rebuild_capture_index(
+        vault_root=vault, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    third = rebuild_capture_index(
+        vault_root=vault, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+
+    assert [len(first.entries), len(second.entries), len(third.entries)] == [1, 2, 3]
+    assert len(processed) == 3
+    assert len(set(processed)) == 3
+    checkpoint = runtime / "captures" / "rebuild-checkpoint.json"
+    assert json.loads(checkpoint.read_text())["next_index"] == 3
+
+    resumed = rebuild_capture_index(vault_root=vault, runtime_dir=runtime, batch_size=1)
+    assert resumed.state == "ready"
+    assert len(resumed.entries) == 3
+    assert not checkpoint.exists()
+    assert _capture_source_bytes(vault) == canonical_before
+
+    shutil.rmtree(runtime / "captures")
+    fresh = rebuild_capture_index(vault_root=vault, runtime_dir=runtime, batch_size=1)
+    assert resumed.entries == fresh.entries
+    assert resumed.diagnostics == fresh.diagnostics
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "{",
+        '{"schema": 999, "next_index": 1}',
+        '{"schema": 2, "source_signature": "sha256:forged"}',
+    ],
+)
+def test_rebuild_discards_invalid_capture_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str
+) -> None:
+    vault, runtime, _api, _created = _seed_capture_history(tmp_path, 2)
+    first = rebuild_capture_index(
+        vault_root=vault, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    assert first.state == "interrupted"
+    checkpoint = runtime / "captures" / "rebuild-checkpoint.json"
+    checkpoint.write_text(payload)
+
+    processed: list[str] = []
+    real_process = capture_recovery._process_capture_source
+
+    def recording_process(source):
+        processed.append(source.relative_path)
+        return real_process(source)
+
+    monkeypatch.setattr(capture_recovery, "_process_capture_source", recording_process)
+    restarted = rebuild_capture_index(
+        vault_root=vault, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+
+    assert restarted.state == "interrupted"
+    assert len(processed) == 1
+    checkpoint_data = json.loads(checkpoint.read_text())
+    assert checkpoint_data["schema"] == 2
+    assert checkpoint_data["next_index"] == 1
+    assert isinstance(checkpoint_data["checkpoint_digest"], str)
+
+
+@pytest.mark.parametrize(
+    "change", ["edit", "add", "move", "delete", "duplicate", "unsupported", "malformed"]
+)
+def test_capture_checkpoint_is_invalidated_when_canonical_sources_change(
+    tmp_path: Path, change: str
+) -> None:
+    vault, runtime, api, created = _seed_capture_history(tmp_path, 3)
+    first = rebuild_capture_index(
+        vault_root=vault, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    assert first.state == "interrupted"
+    checkpoint = runtime / "captures" / "rebuild-checkpoint.json"
+    first_signature = json.loads(checkpoint.read_text())["source_signature"]
+    source = vault / created[0].path
+
+    if change == "edit":
+        source.write_text(source.read_text() + "\ncheckpoint source edit\n")
+    elif change == "add":
+        api.create(
+            title="Added capture",
+            capture_type="meal",
+            now=NOW + timedelta(minutes=1),
+        )
+    elif change == "move":
+        moved = vault / "archive" / "moved-after-interruption.md"
+        moved.parent.mkdir()
+        source.rename(moved)
+    elif change == "delete":
+        source.unlink()
+    elif change == "duplicate":
+        duplicate = source.with_name("duplicate-after-interruption.md")
+        duplicate.write_bytes(source.read_bytes())
+    elif change == "unsupported":
+        source.write_text(source.read_text().replace("schema_version: 1", "schema_version: 999", 1))
+    else:
+        source.write_text(
+            source.read_text().replace(
+                "<!-- lifeos:managed:end rich-capture -->",
+                "<!-- lifeos:managed:end broken-capture -->",
+                1,
+            )
+        )
+
+    canonical_after_change = _capture_source_bytes(vault)
+    restarted = rebuild_capture_index(
+        vault_root=vault, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    assert restarted.state == "interrupted"
+    second_signature = json.loads(checkpoint.read_text())["source_signature"]
+    assert second_signature != first_signature
+
+    resumed = rebuild_capture_index(vault_root=vault, runtime_dir=runtime, batch_size=1)
+    assert resumed.state == "ready"
+    assert _capture_source_bytes(vault) == canonical_after_change
+
+    shutil.rmtree(runtime / "captures")
+    fresh = rebuild_capture_index(vault_root=vault, runtime_dir=runtime, batch_size=1)
+    assert resumed.entries == fresh.entries
+    assert resumed.diagnostics == fresh.diagnostics
+
+
+def test_capture_rebuild_empty_sources_are_ready_and_checkpoint_free(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    runtime = tmp_path / "runtime"
+    vault.mkdir()
+
+    rebuilt = rebuild_capture_index(vault_root=vault, runtime_dir=runtime, batch_size=1)
+
+    assert rebuilt.state == "ready"
+    assert rebuilt.entries == ()
+    assert rebuilt.diagnostics == ()
     assert not (runtime / "captures" / "rebuild-checkpoint.json").exists()

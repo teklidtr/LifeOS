@@ -553,7 +553,20 @@ change.
 
 You can delete `.lifeos/captures/` and rebuild the capture index, missing manifests
 when enough canonical evidence exists, extraction state, galleries, timelines,
-and other derived views. Rebuilds are bounded, checkpointed, resumable, and report:
+and other derived views. Capture-index rebuilds process the canonical Markdown
+source stream in bounded batches and checkpoint the completed source prefix.
+Running rebuild again resumes that progress only when the ordered canonical source
+paths and bytes are unchanged.
+
+If Markdown is edited, added, moved, or deleted before the next bounded run, LifeOS
+discards the stale checkpoint and starts fresh from the current canonical source
+set. A missing, truncated, corrupt, or incompatible checkpoint is also disposable
+and causes a safe fresh rebuild. You never need to repair checkpoint JSON, and its
+partial entries cannot override canonical capture Markdown.
+
+On successful completion LifeOS publishes the same sorted capture entries and
+diagnostics as a fresh uninterrupted rebuild, then removes the checkpoint. Rebuild
+continues to report:
 
 - malformed or unsupported capture notes,
 - duplicate stable identities,
@@ -568,6 +581,12 @@ A rebuild can be interrupted and resumed without changing canonical Markdown or
 original bytes. Rebuilding a manifest requires an unchanged original plus enough
 information in a capture reference. Human-owned Markdown is not rewritten merely
 to refresh a view.
+
+The disposable capture-index checkpoint under `.lifeos/captures/` is not the same
+thing as an unfinished merge or split transaction. Canonical mutation recovery
+records live under `.lifeos/capture-mutations/` and must be resolved by the
+merge/split recovery path; deleting `.lifeos/captures/` does not clear or authorize
+ignoring those transaction records.
 
 ## Current implementation limitations
 
