@@ -331,8 +331,10 @@ def open_vault_file(vault_root: Path, relative_path: str) -> Iterator[BinaryIO]:
 
 
 @contextmanager
-def open_or_create_vault_directory(vault_root: Path, relative_path: str) -> Iterator[int]:
-    """Yield a vault directory descriptor, creating missing regular directories safely."""
+def open_or_create_vault_directory(
+    vault_root: Path, relative_path: str, *, create_missing: bool = True
+) -> Iterator[int]:
+    """Yield a vault directory descriptor, optionally creating missing directories safely."""
     parts = _safe_relative_path(relative_path)
     opened: list[int] = []
     try:
@@ -344,6 +346,12 @@ def open_or_create_vault_directory(vault_root: Path, relative_path: str) -> Iter
             try:
                 next_fd = os.open(part, _DIRECTORY_FLAGS, dir_fd=current_fd)
             except FileNotFoundError:
+                if not create_missing:
+                    raise VaultAccessError(
+                        "not-found",
+                        current_relative,
+                        f"Vault directory does not exist: {current_relative}",
+                    ) from None
                 try:
                     os.mkdir(part, mode=0o755, dir_fd=current_fd)
                 except FileExistsError:

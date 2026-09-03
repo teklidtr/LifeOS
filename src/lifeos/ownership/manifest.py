@@ -264,7 +264,9 @@ class GeneratedOwnership:
             raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
 
     @contextmanager
-    def _target_parent(self, rel_path: str) -> Iterator[ParentDescriptor]:
+    def _target_parent(
+        self, rel_path: str, *, create_missing: bool
+    ) -> Iterator[ParentDescriptor]:
         parent_relative = PurePosixPath(rel_path).parent.as_posix()
         absolute_parent = self.vault_root / Path(parent_relative)
         authority_root, authority_relative = _absolute_descriptor_path(absolute_parent)
@@ -293,7 +295,9 @@ class GeneratedOwnership:
             else:
                 try:
                     with open_or_create_vault_directory(
-                        self.vault_root, parent_relative
+                        self.vault_root,
+                        parent_relative,
+                        create_missing=create_missing,
                     ) as opened_parent:
                         observed = os.fstat(opened_parent)
                         yield ParentDescriptor(
@@ -427,7 +431,7 @@ class GeneratedOwnership:
             return
 
         target_name = PurePosixPath(rel_path).name
-        with self._target_parent(rel_path) as parent:
+        with self._target_parent(rel_path, create_missing=is_new) as parent:
             staging: StagingFile | None = None
             backup: BackupFile | None = None
 
@@ -446,7 +450,7 @@ class GeneratedOwnership:
                         raise ExternalModificationError(
                             f"Target {rel_path} changed before it could be regenerated"
                         )
-                    intended_mode = 0o644
+                    intended_mode = None
                 else:
                     if (
                         expected_target_hash is None

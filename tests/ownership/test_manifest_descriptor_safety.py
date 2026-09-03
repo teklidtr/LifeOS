@@ -1,3 +1,4 @@
+import hashlib
 import os
 from pathlib import Path
 
@@ -238,6 +239,46 @@ def test_creation_refuses_target_that_appears_at_publication_boundary(
     assert target.read_bytes() == b"human"
     assert "new.md" not in ownership.entries
     assert not manifest_path.exists()
+
+
+def test_new_generated_file_respects_process_umask(tmp_path: Path) -> None:
+    vault_root = _vault(tmp_path)
+    ownership = GeneratedOwnership.load(tmp_path / "manifest.json", vault_root)
+
+    previous_umask = os.umask(0o077)
+    try:
+        ownership.write_generated_file("private.md", b"private", "gen", "1")
+    finally:
+        os.umask(previous_umask)
+
+    assert (vault_root / "private.md").stat().st_mode & 0o777 == 0o600
+
+
+def test_existing_target_parent_deleted_during_update_is_not_recreated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("generated/owned.md", b"v1", "gen", "1")
+    parent = vault_root / "generated"
+    original_observe = ownership._observe_existing_target
+
+    def deleting_observe(rel_path: str):
+        observation = original_observe(rel_path)
+        (parent / "owned.md").unlink()
+        parent.rmdir()
+        return observation
+
+    monkeypatch.setattr(ownership, "_observe_existing_target", deleting_observe)
+
+    with pytest.raises(PathSafetyError, match="cannot be inspected safely"):
+        ownership.write_generated_file("generated/owned.md", b"v2", "gen", "2")
+
+    assert not parent.exists()
+    assert ownership.entries["generated/owned.md"].content_hash == hashlib.sha256(
+        b"v1"
+    ).hexdigest()
 
 
 def test_backup_transaction_failure_with_unchanged_target_is_persistence_error(
