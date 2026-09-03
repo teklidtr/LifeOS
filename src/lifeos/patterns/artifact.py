@@ -110,7 +110,7 @@ def serialize_pattern(
 ) -> str:
     """Serialize one canonical pattern while preserving caller-owned body regions verbatim."""
     dumped = yaml.safe_dump(metadata.to_frontmatter(), sort_keys=False, allow_unicode=True).rstrip()
-    return f"---\n{dumped}\n---{body_prefix}{_render_managed_summary(metadata)}{body_suffix}"
+    return f"---\n{dumped}\n---\n{body_prefix}{_render_managed_summary(metadata)}{body_suffix}"
 
 
 def parse_pattern(path: Path, relative_path: str, content: str) -> PatternArtifact | None:
