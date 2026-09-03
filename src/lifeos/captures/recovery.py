@@ -13,9 +13,10 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.vault import (
     VaultAccessError,
     VaultMarkdownFile,
-    iter_vault_markdown,
     observe_vault_file,
+    read_vault_markdown,
 )
+from lifeos.vault_paths import VaultPathMetadata, iter_vault_markdown_metadata
 
 from .artifact import (
     AttachmentManifestService,
@@ -92,12 +93,19 @@ def _checkpoint_path(runtime_dir: Path) -> Path:
     return runtime_dir / "captures" / "rebuild-checkpoint.json"
 
 
-def _source_signature(sources: tuple[VaultMarkdownFile, ...]) -> str:
+def _source_signature(sources: tuple[VaultPathMetadata, ...]) -> str:
+    """Fingerprint source identity without opening or hashing source contents."""
     digest = hashlib.sha256()
     for source in sources:
-        digest.update(source.relative_path.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(hashlib.sha256(source.content_bytes).digest())
+        fields = (
+            source.relative_path,
+            str(source.size_bytes),
+            str(source.mtime_ns),
+            str(source.ctime_ns),
+            str(source.device),
+            str(source.inode),
+        )
+        digest.update("\0".join(fields).encode("utf-8"))
         digest.update(b"\0")
     return "sha256:" + digest.hexdigest()
 
@@ -161,7 +169,7 @@ def _checkpoint_entry(raw: object) -> CaptureIndexEntry:
 
 
 def _load_rebuild_checkpoint(
-    *, checkpoint: Path, sources: tuple[VaultMarkdownFile, ...], source_signature: str
+    *, checkpoint: Path, sources: tuple[VaultPathMetadata, ...], source_signature: str
 ) -> tuple[int, list[CaptureIndexEntry], list[dict[str, object]]]:
     if not checkpoint.exists():
         return 0, [], []
@@ -196,14 +204,8 @@ def _load_rebuild_checkpoint(
             if not isinstance(item, dict) or not isinstance(item.get("code"), str):
                 raise ValueError("Capture rebuild checkpoint diagnostic is invalid.")
             diagnostics.append(dict(item))
-        processed_sources = {
-            source.relative_path: "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
-            for source in sources[:next_index]
-        }
-        if any(
-            processed_sources.get(entry.path) != entry.content_hash
-            for entry in entries
-        ):
+        processed_paths = {source.relative_path for source in sources[:next_index]}
+        if any(entry.path not in processed_paths for entry in entries):
             raise ValueError("Capture rebuild checkpoint entries do not match processed sources.")
         return next_index, entries, diagnostics
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
@@ -277,7 +279,7 @@ def rebuild_capture_index(
 ) -> CaptureIndexReport:
     if batch_size < 1:
         raise CaptureError("invalid_batch_size", "Capture rebuild batch size must be positive.")
-    sources = iter_vault_markdown(vault_root)
+    sources = iter_vault_markdown_metadata(vault_root)
     checkpoint = _checkpoint_path(runtime_dir)
     source_signature = _source_signature(sources)
     next_index, entries, diagnostics = _load_rebuild_checkpoint(
@@ -291,7 +293,8 @@ def rebuild_capture_index(
 
     processed_this_run = 0
     for source_index in range(next_index, len(sources)):
-        source = sources[source_index]
+        source_metadata = sources[source_index]
+        source = read_vault_markdown(vault_root, source_metadata.relative_path)
         entry, expected_path, diagnostic = _process_capture_source(source)
         if diagnostic is not None:
             diagnostics.append(diagnostic)
@@ -444,11 +447,6 @@ def audit_capture_recovery(
 ) -> CaptureRecoveryReport:
     if delete_runtime:
         shutil.rmtree(runtime_dir / "captures", ignore_errors=True)
-    rebuilt = (
-        rebuild_missing_manifests(vault_root=vault_root, runtime_dir=runtime_dir)
-        if rebuild_manifests
-        else ()
-    )
     index = (
         rebuild_capture_index(
             vault_root=vault_root,
@@ -458,6 +456,14 @@ def audit_capture_recovery(
         )
         if rebuild
         else load_capture_index(runtime_dir=runtime_dir)
+    )
+    if index.state == "interrupted":
+        return CaptureRecoveryReport("interrupted", index, tuple(index.diagnostics))
+
+    rebuilt = (
+        rebuild_missing_manifests(vault_root=vault_root, runtime_dir=runtime_dir)
+        if rebuild_manifests
+        else ()
     )
     diagnostics: list[dict[str, object]] = list(index.diagnostics)
     captures = CaptureArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
@@ -533,11 +539,5 @@ def audit_capture_recovery(
             relative = path.relative_to(vault_root).as_posix()
             if relative not in canonical_paths:
                 diagnostics.append({"code": "orphan_original", "path": relative})
-    state = (
-        "interrupted"
-        if index.state == "interrupted"
-        else "needs-review"
-        if diagnostics
-        else "ready"
-    )
+    state = "needs-review" if diagnostics else "ready"
     return CaptureRecoveryReport(state, index, tuple(diagnostics), rebuilt)
