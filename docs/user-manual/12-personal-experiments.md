@@ -284,9 +284,19 @@ Indexes, schedules, summaries, charts, and rebuild journals under
 `.lifeos/experiments/` are disposable.
 
 Deleting runtime state does not delete experiments. Use **Rebuild experiment
-index** to recreate history and derived views. Rebuilds are checkpointed and
-report malformed artifacts, unsupported schema versions, duplicate identities,
-renamed or moved files, missing links, and orphaned observations.
+index** to recreate history and derived views. A bounded interrupted rebuild now
+resumes from its prior completed source prefix when the ordered canonical
+experiment paths and bytes are unchanged. Each checkpoint is source-guarded, so
+editing, adding, moving, or deleting experiment Markdown before the next run
+invalidates that partial progress and starts a fresh rebuild against the current
+canonical source set.
+
+A missing, truncated, corrupt, or incompatible checkpoint is disposable. LifeOS
+discards it and begins a fresh rebuild instead of asking you to repair runtime
+JSON or treating it as authority. Successful completion removes the checkpoint
+and publishes the same sorted entries and diagnostics as an uninterrupted fresh
+rebuild. Malformed artifacts, unsupported schema versions, duplicate identities,
+and moved files remain diagnostics; rebuild never rewrites the source note.
 
 Legacy migration starts with a preview. It preserves the original source, records
 a stable source hash, fails closed when that source changes, resumes from an
@@ -302,7 +312,7 @@ The workspace names degraded states and offers a specific recovery action:
 - **Stale artifact or conflicting edits:** reload before applying an expected-hash write.
 - **Unsupported schema:** keep the Markdown and open it with a compatible version.
 - **Missing index:** rebuild from canonical artifacts.
-- **Rebuild in progress or interrupted:** resume the checkpointed rebuild.
+- **Rebuild in progress or interrupted:** run rebuild again to resume unchanged sources; if canonical experiment sources changed or the checkpoint is unusable, LifeOS safely restarts from current Markdown.
 - **Provider unavailable or timed out:** continue locally or retry the optional action.
 - **Unsafe experiment blocked:** read the user-visible safety explanation.
 - **Insufficient evidence:** collect more data or conclude that evidence is insufficient.
