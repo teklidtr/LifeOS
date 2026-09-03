@@ -286,8 +286,8 @@ def rebuild_capture_index(
         source_signature=source_signature,
     )
     identities: dict[str, str] = {}
-    for entry in entries:
-        identities.setdefault(entry.capture_id, entry.path)
+    for existing_entry in entries:
+        identities.setdefault(existing_entry.capture_id, existing_entry.path)
 
     processed_this_run = 0
     for source_index in range(next_index, len(sources)):
