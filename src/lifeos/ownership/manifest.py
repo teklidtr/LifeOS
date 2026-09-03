@@ -263,6 +263,47 @@ class GeneratedOwnership:
                 ) from exc
             raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
 
+    def _inspect_target_metadata(self, rel_path: str) -> os.stat_result | None:
+        """Inspect target existence/type without opening or hashing file contents."""
+        target_name = PurePosixPath(rel_path).name
+        parent_relative = PurePosixPath(rel_path).parent.as_posix()
+
+        def inspect_at(parent_fd: int) -> os.stat_result | None:
+            try:
+                return os.stat(target_name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return None
+            except OSError as exc:
+                raise PathSafetyError(
+                    f"Target {rel_path} cannot be inspected safely"
+                ) from exc
+
+        if parent_relative == ".":
+            try:
+                parent_fd = os.open(self.vault_root, _DIRECTORY_FLAGS)
+            except OSError as exc:
+                raise PathSafetyError(
+                    f"Target {rel_path} cannot be inspected safely"
+                ) from exc
+            try:
+                return inspect_at(parent_fd)
+            finally:
+                os.close(parent_fd)
+
+        try:
+            with open_or_create_vault_directory(
+                self.vault_root,
+                parent_relative,
+                create_missing=False,
+            ) as parent_fd:
+                return inspect_at(parent_fd)
+        except VaultAccessError as exc:
+            if exc.code == "not-found":
+                return None
+            raise PathSafetyError(
+                f"Target {rel_path} cannot be inspected safely"
+            ) from exc
+
     @contextmanager
     def _target_parent(
         self, rel_path: str, *, create_missing: bool
@@ -352,16 +393,24 @@ class GeneratedOwnership:
         new_hash = hashlib.sha256(content).hexdigest()
 
         existing_entry = self._entries.get(rel_path)
-        observation = self._observe_existing_target(rel_path)
+        target_metadata = self._inspect_target_metadata(rel_path)
+        observation: VaultFileObservation | None = None
 
-        if observation is not None:
+        if target_metadata is not None:
             if not existing_entry:
                 raise UnownedFileError(f"Target {rel_path} exists but is unowned")
             if existing_entry.generator_id != generator_id:
                 raise GeneratorMismatchError(
                     f"Target owned by {existing_entry.generator_id}, not {generator_id}"
                 )
+            if not stat.S_ISREG(target_metadata.st_mode):
+                raise PathSafetyError(f"Target {rel_path} cannot be inspected safely")
 
+            observation = self._observe_existing_target(rel_path)
+            if observation is None:
+                raise ExternalModificationError(
+                    f"Target {rel_path} changed while it was being verified"
+                )
             if observation.content_hash != existing_entry.content_hash:
                 raise ExternalModificationError(f"Target {rel_path} has been modified externally")
 
