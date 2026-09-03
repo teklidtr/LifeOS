@@ -697,3 +697,79 @@ remains. The exact solver and deterministic bounded fallback apply the same ceil
 policy. Remaining capacity, including the public `unused_minutes` diagnostic field, is neutral
 information rather than a failure signal, productivity score, utilization deficit, or instruction
 to fill the day.
+
+## DD-094: Personal patterns are canonical working hypotheses; the Personal Model is derived
+
+Recognized Phase 17 patterns are human-owned Markdown under `patterns/` with stable identity and
+a versioned pattern schema. A pattern remains a reviewable working hypothesis in every lifecycle
+state. `active` means the user currently accepts it as useful working context; it does not mean
+established truth, causation, diagnosis, immutable personality, or instruction authority.
+
+The aggregate Personal Model is disposable derived state under `.lifeos/personal-model/` and
+must rebuild entirely from canonical patterns. LifeOS does not maintain a canonical generated
+`profile/personal-model.md`, an authoritative personality narrative, or an aggregate life,
+wellness, productivity, or personality score. Markdown in `patterns/` without a recognized
+pattern schema remains ordinary user content and is not silently converted.
+
+## DD-095: Personal-pattern evidence is role-aware, version-bound, and fingerprinted
+
+Every durable pattern evidence reference preserves supporting, contesting, or contextual role and
+binds the exact reviewed vault-relative path plus SHA-256 content version, with stable source,
+observation, or event identity when those identities exist. Stable identity, current location,
+and reviewed version remain distinct under DD-090.
+
+The evidence fingerprint is deterministic and ordering-independent over normalized references.
+Historical reviewed hashes never silently advance. A moved, changed, missing, deleted, ambiguous,
+or stale source creates factual evidence-health information and may create a review reason, but it
+does not itself decide that a pattern is supported or contradicted. Missing evidence remains
+unknown rather than negative evidence.
+
+## DD-096: Personal-pattern lifecycle changes are proposal-gated and confidence stays independent
+
+`seed`, `active`, `needs-review`, and `archived` describe how LifeOS should treat a hypothesis,
+not whether the hypothesis is true. Creating a seed means track this idea; activating it requires
+explicit trusted review. Statement, reviewed evidence, confidence, review state, and archival
+changes use the shared durable proposal lifecycle. New pattern files are human-owned creates and
+existing patterns are base-hash-bound human-file patches.
+
+`confidence: low | medium | high` is a qualitative evidence posture rather than a model
+probability. Deterministic observation `candidate` output is not a fifth canonical status and its
+computed evidence strength does not automatically become canonical confidence. Agents may propose
+interpretations and confidence classes but cannot choose the approving identity or directly write
+pattern semantics.
+
+## DD-097: Pattern re-evaluation recommends review; it never performs semantic promotion
+
+A pattern may opt into a supported deterministic evaluation recipe. LifeOS may recompute factual
+analysis and detect materially new evidence, changed versions, weaker evidence, direction
+reversal, contesting evidence, staleness, or a due review date. Those results explain why human
+review may be useful and may ground a draft proposal only after explicit user action.
+
+Re-evaluation cannot directly rewrite the statement, confidence, lifecycle state, or reviewed
+evidence set. Semantic/manual patterns without a deterministic recipe receive only factual source
+state and review-timing checks. No new data is not contradiction, and LifeOS does not perform an
+autonomous vault-wide psychological contradiction search.
+
+## DD-098: Personal Model context is bounded evidence, never instruction or hidden planner policy
+
+Relevant canonical patterns may contribute bounded, traceable evidence to Context Packs,
+knowledge conversations, goal-to-plan clarification, experiment design, review explanations, and
+Obsidian reflection. Every inclusion keeps lifecycle status, evidence health, and canonical
+references visible. `system/instructions.yml` remains the only allowlisted source of routed vault
+instructions; pattern prose cannot authorize mutation or become a hidden personality prompt.
+
+Existing protected-scope, redaction, explicit-grant, and provider-disclosure rules apply before
+pattern or source evidence leaves the local boundary. The complete Personal Model is never sent
+to every provider request. Direct pattern-driven planner scoring, ranking, selection, duration,
+energy, motivation, or automatic routine changes are deferred beyond Phase 17.
+
+## DD-099: The Personal Model UI is a thin read-and-propose surface
+
+The Obsidian Personal Model workspace consumes typed Python read models. Refresh is read-only;
+TypeScript does not reimplement pattern lifecycle, evidence, privacy, proposal, or canonical-write
+semantics. Track, Adopt, Revise, Contest, review-resolution, and Archive actions build ordinary
+reviewable proposals rather than editing pattern Markdown directly.
+
+Missing or corrupt derived Personal Model state degrades to explicit rebuild/recovery behavior.
+Daily and weekly review integration is bounded and optional, and evidence-fingerprint-scoped
+dismissals remain suppressed until the evidence context changes.

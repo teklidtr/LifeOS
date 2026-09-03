@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1700
 title: Define evidence-backed Personal Model architecture
-status: backlog
+status: completed
 phase: 17
 depends_on: []
 risk: high
@@ -83,3 +83,11 @@ Status: required
 - DD-039: Execution history is canonical; feedback is rebuildable
 - DD-041: Missing evidence is not negative evidence
 - DD-055 through DD-059: canonical review artifacts and review decisions
+
+# Validation evidence
+
+- PR #40 fast-check workflow passed on implementation head `bfd09858a3d028ab52f7e2d25b33757605b4ceff`, including the documentation-impact gate, Ruff, mypy, Python compilation, `python3 scripts/validate_manual_links.py`, pytest collection, and the repository contract smoke checks.
+- PR #40 full-validation workflow run `33799026691` passed on the same implementation head, including all full pytest shards and the clean-room/home-node Docker gate with the ARM64 image build.
+- An exact local checkout could not be obtained because the execution environment could not resolve `github.com`; this is an environment limitation rather than a validation pass.
+- `git diff --check` therefore could not be executed locally. The closest practical substitute was a GitHub master-to-branch compare plus PR patch audit; the documentation changes were additive, the intended task lifecycle move was the only task-state change, and no visible whitespace error was found.
+- Code-review/Codex review and security review were explicitly skipped by the repository owner for this task. Full validation and merge-readiness checks were not waived.

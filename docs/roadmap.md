@@ -225,3 +225,31 @@ Shipped delivery through `LIFEOS-1600` to `LIFEOS-1608` includes:
 - migration, rebuild, large-library fixtures, end-to-end validation, and user documentation
 
 Phase 16 is shipped. The accepted architecture is documented in `docs/rich-capture-architecture.md`, and the complete workflow is in `docs/user-manual/13-rich-capture.md`.
+
+## Phase 17: Evidence-backed Personal Model
+
+LifeOS turns selected personal observations and interpretations into durable,
+reviewable working hypotheses without turning them into user truth, hidden
+personality instructions, or automatic planning policy. Canonical hypotheses live
+as human-owned Markdown under `patterns/`; the aggregate Personal Model is a
+rebuildable read model under `.lifeos/`.
+
+The accepted architecture is documented in
+`docs/personal-model-architecture.md`. Implementation proceeds through
+`LIFEOS-1700` to `LIFEOS-1710` in dependency order:
+
+- define the Phase 17 canonical, derived, privacy, proposal, review, and UI boundaries;
+- add the versioned canonical pattern artifact contract;
+- preserve exact evidence lineage, roles, source versions, and deterministic fingerprints;
+- add proposal-gated Track, Adopt, Revise, Contest, review-resolution, and Archive workflows;
+- re-evaluate supported deterministic patterns only to explain why review may be needed;
+- build the disposable Personal Model index and typed read model;
+- integrate bounded optional maintenance with daily and weekly reviews;
+- expose relevant reviewed pattern evidence to context and reflection without granting instruction authority;
+- build the Obsidian Personal Model workspace over Python business rules;
+- add evidence-bounded agent-assisted semantic proposals that stop at draft;
+- validate migration, recovery, large-vault behavior, local/remote MCP boundaries, end-to-end flows, and complete user documentation.
+
+Direct pattern-driven planner scoring or ranking, personality typing, diagnosis,
+immutable inferred traits, aggregate life/productivity/wellness scores, and a
+canonical generated `profile/personal-model.md` biography remain outside Phase 17.
