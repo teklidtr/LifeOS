@@ -677,7 +677,7 @@ def test_status_path_safety_failure_preserves_partial_diagnostics(
     def unsafe_load(*_args: object, **_kwargs: object) -> None:
         raise PathSafetyError("unsafe canonical ownership path")
 
-    monkeypatch.setattr(GeneratedOwnership, "load", unsafe_load)
+    monkeypatch.setattr(GeneratedOwnership, "load_if_present", unsafe_load)
 
     code, out, err = run_cli("status", "--json")
 

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1711
 title: Distinguish missing and unsafe ownership manifests at consumers
-status: backlog
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1668
@@ -90,3 +90,27 @@ rtk git diff --check
 - **Recommended model/configuration:** `gpt-5.6-sol`, reasoning effort `high`.
 - **Reason for the recommendation:** The implementation is small but crosses status, lint, and
   proposal-tool diagnostic semantics around a security-sensitive filesystem boundary.
+
+# Completion evidence
+
+- PR: #39, `LIFEOS-1711 Distinguish unsafe ownership manifests from absence`.
+- Implementation adds descriptor-safe `GeneratedOwnership.load_if_present(...)`, preserves the
+  existing `GeneratedOwnership.load(...)` missing-manifest fallback, and routes status, lint, and
+  proposal-tool manifest presence decisions through the secure ownership boundary.
+- Focused regressions cover true absence, dangling final symlinks, symlinked parents, and regular
+  manifests. The pre-existing status path-safety monkeypatch regression was migrated to the new
+  presence-aware seam after the first full-validation run exposed the stale test seam.
+- PR fast-check run `33795470025` passed on implementation head
+  `25facbaace6d1adf7229d8d084b00abd6252edb9`, including documentation impact, manual links,
+  repository-wide Ruff, mypy, Python compilation, test collection, and project contract smoke tests.
+- Authoritative full-validation run `33795542201` completed successfully on the same implementation
+  head. All four pytest shards and aggregate `full-test` passed; clean-room setup/MCP, home-node
+  service-container, and ARM64 image build passed under `docker-setup-e2e`.
+- Normal `@codex review` was requested but no review result was produced because the GitHub Codex
+  account had reached its code-review usage limit. The repository owner explicitly waived the
+  normal Codex review gate on 2026-09-03 after this limitation was recorded.
+- The repository owner separately authorized skipping the security-review gate on 2026-09-03.
+  Both review exceptions are user-authority workflow overrides and are not represented as successful
+  review results.
+- A manual consumer audit found proposal preflight already reads canonical ownership through
+  `read_file_secure(...)`; no additional pathname-only ownership-manifest presence bypass was found.
