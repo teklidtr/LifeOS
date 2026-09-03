@@ -11,6 +11,7 @@ from lifeos.feedback import (
     FeedbackProposalRequest,
     create_feedback_proposal,
 )
+from lifeos.markdown.parser import parse_markdown_note
 from lifeos.ownership.manifest import serialize_generated_ownership_bytes
 from lifeos.proposals.application import apply_proposal
 from lifeos.proposals.lifecycle import approve_proposal, submit_proposal_for_review
@@ -27,6 +28,11 @@ def plan(vault: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def body_bytes(path: Path) -> bytes:
+    raw = path.read_bytes().decode("utf-8")
+    return parse_markdown_note(path, content=raw).body.encode("utf-8")
 
 
 def request(kind: str, fingerprint: str, **kwargs: object) -> FeedbackProposalRequest:
@@ -218,7 +224,12 @@ def test_insufficient_confidence_and_missing_alternatives_are_suppressed(tmp_pat
 def test_feedback_proposal_uses_existing_lifecycle_and_applies(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
-    plan(vault)
+    target = plan(vault)
+    raw = target.read_bytes().decode("utf-8")
+    parsed = parse_markdown_note(target, content=raw)
+    prefix = raw[: len(raw) - len(parsed.body)]
+    original_body = b"\r\n\r\nHuman proposal notes with hard break.  \r\n\tTail"
+    target.write_bytes(prefix.encode("utf-8") + original_body)
     (vault / "system").mkdir()
     (vault / "system" / "generated-ownership.json").write_bytes(
         serialize_generated_ownership_bytes({})
@@ -234,6 +245,7 @@ def test_feedback_proposal_uses_existing_lifecycle_and_applies(tmp_path: Path) -
         actor_id="user",
         now=datetime(2026, 7, 16, 0, 0, tzinfo=timezone.utc),
     )
+    assert body_bytes(target) == original_body
     root = vault / "proposals"
     proposal_dir = root / result.proposal_id
     draft = load_proposal_directory(proposal_dir, proposals_root=root).proposal
@@ -263,4 +275,5 @@ def test_feedback_proposal_uses_existing_lifecycle_and_applies(tmp_path: Path) -
     )
 
     assert applied.changed_paths == ("plans/p.md",)
-    assert "duration: 45" in (vault / "plans" / "p.md").read_text(encoding="utf-8")
+    assert "duration: 45" in target.read_text(encoding="utf-8")
+    assert body_bytes(target) == original_body
