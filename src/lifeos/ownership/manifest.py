@@ -265,9 +265,8 @@ class GeneratedOwnership:
 
         existing_entry = self._entries.get(rel_path)
         observation = self._observe_existing_target(rel_path)
-        is_existing = observation is not None
 
-        if is_existing:
+        if observation is not None:
             if not existing_entry:
                 raise UnownedFileError(f"Target {rel_path} exists but is unowned")
             if existing_entry.generator_id != generator_id:
@@ -313,7 +312,7 @@ class GeneratedOwnership:
             write_target=True,
             resolved_target=resolved_target,
             content=content,
-            is_new=not is_existing,
+            is_new=observation is None,
             existing_content=observation.captured_bytes if observation is not None else None,
         )
 
