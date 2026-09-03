@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1663
 title: Resume source-guarded capture and experiment index rebuilds
-status: ready
+status: in-progress
 phase: hardening
 depends_on:
   - LIFEOS-1503
