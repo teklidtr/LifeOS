@@ -29,7 +29,7 @@ workflow before using an older supported database.
 
 ## Migrations
 
-The current registry schema version is **3**. Migrations are immutable plain-SQL
+The current registry schema version is **4**. Migrations are immutable plain-SQL
 definitions with positive, unique versions. LifeOS sorts them by version,
 requires recorded versions and names to be an exact prefix of those definitions,
 and refuses unsupported future or inconsistent histories.
@@ -39,6 +39,23 @@ The current migration sequence is:
 1. `initial_registry_schema`
 2. `proposals_schema`
 3. `provenance_schema`
+4. `scoped_stable_identity_schema`
+
+Migration 4 rebuilds the physical `files` and `source_versions` tables while
+preserving their row IDs and the `source_versions.original_file_id` foreign-key
+relationships. It replaces the original global SQLite uniqueness constraint on
+`files.stable_id` with the non-unique partial `idx_files_stable_id` index. This
+lets the disposable registry retain observations needed by scoped identity
+reconciliation without treating a duplicate observation as authorization to use
+that identity.
+
+Stable-ID use still fails closed on ambiguity. Registry scan preflight refuses
+duplicate stable IDs in the participating canonical Markdown observations, and
+`resolve_registered_stable_id()` refuses to resolve a stable ID when more than
+one active registry row carries it. A stable ID identifies which canonical note
+was observed, its vault-relative path records where that note was observed, and
+its content hash records which version was observed; those registry mappings are
+rebuildable facts, not canonical authority.
 
 Each missing migration runs in its own explicit `BEGIN IMMEDIATE` transaction.
 Statements execute individually, the migration record is inserted with
@@ -49,9 +66,9 @@ previously completed migrations remain intact.
 ## Current tables
 
 - `schema_migrations`: migration version, unique name, and application time.
-- `files`: unique normalized vault-relative path, optional stable ID and content
-  hash, file kind, size and nanosecond modification metadata, observation times,
-  and soft-deletion state.
+- `files`: unique normalized vault-relative path, optional stable ID indexed by
+  non-unique `idx_files_stable_id`, optional content hash, file kind, size and
+  nanosecond modification metadata, observation times, and soft-deletion state.
 - `source_versions`: unique source/version identity, its original `files` row,
   observation time, and optional sanitization metadata. The foreign key is
   restrictive and never cascades deletion.
