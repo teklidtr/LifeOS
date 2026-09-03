@@ -46,7 +46,7 @@ There is no canonical generated `profile/personal-model.md`, no automatically ma
 
 ## Canonical pattern contract
 
-LIFEOS-1701 owns the parser and exact serialization, but the Phase 17 semantic contract is fixed here so later tasks do not invent product behavior.
+LIFEOS-1701 implements this boundary in `lifeos.patterns`. Recognition is schema-led: a Markdown file under `patterns/` is a canonical pattern only when its top-level frontmatter declares `pattern_schema`. Schema version 1 then requires `type: pattern`; unsupported versions and malformed declared patterns fail with typed diagnostics. Markdown without a recognized schema remains ordinary user content.
 
 A recognized pattern uses the common LifeOS lifecycle:
 
@@ -80,9 +80,13 @@ evaluation:
   parameters: {}
 ```
 
-`source_id`, `observation_id`, `event_id`, `origin.source_ref`, review timestamps, and `evaluation` are optional when the source or pattern does not have that concept. Required-field details and typed validation belong to LIFEOS-1701, but implementations must preserve the semantics above.
+`pattern_schema`, `type`, `id`, `title`, `description`, `status`, `confidence`, `review_reasons`, `statement`, `origin`, `created_at`, `updated_at`, `evidence_fingerprint`, and `evidence` are required in schema 1. `source_id`, `observation_id`, `event_id`, `origin.source_ref`, review timestamps, and `evaluation` are optional when the source or pattern does not have that concept.
 
-Machine-managed evidence summaries, evidence-health diagnostics, and other refreshable renderings use validated managed blocks. Human reflection, qualifications, competing explanations, and user-created prose remain outside managed blocks and are preserved byte-for-byte by refresh workflows.
+Stable pattern IDs use lowercase letters, digits, dot, underscore, or hyphen. Evidence paths are canonical vault-relative paths and reject traversal, absolute paths, Windows-drive forms, backslashes, and other unsafe path forms through the shared vault validator. Evidence content hashes and the stored fingerprint are exact lowercase `sha256:` digests. Timestamps are timezone-aware ISO 8601 values. Optional evaluation parameters are limited to portable scalar, list, and string-keyed mapping values and serialize with deterministic key ordering.
+
+The serializer emits one `personal-pattern-evidence` managed block containing a refreshable evidence summary. The parser requires that managed boundary exactly once for a recognized schema-1 pattern. Human reflection, qualifications, competing explanations, headings, whitespace, and other user-created prose before or after that managed block are separate ownership regions and can be round-tripped byte-for-byte. The managed summary is derived presentation, not evidence authority.
+
+LIFEOS-1701 validates the stored `evidence_fingerprint` shape but deliberately does not calculate or advance it. LIFEOS-1702 owns evidence normalization, source-state resolution, and fingerprint computation so artifact parsing cannot silently rewrite reviewed evidence versions.
 
 ## Lifecycle semantics
 
