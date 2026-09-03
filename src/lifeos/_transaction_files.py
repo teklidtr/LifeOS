@@ -559,7 +559,7 @@ def create_staging_file(
     target_name: str,
     content: bytes,
     parent: ParentDescriptor,
-    intended_mode: int,
+    intended_mode: int | None,
     *,
     artifact_token: str | None = None,
 ) -> StagingFile:
@@ -573,7 +573,8 @@ def create_staging_file(
     try:
         require_directory_binding(parent.fd, parent_binding)
         live_parent_fd = open_live_parent_for_mutation(parent)
-        fd = os.open(staging_name, flags, 0o600, dir_fd=live_parent_fd)
+        creation_mode = 0o666 if intended_mode is None else 0o600
+        fd = os.open(staging_name, flags, creation_mode, dir_fd=live_parent_fd)
     except (OSError, TransactionError) as e:
         raise TransactionError(f"Failed to create staging file {staging_name}: {e}") from e
     finally:
@@ -588,7 +589,8 @@ def create_staging_file(
                 raise OSError("write returned 0 bytes")
             written += chunk
 
-        os.fchmod(fd, intended_mode)
+        if intended_mode is not None:
+            os.fchmod(fd, intended_mode)
         while True:
             try:
                 os.fsync(fd)
@@ -640,7 +642,7 @@ def create_staging_file(
         parent=parent,
         candidate_hash=candidate_hash,
         size=len(content),
-        intended_mode=intended_mode,
+        intended_mode=stat.S_IMODE(st.st_mode),
         parent_binding=parent_binding,
     )
 

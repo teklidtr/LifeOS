@@ -12,6 +12,7 @@ from lifeos.ownership import (
     PersistenceError,
     UnownedFileError,
 )
+from lifeos._transaction_files import TransactionError
 from lifeos.ownership.manifest import stream_sha256
 
 
@@ -389,17 +390,11 @@ def test_rollback_failure_reports_both_errors(manifest_path: Path, vault_root: P
     target_rel = "test.md"
     ownership.write_generated_file(target_rel, b"v1", "gen1", "1")
 
-    import os
-
-    original_replace = os.replace
-
-    def failing_replace(src, dst):
-        if ".backup.tmp" in str(src):
-            raise Exception("mock rollback fail")
-        return original_replace(src, dst)
-
     with patch.object(ownership, "_save_manifest", side_effect=Exception("mock save fail")):
-        with patch("os.replace", side_effect=failing_replace):
+        with patch(
+            "lifeos.ownership.manifest.rollback_replacement",
+            side_effect=Exception("mock rollback fail"),
+        ):
             with pytest.raises(PersistenceError) as exc_info:
                 ownership.write_generated_file(target_rel, b"v2", "gen1", "2")
 
@@ -412,13 +407,12 @@ def test_no_leftover_files_on_success(manifest_path: Path, vault_root: Path) -> 
     target_rel = "test.md"
     ownership.write_generated_file(target_rel, b"v1", "gen1", "1")
 
-    # Check for any .tmp files in target or manifest dir
     assert not list(vault_root.glob("*.tmp"))
     assert not list(manifest_path.parent.glob("*.tmp"))
 
-    # Update to trigger backup mechanism
     ownership.write_generated_file(target_rel, b"v2", "gen1", "2")
     assert not list(vault_root.glob("*.tmp"))
+    assert not list(vault_root.glob(".*.backup"))
     assert not list(manifest_path.parent.glob("*.tmp"))
 
 
@@ -428,22 +422,16 @@ def test_cleanup_failure_does_not_rollback(manifest_path: Path, vault_root: Path
     ownership.write_generated_file(target_rel, b"v1", "gen1", "1")
     target_abs = vault_root / target_rel
 
-    # Patch Path.unlink to fail during cleanup
-    original_unlink = Path.unlink
-
-    def failing_unlink(self, *args, **kwargs):
-        if ".backup.tmp" in str(self):
-            raise Exception("mock cleanup fail")
-        return original_unlink(self, *args, **kwargs)
-
-    with patch("pathlib.Path.unlink", new=failing_unlink):
+    with patch(
+        "lifeos.ownership.manifest.cleanup_backup",
+        side_effect=Exception("mock cleanup fail"),
+    ):
         with pytest.raises(
             PersistenceError,
             match="Target and manifest committed successfully, but failed to clean up backup file: mock cleanup fail",
         ):
             ownership.write_generated_file(target_rel, b"v2", "gen1", "2")
 
-    # File should be updated
     assert target_abs.read_text() == "v2"
     assert ownership._entries[target_rel].generator_version == "2"
 
@@ -455,17 +443,11 @@ def test_rollback_failure_preserves_backup_and_reports_paths(
     target_rel = "test.md"
     ownership.write_generated_file(target_rel, b"v1", "gen1", "1")
 
-    import os
-
-    original_replace = os.replace
-
-    def failing_replace(src, dst):
-        if ".backup.tmp" in str(src):
-            raise Exception("mock rollback fail")
-        return original_replace(src, dst)
-
     with patch.object(ownership, "_save_manifest", side_effect=Exception("mock save fail")):
-        with patch("os.replace", side_effect=failing_replace):
+        with patch(
+            "lifeos.ownership.manifest.rollback_replacement",
+            side_effect=Exception("mock rollback fail"),
+        ):
             with pytest.raises(PersistenceError) as exc_info:
                 ownership.write_generated_file(target_rel, b"v2", "gen1", "2")
 
@@ -474,8 +456,7 @@ def test_rollback_failure_preserves_backup_and_reports_paths(
             assert "mock rollback fail" in err_msg
             assert "Backup file preserved at:" in err_msg
 
-            # Backup file should still exist
-            backup_files = list(vault_root.glob("*.backup.tmp"))
+            backup_files = list(vault_root.glob(".*.backup"))
             assert len(backup_files) == 1
             assert backup_files[0].exists()
 
@@ -490,8 +471,10 @@ def test_backup_creation_failure_leaves_state_unchanged(
 
     original_entry = ownership._entries[target_rel]
 
-    # Mock shutil.copy2 to fail
-    with patch("shutil.copy2", side_effect=Exception("mock backup fail")):
+    with patch(
+        "lifeos.ownership.manifest.create_hardlink_backup",
+        side_effect=TransactionError("mock backup fail"),
+    ):
         with pytest.raises(
             PersistenceError, match="Failed to create target backup: mock backup fail"
         ):
@@ -499,7 +482,7 @@ def test_backup_creation_failure_leaves_state_unchanged(
 
     assert target_abs.read_text() == "v1"
     assert ownership._entries[target_rel] == original_entry
-    assert not list(vault_root.glob("*.tmp"))
+    assert not list(vault_root.glob(".*.backup"))
 
 
 def test_default_manifest_path() -> None:
@@ -560,7 +543,6 @@ def test_committed_manifest_loads_successfully(tmp_path: Path) -> None:
 def test_pure_byte_parser(tmp_path: Path) -> None:
     from lifeos.ownership.manifest import GeneratedOwnership
 
-    # 1. Valid payload
     valid_json = b'''{
       "schema_version": 1,
       "owned_files": {
@@ -579,17 +561,14 @@ def test_pure_byte_parser(tmp_path: Path) -> None:
     assert "a.md" in ownership._entries
     assert ownership._entries["a.md"].generator_id == "gen1"
 
-    # 2. Malformed JSON
     import pytest
     from lifeos.ownership.manifest import ManifestError
     with pytest.raises(ManifestError, match="Malformed JSON"):
         GeneratedOwnership.from_bytes(b'{ "invalid": }', manifest_path=Path("dummy"), vault_root=tmp_path)
 
-    # 3. Invalid UTF-8
     with pytest.raises(ManifestError, match="Manifest bytes are not valid UTF-8"):
         GeneratedOwnership.from_bytes(b'\xff\xfe', manifest_path=Path("dummy"), vault_root=tmp_path)
 
-    # 4. Duplicate keys
     duplicate_json = b'''{
       "schema_version": 1,
       "owned_files": {},

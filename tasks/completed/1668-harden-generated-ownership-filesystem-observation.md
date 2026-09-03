@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1668
 title: Harden generated ownership filesystem observation
-status: backlog
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-109
@@ -80,6 +80,38 @@ rtk .venv/bin/mypy src/lifeos
 rtk .venv/bin/pytest -q
 rtk git diff --check
 ```
+
+Local repository execution remained unavailable in the implementation environment because the
+execution container could not resolve `github.com` during checkout. The limitation was recorded
+rather than represented as a pass; repository CI supplied the executable validation layer.
+
+Implementation head `d79e307bc4fc9217f4af8c15d1f81274608af909` passed fast-checks run
+`33787919708`. After synchronizing current `master`, head
+`232a4494a11c21230124a00e662cc0cc9db27e32` passed fast-checks run `33789162196` and the final
+normal Codex review reported no major issues. The only later implementation-branch change before
+completion evidence was the task-only LIFEOS-1711 backlog record.
+
+Pre-completion head `4dad98e7daa9224fecf025e931d9f53c151f8f5f` passed fast-checks run
+`33789727529` and full-validation run `33789845570`. All four full pytest shards and aggregate
+`full-test` succeeded; clean-room setup/MCP, the home-node service container, and the ARM64
+home-node image build also succeeded through `docker-setup-e2e`.
+
+The normal Codex review cycle found blocking correctness and security-sensitive filesystem findings
+covering rollback races, compatibility seams, symlink diagnostics, metadata and umask preservation,
+deleted-parent races, backup preservation, authorization-before-content-read ordering, and
+version-only manifest publication races. Accepted findings were fixed by the implementation agent,
+covered by focused regressions, replied to with evidence, and their review threads were resolved.
+The final normal review on `232a4494a11c21230124a00e662cc0cc9db27e32` returned no major issues.
+
+The separate security review was not run. On 2026-09-03 the repository owner explicitly authorized
+skipping it for this task. This is a current-user-authority workflow override under `AGENTS.md`, not
+a successful security-review result.
+
+The required consumer audit also identified a distinct caller-side pathname-presence classification
+gap: a dangling canonical ownership-manifest symlink can be collapsed into an absent/clean
+diagnostic by consumers that call `Path.exists()` before the secure ownership loader. That issue is
+outside LIFEOS-1668's ownership-service scope and was recorded separately as backlog task
+LIFEOS-1711 rather than widening this PR.
 
 # Relevant decisions
 

@@ -2,12 +2,43 @@ import hashlib
 import json
 import os
 import re
+import stat
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
+
+from lifeos._transaction_files import (
+    BackupFile,
+    ParentDescriptor,
+    StagingFile,
+    TransactionError,
+    cleanup_backup,
+    cleanup_staging,
+    create_hardlink_backup,
+    create_staging_file,
+    get_target_identity,
+    publish_creation,
+    publish_replacement,
+    rollback_creation,
+    rollback_replacement,
+)
+from lifeos.vault import (
+    VaultAccessError,
+    VaultFileObservation,
+    observe_vault_file,
+    open_or_create_vault_directory,
+)
 
 DEFAULT_OWNERSHIP_MANIFEST_PATH = PurePosixPath("system/generated-ownership.json")
+
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
 
 
 class OwnershipError(Exception):
@@ -81,6 +112,34 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return d
 
 
+def _absolute_descriptor_path(path: Path) -> tuple[Path, str]:
+    """Return one filesystem-root descriptor anchor plus a portable relative path."""
+    absolute_path = Path(os.path.abspath(path))
+    root = Path(absolute_path.anchor)
+    relative_parts = absolute_path.parts[len(root.parts) :]
+    relative_path = PurePosixPath(*relative_parts).as_posix() if relative_parts else "."
+    return root, relative_path
+
+
+def _read_manifest_bytes(manifest_path: Path) -> bytes | None:
+    root, relative_path = _absolute_descriptor_path(manifest_path)
+    if relative_path == ".":
+        raise ManifestError("Manifest path must name a file")
+    try:
+        return observe_vault_file(root, relative_path).captured_bytes
+    except VaultAccessError as exc:
+        if exc.code == "not-found":
+            return None
+        if exc.code == "unsafe-symlink":
+            unsafe_path = root / exc.relative_path
+            raise PathSafetyError(
+                f"Manifest path or parent is a symlink: {unsafe_path}"
+            ) from exc
+        if exc.code in {"unsafe-file-type", "invalid-path", "invalid-root"}:
+            raise PathSafetyError(f"Manifest path cannot be read safely: {manifest_path}") from exc
+        raise ManifestError(f"Failed to read manifest file: {exc}") from exc
+
+
 def serialize_generated_ownership_bytes(
     entries: Mapping[str, ManifestEntry],
 ) -> bytes:
@@ -149,7 +208,6 @@ class GeneratedOwnership:
             if norm_p in entries:
                 raise ManifestError(f"Duplicate normalized path in manifest: {norm_p}")
 
-            # Simple check for absolute / traversal in manifest
             if os.path.isabs(norm_p) or norm_p.startswith("../") or norm_p == "..":
                 raise ManifestError(f"Unsafe path in manifest: {norm_p}")
 
@@ -170,22 +228,9 @@ class GeneratedOwnership:
 
     @classmethod
     def load(cls, manifest_path: Path, vault_root: Path) -> "GeneratedOwnership":
-        # Protect manifest path from symlinks
-        norm_manifest = Path(os.path.normpath(str(manifest_path)))
-
-        # For simplicity, resolve each parent up to root
-        for parent in list(norm_manifest.parents)[::-1] + [norm_manifest]:
-            if parent.is_symlink():
-                raise PathSafetyError(f"Manifest path or parent is a symlink: {parent}")
-
-        if not manifest_path.exists():
+        content_bytes = _read_manifest_bytes(manifest_path)
+        if content_bytes is None:
             return cls(manifest_path, vault_root, {})
-
-        try:
-            content_bytes = manifest_path.read_bytes()
-        except OSError as e:
-            raise ManifestError(f"Failed to read manifest file: {e}") from e
-
         return cls.from_bytes(content_bytes, manifest_path=manifest_path, vault_root=vault_root)
 
     def _check_path_safety(self, target: Path) -> tuple[Path, str]:
@@ -205,6 +250,112 @@ class GeneratedOwnership:
 
         rel_path = current.relative_to(self.vault_root).as_posix()
         return current, rel_path
+
+    def _observe_existing_target(self, rel_path: str) -> VaultFileObservation | None:
+        try:
+            return observe_vault_file(self.vault_root, rel_path, capture_limit=0)
+        except VaultAccessError as exc:
+            if exc.code == "not-found":
+                return None
+            if exc.code == "concurrent-change":
+                raise ExternalModificationError(
+                    f"Target {rel_path} changed while it was being verified"
+                ) from exc
+            raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
+
+    def _inspect_target_metadata(self, rel_path: str) -> os.stat_result | None:
+        """Inspect target existence/type without opening or hashing file contents."""
+        target_name = PurePosixPath(rel_path).name
+        parent_relative = PurePosixPath(rel_path).parent.as_posix()
+
+        def inspect_at(parent_fd: int) -> os.stat_result | None:
+            try:
+                return os.stat(target_name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return None
+            except OSError as exc:
+                raise PathSafetyError(
+                    f"Target {rel_path} cannot be inspected safely"
+                ) from exc
+
+        if parent_relative == ".":
+            try:
+                parent_fd = os.open(self.vault_root, _DIRECTORY_FLAGS)
+            except OSError as exc:
+                raise PathSafetyError(
+                    f"Target {rel_path} cannot be inspected safely"
+                ) from exc
+            try:
+                return inspect_at(parent_fd)
+            finally:
+                os.close(parent_fd)
+
+        try:
+            with open_or_create_vault_directory(
+                self.vault_root,
+                parent_relative,
+                create_missing=False,
+            ) as parent_fd:
+                return inspect_at(parent_fd)
+        except VaultAccessError as exc:
+            if exc.code == "not-found":
+                return None
+            raise PathSafetyError(
+                f"Target {rel_path} cannot be inspected safely"
+            ) from exc
+
+    @contextmanager
+    def _target_parent(
+        self, rel_path: str, *, create_missing: bool
+    ) -> Iterator[ParentDescriptor]:
+        parent_relative = PurePosixPath(rel_path).parent.as_posix()
+        absolute_parent = self.vault_root / Path(parent_relative)
+        authority_root, authority_relative = _absolute_descriptor_path(absolute_parent)
+        try:
+            authority_fd = os.open(authority_root, _DIRECTORY_FLAGS)
+        except OSError as exc:
+            raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
+
+        parent_fd = -1
+        try:
+            if parent_relative == ".":
+                try:
+                    parent_fd = os.open(self.vault_root, _DIRECTORY_FLAGS)
+                except OSError as exc:
+                    raise PathSafetyError(
+                        f"Target {rel_path} cannot be inspected safely"
+                    ) from exc
+                observed = os.fstat(parent_fd)
+                yield ParentDescriptor(
+                    fd=parent_fd,
+                    dev=observed.st_dev,
+                    ino=observed.st_ino,
+                    path=authority_relative,
+                    authority_fd=authority_fd,
+                )
+            else:
+                try:
+                    with open_or_create_vault_directory(
+                        self.vault_root,
+                        parent_relative,
+                        create_missing=create_missing,
+                    ) as opened_parent:
+                        observed = os.fstat(opened_parent)
+                        yield ParentDescriptor(
+                            fd=opened_parent,
+                            dev=observed.st_dev,
+                            ino=observed.st_ino,
+                            path=authority_relative,
+                            authority_fd=authority_fd,
+                        )
+                except VaultAccessError as exc:
+                    raise PathSafetyError(
+                        f"Target {rel_path} cannot be inspected safely"
+                    ) from exc
+        finally:
+            if parent_fd >= 0:
+                os.close(parent_fd)
+            os.close(authority_fd)
 
     def _save_manifest(self) -> None:
         json_bytes = serialize_generated_ownership_bytes(self._entries)
@@ -242,18 +393,25 @@ class GeneratedOwnership:
         new_hash = hashlib.sha256(content).hexdigest()
 
         existing_entry = self._entries.get(rel_path)
-        is_existing = resolved_target.exists()
+        target_metadata = self._inspect_target_metadata(rel_path)
+        observation: VaultFileObservation | None = None
 
-        if is_existing:
+        if target_metadata is not None:
             if not existing_entry:
                 raise UnownedFileError(f"Target {rel_path} exists but is unowned")
             if existing_entry.generator_id != generator_id:
                 raise GeneratorMismatchError(
                     f"Target owned by {existing_entry.generator_id}, not {generator_id}"
                 )
+            if not stat.S_ISREG(target_metadata.st_mode):
+                raise PathSafetyError(f"Target {rel_path} cannot be inspected safely")
 
-            current_hash = stream_sha256(resolved_target)
-            if current_hash != existing_entry.content_hash:
+            observation = self._observe_existing_target(rel_path)
+            if observation is None:
+                raise ExternalModificationError(
+                    f"Target {rel_path} changed while it was being verified"
+                )
+            if observation.content_hash != existing_entry.content_hash:
                 raise ExternalModificationError(f"Target {rel_path} has been modified externally")
 
             if new_hash == existing_entry.content_hash:
@@ -270,6 +428,7 @@ class GeneratedOwnership:
                     resolved_target=resolved_target,
                     content=content,
                     is_new=False,
+                    expected_target_hash=observation.content_hash,
                 )
                 return
 
@@ -290,7 +449,8 @@ class GeneratedOwnership:
             write_target=True,
             resolved_target=resolved_target,
             content=content,
-            is_new=not is_existing,
+            is_new=observation is None,
+            expected_target_hash=observation.content_hash if observation is not None else None,
         )
 
     def _update_and_save_manifest(
@@ -301,85 +461,186 @@ class GeneratedOwnership:
         resolved_target: Path,
         content: bytes,
         is_new: bool,
+        expected_target_hash: str | None,
     ) -> None:
-        import shutil
-        import uuid
-
-        backup_target = None
-        unique_suffix = uuid.uuid4().hex
-        if write_target and not is_new:
-            # Backup original target to a unique tmp file
-            backup_target = resolved_target.with_name(
-                f"{resolved_target.name}.{unique_suffix}.backup.tmp"
-            )
-            try:
-                shutil.copy2(resolved_target, backup_target)
-            except Exception as e:
-                if backup_target.exists():
-                    backup_target.unlink()
-                raise PersistenceError(f"Failed to create target backup: {e}") from e
-
         old_entry = self._entries.get(rel_path)
-        self._entries[rel_path] = new_entry
 
-        if write_target:
-            resolved_target.parent.mkdir(parents=True, exist_ok=True)
-            # Write new target content to a unique tmp file
-            temp_target = resolved_target.with_name(f"{resolved_target.name}.{unique_suffix}.tmp")
+        if not write_target:
+            if expected_target_hash is not None:
+                observation = self._observe_existing_target(rel_path)
+                if (
+                    observation is None
+                    or observation.content_hash != expected_target_hash
+                ):
+                    raise ExternalModificationError(
+                        f"Target {rel_path} changed before manifest update"
+                    )
+            self._entries[rel_path] = new_entry
             try:
-                temp_target.write_bytes(content)
-                os.replace(temp_target, resolved_target)
-            except Exception as e:
-                # Rollback memory on target write failure
+                self._save_manifest()
+            except Exception as exc:
                 if old_entry:
                     self._entries[rel_path] = old_entry
                 else:
                     del self._entries[rel_path]
-                if temp_target.exists():
-                    temp_target.unlink()
-                if backup_target and backup_target.exists():
-                    backup_target.unlink()
-                raise PersistenceError(f"Failed to write target file: {e}") from e
-
-        try:
-            self._save_manifest()
-        except Exception as e:
-            # Rollback target if manifest save fails
-            rollback_err = None
-            if write_target:
-                try:
-                    if is_new:
-                        if resolved_target.exists():
-                            resolved_target.unlink()
-                    else:
-                        if backup_target and backup_target.exists():
-                            os.replace(backup_target, resolved_target)  # Atomic restoration
-                except Exception as r_err:
-                    rollback_err = r_err
-
-            # Rollback memory
-            if old_entry:
-                self._entries[rel_path] = old_entry
-            else:
-                del self._entries[rel_path]
-
-            if rollback_err:
-                # Do not unlink backup if rollback failed, to preserve it for manual recovery
                 raise PersistenceError(
-                    f"Manifest save failed, AND rollback failed: {rollback_err} (Original error: {e}). "
-                    f"Backup file preserved at: {backup_target}"
-                ) from e
+                    f"Manifest persistence failed, changes rolled back: {exc}"
+                ) from exc
+            return
 
-            if backup_target and backup_target.exists():
-                backup_target.unlink()
+        target_name = PurePosixPath(rel_path).name
+        with self._target_parent(rel_path, create_missing=is_new) as parent:
+            staging: StagingFile | None = None
+            backup: BackupFile | None = None
 
-            raise PersistenceError(f"Manifest persistence failed, changes rolled back: {e}") from e
-
-        # Post-commit cleanup: Manifest and target successfully committed
-        if backup_target and backup_target.exists():
             try:
-                backup_target.unlink()
-            except Exception as e:
-                raise PersistenceError(
-                    f"Target and manifest committed successfully, but failed to clean up backup file: {e}"
-                ) from e
+                try:
+                    current_identity = get_target_identity(target_name, parent)
+                except TransactionError as exc:
+                    raise PathSafetyError(
+                        f"Target {rel_path} cannot be inspected safely"
+                    ) from exc
+
+                if is_new:
+                    if current_identity is not None:
+                        if old_entry is None:
+                            raise UnownedFileError(f"Target {rel_path} exists but is unowned")
+                        raise ExternalModificationError(
+                            f"Target {rel_path} changed before it could be regenerated"
+                        )
+                    intended_mode = None
+                else:
+                    if (
+                        expected_target_hash is None
+                        or current_identity is None
+                        or current_identity.content_hash != expected_target_hash
+                    ):
+                        raise ExternalModificationError(
+                            f"Target {rel_path} changed before mutation"
+                        )
+                    intended_mode = stat.S_IMODE(current_identity.mode)
+
+                try:
+                    staging = create_staging_file(
+                        target_name,
+                        content,
+                        parent,
+                        intended_mode,
+                    )
+                except TransactionError as exc:
+                    raise PersistenceError(f"Failed to write target file: {exc}") from exc
+
+                if is_new:
+                    try:
+                        publish_creation(target_name, staging)
+                    except TransactionError as exc:
+                        observed_after_failure = self._observe_existing_target(rel_path)
+                        if observed_after_failure is not None:
+                            if old_entry is None:
+                                raise UnownedFileError(
+                                    f"Target {rel_path} exists but is unowned"
+                                ) from exc
+                            raise ExternalModificationError(
+                                f"Target {rel_path} changed before creation"
+                            ) from exc
+                        raise PersistenceError(f"Failed to write target file: {exc}") from exc
+                else:
+                    assert current_identity is not None
+                    try:
+                        backup = create_hardlink_backup(
+                            target_name,
+                            parent,
+                            current_identity,
+                        )
+                    except TransactionError as exc:
+                        observed_after_failure = self._observe_existing_target(rel_path)
+                        if (
+                            observed_after_failure is None
+                            or observed_after_failure.content_hash != expected_target_hash
+                        ):
+                            raise ExternalModificationError(
+                                f"Target {rel_path} changed before backup"
+                            ) from exc
+                        raise PersistenceError(
+                            f"Failed to create target backup: {exc}"
+                        ) from exc
+
+                    assert backup is not None
+                    try:
+                        publish_replacement(target_name, staging, current_identity)
+                    except TransactionError as exc:
+                        observed_after_failure = self._observe_existing_target(rel_path)
+                        if (
+                            observed_after_failure is None
+                            or observed_after_failure.content_hash != expected_target_hash
+                        ):
+                            raise ExternalModificationError(
+                                f"Target {rel_path} changed during mutation"
+                            ) from exc
+                        cleanup_error: Exception | None = None
+                        try:
+                            cleanup_backup(backup)
+                            backup = None
+                        except Exception as cleanup_exc:
+                            cleanup_error = cleanup_exc
+                        if cleanup_error is not None:
+                            raise PersistenceError(
+                                "Failed to write target file and clean up backup: "
+                                f"{exc}; cleanup failed: {cleanup_error}"
+                            ) from exc
+                        raise PersistenceError(f"Failed to write target file: {exc}") from exc
+
+                assert staging is not None
+                self._entries[rel_path] = new_entry
+                try:
+                    self._save_manifest()
+                except Exception as exc:
+                    rollback_error: Exception | None = None
+                    try:
+                        if is_new:
+                            rollback_creation(target_name, staging)
+                        else:
+                            assert backup is not None
+                            rollback_replacement(target_name, staging, backup)
+                    except Exception as rollback_exc:
+                        rollback_error = rollback_exc
+
+                    if old_entry:
+                        self._entries[rel_path] = old_entry
+                    else:
+                        del self._entries[rel_path]
+
+                    if rollback_error is not None:
+                        backup_path = (
+                            resolved_target.parent / backup.name
+                            if backup is not None
+                            else None
+                        )
+                        preserved = (
+                            f" Backup file preserved at: {backup_path}"
+                            if backup_path is not None
+                            else ""
+                        )
+                        raise PersistenceError(
+                            "Manifest save failed, AND rollback failed: "
+                            f"{rollback_error} (Original error: {exc}).{preserved}"
+                        ) from exc
+
+                    raise PersistenceError(
+                        f"Manifest persistence failed, changes rolled back: {exc}"
+                    ) from exc
+
+                if backup is not None:
+                    try:
+                        cleanup_backup(backup)
+                    except Exception as exc:
+                        raise PersistenceError(
+                            "Target and manifest committed successfully, but failed "
+                            f"to clean up backup file: {exc}"
+                        ) from exc
+            finally:
+                if staging is not None:
+                    try:
+                        cleanup_staging(staging)
+                    except (FileNotFoundError, OSError):
+                        pass

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Iterable, Literal
 
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.ownership import GeneratedOwnership, ManifestError
+from lifeos.ownership import GeneratedOwnership, ManifestError, PathSafetyError
 from lifeos.scanner import VaultFile
 from lifeos.vault import VaultAccessError, observe_vault_file
 
@@ -36,6 +36,20 @@ def _sort_key(finding: LintFinding) -> tuple[Any, ...]:
     line_key = float("inf") if finding.line is None else finding.line
     severity_rank = SEVERITY_ORDER.get(finding.severity, 99)
     return (str(finding.path), line_key, severity_rank, finding.code, finding.message)
+
+
+def _ownership_manifest_finding(manifest_path: Path, vault_root: Path, error: Exception) -> LintFinding:
+    rel_manifest = (
+        manifest_path.relative_to(vault_root)
+        if manifest_path.is_relative_to(vault_root)
+        else manifest_path
+    )
+    return LintFinding(
+        path=rel_manifest,
+        code="ownership-manifest-invalid",
+        severity="error",
+        message=f"Failed to load ownership manifest: {error}",
+    )
 
 
 def lint_vault(
@@ -164,21 +178,13 @@ def lint_vault(
                                 message="Generated file content hash does not match ownership manifest.",
                             )
                         )
+            except PathSafetyError as e:
+                cause = e.__cause__
+                if not isinstance(cause, VaultAccessError) or cause.code != "unsafe-file-type":
+                    raise
+                findings.append(_ownership_manifest_finding(manifest_path, vault_root, e))
             except ManifestError as e:
-                # manifest loading failed
-                rel_manifest = (
-                    manifest_path.relative_to(vault_root)
-                    if manifest_path.is_relative_to(vault_root)
-                    else manifest_path
-                )
-                findings.append(
-                    LintFinding(
-                        path=rel_manifest,
-                        code="ownership-manifest-invalid",
-                        severity="error",
-                        message=f"Failed to load ownership manifest: {e}",
-                    )
-                )
+                findings.append(_ownership_manifest_finding(manifest_path, vault_root, e))
 
     # Final sorting
     findings.sort(key=_sort_key)
