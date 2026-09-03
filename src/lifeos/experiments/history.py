@@ -9,7 +9,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
-from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown
+from lifeos.vault import VaultAccessError, read_vault_markdown
+from lifeos.vault_paths import VaultPathMetadata, iter_vault_markdown_metadata
 
 from .artifact import parse_experiment
 from .contracts import ExperimentError
@@ -51,12 +52,23 @@ class ExperimentIndexReport:
         }
 
 
-def _source_signature(sources: tuple[VaultMarkdownFile, ...]) -> str:
+def _experiment_path(relative_path: str) -> bool:
+    return relative_path == "experiments" or relative_path.startswith("experiments/")
+
+
+def _source_signature(sources: tuple[VaultPathMetadata, ...]) -> str:
+    """Fingerprint source identity without opening or hashing source contents."""
     digest = hashlib.sha256()
     for source in sources:
-        digest.update(source.relative_path.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(hashlib.sha256(source.content_bytes).digest())
+        fields = (
+            source.relative_path,
+            str(source.size_bytes),
+            str(source.mtime_ns),
+            str(source.ctime_ns),
+            str(source.device),
+            str(source.inode),
+        )
+        digest.update("\0".join(fields).encode("utf-8"))
         digest.update(b"\0")
     return "sha256:" + digest.hexdigest()
 
@@ -124,7 +136,7 @@ def _discard_checkpoint(checkpoint: Path) -> None:
 
 
 def _load_rebuild_checkpoint(
-    *, checkpoint: Path, sources: tuple[VaultMarkdownFile, ...], source_signature: str
+    *, checkpoint: Path, sources: tuple[VaultPathMetadata, ...], source_signature: str
 ) -> tuple[int, list[ExperimentIndexEntry], list[dict[str, object]]]:
     if not checkpoint.exists():
         return 0, [], []
@@ -159,11 +171,8 @@ def _load_rebuild_checkpoint(
             if not isinstance(item, dict) or not isinstance(item.get("code"), str):
                 raise ValueError("Experiment rebuild checkpoint diagnostic is invalid.")
             diagnostics.append(dict(item))
-        processed_sources = {
-            source.relative_path: "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
-            for source in sources[:next_index]
-        }
-        if any(processed_sources.get(entry.path) != entry.content_hash for entry in entries):
+        processed_paths = {source.relative_path for source in sources[:next_index]}
+        if any(entry.path not in processed_paths for entry in entries):
             raise ValueError(
                 "Experiment rebuild checkpoint entries do not match processed sources."
             )
@@ -212,7 +221,7 @@ def rebuild_experiment_index(
     checkpoint = index_dir / "rebuild-checkpoint.json"
     output_path = index_dir / "index.json"
     try:
-        sources = iter_vault_markdown(vault_root, roots=("experiments",))
+        sources = iter_vault_markdown_metadata(vault_root, path_filter=_experiment_path)
     except VaultAccessError as exc:
         if exc.code == "not-found":
             sources = ()
@@ -231,12 +240,15 @@ def rebuild_experiment_index(
 
     processed_this_run = 0
     for source_index in range(next_index, len(sources)):
-        source = sources[source_index]
+        source_metadata = sources[source_index]
         try:
+            source = read_vault_markdown(vault_root, source_metadata.relative_path)
             artifact = parse_experiment(source.path, source.relative_path, source.content)
+        except VaultAccessError as exc:
+            raise ExperimentError(exc.code, str(exc)) from exc
         except ExperimentError as exc:
             diagnostics.append(
-                {"code": exc.code, "path": source.relative_path, "message": exc.message}
+                {"code": exc.code, "path": source_metadata.relative_path, "message": exc.message}
             )
         else:
             identity = artifact.metadata.experiment_id
