@@ -17,6 +17,7 @@ from lifeos.copilot import (
     generate_plan_options,
 )
 from lifeos.desktop import DesktopProposalService
+from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.loader import load_proposal_directory
 
 
@@ -25,10 +26,15 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _body_bytes(path: Path) -> bytes:
+    raw = path.read_bytes().decode("utf-8")
+    return parse_markdown_note(path, content=raw).body.encode("utf-8")
+
+
 def _goal(vault: Path) -> None:
     _write(
         vault / "goals" / "cell.md",
-        "---\ncopilot_schema_version: 1\nid: goal-cell\ntype: goal\ntitle: Learn cells\nstatus: active\nhorizon: year\nwhy: Understand cells.\ndesired_change: Explain six chapters.\nconstraints: [Four hours weekly]\nactive_plans: []\n---\n\nHuman goal notes stay here.\n",
+        "---\ncopilot_schema_version: 1\nid: goal-cell\ntype: goal\ntitle: Learn cells\nstatus: active\nhorizon: year\nwhy: Understand cells.\ndesired_change: Explain six chapters.\nconstraints: [Four hours weekly]\nactive_plans: []\n---\n\n\nHuman goal notes stay here.  \n\tTail",
     )
     _write(
         vault / "system" / "generated-ownership.json", '{"schema_version": 1, "owned_files": {}}\n'
@@ -39,7 +45,7 @@ def _goal(vault: Path) -> None:
 def _conflict(vault: Path) -> None:
     _write(
         vault / "plans" / "old.md",
-        "---\ncopilot_schema_version: 1\nid: plan-old\ntype: plan\ntitle: Old cell plan\nstatus: active\ngoal: goal-other\ndesired_outcome: Explain six chapters.\ntasks: []\n---\n\nHuman conflict notes stay here.\n",
+        "---\ncopilot_schema_version: 1\nid: plan-old\ntype: plan\ntitle: Old cell plan\nstatus: active\ngoal: goal-other\ndesired_outcome: Explain six chapters.\ntasks: []\n---\n\nHuman conflict notes stay here.  \n\tTail",
     )
 
 
@@ -124,6 +130,8 @@ def test_selected_exclusion_and_unrelated_goal_body_are_preserved_after_apply(
 ) -> None:
     _goal(tmp_path)
     goal, sessions, snapshot, option, decomposition, index = _draft(tmp_path)
+    goal_path = tmp_path / "goals" / "cell.md"
+    original_goal_body = _body_bytes(goal_path)
     request = _request(goal, snapshot, option, decomposition, included_action_ids=())
     result = create_copilot_plan_proposal(
         vault_root=tmp_path,
@@ -140,16 +148,18 @@ def test_selected_exclusion_and_unrelated_goal_body_are_preserved_after_apply(
         challenge = desktop.prepare(proposal_id=result.proposal_id, action=action)
         desktop.execute(proposal_id=result.proposal_id, action=action, token=challenge.token)
     plan = (tmp_path / "plans" / "cell-new.md").read_text()
-    goal_text = (tmp_path / "goals" / "cell.md").read_text()
+    goal_text = goal_path.read_text()
     assert "tasks: []" in plan
     assert "plan-cell-new" in goal_text
-    assert "Human goal notes stay here." in goal_text
+    assert _body_bytes(goal_path) == original_goal_body
     assert build_copilot_index(tmp_path).plans[0].plan_id == "plan-cell-new"
 
 
 def test_explicit_supersession_uses_exact_hash_and_preserves_human_body(tmp_path: Path) -> None:
     _goal(tmp_path)
     _conflict(tmp_path)
+    conflict_path = tmp_path / "plans" / "old.md"
+    original_conflict_body = _body_bytes(conflict_path)
     goal, sessions, snapshot, option, decomposition, index = _draft(tmp_path)
     request = _request(
         goal,
@@ -175,6 +185,14 @@ def test_explicit_supersession_uses_exact_hash_and_preserves_human_body(tmp_path
     assert loaded.proposal is not None
     assert any(op.target_path == "plans/old.md" for op in loaded.proposal.patch_document.operations)
 
+    desktop = DesktopProposalService(vault_root=tmp_path, actor_id="tester")
+    for action in ("submit", "approve", "apply"):
+        challenge = desktop.prepare(proposal_id=result.proposal_id, action=action)
+        desktop.execute(proposal_id=result.proposal_id, action=action, token=challenge.token)
+    assert _body_bytes(conflict_path) == original_conflict_body
+    assert b"status: superseded" in conflict_path.read_bytes()
+    assert b"superseded_by: plan-cell-new" in conflict_path.read_bytes()
+
 
 def test_duplicate_ids_invalid_links_and_stale_goal_fail_closed(tmp_path: Path) -> None:
     _goal(tmp_path)
@@ -193,9 +211,9 @@ def test_duplicate_ids_invalid_links_and_stale_goal_fail_closed(tmp_path: Path) 
             actor_id="tester",
         )
     (tmp_path / "plans" / "duplicate.md").unlink()
-    (tmp_path / "goals" / "cell.md").write_text(
-        (tmp_path / "goals" / "cell.md").read_text() + "Concurrent edit\n"
-    )
+    goal_path = tmp_path / "goals" / "cell.md"
+    goal_path.write_text(goal_path.read_text() + "Concurrent edit\n")
+    concurrent = goal_path.read_bytes()
     with pytest.raises(CopilotProposalError, match="goal changed"):
         create_copilot_plan_proposal(
             vault_root=tmp_path,
@@ -205,11 +223,14 @@ def test_duplicate_ids_invalid_links_and_stale_goal_fail_closed(tmp_path: Path) 
             request=_request(goal, snapshot, option, decomposition),
             actor_id="tester",
         )
+    assert goal_path.read_bytes() == concurrent
 
 
 def test_rejected_lifecycle_leaves_canonical_files_unchanged(tmp_path: Path) -> None:
     _goal(tmp_path)
     goal, sessions, snapshot, option, decomposition, index = _draft(tmp_path)
+    goal_path = tmp_path / "goals" / "cell.md"
+    original_goal = goal_path.read_bytes()
     result = create_copilot_plan_proposal(
         vault_root=tmp_path,
         option=option,
@@ -227,6 +248,7 @@ def test_rejected_lifecycle_leaves_canonical_files_unchanged(tmp_path: Path) -> 
     desktop.execute(
         proposal_id=result.proposal_id, action="reject", token=challenge.token, reason="Not now"
     )
+    assert goal_path.read_bytes() == original_goal
     assert not (tmp_path / "plans" / "cell-new.md").exists()
     assert desktop.inspect(result.proposal_id).status == "rejected"
 
