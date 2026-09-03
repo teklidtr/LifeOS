@@ -1,4 +1,5 @@
 import re
+from collections.abc import Hashable
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -184,6 +185,13 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
                             key_node.start_mark,
                         )
                     key = self.construct_object(key_node, deep=False)
+                    if not isinstance(key, Hashable):
+                        raise yaml.constructor.ConstructorError(
+                            "while constructing a mapping",
+                            node.start_mark,
+                            "found unhashable key",
+                            key_node.start_mark,
+                        )
                     if key in mapping:
                         raise yaml.constructor.ConstructorError(
                             "while constructing a mapping",

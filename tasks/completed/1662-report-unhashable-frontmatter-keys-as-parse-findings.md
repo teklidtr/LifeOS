@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1662
 title: Report unhashable frontmatter keys as parse findings
-status: backlog
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-007
