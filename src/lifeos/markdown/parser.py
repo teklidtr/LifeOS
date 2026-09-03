@@ -125,11 +125,11 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
             content = path.read_text(encoding="utf-8")
         except Exception as e:
             return ParsedNote(
-                path=path,
-                durable_fields=DurableFields(),
-                frontmatter=MappingProxyType({}),
-                body="",
-                managed_blocks=(),
+            path=path,
+            durable_fields=DurableFields(),
+            frontmatter=MappingProxyType({}),
+            body="",
+            managed_blocks=(),
                 findings=(ParseFinding("file-read-error", "error", path, 1, str(e)),),
             )
 
