@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1666
 title: Preserve human Markdown in metadata-only updates
-status: ready
+status: in-progress
 phase: hardening
 depends_on:
   - LIFEOS-1657
