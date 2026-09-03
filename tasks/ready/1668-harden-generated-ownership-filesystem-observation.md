@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1668
 title: Harden generated ownership filesystem observation
-status: backlog
+status: ready
 phase: hardening
 depends_on:
   - LIFEOS-109
