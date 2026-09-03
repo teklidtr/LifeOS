@@ -635,3 +635,30 @@ remediation, and only the relative exposed paths needed to fix a local gap. The 
 `recovery.backup.external`, and `recovery.runtime.disposable`. Operational doctor readiness
 remains separate from this recovery evidence so advisory recovery gaps do not silently redefine
 whether the local LifeOS application can run.
+
+## Evidence-backed Personal Model
+
+Phase 17 adds durable personal working hypotheses without turning the aggregate model into a
+second source of truth. Recognized canonical patterns are human-owned Markdown under `patterns/`;
+`status: active` means the user currently accepts a hypothesis as useful working context, not that
+LifeOS has established a fact, causal rule, personality trait, or instruction.
+
+The aggregate Personal Model is a deterministic read model under `.lifeos/personal-model/` and is
+fully rebuildable from canonical pattern artifacts. Evidence references keep stable source
+identity, reviewed path, reviewed content hash, and supporting/contesting/contextual roles
+separate. Changed, moved, missing, ambiguous, stale, or reversed evidence can create an explicit
+review reason but never silently rewrites a statement, confidence, or lifecycle state. Existing
+Phase 7 `candidate` observation output remains ephemeral analysis rather than a canonical status.
+
+Every consequential semantic transition uses the shared proposal engine. Pattern files remain
+human-owned, agents cannot approve their own interpretations, and external MCP assistance stops
+at a draft. Daily and weekly reviews may surface a bounded optional maintenance item; Context
+Packs, conversations, goals, plans, experiments, and reflection may receive bounded relevant
+pattern evidence with lifecycle and evidence state visible. Pattern text never gains instruction
+authority, protected scopes retain the existing default-deny/provider-disclosure contract, and
+the whole Personal Model is never injected into every provider request.
+
+Direct pattern-driven planner scoring, ranking, selection, or automatic routine changes are
+outside Phase 17. The Obsidian Personal Model workspace remains a thin client over typed Python
+read models and proposal-backed actions. See
+[Evidence-Backed Personal Model Architecture](personal-model-architecture.md).
