@@ -306,7 +306,7 @@ class DailyInteractionService:
                         "Correct the task capacity fields.",
                     )
                 tasks.append(task)
-                document = _frontmatter_document(frontmatter, body)
+                document = _frontmatter_document(frontmatter, body, preserve_body=True)
                 _atomic_write(
                     self.vault_root, path, document, expected_hash=actual_hash, create=False
                 )
@@ -521,8 +521,10 @@ class DailyInteractionService:
                 else ""
             )
             if section:
-                body = body.rstrip() + "\n\n" + section
-            document = _frontmatter_document(frontmatter, body)
+                if created:
+                    body = body.rstrip()
+                body += "\n\n" + section
+            document = _frontmatter_document(frontmatter, body, preserve_body=not created)
             _atomic_write(
                 self.vault_root, path, document, expected_hash=actual_hash, create=created
             )
@@ -627,7 +629,7 @@ class DailyInteractionService:
                     "invalid_note", "Execution history must be a list.", "Repair the plan note."
                 )
             history.append(event)
-            document = _frontmatter_document(frontmatter, body)
+            document = _frontmatter_document(frontmatter, body, preserve_body=True)
             _atomic_write(self.vault_root, path, document, expected_hash=actual_hash, create=False)
             ref = CanonicalReference(
                 path, content_hash(document), str(frontmatter.get("id") or ""), request.task_id
