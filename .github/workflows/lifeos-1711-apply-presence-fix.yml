@@ -1,0 +1,494 @@
+name: LIFEOS-1711 presence patch runner
+
+on:
+  push:
+    branches:
+      - lifeos-1711-secure-ownership-presence
+    paths:
+      - .github/workflows/lifeos-1711-apply-presence-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lifeos-1711-secure-ownership-presence
+          fetch-depth: 0
+
+      - name: Verify reviewed source base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object src/lifeos/ownership/manifest.py)" = "8431f31d5b082c3551252df2807779689f0d0de0"
+          test "$(git hash-object src/lifeos/lint/linter.py)" = "5e527f56f24342643155c4ad5de9c687904e52d5"
+          test "$(git hash-object src/lifeos/status.py)" = "0a5b9a18c0a84879d545e6a03c5b86b9ce759576"
+          test "$(git hash-object src/lifeos/facade/proposal_tools.py)" = "b3e66191e6a268372abb56f0c9494dfb3a020285"
+
+      - name: Apply exact reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one match in {path}, found {count}")
+              target.write_text(text.replace(old, new), encoding="utf-8")
+
+          replace_exact(
+              "src/lifeos/ownership/manifest.py",
+              '''    @classmethod
+              def load(cls, manifest_path: Path, vault_root: Path) -> "GeneratedOwnership":
+                  content_bytes = _read_manifest_bytes(manifest_path)
+                  if content_bytes is None:
+                      return cls(manifest_path, vault_root, {})
+                  return cls.from_bytes(content_bytes, manifest_path=manifest_path, vault_root=vault_root)
+          ''',
+              '''    @classmethod
+              def load_if_present(
+                  cls, manifest_path: Path, vault_root: Path
+              ) -> "GeneratedOwnership | None":
+                  content_bytes = _read_manifest_bytes(manifest_path)
+                  if content_bytes is None:
+                      return None
+                  return cls.from_bytes(content_bytes, manifest_path=manifest_path, vault_root=vault_root)
+
+              @classmethod
+              def load(cls, manifest_path: Path, vault_root: Path) -> "GeneratedOwnership":
+                  ownership = cls.load_if_present(manifest_path, vault_root)
+                  if ownership is None:
+                      return cls(manifest_path, vault_root, {})
+                  return ownership
+          ''',
+          )
+
+          lint_path = Path("src/lifeos/lint/linter.py")
+          lint_text = lint_path.read_text(encoding="utf-8")
+          start_marker = "    # Ownership checks\n"
+          end_marker = "    # Final sorting\n"
+          start = lint_text.index(start_marker)
+          end = lint_text.index(end_marker, start)
+          lint_block = '''    # Ownership checks
+              if manifest_path is not None:
+                  try:
+                      ownership = GeneratedOwnership.load_if_present(manifest_path, vault_root)
+                      if ownership is not None:
+                          for rel_path, entry in ownership.entries.items():
+                              portable_rel_path = Path(rel_path).as_posix()
+                              try:
+                                  observation = observe_vault_file(
+                                      vault_root,
+                                      portable_rel_path,
+                                      capture_limit=0,
+                                  )
+                              except VaultAccessError as e:
+                                  if e.code == "not-found":
+                                      code = "ownership-file-missing"
+                                      message = "Owned generated file is missing from disk."
+                                  elif e.code in {"invalid-path", "unsafe-symlink", "unsafe-file-type"}:
+                                      code = "ownership-path-unsafe"
+                                      message = "Owned generated file is not a safe regular vault file."
+                                  else:
+                                      code = "ownership-file-missing"
+                                      message = "Failed to read generated file for hash verification."
+                                  findings.append(
+                                      LintFinding(
+                                          path=Path(portable_rel_path),
+                                          code=code,
+                                          severity="error",
+                                          message=message,
+                                      )
+                                  )
+                                  continue
+
+                              if observation.content_hash != entry.content_hash:
+                                  findings.append(
+                                      LintFinding(
+                                          path=Path(portable_rel_path),
+                                          code="ownership-hash-mismatch",
+                                          severity="error",
+                                          message="Generated file content hash does not match ownership manifest.",
+                                      )
+                                  )
+                  except PathSafetyError as e:
+                      cause = e.__cause__
+                      if not isinstance(cause, VaultAccessError) or cause.code != "unsafe-file-type":
+                          raise
+                      findings.append(_ownership_manifest_finding(manifest_path, vault_root, e))
+                  except ManifestError as e:
+                      findings.append(_ownership_manifest_finding(manifest_path, vault_root, e))
+
+          '''
+          lint_path.write_text(lint_text[:start] + lint_block + lint_text[end:], encoding="utf-8")
+
+          replace_exact(
+              "src/lifeos/status.py",
+              '''def _ownership_status(config: LifeOSConfig) -> SubsystemStatus:
+              manifest_path = config.vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
+              if not manifest_path.exists():
+                  return SubsystemStatus(
+                      "ownership",
+                      "healthy",
+                      "ownership-absent",
+                      "No generated ownership manifest is present.",
+                  )
+              try:
+                  GeneratedOwnership.load(manifest_path, config.vault_root)
+              except PathSafetyError:
+                  return SubsystemStatus(
+                      "ownership",
+                      "corrupt",
+                      "ownership-unsafe-path",
+                      "Generated ownership uses an unsafe path.",
+                      "Inspect and repair the canonical ownership manifest.",
+                  )
+              except ManifestError:
+                  return SubsystemStatus(
+                      "ownership",
+                      "corrupt",
+                      "ownership-invalid",
+                      "Generated ownership manifest is invalid.",
+                      "Inspect and repair the canonical ownership manifest.",
+                  )
+              except OSError:
+                  return SubsystemStatus(
+                      "ownership",
+                      "unavailable",
+                      "ownership-unavailable",
+                      "Generated ownership manifest is not readable.",
+                      "Check vault permissions and retry.",
+                  )
+              return SubsystemStatus(
+                  "ownership", "healthy", "ownership-valid", "Generated ownership is valid."
+              )
+          ''',
+              '''def _ownership_status(config: LifeOSConfig) -> SubsystemStatus:
+              manifest_path = config.vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
+              try:
+                  ownership = GeneratedOwnership.load_if_present(manifest_path, config.vault_root)
+              except PathSafetyError:
+                  return SubsystemStatus(
+                      "ownership",
+                      "corrupt",
+                      "ownership-unsafe-path",
+                      "Generated ownership uses an unsafe path.",
+                      "Inspect and repair the canonical ownership manifest.",
+                  )
+              except ManifestError:
+                  return SubsystemStatus(
+                      "ownership",
+                      "corrupt",
+                      "ownership-invalid",
+                      "Generated ownership manifest is invalid.",
+                      "Inspect and repair the canonical ownership manifest.",
+                  )
+              except OSError:
+                  return SubsystemStatus(
+                      "ownership",
+                      "unavailable",
+                      "ownership-unavailable",
+                      "Generated ownership manifest is not readable.",
+                      "Check vault permissions and retry.",
+                  )
+              if ownership is None:
+                  return SubsystemStatus(
+                      "ownership",
+                      "healthy",
+                      "ownership-absent",
+                      "No generated ownership manifest is present.",
+                  )
+              return SubsystemStatus(
+                  "ownership", "healthy", "ownership-valid", "Generated ownership is valid."
+              )
+          ''',
+          )
+
+          replace_exact(
+              "src/lifeos/facade/proposal_tools.py",
+              '''def _load_generated_ownership(*, vault_root: Path) -> GeneratedOwnership:
+              manifest_path = vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
+              if not manifest_path.exists():
+                  raise ToolValidationError("Generated ownership manifest is missing")
+              try:
+                  return GeneratedOwnership.load(manifest_path, vault_root)
+              except (ManifestError, PathSafetyError) as e:
+                  raise ToolValidationError("Generated ownership manifest is invalid") from e
+          ''',
+              '''def _load_generated_ownership(*, vault_root: Path) -> GeneratedOwnership:
+              manifest_path = vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
+              try:
+                  ownership = GeneratedOwnership.load_if_present(manifest_path, vault_root)
+              except (ManifestError, PathSafetyError) as e:
+                  raise ToolValidationError("Generated ownership manifest is invalid") from e
+              if ownership is None:
+                  raise ToolValidationError("Generated ownership manifest is missing")
+              return ownership
+          ''',
+          )
+
+          Path("tests/ownership/test_manifest_presence.py").write_text('''from pathlib import Path
+
+          import pytest
+
+          from lifeos.ownership import GeneratedOwnership, PathSafetyError
+
+
+          def _symlink(link: Path, target: str | Path, *, target_is_directory: bool = False) -> None:
+              try:
+                  link.symlink_to(target, target_is_directory=target_is_directory)
+              except (OSError, NotImplementedError) as exc:
+                  pytest.skip(f"symlink creation is unavailable: {exc}")
+
+
+          def test_load_if_present_distinguishes_true_missing_from_load_fallback(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              vault_root.mkdir()
+              manifest_path = vault_root / "system" / "generated-ownership.json"
+
+              assert GeneratedOwnership.load_if_present(manifest_path, vault_root) is None
+              assert GeneratedOwnership.load(manifest_path, vault_root).entries == {}
+
+
+          def test_load_if_present_rejects_dangling_final_symlink(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              system_dir = vault_root / "system"
+              system_dir.mkdir(parents=True)
+              manifest_path = system_dir / "generated-ownership.json"
+              _symlink(manifest_path, "missing.json")
+
+              with pytest.raises(PathSafetyError, match="Manifest path or parent is a symlink"):
+                  GeneratedOwnership.load_if_present(manifest_path, vault_root)
+
+
+          def test_load_if_present_rejects_symlinked_parent(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              vault_root.mkdir()
+              external_system = tmp_path / "external-system"
+              external_system.mkdir()
+              _symlink(vault_root / "system", external_system, target_is_directory=True)
+              manifest_path = vault_root / "system" / "generated-ownership.json"
+
+              with pytest.raises(PathSafetyError, match="Manifest path or parent is a symlink"):
+                  GeneratedOwnership.load_if_present(manifest_path, vault_root)
+          ''', encoding="utf-8")
+
+          Path("tests/lint/test_ownership_manifest_presence.py").write_text('''from pathlib import Path
+
+          import pytest
+
+          from lifeos.lint.linter import lint_vault
+          from lifeos.ownership import PathSafetyError
+
+
+          def _symlink(link: Path, target: str | Path) -> None:
+              try:
+                  link.symlink_to(target)
+              except (OSError, NotImplementedError) as exc:
+                  pytest.skip(f"symlink creation is unavailable: {exc}")
+
+
+          def test_missing_ownership_manifest_remains_clean(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              vault_root.mkdir()
+              manifest_path = vault_root / "system" / "generated-ownership.json"
+
+              result = lint_vault(vault_root, [], manifest_path)
+
+              assert result.error_count == 0
+              assert result.findings == ()
+
+
+          def test_dangling_ownership_manifest_symlink_is_not_skipped(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              system_dir = vault_root / "system"
+              system_dir.mkdir(parents=True)
+              manifest_path = system_dir / "generated-ownership.json"
+              _symlink(manifest_path, "missing.json")
+
+              with pytest.raises(PathSafetyError, match="Manifest path or parent is a symlink"):
+                  lint_vault(vault_root, [], manifest_path)
+          ''', encoding="utf-8")
+
+          Path("tests/status/test_ownership_manifest_presence.py").write_text('''from pathlib import Path
+
+          import pytest
+
+          from lifeos.config import LifeOSConfig
+          from lifeos.ownership.manifest import serialize_generated_ownership_bytes
+          from lifeos.status import _ownership_status
+
+
+          def _symlink(link: Path, target: str | Path, *, target_is_directory: bool = False) -> None:
+              try:
+                  link.symlink_to(target, target_is_directory=target_is_directory)
+              except (OSError, NotImplementedError) as exc:
+                  pytest.skip(f"symlink creation is unavailable: {exc}")
+
+
+          def _config(vault_root: Path) -> LifeOSConfig:
+              return LifeOSConfig(vault_root=vault_root, runtime_dir=vault_root / ".lifeos")
+
+
+          def test_status_true_missing_ownership_manifest_remains_absent(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              vault_root.mkdir()
+
+              status = _ownership_status(_config(vault_root))
+
+              assert status.state == "healthy"
+              assert status.code == "ownership-absent"
+
+
+          def test_status_dangling_ownership_manifest_symlink_is_unsafe(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              system_dir = vault_root / "system"
+              system_dir.mkdir(parents=True)
+              manifest_path = system_dir / "generated-ownership.json"
+              _symlink(manifest_path, "missing.json")
+
+              status = _ownership_status(_config(vault_root))
+
+              assert status.state == "corrupt"
+              assert status.code == "ownership-unsafe-path"
+
+
+          def test_status_symlinked_manifest_parent_is_unsafe(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              vault_root.mkdir()
+              external_system = tmp_path / "external-system"
+              external_system.mkdir()
+              _symlink(vault_root / "system", external_system, target_is_directory=True)
+
+              status = _ownership_status(_config(vault_root))
+
+              assert status.state == "corrupt"
+              assert status.code == "ownership-unsafe-path"
+
+
+          def test_status_regular_ownership_manifest_remains_valid(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              system_dir = vault_root / "system"
+              system_dir.mkdir(parents=True)
+              manifest_path = system_dir / "generated-ownership.json"
+              manifest_path.write_bytes(serialize_generated_ownership_bytes({}))
+
+              status = _ownership_status(_config(vault_root))
+
+              assert status.state == "healthy"
+              assert status.code == "ownership-valid"
+          ''', encoding="utf-8")
+
+          Path("tests/facade/test_ownership_manifest_presence.py").write_text('''from pathlib import Path
+
+          import pytest
+
+          from lifeos.facade.errors import ToolValidationError
+          from lifeos.facade.proposal_tools import _load_generated_ownership
+          from lifeos.ownership import PathSafetyError
+          from lifeos.ownership.manifest import serialize_generated_ownership_bytes
+
+
+          def _symlink(link: Path, target: str | Path) -> None:
+              try:
+                  link.symlink_to(target)
+              except (OSError, NotImplementedError) as exc:
+                  pytest.skip(f"symlink creation is unavailable: {exc}")
+
+
+          def test_facade_true_missing_ownership_manifest_keeps_missing_error(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              vault_root.mkdir()
+
+              with pytest.raises(ToolValidationError, match="Generated ownership manifest is missing"):
+                  _load_generated_ownership(vault_root=vault_root)
+
+
+          def test_facade_dangling_manifest_symlink_is_invalid_not_missing(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              system_dir = vault_root / "system"
+              system_dir.mkdir(parents=True)
+              manifest_path = system_dir / "generated-ownership.json"
+              _symlink(manifest_path, "missing.json")
+
+              with pytest.raises(ToolValidationError, match="Generated ownership manifest is invalid") as exc_info:
+                  _load_generated_ownership(vault_root=vault_root)
+
+              assert isinstance(exc_info.value.__cause__, PathSafetyError)
+
+
+          def test_facade_regular_ownership_manifest_still_loads(tmp_path: Path) -> None:
+              vault_root = tmp_path / "vault"
+              system_dir = vault_root / "system"
+              system_dir.mkdir(parents=True)
+              manifest_path = system_dir / "generated-ownership.json"
+              manifest_path.write_bytes(serialize_generated_ownership_bytes({}))
+
+              ownership = _load_generated_ownership(vault_root=vault_root)
+
+              assert ownership.entries == {}
+          ''', encoding="utf-8")
+          PY
+          git diff --check
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Run focused LIFEOS-1711 validation
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -euo pipefail
+          uv run pytest -q \
+            tests/ownership/test_manifest_presence.py \
+            tests/lint/test_ownership_manifest_presence.py \
+            tests/status/test_ownership_manifest_presence.py \
+            tests/facade/test_ownership_manifest_presence.py
+          uv run ruff check \
+            src/lifeos/ownership/manifest.py \
+            src/lifeos/lint/linter.py \
+            src/lifeos/status.py \
+            src/lifeos/facade/proposal_tools.py \
+            tests/ownership/test_manifest_presence.py \
+            tests/lint/test_ownership_manifest_presence.py \
+            tests/status/test_ownership_manifest_presence.py \
+            tests/facade/test_ownership_manifest_presence.py
+          uv run mypy \
+            src/lifeos/ownership/manifest.py \
+            src/lifeos/lint/linter.py \
+            src/lifeos/status.py \
+            src/lifeos/facade/proposal_tools.py
+          uv run python -m compileall -q src tests
+          git diff --check
+
+      - name: Commit and push implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/lifeos/ownership/manifest.py \
+            src/lifeos/lint/linter.py \
+            src/lifeos/status.py \
+            src/lifeos/facade/proposal_tools.py \
+            tests/ownership/test_manifest_presence.py \
+            tests/lint/test_ownership_manifest_presence.py \
+            tests/status/test_ownership_manifest_presence.py \
+            tests/facade/test_ownership_manifest_presence.py
+          git commit -m "LIFEOS-1711 distinguish unsafe ownership manifests"
+          git push origin HEAD:lifeos-1711-secure-ownership-presence
