@@ -430,3 +430,56 @@ redaction_state:
 Original bytes plus the manifest are canonical evidence. Extracted text, OCR,
 transcripts, thumbnails, waveforms, descriptions, embeddings, and indexes are
 versioned derived artifacts keyed by the original content hash.
+
+## Personal pattern (Phase 17 proposed canonical)
+
+Phase 17 recognizes individual reviewable working hypotheses under `patterns/`.
+The exact parser and serializer ship in LIFEOS-1701; the semantic shape is fixed by
+[Evidence-Backed Personal Model Architecture](personal-model-architecture.md).
+Unrecognized Markdown under `patterns/` remains ordinary user content.
+
+```yaml
+pattern_schema: 1
+type: pattern
+id: pattern-example
+title:
+description:
+status: seed | active | needs-review | archived
+confidence: low | medium | high
+review_reasons: []
+statement:
+origin:
+  kind: manual | observation | review | conversation | experiment | goal | plan | agent
+  source_ref:
+created_at:
+updated_at:
+last_reviewed_at:
+review_due_at:
+evidence_fingerprint: sha256:<digest>
+evidence:
+  - path:
+    source_id:
+    content_hash: sha256:<digest>
+    role: supporting | contesting | contextual
+    observation_id:
+    event_id:
+evaluation:
+  kind:
+  parameters: {}
+```
+
+Stable source identity, reviewed path, and reviewed content hash remain separate
+facts. Optional `source_id`, `observation_id`, and `event_id` fields are present only
+when the referenced evidence has those durable identities. Historical reviewed
+hashes are not silently advanced when a source changes or moves.
+
+The evidence fingerprint is derived deterministically from normalized evidence
+references and is ordering-independent. Evidence roles remain separate so
+supporting material cannot erase contesting evidence. Missing evidence is unknown,
+not negative evidence. `evaluation` is optional and only names a supported
+deterministic re-evaluation recipe; it cannot encode an autonomous semantic model.
+
+Machine-managed evidence summaries use validated managed blocks while human
+reflection remains outside those blocks. Canonical pattern files are human-owned.
+The aggregate Personal Model is derived under `.lifeos/personal-model/` and is not
+a second canonical artifact or generated biography.
