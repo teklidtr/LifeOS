@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1669
 title: Allow status-only historical task reconciliation through the documentation-impact gate
-status: backlog
+status: completed
 phase: hardening
 depends_on: []
 risk: medium
@@ -74,6 +74,27 @@ pytest -q tests/project/test_documentation_impact.py
 python scripts/check_documentation_impact.py --base-ref <known-good-base>
 git diff --check
 ```
+
+# Results
+
+- The documentation-impact exception is centralized at a Git-object comparison boundary. The
+  merge-base and HEAD snapshots must preserve object type and file mode, and raw blob bytes may
+  differ only by the canonical frontmatter transition from `status: backlog|ready|in-progress`
+  to `status: completed`.
+- Regression coverage includes the LIFEOS-1667 multi-file reconciliation shape and rejects
+  substantive task edits, ID/dependency/acceptance changes, final-newline and line-ending churn,
+  status-line formatting changes, executable-mode changes, symlink mode, and non-blob objects.
+- PR #32 fast-checks run 732 passed on consolidated head
+  `bbebca2ec945227b40263f6a48d1bb9f3edb04e7`, including the documentation-impact gate,
+  manual-link validation, Ruff, mypy, source compilation, pytest collection, and `tests/project`
+  smoke tests.
+- The final Codex re-review of consolidated head `bbebca2ec945227b40263f6a48d1bb9f3edb04e7`
+  reported no major issues. All three earlier P2 review threads are resolved.
+- Security review is skipped by explicit user instruction for this workflow.
+- A repository-local checkout remains unavailable in the current execution environment, so the
+  literal local validation commands could not all be run. The isolated regression harness and
+  GitHub diff inspection were used as the closest local/static substitutes, with CI providing
+  independent repository validation.
 
 # Relevant decisions
 
