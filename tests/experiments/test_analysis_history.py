@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
 import shutil
+
+import pytest
+
+import lifeos.experiments.history as experiment_history
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -228,3 +233,165 @@ def test_lineage_and_incompatible_comparison_warning(tmp_path: Path) -> None:
     )
     assert comparison["compatible"] is True
     assert repeat.metadata.repeated_from_experiment_id == first.metadata.experiment_id
+
+
+def _experiment_source_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted((root / "experiments").rglob("*.md"))
+    }
+
+
+def test_rebuild_resumes_verified_experiment_progress_and_bounds_processing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / ".lifeos"
+    _api, _created = _seed_experiment_history(tmp_path, 3)
+    canonical_before = _experiment_source_bytes(tmp_path)
+    processed: list[str] = []
+    real_parse = experiment_history.parse_experiment
+
+    def recording_parse(path: Path, relative_path: str, content: str):
+        processed.append(relative_path)
+        return real_parse(path, relative_path, content)
+
+    monkeypatch.setattr(experiment_history, "parse_experiment", recording_parse)
+
+    first = rebuild_experiment_index(
+        vault_root=tmp_path, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    second = rebuild_experiment_index(
+        vault_root=tmp_path, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    third = rebuild_experiment_index(
+        vault_root=tmp_path, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+
+    assert [len(first.entries), len(second.entries), len(third.entries)] == [1, 2, 3]
+    assert len(processed) == 3
+    assert len(set(processed)) == 3
+    checkpoint = runtime / "experiments" / "rebuild-checkpoint.json"
+    assert json.loads(checkpoint.read_text())["next_index"] == 3
+
+    resumed = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime, batch_size=1)
+    assert resumed.state == "ready"
+    assert len(resumed.entries) == 3
+    assert not checkpoint.exists()
+    assert _experiment_source_bytes(tmp_path) == canonical_before
+
+    shutil.rmtree(runtime / "experiments")
+    fresh = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime, batch_size=1)
+    assert resumed.entries == fresh.entries
+    assert resumed.diagnostics == fresh.diagnostics
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "{",
+        '{"schema": 999, "next_index": 1}',
+        '{"schema": 2, "source_signature": "sha256:forged"}',
+    ],
+)
+def test_rebuild_discards_invalid_experiment_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str
+) -> None:
+    runtime = tmp_path / ".lifeos"
+    _api, _created = _seed_experiment_history(tmp_path, 2)
+    first = rebuild_experiment_index(
+        vault_root=tmp_path, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    assert first.state == "interrupted"
+    checkpoint = runtime / "experiments" / "rebuild-checkpoint.json"
+    checkpoint.write_text(payload)
+
+    processed: list[str] = []
+    real_parse = experiment_history.parse_experiment
+
+    def recording_parse(path: Path, relative_path: str, content: str):
+        processed.append(relative_path)
+        return real_parse(path, relative_path, content)
+
+    monkeypatch.setattr(experiment_history, "parse_experiment", recording_parse)
+    restarted = rebuild_experiment_index(
+        vault_root=tmp_path, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+
+    assert restarted.state == "interrupted"
+    assert len(processed) == 1
+    checkpoint_data = json.loads(checkpoint.read_text())
+    assert checkpoint_data["schema"] == 2
+    assert checkpoint_data["next_index"] == 1
+    assert isinstance(checkpoint_data["checkpoint_digest"], str)
+
+
+@pytest.mark.parametrize(
+    "change", ["edit", "add", "move", "delete", "duplicate", "unsupported", "malformed"]
+)
+def test_experiment_checkpoint_is_invalidated_when_canonical_sources_change(
+    tmp_path: Path, change: str
+) -> None:
+    runtime = tmp_path / ".lifeos"
+    api, created = _seed_experiment_history(tmp_path, 3)
+    first = rebuild_experiment_index(
+        vault_root=tmp_path, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    assert first.state == "interrupted"
+    checkpoint = runtime / "experiments" / "rebuild-checkpoint.json"
+    first_signature = json.loads(checkpoint.read_text())["source_signature"]
+    source = tmp_path / created[0].path
+
+    if change == "edit":
+        source.write_text(source.read_text() + "\ncheckpoint source edit\n")
+    elif change == "add":
+        api.create(
+            title="Added experiment",
+            description="",
+            category="study",
+            protocol=protocol(),
+            now=NOW + timedelta(minutes=1),
+        )
+    elif change == "move":
+        source.rename(source.with_name("renamed-after-interruption.md"))
+    elif change == "delete":
+        source.unlink()
+    elif change == "duplicate":
+        source.with_name("duplicate-after-interruption.md").write_bytes(source.read_bytes())
+    elif change == "unsupported":
+        source.write_text(source.read_text().replace("schema_version: 1", "schema_version: 999", 1))
+    else:
+        source.write_text(
+            source.read_text().replace(
+                "<!-- lifeos:managed:end personal-experiment -->",
+                "<!-- lifeos:managed:end broken-experiment -->",
+                1,
+            )
+        )
+
+    canonical_after_change = _experiment_source_bytes(tmp_path)
+    restarted = rebuild_experiment_index(
+        vault_root=tmp_path, runtime_dir=runtime, batch_size=1, interrupt_after=1
+    )
+    assert restarted.state == "interrupted"
+    second_signature = json.loads(checkpoint.read_text())["source_signature"]
+    assert second_signature != first_signature
+
+    resumed = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime, batch_size=1)
+    assert resumed.state == "ready"
+    assert _experiment_source_bytes(tmp_path) == canonical_after_change
+
+    shutil.rmtree(runtime / "experiments")
+    fresh = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime, batch_size=1)
+    assert resumed.entries == fresh.entries
+    assert resumed.diagnostics == fresh.diagnostics
+
+
+def test_experiment_rebuild_empty_sources_are_ready_and_checkpoint_free(tmp_path: Path) -> None:
+    runtime = tmp_path / ".lifeos"
+
+    rebuilt = rebuild_experiment_index(vault_root=tmp_path, runtime_dir=runtime, batch_size=1)
+
+    assert rebuilt.state == "ready"
+    assert rebuilt.entries == ()
+    assert rebuilt.diagnostics == ()
+    assert not (runtime / "experiments" / "rebuild-checkpoint.json").exists()
