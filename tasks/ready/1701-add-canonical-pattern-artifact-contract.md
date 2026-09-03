@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1701
 title: Add canonical personal-pattern artifact contract
-status: backlog
+status: ready
 phase: 17
 depends_on:
   - LIFEOS-1700
