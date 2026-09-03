@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1002
 title: Implement the local desktop bridge for Obsidian
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1000

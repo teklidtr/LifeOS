@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1003
 title: Create the desktop Obsidian plugin shell
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1000

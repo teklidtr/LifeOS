@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-003
 title: Define the configuration model
-status: ready
+status: completed
 milestone: phase-1-deterministic-foundation
 depends_on: [LIFEOS-002]
 affected_paths:

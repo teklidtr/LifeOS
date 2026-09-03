@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1004
 title: Build the Obsidian Today dashboard
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1001

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-100
 title: Decompose the proposal engine milestone
-status: backlog
+status: completed
 milestone: phase-2-proposal-engine
 depends_on: [LIFEOS-010]
 risk: medium

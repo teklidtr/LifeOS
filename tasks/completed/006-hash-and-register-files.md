@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-006
 title: Hash and register vault files
-status: ready
+status: completed
 milestone: phase-1-deterministic-foundation
 depends_on: [LIFEOS-004, LIFEOS-005]
 affected_paths:

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-007
 title: Parse durable note metadata
-status: ready
+status: completed
 milestone: phase-1-deterministic-foundation
 depends_on: [LIFEOS-005]
 affected_paths:

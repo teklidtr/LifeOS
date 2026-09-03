@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1007
 title: Add an attention engine and unaccounted-outcome reconciliation
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1004

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1005
 title: Add Obsidian quick capture and daily check-ins
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1001

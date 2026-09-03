@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-109
 title: Make generated ownership durable
-status: ready
+status: completed
 milestone: phase-2-proposal-engine
 depends_on: []
 risk: medium

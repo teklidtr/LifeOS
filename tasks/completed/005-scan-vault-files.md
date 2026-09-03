@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-005
 title: Scan supported vault files
-status: ready
+status: completed
 milestone: phase-1-deterministic-foundation
 depends_on: [LIFEOS-003, LIFEOS-004]
 affected_paths:

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-207
 title: MCP-driven end-to-end ingestion lifecycle
-status: backlog
+status: completed
 milestone: phase-3-first-ingestion
 depends_on: [LIFEOS-115, LIFEOS-205]
 risk: low

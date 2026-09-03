@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1008
 title: Add study-session controls to the Obsidian dashboard
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1003

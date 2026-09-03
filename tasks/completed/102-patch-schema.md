@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-102
 title: Typed patch schema and canonical serialization
-status: ready
+status: completed
 milestone: phase-2-proposal-engine
 depends_on: [LIFEOS-101]
 risk: medium

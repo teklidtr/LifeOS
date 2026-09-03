@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-009
 title: Create basic structural lint
-status: ready
+status: completed
 milestone: phase-1-deterministic-foundation
 depends_on: [LIFEOS-005, LIFEOS-007, LIFEOS-008]
 affected_paths:

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1000
 title: Define the Obsidian-native daily interaction architecture
-status: ready
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-113

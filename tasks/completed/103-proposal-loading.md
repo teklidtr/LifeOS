@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-103
 title: Proposal loading and structural validation
-status: ready
+status: completed
 milestone: phase-2-proposal-engine
 depends_on: [LIFEOS-102]
 risk: low

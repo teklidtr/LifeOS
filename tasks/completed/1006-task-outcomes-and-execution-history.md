@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1006
 title: Record task outcomes and execution history from Obsidian
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1001

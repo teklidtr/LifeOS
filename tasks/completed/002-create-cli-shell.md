@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-002
 title: Create the CLI shell
-status: ready
+status: completed
 milestone: phase-0-project-skeleton
 depends_on: [LIFEOS-001]
 affected_paths:

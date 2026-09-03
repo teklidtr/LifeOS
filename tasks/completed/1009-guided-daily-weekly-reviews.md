@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1009
 title: Build guided daily and weekly review workflows
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1005

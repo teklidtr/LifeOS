@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1010
 title: Add proposal review and system-health UI to Obsidian
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1002

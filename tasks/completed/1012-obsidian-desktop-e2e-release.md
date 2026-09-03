@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1012
 title: Complete desktop end-to-end testing, packaging, and release
-status: backlog
+status: completed
 phase: 10
 depends_on:
   - LIFEOS-1003
