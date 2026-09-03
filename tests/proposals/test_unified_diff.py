@@ -82,6 +82,14 @@ def test_mixed_line_endings_rejected():
         apply_diff(target, patch)
 
 
+def test_crlf_addition_to_lf_target_is_rejected():
+    target = "line 1\n"
+    patch = "@@ -1 +1 @@\n-line 1\n+line 1\r\n"
+
+    with pytest.raises(DiffError, match="LF line endings"):
+        apply_diff(target, patch)
+
+
 def test_generated_patch_preserves_mixed_crlf_body():
     target = "---\nstatus: active\n---\n\r\nHuman notes.  \r\n\tTail"
     candidate = "---\nstatus: paused\n---\n\r\nHuman notes.  \r\n\tTail"
