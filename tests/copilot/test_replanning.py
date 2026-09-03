@@ -21,12 +21,18 @@ from lifeos.copilot import (
 )
 from lifeos.daily import DailyInteractionService, TaskOutcomeRequest, content_hash
 from lifeos.desktop import DesktopProposalService
+from lifeos.markdown.parser import parse_markdown_note
 from lifeos.reviews import build_review_workflow
 
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _body_bytes(path: Path) -> bytes:
+    raw = path.read_bytes().decode("utf-8")
+    return parse_markdown_note(path, content=raw).body.encode("utf-8")
 
 
 def _ownership(vault: Path) -> None:
@@ -102,8 +108,9 @@ tasks:
     source_refs: [goal-cell]
 ---
 
-The original plan narrative remains visible.
-""",
+
+The original plan narrative remains visible.  
+\tTail""",
     )
     return path
 
@@ -187,6 +194,7 @@ def test_repeated_avoidance_preserves_competing_explanations(tmp_path: Path) -> 
     _goal(tmp_path, with_plan=True)
     plan = _plan(tmp_path)
     service = DailyInteractionService(vault_root=tmp_path, runtime_dir=runtime)
+    original_body = _body_bytes(plan)
     for event_id, reason, day in (
         ("event-scope", "scope", date(2026, 7, 14)),
         ("event-energy", "energy", date(2026, 7, 15)),
@@ -198,11 +206,12 @@ def test_repeated_avoidance_preserves_competing_explanations(tmp_path: Path) -> 
                 "task-cell-read-1",
                 "partial",
                 day,
-                content_hash(plan.read_text()),
+                content_hash(plan.read_bytes()),
                 actual_minutes=10,
                 reason=reason,
             )
         )
+    assert _body_bytes(plan) == original_body
     trigger = next(
         item
         for item in scan_replanning_triggers(
@@ -219,6 +228,7 @@ def test_continue_unchanged_pause_supersede_close_and_reopen_paths(tmp_path: Pat
     _ownership(tmp_path)
     _goal(tmp_path, with_plan=True)
     plan = _plan(tmp_path)
+    original_body = _body_bytes(plan)
     review = build_replanning_review(
         vault_root=tmp_path,
         runtime_dir=runtime,
@@ -253,7 +263,7 @@ def test_continue_unchanged_pause_supersede_close_and_reopen_paths(tmp_path: Pat
     paused = plan.read_text(encoding="utf-8")
     assert "status: paused" in paused
     assert "decision_lineage:" in paused
-    assert "The original plan narrative remains visible." in paused
+    assert _body_bytes(plan) == original_body
 
     # Each additional outcome is created from fresh canonical state and remains proposal-only.
     for index, (outcome, changes) in enumerate((
@@ -312,8 +322,9 @@ def test_stale_source_fails_closed_in_review_and_proposal(tmp_path: Path) -> Non
     runtime = tmp_path / ".lifeos"
     _goal(tmp_path, with_plan=True)
     plan = _plan(tmp_path)
-    old_hash = "sha256:" + content_hash(plan.read_text())
+    old_hash = "sha256:" + content_hash(plan.read_bytes())
     plan.write_text(plan.read_text() + "Concurrent canonical edit.\n", encoding="utf-8")
+    concurrent = plan.read_bytes()
     with pytest.raises(ReplanningError, match="changed during replanning review"):
         build_replanning_review(
             vault_root=tmp_path,
@@ -322,10 +333,12 @@ def test_stale_source_fails_closed_in_review_and_proposal(tmp_path: Path) -> Non
             as_of=date(2026, 7, 16),
             expected_hash=old_hash,
         )
+    assert plan.read_bytes() == concurrent
     current = build_replanning_review(
         vault_root=tmp_path, runtime_dir=runtime, target_path="plans/cell.md", as_of=date(2026, 7, 16)
     )
     plan.write_text(plan.read_text() + "Another edit.\n", encoding="utf-8")
+    another = plan.read_bytes()
     with pytest.raises(ReplanningError, match="changed after review"):
         create_replanning_proposal(
             vault_root=tmp_path,
@@ -335,6 +348,7 @@ def test_stale_source_fails_closed_in_review_and_proposal(tmp_path: Path) -> Non
             ),
             actor_id="tester",
         )
+    assert plan.read_bytes() == another
 
 
 def test_daily_attention_weekly_review_and_bridge_integration(tmp_path: Path) -> None:
