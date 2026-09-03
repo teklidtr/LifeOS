@@ -4,11 +4,14 @@ from pathlib import Path
 import pytest
 
 import lifeos.ownership.manifest as ownership_manifest
+from lifeos._transaction_files import TransactionError
 from lifeos.ownership import (
     ExternalModificationError,
     GeneratedOwnership,
     ManifestError,
     PathSafetyError,
+    PersistenceError,
+    UnownedFileError,
 )
 from lifeos.vault import VaultAccessError
 
@@ -30,7 +33,7 @@ def test_load_rejects_final_manifest_symlink(tmp_path: Path) -> None:
     manifest_path = tmp_path / "manifest.json"
     manifest_path.symlink_to(real_manifest)
 
-    with pytest.raises(PathSafetyError, match="cannot be read safely"):
+    with pytest.raises(PathSafetyError, match="Manifest path or parent is a symlink"):
         GeneratedOwnership.load(manifest_path, vault_root)
 
 
@@ -42,7 +45,7 @@ def test_load_rejects_manifest_parent_symlink(tmp_path: Path) -> None:
     linked_parent = tmp_path / "linked-parent"
     linked_parent.symlink_to(real_parent, target_is_directory=True)
 
-    with pytest.raises(PathSafetyError, match="cannot be read safely"):
+    with pytest.raises(PathSafetyError, match="Manifest path or parent is a symlink"):
         GeneratedOwnership.load(linked_parent / "manifest.json", vault_root)
 
 
@@ -163,3 +166,94 @@ def test_existing_target_mutation_no_longer_uses_pathname_stream_hash(
     ownership.write_generated_file("owned.md", b"v2", "gen", "2")
 
     assert (vault_root / "owned.md").read_bytes() == b"v2"
+
+
+def test_replacement_revalidates_target_at_backup_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+    original_entry = ownership.entries["owned.md"]
+    target = vault_root / "owned.md"
+    original_backup = ownership_manifest.create_hardlink_backup
+
+    def racing_backup(*args: object, **kwargs: object):
+        target.write_bytes(b"external")
+        return original_backup(*args, **kwargs)
+
+    monkeypatch.setattr(ownership_manifest, "create_hardlink_backup", racing_backup)
+
+    with pytest.raises(ExternalModificationError, match="changed before backup"):
+        ownership.write_generated_file("owned.md", b"v2", "gen", "2")
+
+    assert target.read_bytes() == b"external"
+    assert ownership.entries["owned.md"] == original_entry
+    assert not list(vault_root.glob(".*.backup"))
+
+
+def test_manifest_failure_never_rolls_back_over_concurrent_target_edit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+    original_entry = ownership.entries["owned.md"]
+    target = vault_root / "owned.md"
+
+    def fail_manifest_after_external_edit() -> None:
+        target.write_bytes(b"external")
+        raise Exception("mock save fail")
+
+    monkeypatch.setattr(ownership, "_save_manifest", fail_manifest_after_external_edit)
+
+    with pytest.raises(PersistenceError, match="rollback failed"):
+        ownership.write_generated_file("owned.md", b"v2", "gen", "2")
+
+    assert target.read_bytes() == b"external"
+    assert ownership.entries["owned.md"] == original_entry
+    assert len(list(vault_root.glob(".*.backup"))) == 1
+
+
+def test_creation_refuses_target_that_appears_at_publication_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    target = vault_root / "new.md"
+    original_publish = ownership_manifest.publish_creation
+
+    def racing_publish(*args: object, **kwargs: object):
+        target.write_bytes(b"human")
+        return original_publish(*args, **kwargs)
+
+    monkeypatch.setattr(ownership_manifest, "publish_creation", racing_publish)
+
+    with pytest.raises(UnownedFileError, match="exists but is unowned"):
+        ownership.write_generated_file("new.md", b"generated", "gen", "1")
+
+    assert target.read_bytes() == b"human"
+    assert "new.md" not in ownership.entries
+    assert not manifest_path.exists()
+
+
+def test_backup_transaction_failure_with_unchanged_target_is_persistence_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+
+    def failing_backup(*_args: object, **_kwargs: object):
+        raise TransactionError("backup unavailable")
+
+    monkeypatch.setattr(ownership_manifest, "create_hardlink_backup", failing_backup)
+
+    with pytest.raises(PersistenceError, match="Failed to create target backup"):
+        ownership.write_generated_file("owned.md", b"v2", "gen", "2")
+
+    assert (vault_root / "owned.md").read_bytes() == b"v1"
