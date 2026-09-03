@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from lifeos.vault import VaultAccessError, VaultFileObservation, observe_vault_file
+
 DEFAULT_OWNERSHIP_MANIFEST_PATH = PurePosixPath("system/generated-ownership.json")
 
 
@@ -81,6 +83,28 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return d
 
 
+def _absolute_observation_path(path: Path) -> tuple[Path, str]:
+    """Return a descriptor-safe root and relative path without resolving symlinks."""
+    absolute_path = Path(os.path.abspath(path))
+    root = Path(absolute_path.anchor)
+    relative_parts = absolute_path.parts[len(root.parts) :]
+    if not relative_parts:
+        raise ManifestError("Manifest path must name a file")
+    return root, PurePosixPath(*relative_parts).as_posix()
+
+
+def _read_manifest_bytes(manifest_path: Path) -> bytes | None:
+    root, relative_path = _absolute_observation_path(manifest_path)
+    try:
+        return observe_vault_file(root, relative_path).captured_bytes
+    except VaultAccessError as exc:
+        if exc.code == "not-found":
+            return None
+        if exc.code in {"unsafe-symlink", "unsafe-file-type", "invalid-path", "invalid-root"}:
+            raise PathSafetyError(f"Manifest path cannot be read safely: {manifest_path}") from exc
+        raise ManifestError(f"Failed to read manifest file: {exc}") from exc
+
+
 def serialize_generated_ownership_bytes(
     entries: Mapping[str, ManifestEntry],
 ) -> bytes:
@@ -149,7 +173,6 @@ class GeneratedOwnership:
             if norm_p in entries:
                 raise ManifestError(f"Duplicate normalized path in manifest: {norm_p}")
 
-            # Simple check for absolute / traversal in manifest
             if os.path.isabs(norm_p) or norm_p.startswith("../") or norm_p == "..":
                 raise ManifestError(f"Unsafe path in manifest: {norm_p}")
 
@@ -170,22 +193,9 @@ class GeneratedOwnership:
 
     @classmethod
     def load(cls, manifest_path: Path, vault_root: Path) -> "GeneratedOwnership":
-        # Protect manifest path from symlinks
-        norm_manifest = Path(os.path.normpath(str(manifest_path)))
-
-        # For simplicity, resolve each parent up to root
-        for parent in list(norm_manifest.parents)[::-1] + [norm_manifest]:
-            if parent.is_symlink():
-                raise PathSafetyError(f"Manifest path or parent is a symlink: {parent}")
-
-        if not manifest_path.exists():
+        content_bytes = _read_manifest_bytes(manifest_path)
+        if content_bytes is None:
             return cls(manifest_path, vault_root, {})
-
-        try:
-            content_bytes = manifest_path.read_bytes()
-        except OSError as e:
-            raise ManifestError(f"Failed to read manifest file: {e}") from e
-
         return cls.from_bytes(content_bytes, manifest_path=manifest_path, vault_root=vault_root)
 
     def _check_path_safety(self, target: Path) -> tuple[Path, str]:
@@ -205,6 +215,18 @@ class GeneratedOwnership:
 
         rel_path = current.relative_to(self.vault_root).as_posix()
         return current, rel_path
+
+    def _observe_existing_target(self, rel_path: str) -> VaultFileObservation | None:
+        try:
+            return observe_vault_file(self.vault_root, rel_path)
+        except VaultAccessError as exc:
+            if exc.code == "not-found":
+                return None
+            if exc.code == "concurrent-change":
+                raise ExternalModificationError(
+                    f"Target {rel_path} changed while it was being verified"
+                ) from exc
+            raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
 
     def _save_manifest(self) -> None:
         json_bytes = serialize_generated_ownership_bytes(self._entries)
@@ -242,7 +264,8 @@ class GeneratedOwnership:
         new_hash = hashlib.sha256(content).hexdigest()
 
         existing_entry = self._entries.get(rel_path)
-        is_existing = resolved_target.exists()
+        observation = self._observe_existing_target(rel_path)
+        is_existing = observation is not None
 
         if is_existing:
             if not existing_entry:
@@ -252,8 +275,7 @@ class GeneratedOwnership:
                     f"Target owned by {existing_entry.generator_id}, not {generator_id}"
                 )
 
-            current_hash = stream_sha256(resolved_target)
-            if current_hash != existing_entry.content_hash:
+            if observation.content_hash != existing_entry.content_hash:
                 raise ExternalModificationError(f"Target {rel_path} has been modified externally")
 
             if new_hash == existing_entry.content_hash:
@@ -270,6 +292,7 @@ class GeneratedOwnership:
                     resolved_target=resolved_target,
                     content=content,
                     is_new=False,
+                    existing_content=observation.captured_bytes,
                 )
                 return
 
@@ -291,6 +314,7 @@ class GeneratedOwnership:
             resolved_target=resolved_target,
             content=content,
             is_new=not is_existing,
+            existing_content=observation.captured_bytes if observation is not None else None,
         )
 
     def _update_and_save_manifest(
@@ -301,19 +325,20 @@ class GeneratedOwnership:
         resolved_target: Path,
         content: bytes,
         is_new: bool,
+        existing_content: bytes | None,
     ) -> None:
-        import shutil
         import uuid
 
         backup_target = None
         unique_suffix = uuid.uuid4().hex
         if write_target and not is_new:
-            # Backup original target to a unique tmp file
+            if existing_content is None:
+                raise PersistenceError("Existing target snapshot is unavailable")
             backup_target = resolved_target.with_name(
                 f"{resolved_target.name}.{unique_suffix}.backup.tmp"
             )
             try:
-                shutil.copy2(resolved_target, backup_target)
+                backup_target.write_bytes(existing_content)
             except Exception as e:
                 if backup_target.exists():
                     backup_target.unlink()
@@ -324,13 +349,11 @@ class GeneratedOwnership:
 
         if write_target:
             resolved_target.parent.mkdir(parents=True, exist_ok=True)
-            # Write new target content to a unique tmp file
             temp_target = resolved_target.with_name(f"{resolved_target.name}.{unique_suffix}.tmp")
             try:
                 temp_target.write_bytes(content)
                 os.replace(temp_target, resolved_target)
             except Exception as e:
-                # Rollback memory on target write failure
                 if old_entry:
                     self._entries[rel_path] = old_entry
                 else:
@@ -344,7 +367,6 @@ class GeneratedOwnership:
         try:
             self._save_manifest()
         except Exception as e:
-            # Rollback target if manifest save fails
             rollback_err = None
             if write_target:
                 try:
@@ -353,18 +375,16 @@ class GeneratedOwnership:
                             resolved_target.unlink()
                     else:
                         if backup_target and backup_target.exists():
-                            os.replace(backup_target, resolved_target)  # Atomic restoration
+                            os.replace(backup_target, resolved_target)
                 except Exception as r_err:
                     rollback_err = r_err
 
-            # Rollback memory
             if old_entry:
                 self._entries[rel_path] = old_entry
             else:
                 del self._entries[rel_path]
 
             if rollback_err:
-                # Do not unlink backup if rollback failed, to preserve it for manual recovery
                 raise PersistenceError(
                     f"Manifest save failed, AND rollback failed: {rollback_err} (Original error: {e}). "
                     f"Backup file preserved at: {backup_target}"
@@ -375,7 +395,6 @@ class GeneratedOwnership:
 
             raise PersistenceError(f"Manifest persistence failed, changes rolled back: {e}") from e
 
-        # Post-commit cleanup: Manifest and target successfully committed
         if backup_target and backup_target.exists():
             try:
                 backup_target.unlink()

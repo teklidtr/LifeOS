@@ -1,0 +1,165 @@
+import os
+from pathlib import Path
+
+import pytest
+
+import lifeos.ownership.manifest as ownership_manifest
+from lifeos.ownership import (
+    ExternalModificationError,
+    GeneratedOwnership,
+    ManifestError,
+    PathSafetyError,
+)
+from lifeos.vault import VaultAccessError
+
+
+def _vault(tmp_path: Path) -> Path:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    return vault_root
+
+
+def _empty_manifest(path: Path) -> None:
+    path.write_text('{"schema_version": 1, "owned_files": {}}', encoding="utf-8")
+
+
+def test_load_rejects_final_manifest_symlink(tmp_path: Path) -> None:
+    vault_root = _vault(tmp_path)
+    real_manifest = tmp_path / "real-manifest.json"
+    _empty_manifest(real_manifest)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.symlink_to(real_manifest)
+
+    with pytest.raises(PathSafetyError, match="cannot be read safely"):
+        GeneratedOwnership.load(manifest_path, vault_root)
+
+
+def test_load_rejects_manifest_parent_symlink(tmp_path: Path) -> None:
+    vault_root = _vault(tmp_path)
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    _empty_manifest(real_parent / "manifest.json")
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(PathSafetyError, match="cannot be read safely"):
+        GeneratedOwnership.load(linked_parent / "manifest.json", vault_root)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO creation is unavailable")
+def test_load_rejects_fifo_manifest_without_blocking(tmp_path: Path) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    os.mkfifo(manifest_path)
+
+    with pytest.raises(PathSafetyError, match="cannot be read safely"):
+        GeneratedOwnership.load(manifest_path, vault_root)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO creation is unavailable")
+def test_owned_target_fifo_is_rejected_without_blocking(tmp_path: Path) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+
+    target = vault_root / "owned.md"
+    target.unlink()
+    os.mkfifo(target)
+
+    with pytest.raises(PathSafetyError, match="cannot be inspected safely"):
+        ownership.write_generated_file("owned.md", b"v2", "gen", "2")
+
+
+def test_owned_target_parent_symlink_is_rejected(tmp_path: Path) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    owned_parent = vault_root / "generated"
+    owned_parent.mkdir()
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("generated/owned.md", b"v1", "gen", "1")
+
+    real_parent = tmp_path / "replacement"
+    real_parent.mkdir()
+    (real_parent / "owned.md").write_bytes(b"v1")
+    (owned_parent / "owned.md").unlink()
+    owned_parent.rmdir()
+    owned_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(PathSafetyError, match="Symlinks are not allowed"):
+        ownership.write_generated_file("generated/owned.md", b"v2", "gen", "2")
+
+
+def test_missing_owned_target_retains_regeneration_semantics(tmp_path: Path) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+    created_at = ownership.entries["owned.md"].created_at
+
+    (vault_root / "owned.md").unlink()
+    ownership.write_generated_file("owned.md", b"v2", "gen", "2")
+
+    assert (vault_root / "owned.md").read_bytes() == b"v2"
+    assert ownership.entries["owned.md"].created_at == created_at
+
+
+def test_owned_target_observation_maps_race_to_external_modification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+    original_observe = ownership_manifest.observe_vault_file
+
+    def racing_observe(root: Path, relative_path: str, **kwargs: object):
+        if root == vault_root.resolve() and relative_path == "owned.md":
+            raise VaultAccessError(
+                "concurrent-change",
+                relative_path,
+                f"Vault file changed while it was being read: {relative_path}",
+            )
+        return original_observe(root, relative_path, **kwargs)
+
+    monkeypatch.setattr(ownership_manifest, "observe_vault_file", racing_observe)
+
+    with pytest.raises(ExternalModificationError, match="changed while it was being verified"):
+        ownership.write_generated_file("owned.md", b"v2", "gen", "2")
+
+
+def test_manifest_observation_maps_race_to_manifest_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    _empty_manifest(manifest_path)
+
+    def racing_observe(root: Path, relative_path: str, **kwargs: object):
+        raise VaultAccessError(
+            "concurrent-change",
+            relative_path,
+            f"Vault file changed while it was being read: {relative_path}",
+        )
+
+    monkeypatch.setattr(ownership_manifest, "observe_vault_file", racing_observe)
+
+    with pytest.raises(ManifestError, match="Failed to read manifest file"):
+        GeneratedOwnership.load(manifest_path, vault_root)
+
+
+def test_existing_target_mutation_no_longer_uses_pathname_stream_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+
+    def forbidden_stream_hash(_path: Path) -> str:
+        raise AssertionError("pathname stream hash must not be used for ownership mutation")
+
+    monkeypatch.setattr(ownership_manifest, "stream_sha256", forbidden_stream_hash)
+    ownership.write_generated_file("owned.md", b"v2", "gen", "2")
+
+    assert (vault_root / "owned.md").read_bytes() == b"v2"
