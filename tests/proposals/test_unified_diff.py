@@ -1,3 +1,5 @@
+import difflib
+
 import pytest
 from lifeos.proposals.unified_diff import apply_diff, DiffError
 
@@ -78,6 +80,42 @@ def test_mixed_line_endings_rejected():
     patch = "@@ -1,2 +1,2 @@\n line 1\n line 2\n"
     with pytest.raises(DiffError, match="Mixed line endings"):
         apply_diff(target, patch)
+
+
+def test_generated_patch_preserves_mixed_crlf_body():
+    target = "---\nstatus: active\n---\n\r\nHuman notes.  \r\n\tTail"
+    candidate = "---\nstatus: paused\n---\n\r\nHuman notes.  \r\n\tTail"
+    patch = "".join(
+        tuple(
+            difflib.unified_diff(
+                target.splitlines(keepends=True),
+                candidate.splitlines(keepends=True),
+                fromfile="note.md",
+                tofile="note.md",
+            )
+        )[2:]
+    )
+
+    assert "\r" in patch
+    assert apply_diff(target, patch) == candidate
+
+
+def test_generated_patch_can_preserve_crlf_body_while_rewriting_frontmatter():
+    target = "---\r\nstatus: active\r\n---\r\n\r\nBody\r\nTail"
+    candidate = "---\nstatus: paused\n---\n\r\nBody\r\nTail"
+    patch = "".join(
+        tuple(
+            difflib.unified_diff(
+                target.splitlines(keepends=True),
+                candidate.splitlines(keepends=True),
+                fromfile="note.md",
+                tofile="note.md",
+            )
+        )[2:]
+    )
+
+    assert not patch.endswith("\n")
+    assert apply_diff(target, patch) == candidate
 
 
 def test_diff_text_uses_lf():
