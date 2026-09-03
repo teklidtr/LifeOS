@@ -242,7 +242,7 @@ class StudySessionService:
                     "actor": self.actor_id,
                 }
             )
-        document = _frontmatter_document(frontmatter, body)
+        document = _frontmatter_document(frontmatter, body, preserve_body=not created)
         _atomic_write(
             self.vault_root,
             relative,
