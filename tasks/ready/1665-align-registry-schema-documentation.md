@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1665
 title: Align registry schema documentation with scoped identity migration
-status: backlog
+status: ready
 phase: hardening
 depends_on:
   - LIFEOS-1643
