@@ -78,6 +78,14 @@ def _managed_block(parsed_blocks: Iterable[ManagedBlock]) -> ManagedBlock:
     return matches[0]
 
 
+def _body_suffix(body: str, block: ManagedBlock) -> str:
+    """Return caller-owned text after the managed marker, preserving CRLF boundaries."""
+    start = block.end_offset
+    if start > 0 and start < len(body) and body[start - 1 : start + 1] == "\r\n":
+        start -= 1
+    return body[start:]
+
+
 def _render_managed_summary(metadata: PatternMetadata) -> str:
     counts = {"supporting": 0, "contesting": 0, "contextual": 0}
     for item in metadata.evidence:
@@ -130,7 +138,7 @@ def parse_pattern(path: Path, relative_path: str, content: str) -> PatternArtifa
     metadata = metadata_from_dict(parsed.frontmatter)
     block = _managed_block(parsed.managed_blocks)
     body_prefix = parsed.body[: block.start_offset]
-    body_suffix = parsed.body[block.end_offset :]
+    body_suffix = _body_suffix(parsed.body, block)
     artifact = PatternArtifact(
         path=relative_path,
         content_hash=_content_hash(content),
