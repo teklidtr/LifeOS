@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1666
 title: Preserve human Markdown in metadata-only updates
-status: backlog
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1657
@@ -111,6 +111,26 @@ rtk git diff --check
 
 Before broad validation, search all `_frontmatter_document` callers, preserve_body uses, and any
 changed monkeypatch/return/error seams as required by `AGENTS.md`'s consolidation safety rules.
+
+The material implementation head `457c378aaea700cb1aa812c1d15ec79212a00e5e` passed PR fast-checks
+run `33748866900` and full-validation run `33748995865`: all four full pytest shards, aggregate
+`full-test`, clean-room setup/MCP, home-node service container, and the ARM64 image build passed.
+Repository-wide consolidation audit covered `_frontmatter_document`/`preserve_body` callers,
+`difflib.unified_diff` proposal generators, and every production `apply_diff` consumer.
+
+Normal Codex review found two P2 variants of the same line-ending boundary invariant. Both were
+addressed at the shared proposal patch boundary with focused regressions and their review threads
+were resolved. After consolidation and broad validation, final normal Codex review on unchanged
+material head `457c378aae` reported: "Didn't find any major issues."
+
+The separate security review was not run. On 2026-09-03 the repository owner explicitly instructed
+the implementation agent to skip it for this task; this is recorded as a current-user workflow
+override under `AGENTS.md`, not as a successful security-review result.
+
+Local repository execution remained unavailable in the implementation environment because direct
+GitHub access from the execution container could not resolve `github.com`; repository CI supplied
+the executable validation layer, and that limitation is recorded rather than represented as local
+validation.
 
 # Relevant decisions
 

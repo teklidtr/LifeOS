@@ -143,7 +143,9 @@ def create_copilot_plan_proposal(
         if request.plan_id not in refs:
             refs.append(request.plan_id)
         updated_goal["active_plans"] = sorted(set(refs))
-    updated_goal_content = _frontmatter_document(updated_goal, goal_parsed.body)
+    updated_goal_content = _frontmatter_document(
+        updated_goal, goal_parsed.body, preserve_body=True
+    )
     if updated_goal_content != goal_source.content:
         operations.append(PatchHumanFile(
             "op-update-goal", request.goal_path, goal_base,
@@ -366,7 +368,7 @@ def _conflict_operations(*, vault_root: Path, request: CopilotProposalRequest) -
             supersedes = fm["id"]
             fm["status"] = "superseded"
             fm["superseded_by"] = request.plan_id
-        updated = _frontmatter_document(fm, parsed.body)
+        updated = _frontmatter_document(fm, parsed.body, preserve_body=True)
         base = _hash(source.content)
         operations.append(PatchHumanFile(f"op-conflict-{index}", edit.target_path, base, _diff(source.content, updated, edit.target_path)))
         hashes.append((edit.target_path, base))

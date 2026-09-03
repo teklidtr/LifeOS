@@ -337,7 +337,7 @@ def create_review_proposal(
         raise ReviewProposalError("Target note is structurally invalid.")
     updated_frontmatter = copy.deepcopy(dict(parsed.frontmatter))
     _apply_review_change(updated_frontmatter, request)
-    updated_content = _frontmatter_document(updated_frontmatter, parsed.body)
+    updated_content = _frontmatter_document(updated_frontmatter, parsed.body, preserve_body=True)
     if updated_content == source.content:
         raise ReviewProposalError("The proposed change has no effect.")
     moment = now or datetime.now(timezone.utc)

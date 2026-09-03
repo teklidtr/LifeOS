@@ -13,6 +13,12 @@ from lifeos.feedback import (
     build_evidence_dataset,
 )
 from lifeos.daily.service import content_hash
+from lifeos.markdown.parser import parse_markdown_note
+
+
+def body_bytes(path: Path) -> bytes:
+    raw = path.read_bytes().decode("utf-8")
+    return parse_markdown_note(path, content=raw).body.encode("utf-8")
 
 
 def test_mode_disable_exclude_dismiss_and_reset_are_canonical(tmp_path: Path) -> None:
@@ -61,9 +67,12 @@ def test_outcome_correction_preserves_source_and_builds_lineage(tmp_path: Path) 
     vault = tmp_path / "vault"
     (vault / "plans").mkdir(parents=True)
     path = vault / "plans" / "p.md"
-    path.write_text(
-        """---\nid: p\ntype: plan\ntasks:\n  - task_id: t\n    title: T\n    status: todo\n    duration: 30\n    energy: medium\n    motivation: medium\n    mode: writing\nexecution_history:\n  - event_id: old\n    task_id: t\n    outcome: skipped\n    date: 2026-07-10\n    actor: user\n---\n""",
-        encoding="utf-8",
+    original_body = b"\r\n\r\nHuman correction notes with hard break.  \r\n\tTail"
+    path.write_bytes(
+        b"---\nid: p\ntype: plan\ntasks:\n  - task_id: t\n    title: T\n    status: todo\n"
+        b"    duration: 30\n    energy: medium\n    motivation: medium\n    mode: writing\n"
+        b"execution_history:\n  - event_id: old\n    task_id: t\n    outcome: skipped\n"
+        b"    date: 2026-07-10\n    actor: user\n---\n" + original_body
     )
     service = FeedbackControlService(
         vault_root=vault, runtime_dir=tmp_path / "runtime", actor_id="user"
@@ -75,13 +84,14 @@ def test_outcome_correction_preserves_source_and_builds_lineage(tmp_path: Path) 
             "old",
             "done",
             date(2026, 7, 10),
-            content_hash(path.read_text()),
+            content_hash(path.read_bytes()),
             actual_minutes=25,
             completion_fraction=1.0,
             reason="forgot to record",
         )
     )
     assert result["corrects_event_id"] == "old"
+    assert body_bytes(path) == original_body
     dataset = build_evidence_dataset(vault)
     assert [item.event_id for item in dataset.observations] == ["correct-1"]
     assert dataset.observations[0].correction_lineage == ("old",)

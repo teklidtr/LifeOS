@@ -22,6 +22,11 @@ def service(tmp_path: Path) -> DailyInteractionService:
     return DailyInteractionService(vault_root=vault, runtime_dir=tmp_path / "runtime")
 
 
+def body_bytes(path: Path) -> bytes:
+    raw = path.read_bytes().decode("utf-8")
+    return parse_markdown_note(path, content=raw).body.encode("utf-8")
+
+
 def test_capture_is_idempotent(tmp_path: Path) -> None:
     app = service(tmp_path)
     request = QuickCaptureRequest("capture-1", "thought", "A useful thought", "Body")
@@ -46,6 +51,7 @@ def test_checkin_rejects_stale_update_and_preserves_edit(tmp_path: Path) -> None
     )
     path = app.vault_root / created.reference.path
     path.write_text(path.read_text() + "Manual edit\n")
+    edited = path.read_bytes()
     with pytest.raises(DailyInteractionError) as caught:
         app.update_checkin(
             CheckInRequest(
@@ -57,17 +63,92 @@ def test_checkin_rejects_stale_update_and_preserves_edit(tmp_path: Path) -> None
             )
         )
     assert caught.value.code == "stale_write"
-    assert "Manual edit" in path.read_text()
+    assert path.read_bytes() == edited
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        b"\n\nLeading blank lines\n",
+        b"\nTrailing spaces and tabs  \n\t  \n\n",
+        b"\nMarkdown hard break  \nNext line\n",
+        b"\r\nCRLF first\r\nCRLF second\r\n",
+        b"\nNo final newline",
+    ),
+)
+def test_task_capture_preserves_existing_body_bytes(tmp_path: Path, body: bytes) -> None:
+    app = service(tmp_path)
+    plan = app.vault_root / "plans" / "p.md"
+    plan.parent.mkdir()
+    plan.write_bytes(
+        b"---\nid: p\ntype: plan\ntitle: P\nstatus: active\ntasks: []\n---\n" + body
+    )
+    expected_body = body_bytes(plan)
+
+    result = app.quick_capture(
+        QuickCaptureRequest(
+            "task-preserve",
+            "task",
+            "Preserve body",
+            plan_path="plans/p.md",
+            expected_hash=content_hash(plan.read_bytes()),
+            task={"task_id": "preserve-body", "duration": 15},
+        )
+    )
+
+    assert result.reference.block == "preserve-body"
+    assert body_bytes(plan) == expected_body
+    assert b"task_id: preserve-body" in plan.read_bytes()
+
+
+def test_checkin_metadata_and_append_preserve_existing_body_prefix(tmp_path: Path) -> None:
+    app = service(tmp_path)
+    journal = app.vault_root / "journal" / "2026-07-16.md"
+    journal.parent.mkdir()
+    original_body = b"\r\nHuman hard break  \r\n\tTail"
+    journal.write_bytes(
+        b"---\ntype: journal\ntitle: '2026-07-16'\ndate: 2026-07-16\nstatus: active\nmetrics: {}\nactivities: []\n---\n"
+        + original_body
+    )
+
+    app.update_checkin(
+        CheckInRequest(
+            "metadata-only",
+            date(2026, 7, 16),
+            "morning",
+            {"energy": 6},
+            expected_hash=content_hash(journal.read_bytes()),
+        )
+    )
+    assert body_bytes(journal) == original_body
+
+    current_hash = content_hash(journal.read_bytes())
+    before_append = body_bytes(journal)
+    app.update_checkin(
+        CheckInRequest(
+            "append-note",
+            date(2026, 7, 16),
+            "evening",
+            {},
+            note="Added note",
+            expected_hash=current_hash,
+        )
+    )
+    assert body_bytes(journal) == before_append + b"\n\n## Evening check-in\n\nAdded note\n"
 
 
 def test_task_outcome_updates_only_targeted_structure(tmp_path: Path) -> None:
     app = service(tmp_path)
     plan = app.vault_root / "plans" / "p.md"
     plan.parent.mkdir()
-    plan.write_text(
-        """---\nid: p\ntype: plan\ntitle: P\nstatus: active\ntasks:\n  - task_id: t1\n    title: Work\n    status: todo\n    duration: 20\n    energy: low\n    motivation: low\n    mode: writing\n---\n\nHuman prose.\n"""
+    plan.write_bytes(
+        b"---\nid: p\ntype: plan\ntitle: P\nstatus: active\ntasks:\n"
+        b"  - task_id: t1\n    title: Work\n    status: todo\n    duration: 20\n"
+        b"    energy: low\n    motivation: low\n    mode: writing\n---\n"
+        b"\n\nHuman prose with a hard break.  \n\tTail"
     )
-    before = content_hash(plan.read_text())
+    expected_body = body_bytes(plan)
+    before = content_hash(plan.read_bytes())
     result = app.record_task_outcome(
         TaskOutcomeRequest(
             "outcome-1", "plans/p.md", "t1", "done", date(2026, 7, 16), before, actual_minutes=19
@@ -75,7 +156,7 @@ def test_task_outcome_updates_only_targeted_structure(tmp_path: Path) -> None:
     )
     assert result.data["outcome"] == "done"
     text = plan.read_text()
-    assert "Human prose." in text
+    assert body_bytes(plan) == expected_body
     assert "outcome: done" in text
     assert "status: done" in text
 
@@ -232,6 +313,7 @@ def test_task_capture_stale_plan_is_rejected(tmp_path: Path) -> None:
     plan.write_text("---\nid: p\ntype: plan\ntitle: P\nstatus: active\ntasks: []\n---\n")
     stale = content_hash(plan.read_text())
     plan.write_text(plan.read_text() + "Manual\n")
+    edited = plan.read_bytes()
     with pytest.raises(DailyInteractionError) as caught:
         app.quick_capture(
             QuickCaptureRequest(
@@ -244,3 +326,4 @@ def test_task_capture_stale_plan_is_rejected(tmp_path: Path) -> None:
             )
         )
     assert caught.value.code == "stale_write"
+    assert plan.read_bytes() == edited

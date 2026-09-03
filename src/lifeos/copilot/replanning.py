@@ -367,7 +367,7 @@ def create_replanning_proposal(
         "decided_at": utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
     })
     fm["decision_lineage"] = lineage
-    updated = _frontmatter_document(fm, parsed.body)
+    updated = _frontmatter_document(fm, parsed.body, preserve_body=True)
     if updated == source.content:
         raise ReplanningError("selected review outcome has no visible effect")
     suffix = hashlib.sha256(

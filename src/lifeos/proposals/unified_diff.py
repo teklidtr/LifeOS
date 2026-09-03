@@ -35,9 +35,6 @@ def _parse_diff(diff_text: str) -> List[Hunk]:
     if not diff_text:
         return []
 
-    if "\r" in diff_text:
-        raise DiffError("Diff text must use LF line endings")
-
     lines = diff_text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
@@ -46,8 +43,15 @@ def _parse_diff(diff_text: str) -> List[Hunk]:
     current_hunk = None
 
     for line in lines:
-        if line.startswith("---") or line.startswith("+++"):
-            raise DiffError("File headers --- and +++ are rejected")
+        if "\r" in line:
+            allowed_data_cr = (
+                current_hunk is not None
+                and line.endswith("\r")
+                and line.startswith((" ", "-"))
+                and "\r" not in line[:-1]
+            )
+            if not allowed_data_cr:
+                raise DiffError("Diff text must use LF line endings")
 
         if line.startswith("@@"):
             if current_hunk:
@@ -59,6 +63,8 @@ def _parse_diff(diff_text: str) -> List[Hunk]:
                 current_hunk.lines.append(line)
             else:
                 raise DiffError(f"Invalid hunk line marker: {line!r}")
+        elif line.startswith("---") or line.startswith("+++"):
+            raise DiffError("File headers --- and +++ are rejected")
         else:
             raise DiffError(f"Unexpected line outside hunk: {line!r}")
 
@@ -84,6 +90,12 @@ def _detect_line_ending(text: str) -> str:
     return "\n"
 
 
+def _mixed_line_endings(text: str) -> tuple[bool, bool]:
+    has_crlf = "\r\n" in text
+    stripped = text.replace("\r\n", "")
+    return "\r" in stripped, has_crlf and "\n" in stripped
+
+
 def _split_lines_preserve_endings(text: str) -> Tuple[List[str], str]:
     if not text:
         return [], "\n"
@@ -105,7 +117,22 @@ def apply_diff(target_text: str, diff_text: str) -> str:
     if not hunks:
         return target_text
 
-    target_lines, newline = _split_lines_preserve_endings(target_text)
+    has_bare_cr, has_mixed_lf_crlf = _mixed_line_endings(target_text)
+    if has_bare_cr:
+        raise DiffError("Mixed line endings in target text")
+    diff_preserves_crlf = any(
+        line.endswith("\r")
+        for hunk in hunks
+        for line in hunk.lines
+        if line.startswith((" ", "-"))
+    )
+    target_has_mixed_line_endings = has_mixed_lf_crlf
+    if target_has_mixed_line_endings or diff_preserves_crlf:
+        target_lines = target_text.split("\n")
+        newline = "\n"
+    else:
+        target_lines, newline = _split_lines_preserve_endings(target_text)
+
     target_has_final_newline = target_text.endswith(newline) if target_text else False
     if target_lines and target_lines[-1] == "":
         target_lines.pop()
@@ -143,6 +170,8 @@ def apply_diff(target_text: str, diff_text: str) -> str:
                 if old_idx >= len(target_lines):
                     raise DiffError("Hunk extends beyond target file length")
                 if target_lines[old_idx] != content:
+                    if target_has_mixed_line_endings:
+                        raise DiffError("Mixed line endings in target text")
                     raise DiffError(f"Context mismatch at target line {old_idx + 1}")
                 old_idx += 1
 
@@ -211,7 +240,7 @@ def apply_diff(target_text: str, diff_text: str) -> str:
                 if line.startswith("+") or line.startswith(" "):
                     break
 
-            if has_no_newline_marker:
+            if has_no_newline_marker or not diff_text.endswith("\n"):
                 result_has_final_newline = False
             else:
                 result_has_final_newline = True
