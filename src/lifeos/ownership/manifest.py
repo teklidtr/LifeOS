@@ -466,6 +466,15 @@ class GeneratedOwnership:
         old_entry = self._entries.get(rel_path)
 
         if not write_target:
+            if expected_target_hash is not None:
+                observation = self._observe_existing_target(rel_path)
+                if (
+                    observation is None
+                    or observation.content_hash != expected_target_hash
+                ):
+                    raise ExternalModificationError(
+                        f"Target {rel_path} changed before manifest update"
+                    )
             self._entries[rel_path] = new_entry
             try:
                 self._save_manifest()

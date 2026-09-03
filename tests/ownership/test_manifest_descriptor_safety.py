@@ -169,6 +169,37 @@ def test_existing_target_mutation_no_longer_uses_pathname_stream_hash(
     assert (vault_root / "owned.md").read_bytes() == b"v2"
 
 
+def test_version_only_update_revalidates_target_before_manifest_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+    original_entry = ownership.entries["owned.md"]
+    target = vault_root / "owned.md"
+    original_observe = ownership._observe_existing_target
+    calls = 0
+
+    def racing_observe(rel_path: str):
+        nonlocal calls
+        observation = original_observe(rel_path)
+        calls += 1
+        if calls == 1:
+            target.write_bytes(b"external")
+        return observation
+
+    monkeypatch.setattr(ownership, "_observe_existing_target", racing_observe)
+
+    with pytest.raises(ExternalModificationError, match="changed before manifest update"):
+        ownership.write_generated_file("owned.md", b"v1", "gen", "2")
+
+    assert calls == 2
+    assert target.read_bytes() == b"external"
+    assert ownership.entries["owned.md"] == original_entry
+    assert GeneratedOwnership.load(manifest_path, vault_root).entries["owned.md"] == original_entry
+
+
 def test_replacement_revalidates_target_at_backup_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
