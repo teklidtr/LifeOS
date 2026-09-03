@@ -281,6 +281,32 @@ def test_existing_target_parent_deleted_during_update_is_not_recreated(
     ).hexdigest()
 
 
+def test_replacement_publication_failure_preserves_backup_when_target_disappears(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault_root = _vault(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    ownership = GeneratedOwnership.load(manifest_path, vault_root)
+    ownership.write_generated_file("owned.md", b"v1", "gen", "1")
+    original_entry = ownership.entries["owned.md"]
+    target = vault_root / "owned.md"
+
+    def failing_publish(*_args: object, **_kwargs: object) -> None:
+        target.unlink()
+        raise TransactionError("publication failed after original removal")
+
+    monkeypatch.setattr(ownership_manifest, "publish_replacement", failing_publish)
+
+    with pytest.raises(ExternalModificationError, match="changed during mutation"):
+        ownership.write_generated_file("owned.md", b"v2", "gen", "2")
+
+    backups = list(vault_root.glob(".*.backup"))
+    assert not target.exists()
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == b"v1"
+    assert ownership.entries["owned.md"] == original_entry
+
+
 def test_backup_transaction_failure_with_unchanged_target_is_persistence_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

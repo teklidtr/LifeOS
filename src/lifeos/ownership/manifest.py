@@ -512,12 +512,6 @@ class GeneratedOwnership:
                         publish_replacement(target_name, staging, current_identity)
                     except TransactionError as exc:
                         observed_after_failure = self._observe_existing_target(rel_path)
-                        cleanup_error: Exception | None = None
-                        try:
-                            cleanup_backup(backup)
-                            backup = None
-                        except Exception as cleanup_exc:
-                            cleanup_error = cleanup_exc
                         if (
                             observed_after_failure is None
                             or observed_after_failure.content_hash != expected_target_hash
@@ -525,6 +519,12 @@ class GeneratedOwnership:
                             raise ExternalModificationError(
                                 f"Target {rel_path} changed during mutation"
                             ) from exc
+                        cleanup_error: Exception | None = None
+                        try:
+                            cleanup_backup(backup)
+                            backup = None
+                        except Exception as cleanup_exc:
+                            cleanup_error = cleanup_exc
                         if cleanup_error is not None:
                             raise PersistenceError(
                                 "Failed to write target file and clean up backup: "
