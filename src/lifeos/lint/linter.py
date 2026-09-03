@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Iterable, Literal
 
 from lifeos.markdown.parser import parse_markdown_note
-from lifeos.ownership import GeneratedOwnership, ManifestError
+from lifeos.ownership import GeneratedOwnership, ManifestError, PathSafetyError
 from lifeos.scanner import VaultFile
 from lifeos.vault import VaultAccessError, observe_vault_file
 
@@ -164,7 +164,7 @@ def lint_vault(
                                 message="Generated file content hash does not match ownership manifest.",
                             )
                         )
-            except ManifestError as e:
+            except (ManifestError, PathSafetyError) as e:
                 # manifest loading failed
                 rel_manifest = (
                     manifest_path.relative_to(vault_root)
