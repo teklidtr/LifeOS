@@ -431,12 +431,12 @@ Original bytes plus the manifest are canonical evidence. Extracted text, OCR,
 transcripts, thumbnails, waveforms, descriptions, embeddings, and indexes are
 versioned derived artifacts keyed by the original content hash.
 
-## Personal pattern (Phase 17 proposed canonical)
+## Personal pattern (canonical)
 
-Phase 17 recognizes individual reviewable working hypotheses under `patterns/`.
-The exact parser and serializer ship in LIFEOS-1701; the semantic shape is fixed by
-[Evidence-Backed Personal Model Architecture](personal-model-architecture.md).
-Unrecognized Markdown under `patterns/` remains ordinary user content.
+Schema version 1 is implemented by the deterministic `lifeos.patterns` parser and
+serializer. A Markdown file under `patterns/` becomes a canonical pattern only
+when its top-level frontmatter declares `pattern_schema`. Files without a
+recognized schema remain ordinary user content and are not silently converted.
 
 ```yaml
 pattern_schema: 1
@@ -468,18 +468,32 @@ evaluation:
   parameters: {}
 ```
 
+Schema 1 requires `pattern_schema`, `type`, `id`, `title`, `description`,
+`status`, `confidence`, `review_reasons`, `statement`, `origin`, `created_at`,
+`updated_at`, `evidence_fingerprint`, and `evidence`. `origin.source_ref`,
+`last_reviewed_at`, `review_due_at`, `source_id`, `observation_id`, `event_id`, and
+`evaluation` are optional. Pattern IDs use lowercase letters, digits, dot,
+underscore, or hyphen. Evidence paths must pass the shared canonical
+vault-relative path validator. Evidence hashes and `evidence_fingerprint` are
+full lowercase `sha256:` digests. Timestamps must be timezone-aware ISO 8601
+values.
+
 Stable source identity, reviewed path, and reviewed content hash remain separate
 facts. Optional `source_id`, `observation_id`, and `event_id` fields are present only
 when the referenced evidence has those durable identities. Historical reviewed
 hashes are not silently advanced when a source changes or moves.
 
 The evidence fingerprint is derived deterministically from normalized evidence
-references and is ordering-independent. Evidence roles remain separate so
+references and is ordering-independent. LIFEOS-1701 validates the stored digest
+but does not calculate or advance it; LIFEOS-1702 owns normalization, source-state
+resolution, and fingerprint computation. Evidence roles remain separate so
 supporting material cannot erase contesting evidence. Missing evidence is unknown,
 not negative evidence. `evaluation` is optional and only names a supported
 deterministic re-evaluation recipe; it cannot encode an autonomous semantic model.
 
-Machine-managed evidence summaries use validated managed blocks while human
-reflection remains outside those blocks. Canonical pattern files are human-owned.
-The aggregate Personal Model is derived under `.lifeos/personal-model/` and is not
-a second canonical artifact or generated biography.
+Canonical serialization emits exactly one `personal-pattern-evidence` managed
+block for the refreshable evidence summary. Human reflection and user-created
+prose before and after that block remain outside machine ownership and can be
+round-tripped byte-for-byte. Canonical pattern files are human-owned. The
+aggregate Personal Model is derived under `.lifeos/personal-model/` and is not a
+second canonical artifact or generated biography.

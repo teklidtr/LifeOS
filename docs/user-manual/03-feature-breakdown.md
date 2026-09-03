@@ -768,6 +768,41 @@ Other controller origins, provider-backed OCR or transcription, exclusion
 toggles, destructive deletion, and several bulk actions need additional UI or
 host wiring. See [Rich Capture for Meals, Exercise, and Attachments](13-rich-capture.md).
 
+## 3.19 Canonical personal working hypotheses
+
+### What it is
+
+LifeOS can recognize individual canonical working hypotheses as human-owned
+Markdown under `patterns/`. A recognized artifact declares `pattern_schema: 1`
+and `type: pattern`, then records a stable ID, the concise hypothesis statement,
+lifecycle state, qualitative confidence, review reasons, origin, evidence
+references, reviewed SHA-256 versions, and an evidence fingerprint.
+
+These notes are hypotheses, not user truths, diagnoses, personality labels, or
+instructions. `active` means the user currently accepts a hypothesis as useful
+working context. `needs-review` means the evidence or timing deserves another
+look. `confidence` remains separate from lifecycle and is never a numeric model
+probability.
+
+LifeOS uses the `personal-pattern-evidence` managed block for the refreshable
+evidence summary. Reflection and other user prose before or after that block stay
+human-owned. Markdown in `patterns/` without a recognized pattern schema remains
+ordinary content.
+
+### How it connects
+
+The schema parser validates stable IDs, lifecycle values, evidence roles, safe
+vault-relative evidence paths, exact lowercase SHA-256 digests, timestamps, and
+portable optional evaluation parameters. It also detects duplicate pattern IDs
+when canonical patterns are enumerated. Parsing reads directly from Markdown and
+does not require `.lifeos/` or another disposable runtime database.
+
+This artifact layer does not yet generate hypotheses, recalculate evidence
+fingerprints, change lifecycle states, build the aggregate Personal Model, or
+alter planner ranking. Those behaviors remain separate Phase 17 steps so evidence
+storage cannot quietly turn into interpretation or planning authority. See
+[Evidence-Backed Personal Model Architecture](../personal-model-architecture.md).
+
 ---
 
 [← Previous: Executive Summary & Philosophy](02-executive-summary-and-philosophy.md) · [Manual home](README.md) · [Next: Setup & Installation →](04-setup-and-installation.md)

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1701
 title: Add canonical personal-pattern artifact contract
-status: backlog
+status: completed
 phase: 17
 depends_on:
   - LIFEOS-1700
@@ -70,3 +70,11 @@ Status: required
 - DD-011
 - DD-012
 - Phase 17 Personal Model architecture
+
+# Validation evidence
+
+- PR #41 fast-check workflow run `33806305587` passed on implementation head `65509dde785b75c407bf80dbeb44d3a37c3cc829`, including the documentation-impact gate, manual-link validation, Ruff, mypy, Python compilation, pytest collection, and repository contract smoke tests.
+- PR #41 full-validation workflow run `33806318935` passed on the same implementation head. All four full pytest shards passed, including the focused pattern lifecycle, counter-evidence, malformed hash/path, duplicate identity, unsupported schema, LF/CRLF round-trip, and human-owned preservation coverage. The clean-room setup/MCP gate, home-node service container gate, and ARM64 home-node image build also passed.
+- The initial full-validation run exposed two serializer preservation defects at the managed-block boundary. Commit `95a1dfa3008cc1a9c9a0fdd801139289edfd82e0` made the frontmatter closing newline structural serializer output, and commit `65509dde785b75c407bf80dbeb44d3a37c3cc829` preserved CRLF suffix boundaries without changing the shared Markdown parser. The subsequent full validation passed.
+- An exact local checkout for `git diff --check` could not be obtained because the execution environment could not resolve `github.com`. This is an environment limitation rather than a validation pass. The closest practical substitute was a GitHub PR unified-diff audit; no trailing-whitespace error or unintended scope change was found.
+- Security review and code review were explicitly skipped by the repository owner for this task. Required validation and merge-readiness checks were not waived.
