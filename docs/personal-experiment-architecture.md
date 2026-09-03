@@ -79,7 +79,11 @@ Protected and sensitive scopes default to local-only. Linked content is never au
 
 ## Recovery and migration
 
-Indexes and analyses rebuild from canonical Markdown with checkpoints. Rebuild detects malformed artifacts, unsupported schemas, duplicate IDs, renamed files, missing links, and orphaned observations. Legacy migration is previewed, source-hash guarded, resumable, audited, and preserves originals.
+Indexes and analyses rebuild from canonical Markdown. An interrupted experiment-index rebuild stores a disposable checkpoint under `.lifeos/experiments/` containing a deterministic fingerprint of the ordered canonical experiment sources, the next source position, partial entries, and diagnostics. A later bounded invocation reuses that progress only when the current source paths and bytes still match the checkpoint fingerprint.
+
+Edits, additions, moves, deletions, or identity conflicts between invocations therefore invalidate stale progress and force a fresh rebuild from the current canonical source set. Missing, malformed, truncated, corrupt, or unsupported checkpoint data is discarded rather than repaired into authority. Completion publishes the same sorted derived index and diagnostics as a fresh uninterrupted rebuild and removes the checkpoint. Deleting all experiment runtime state remains a supported recovery path because experiment Markdown is canonical.
+
+Rebuild detects malformed artifacts, unsupported schemas, duplicate IDs, and renamed files without rewriting canonical experiment notes. Legacy migration remains a separate previewed, source-hash guarded, resumable, audited flow that preserves originals.
 
 ## Obsidian workspace
 
