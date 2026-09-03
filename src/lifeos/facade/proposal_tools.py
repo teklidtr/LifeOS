@@ -454,12 +454,13 @@ def _load_verified_source(
 
 def _load_generated_ownership(*, vault_root: Path) -> GeneratedOwnership:
     manifest_path = vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
-    if not manifest_path.exists():
-        raise ToolValidationError("Generated ownership manifest is missing")
     try:
-        return GeneratedOwnership.load(manifest_path, vault_root)
+        ownership = GeneratedOwnership.load_if_present(manifest_path, vault_root)
     except (ManifestError, PathSafetyError) as e:
         raise ToolValidationError("Generated ownership manifest is invalid") from e
+    if ownership is None:
+        raise ToolValidationError("Generated ownership manifest is missing")
+    return ownership
 
 
 def _check_create_target_ownership(

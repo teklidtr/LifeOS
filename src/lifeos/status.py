@@ -308,15 +308,8 @@ def _lint_status(config: LifeOSConfig) -> tuple[LintStatusCounts | None, Subsyst
 
 def _ownership_status(config: LifeOSConfig) -> SubsystemStatus:
     manifest_path = config.vault_root / DEFAULT_OWNERSHIP_MANIFEST_PATH
-    if not manifest_path.exists():
-        return SubsystemStatus(
-            "ownership",
-            "healthy",
-            "ownership-absent",
-            "No generated ownership manifest is present.",
-        )
     try:
-        GeneratedOwnership.load(manifest_path, config.vault_root)
+        ownership = GeneratedOwnership.load_if_present(manifest_path, config.vault_root)
     except PathSafetyError:
         return SubsystemStatus(
             "ownership",
@@ -340,6 +333,13 @@ def _ownership_status(config: LifeOSConfig) -> SubsystemStatus:
             "ownership-unavailable",
             "Generated ownership manifest is not readable.",
             "Check vault permissions and retry.",
+        )
+    if ownership is None:
+        return SubsystemStatus(
+            "ownership",
+            "healthy",
+            "ownership-absent",
+            "No generated ownership manifest is present.",
         )
     return SubsystemStatus(
         "ownership", "healthy", "ownership-valid", "Generated ownership is valid."

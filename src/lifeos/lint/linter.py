@@ -138,9 +138,9 @@ def lint_vault(
 
     # Ownership checks
     if manifest_path is not None:
-        if manifest_path.exists():
-            try:
-                ownership = GeneratedOwnership.load(manifest_path, vault_root)
+        try:
+            ownership = GeneratedOwnership.load_if_present(manifest_path, vault_root)
+            if ownership is not None:
                 for rel_path, entry in ownership.entries.items():
                     portable_rel_path = Path(rel_path).as_posix()
                     try:
@@ -178,13 +178,13 @@ def lint_vault(
                                 message="Generated file content hash does not match ownership manifest.",
                             )
                         )
-            except PathSafetyError as e:
-                cause = e.__cause__
-                if not isinstance(cause, VaultAccessError) or cause.code != "unsafe-file-type":
-                    raise
-                findings.append(_ownership_manifest_finding(manifest_path, vault_root, e))
-            except ManifestError as e:
-                findings.append(_ownership_manifest_finding(manifest_path, vault_root, e))
+        except PathSafetyError as e:
+            cause = e.__cause__
+            if not isinstance(cause, VaultAccessError) or cause.code != "unsafe-file-type":
+                raise
+            findings.append(_ownership_manifest_finding(manifest_path, vault_root, e))
+        except ManifestError as e:
+            findings.append(_ownership_manifest_finding(manifest_path, vault_root, e))
 
     # Final sorting
     findings.sort(key=_sort_key)

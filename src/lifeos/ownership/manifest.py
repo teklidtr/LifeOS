@@ -227,11 +227,20 @@ class GeneratedOwnership:
         return cls(manifest_path, vault_root, entries)
 
     @classmethod
-    def load(cls, manifest_path: Path, vault_root: Path) -> "GeneratedOwnership":
+    def load_if_present(
+        cls, manifest_path: Path, vault_root: Path
+    ) -> "GeneratedOwnership | None":
         content_bytes = _read_manifest_bytes(manifest_path)
         if content_bytes is None:
-            return cls(manifest_path, vault_root, {})
+            return None
         return cls.from_bytes(content_bytes, manifest_path=manifest_path, vault_root=vault_root)
+
+    @classmethod
+    def load(cls, manifest_path: Path, vault_root: Path) -> "GeneratedOwnership":
+        ownership = cls.load_if_present(manifest_path, vault_root)
+        if ownership is None:
+            return cls(manifest_path, vault_root, {})
+        return ownership
 
     def _check_path_safety(self, target: Path) -> tuple[Path, str]:
         norm_str = os.path.normpath(str(target))
