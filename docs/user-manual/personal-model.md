@@ -48,6 +48,27 @@ Choose **Create draft proposal** only after the candidate matches what you inten
 
 The workspace binds actions to the exact pattern content hash you inspected. If the canonical pattern changes in Obsidian before preview or draft creation, the action stops with a stale-target state. Refresh, inspect the new pattern and evidence, and create a new preview. LifeOS does not silently attach your decision to the newer content.
 
+## Agent-assisted pattern proposals
+
+An MCP-connected agent can help formulate a new working hypothesis or review an existing one, but it receives no special authority over the Personal Model. Agent assistance is an **evidence-bounded proposal aid**, not automatic profiling.
+
+The agent first selects and reads the canonical evidence relevant to the question. Every evidence reference supplied to the proposal carries the exact vault path and SHA-256 content hash the agent actually inspected, plus its role as `supporting`, `contesting`, or `contextual`. For an existing pattern review, the agent must also bind the request to the exact canonical pattern hash it inspected.
+
+LifeOS independently checks retrieval policy and rereads the selected sources before creating a draft. It verifies the evidence hashes again at the publication boundary. If a source is missing, changed, unsafe, protected without the required explicit grant and external allowlist, or otherwise unavailable, no draft is published. A changed existing pattern is likewise rejected rather than silently rebased.
+
+The reviewable proposal keeps the agent's concise hypothesis, rationale, supporting and contesting evidence, competing explanations, limitations, and proposed qualitative confidence class visible. Counter-evidence stays inspectable instead of being averaged away. Hidden chain-of-thought is not stored, and these review fields do not become provider-specific canonical pattern fields.
+
+The two MCP operations are:
+
+- `personal_pattern_propose` for a new `seed` hypothesis;
+- `personal_pattern_review_proposal` for a revision of an existing canonical pattern.
+
+Both stop at a **draft proposal**. They cannot approve, apply, diagnose, promote a hypothesis to `active`, select the approving identity, or directly edit `patterns/`. If an existing pattern already has the same statement, confidence, and exact reviewed evidence set, `personal_pattern_review_proposal` returns `no-change` and creates nothing.
+
+A model provider is optional. LifeOS can deterministically validate evidence and persist an externally supplied typed semantic candidate without a local model. When a provider is used, the contract is provider-neutral; timeout, provider failure, malformed output, or a provider returning no proposal creates no durable semantic authority.
+
+On an authenticated home node, the same draft-producing tools are available through the shared MCP core, but remote clients still do not receive `proposal_approve` or `proposal_apply`. A remote agent can therefore help prepare something for review, not accept it on your behalf.
+
 ## Refresh versus rebuild
 
 **Refresh** is read-only. It recomputes the presentation from canonical patterns and current authorized evidence without mutating pattern Markdown or rebuilding runtime files.
