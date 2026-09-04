@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Iterable, Literal, Mapping
 
 from lifeos.markdown.parser import parse_markdown_note
+from lifeos.patterns.context import (
+    PersonalPatternContextError,
+    build_personal_pattern_context,
+    render_personal_pattern_evidence,
+)
 from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
 
 from .contracts import CopilotIndex, GoalRecord, content_hash
@@ -124,6 +129,45 @@ def build_planning_context(
     plans_by_id = {plan.plan_id: plan for plan in index.plans}
 
     candidates: list[tuple[str, str, bool]] = [(goal.path, "selected goal", False)]
+    pattern_by_path = {}
+    pattern_context_omissions: list[ContextOmission] = []
+    pattern_query = " ".join(
+        value
+        for value in (
+            goal.title,
+            goal.description or "",
+            goal.why or "",
+            goal.desired_change or "",
+            *goal.constraints,
+        )
+        if value
+    )
+    def pattern_context_path_filter(path: str) -> bool:
+        if path in excludes:
+            return False
+        root = path.split("/", 1)[0]
+        return root not in policy.sensitive_roots
+
+    try:
+        pattern_context = build_personal_pattern_context(
+            vault_root=vault_root,
+            runtime_dir=vault_root / ".lifeos",
+            question=pattern_query,
+            limit=3,
+            mode="external",
+            explicit_paths=includes,
+            redact_terms=redactions,
+            path_filter=pattern_context_path_filter,
+        )
+        pattern_by_path = {item.pattern_path: item for item in pattern_context.items}
+        candidates.extend(
+            (item.pattern_path, "relevant personal-pattern evidence", False)
+            for item in pattern_context.items
+        )
+    except PersonalPatternContextError as exc:
+        pattern_context_omissions.append(
+            ContextOmission("patterns", "personal-model-unavailable", str(exc))
+        )
     for ref in sorted(goal.active_plan_refs):
         plan = plans_by_id.get(_reference_id(ref))
         if plan is not None:
@@ -139,7 +183,7 @@ def build_planning_context(
             ordered.append(candidate)
 
     items: list[PlanningContextItem] = []
-    omissions: list[ContextOmission] = []
+    omissions: list[ContextOmission] = list(pattern_context_omissions)
     remaining = max_total_bytes
     pack_truncated = False
     for path, reason, explicit in ordered:
@@ -177,7 +221,12 @@ def build_planning_context(
             "stale" if expected is not None and expected != source_hash else "current"
         )
         parsed = parse_markdown_note(source.path, content=source.content)
-        visible = _visible_text(parsed.body, source.content)
+        pattern_item = pattern_by_path.get(path)
+        visible = (
+            render_personal_pattern_evidence(pattern_item)
+            if pattern_item is not None
+            else _visible_text(parsed.body, source.content)
+        )
         redacted, applied = _apply_redactions(visible, redactions)
         raw_bytes = len(redacted.encode("utf-8"))
         allowance = min(max_item_bytes, remaining)

@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1707
 title: Integrate Personal Model with context and reflection
-status: backlog
+status: completed
 phase: 17
 depends_on:
   - LIFEOS-1705

@@ -7,6 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from lifeos.patterns.context import (
+    PersonalPatternContext,
+    PersonalPatternContextError,
+    archived_personal_pattern_paths_for_scope,
+    build_personal_pattern_context,
+    render_personal_pattern_evidence,
+)
 from lifeos.retrieval import (
     AnswerProvider,
     CancellationToken,
@@ -42,6 +49,23 @@ def _moment(value: datetime | None = None) -> datetime:
 
 def _turn_id(artifact: ConversationArtifact) -> str:
     return f"turn-{len(artifact.turns) + 1:03d}"
+
+
+def _pattern_annotated_results(
+    results: Sequence[RetrievalEvidence], context: PersonalPatternContext
+) -> tuple[RetrievalEvidence, ...]:
+    by_path = {item.pattern_path: item for item in context.items}
+    annotated: list[RetrievalEvidence] = []
+    for result in results:
+        pattern = by_path.get(result.path)
+        if pattern is None:
+            annotated.append(result)
+            continue
+        rendered = render_personal_pattern_evidence(
+            pattern, matched_excerpt=result.context_text
+        )
+        annotated.append(replace(result, text=rendered, context_text=rendered))
+    return tuple(annotated)
 
 
 def _saved_evidence(item: RetrievalEvidence) -> ConversationEvidence:
@@ -149,6 +173,18 @@ class KnowledgeConversationService:
             excluded_paths=tuple(dict.fromkeys((*artifact.metadata.scope.excluded_paths, *artifact.metadata.excluded_sources))),
         )
         token = cancellation or CancellationToken()
+        archived_patterns = archived_personal_pattern_paths_for_scope(
+            vault_root=self.vault_root,
+            retrieval_scope=scope,
+            explicit_paths=scope.pinned_paths,
+        )
+        if archived_patterns:
+            scope = replace(
+                scope,
+                excluded_paths=tuple(
+                    dict.fromkeys((*scope.excluded_paths, *archived_patterns))
+                ),
+            )
         response = self.retriever.search(
             RetrievalRequest(
                 query=query,
@@ -160,7 +196,25 @@ class KnowledgeConversationService:
             embedding_provider=embedding_provider,
             cancellation=token,
         )
-        evidence = tuple(_saved_evidence(item) for item in response.results)
+        retrieval_results = response.results
+        try:
+            local_pattern_context = build_personal_pattern_context(
+                vault_root=self.vault_root,
+                runtime_dir=self.runtime_dir,
+                question=query,
+                limit=limit,
+                retrieval_scope=scope,
+                candidate_paths=(item.path for item in retrieval_results),
+                explicit_paths=scope.pinned_paths,
+            )
+            retrieval_results = _pattern_annotated_results(
+                retrieval_results, local_pattern_context
+            )
+        except PersonalPatternContextError:
+            retrieval_results = tuple(
+                item for item in retrieval_results if not item.path.startswith("patterns/")
+            )
+        evidence = tuple(_saved_evidence(item) for item in retrieval_results)
         state = "ready"
         paragraphs: tuple[ConversationParagraph, ...] = ()
         explanation = ""
@@ -179,7 +233,41 @@ class KnowledgeConversationService:
             state = "unavailable-provider"
             explanation = "Evidence is available, but no answer provider is configured."
         else:
-            answer_evidence = tuple(item.answer_evidence() for item in response.results)
+            provider_results = retrieval_results
+            local_pattern_paths = {
+                item.path for item in retrieval_results if item.path.startswith("patterns/")
+            }
+            if local_pattern_paths:
+                try:
+                    external_pattern_context = build_personal_pattern_context(
+                        vault_root=self.vault_root,
+                        runtime_dir=self.runtime_dir,
+                        question=query,
+                        limit=limit,
+                        mode=(
+                            "local" if answer_provider.capabilities.local_only else "external"
+                        ),
+                        retrieval_scope=scope,
+                        candidate_paths=local_pattern_paths,
+                        explicit_paths=scope.pinned_paths,
+                    )
+                    external_paths = {
+                        item.pattern_path for item in external_pattern_context.items
+                    }
+                    provider_results = _pattern_annotated_results(
+                        tuple(
+                            item
+                            for item in provider_results
+                            if item.path not in local_pattern_paths or item.path in external_paths
+                        ),
+                        external_pattern_context,
+                    )
+                except PersonalPatternContextError:
+                    provider_results = tuple(
+                        item for item in provider_results if item.path not in local_pattern_paths
+                    )
+            answer_evidence = tuple(item.answer_evidence() for item in provider_results)
+            provider_saved_evidence = tuple(_saved_evidence(item) for item in provider_results)
             generation_disclosure = build_provider_disclosure(
                 evidence=answer_evidence,
                 capabilities=answer_provider.capabilities,
@@ -199,7 +287,9 @@ class KnowledgeConversationService:
                         timeout_seconds=timeout_seconds,
                         cancellation=token,
                     )
-                    paragraphs = validate_generated_answer(generated, evidence)
+                    paragraphs = validate_generated_answer(
+                        generated, provider_saved_evidence
+                    )
                     explanation = generated.explanation
                 except ProviderError as exc:
                     state = "timeout" if exc.code == "timeout" else "malformed-response"

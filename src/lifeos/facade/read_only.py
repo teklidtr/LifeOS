@@ -53,7 +53,8 @@ VAULT_CONTEXT_DESCRIPTOR = ToolDescriptor(
     description=(
         "Build a bounded reasoning context from explicit focus paths, applicable vault "
         "instructions, and relevant canonical Markdown using healthy hybrid retrieval when "
-        "available and deterministic local fallback otherwise."
+        "available and deterministic local fallback otherwise. Relevant Personal Model "
+        "patterns are returned as bounded evidence with lifecycle and evidence-health metadata."
     ),
     effect=ToolEffect.READ_ONLY,
 )

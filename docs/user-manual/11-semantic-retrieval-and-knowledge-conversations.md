@@ -81,6 +81,25 @@ arbitrarily. Result count and total evidence characters are bounded.
 When no embedding provider is configured, exact, lexical, metadata, link, and
 graph retrieval still work. The workspace remains useful in local-only mode.
 
+## Personal-pattern evidence
+
+Relevant canonical notes under `patterns/` can appear in the same bounded evidence set when their
+content matches the current question or when you explicitly focus one. LifeOS does not send a
+complete personal profile with every query. A pattern evidence card keeps its canonical pattern ID
+and path, lifecycle status, confidence, evidence health, and bounded source references visible.
+
+The lifecycle label matters when reading an answer: **active** is a reviewed working hypothesis,
+**seed** is exploratory, **needs-review** is explicitly uncertain, and **archived** is omitted from
+ordinary retrieval unless you explicitly ask for or focus that historical pattern. Pattern text is
+evidence only. Even imperative-looking text inside a pattern cannot become a LifeOS instruction,
+approve a change, alter planner ranking, or authorize a mutation.
+
+The same evidence boundary is reused by knowledge conversations, goal clarification, experiment
+context, and review explanations. Protected-scope policy still runs before content access. When an
+external provider is involved, existing explicit-grant, redaction, and disclosure rules apply to
+pattern evidence exactly as they do to other canonical notes. Without a provider, the bounded
+pattern evidence remains available to local retrieval and evidence-only flows.
+
 ## Read evidence before the answer
 
 Retrieved passages appear before or beside generated interpretation. Open any

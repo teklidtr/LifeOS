@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
 from lifeos.daily.service import content_hash
+from lifeos.patterns.context import (
+    PersonalPatternContextError,
+    PersonalPatternContextItem,
+    build_personal_pattern_context,
+    render_personal_pattern_evidence,
+)
 from lifeos.retrieval.contracts import (
     RetrievalError,
     RetrievalPolicy,
@@ -38,9 +45,24 @@ class ExperimentContextItem:
     included_bytes: int
     truncated: bool
     redactions: tuple[dict[str, object], ...]
+    personal_pattern: PersonalPatternContextItem | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {**asdict(self), "redactions": [dict(item) for item in self.redactions]}
+        return {
+            "path": self.path,
+            "content_hash": self.content_hash,
+            "inclusion_reason": self.inclusion_reason,
+            "excerpt": self.excerpt,
+            "byte_count": self.byte_count,
+            "included_bytes": self.included_bytes,
+            "truncated": self.truncated,
+            "redactions": [dict(item) for item in self.redactions],
+            "personal_pattern": (
+                self.personal_pattern.to_dict()
+                if self.personal_pattern is not None
+                else None
+            ),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +108,18 @@ def _redact(text: str, terms: tuple[str, ...]) -> tuple[str, tuple[dict[str, obj
         if count:
             applied.append({"label": f"redaction-{index}", "occurrences": count})
     return result, tuple(applied)
+
+
+def _personal_pattern_bytes(item: PersonalPatternContextItem | None) -> int:
+    if item is None:
+        return 0
+    encoded = json.dumps(
+        item.to_dict(),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return len(encoded)
 
 
 def _truncate(text: str, limit: int) -> tuple[str, int, bool]:
@@ -190,9 +224,60 @@ def preview_experiment_context(
         )
     service = ExperimentArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
     artifact = service.load(experiment_decision.path)
+
+    def provider_filter(path: str) -> bool:
+        return _provider_decision(path, allowed_roots=allowed, policy=policy).allowed
+
+    pattern_by_path: dict[str, PersonalPatternContextItem] = {}
+    auto_pattern_paths: tuple[str, ...] = ()
+    pattern_query = " ".join(
+        (
+            artifact.metadata.title,
+            artifact.metadata.description,
+            artifact.metadata.protocol.question,
+            artifact.metadata.protocol.hypothesis,
+        )
+    )
+    try:
+        automatic = build_personal_pattern_context(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            question=pattern_query,
+            limit=3,
+            mode="external",
+            redact_terms=redactions,
+            path_filter=provider_filter,
+        )
+        explicit_pattern_paths = tuple(
+            path for path in selected if path.startswith("patterns/")
+        )
+        explicit_patterns = build_personal_pattern_context(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            question=pattern_query,
+            limit=max(1, min(20, len(explicit_pattern_paths) or 1)),
+            mode="external",
+            allow_protected=True,
+            candidate_paths=explicit_pattern_paths,
+            explicit_paths=explicit_pattern_paths,
+            redact_terms=redactions,
+            path_filter=provider_filter,
+        )
+        for item in (*explicit_patterns.items, *automatic.items):
+            pattern_by_path.setdefault(item.pattern_path, item)
+        auto_pattern_paths = tuple(
+            item.pattern_path
+            for item in automatic.items
+            if item.pattern_path not in selected
+        )
+    except PersonalPatternContextError:
+        pattern_by_path = {}
+        auto_pattern_paths = ()
+
     candidates = (
         (artifact.path, "canonical experiment explicitly opened"),
         *[(path, "user-selected source") for path in selected],
+        *[(path, "relevant personal-pattern evidence") for path in auto_pattern_paths],
     )
     remaining = max_total_bytes
     items: list[ExperimentContextItem] = []
@@ -216,10 +301,17 @@ def preview_experiment_context(
                 ExperimentContextOmission(decision.path, "source-unavailable", str(exc))
             )
             continue
-        visible, applied = _redact(source.content, redactions)
-        raw_bytes = len(visible.encode("utf-8"))
+        pattern_item = pattern_by_path.get(decision.path)
+        context_text = (
+            render_personal_pattern_evidence(pattern_item)
+            if pattern_item is not None
+            else source.content
+        )
+        visible, applied = _redact(context_text, redactions)
+        pattern_bytes = _personal_pattern_bytes(pattern_item)
+        raw_bytes = len(visible.encode("utf-8")) + pattern_bytes
         allowance = min(max_item_bytes, remaining)
-        if allowance <= 0:
+        if allowance <= pattern_bytes:
             omissions.append(
                 ExperimentContextOmission(
                     path, "context-budget-exhausted", "The bounded context budget was reached."
@@ -227,8 +319,15 @@ def preview_experiment_context(
             )
             truncated = True
             continue
-        excerpt, included_bytes, item_truncated = _truncate(visible, allowance)
+        excerpt, excerpt_bytes, item_truncated = _truncate(
+            visible, allowance - pattern_bytes
+        )
+        included_bytes = excerpt_bytes + pattern_bytes
         truncated = truncated or item_truncated
+        item_redactions = (
+            *applied,
+            *(pattern_item.redactions if pattern_item is not None else ()),
+        )
         items.append(
             ExperimentContextItem(
                 path=decision.path,
@@ -238,7 +337,8 @@ def preview_experiment_context(
                 byte_count=raw_bytes,
                 included_bytes=included_bytes,
                 truncated=item_truncated,
-                redactions=applied,
+                redactions=item_redactions,
+                personal_pattern=pattern_item,
             )
         )
         remaining -= included_bytes

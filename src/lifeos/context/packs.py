@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         RetrievalScope,
         RerankingProvider,
     )
+    from lifeos.patterns.context import PersonalPatternContextItem
     from lifeos.retrieval.search import RetrievalEvidence, RetrievalResponse
 
 
@@ -49,6 +50,7 @@ class ContextPack:
     evidence_gaps: tuple[str, ...]
     omissions: tuple[str, ...]
     diagnostics: tuple[DomainDiagnostic, ...]
+    personal_patterns: tuple[PersonalPatternContextItem, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,7 +480,7 @@ def build_context_pack(
     reranker: RerankingProvider | None = None,
     graph_hints: Mapping[str, float] | None = None,
 ) -> ContextPack:
-    from lifeos.retrieval import RetrievalScope
+    from lifeos.retrieval import RetrievalError, RetrievalScope
 
     if type(limit) is not int or limit <= 0:
         raise ContextSearchError("limit must be a positive integer")
@@ -490,6 +492,25 @@ def build_context_pack(
         raise ContextSearchError("retrieval_mode must be local or external")
 
     scope = retrieval_scope or RetrievalScope()
+    from lifeos.patterns.context import archived_personal_pattern_paths_for_scope
+
+    try:
+        archived_patterns = archived_personal_pattern_paths_for_scope(
+            vault_root=vault_root,
+            mode=cast(Literal["local", "external"], retrieval_mode),
+            retrieval_scope=scope,
+            explicit_paths=focus_paths,
+            path_filter=path_filter,
+        )
+    except RetrievalError as exc:
+        raise ContextSearchExecutionError("Retrieval policy is invalid") from exc
+    if archived_patterns:
+        scope = replace(
+            scope,
+            excluded_paths=tuple(
+                dict.fromkeys((*scope.excluded_paths, *archived_patterns))
+            ),
+        )
     candidate_filter = _retrieval_filter(
         vault_root=vault_root,
         scope=scope,
@@ -616,6 +637,51 @@ def build_context_pack(
 
     limited = len(candidates) > remaining
     sources = (*focused, *candidates[:remaining])
+    pattern_context_items: tuple[PersonalPatternContextItem, ...] = ()
+    pattern_context_omissions: tuple[str, ...] = ()
+    from lifeos.patterns.context import (
+        PersonalPatternContextError,
+        build_personal_pattern_context,
+        render_personal_pattern_evidence,
+    )
+
+    try:
+        pattern_context = build_personal_pattern_context(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir or (vault_root / ".lifeos"),
+            question=question,
+            limit=limit,
+            mode=cast(Literal["local", "external"], retrieval_mode),
+            retrieval_scope=scope,
+            candidate_paths=(source.path for source in sources),
+            explicit_paths=focus_paths,
+            path_filter=path_filter,
+        )
+        by_path = {item.pattern_path: item for item in pattern_context.items}
+        sources = tuple(
+            replace(
+                source,
+                excerpt=render_personal_pattern_evidence(
+                    by_path[source.path], matched_excerpt=source.excerpt
+                ),
+            )
+            if source.path in by_path
+            else source
+            for source in sources
+        )
+        pattern_context_items = pattern_context.items
+        pattern_context_omissions = tuple(
+            f"Personal pattern {item.path}: {item.detail}"
+            for item in pattern_context.omissions
+        )
+        if pattern_context.truncated:
+            pattern_context_omissions = (
+                *pattern_context_omissions,
+                "Personal pattern evidence was limited by the context source bound.",
+            )
+    except PersonalPatternContextError as exc:
+        pattern_context_omissions = (f"Personal pattern context unavailable: {exc}",)
+
     instruction_report = load_instruction_report(
         vault_root=vault_root,
         question=question,
@@ -650,6 +716,7 @@ def build_context_pack(
             "Protected scopes were excluded from candidate selection by retrieval policy."
         )
     omissions.extend(retrieval_omissions)
+    omissions.extend(pattern_context_omissions)
     if hybrid_response is not None and hybrid is not None:
         if hybrid_response.semantic_state == "not-configured":
             omissions.append(
@@ -687,6 +754,7 @@ def build_context_pack(
         evidence_gaps=tuple(gaps),
         omissions=tuple(omissions),
         diagnostics=diagnostics,
+        personal_patterns=pattern_context_items,
     )
 
 
@@ -729,6 +797,17 @@ def format_context_pack(pack: ContextPack) -> str:
             lines.append(f"    {source.description}")
         if source.excerpt:
             lines.append(f"    {source.excerpt}")
+
+    lines.append("")
+    lines.append("Personal pattern evidence")
+    if pack.personal_patterns:
+        for pattern in pack.personal_patterns:
+            lines.append(
+                f"  - {pattern.pattern_id}: {pattern.status}, {pattern.confidence}, "
+                f"evidence {pattern.evidence_health} ({pattern.pattern_path})"
+            )
+    else:
+        lines.append("  none")
 
     lines.append("")
     lines.append("Diagnostics")

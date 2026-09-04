@@ -240,6 +240,14 @@ ranking would prefer other notes; they still pass normal vault safety and privac
 Instruction applicability is evaluated against the final selected source set and grants no
 mutation authority.
 
+Recognized `patterns/*.md` artifacts participate through the same bounded source selection rather
+than through a universal profile prompt. Selected patterns are accompanied by typed Personal Model
+evidence containing lifecycle status, confidence, evidence health, canonical hashes/references, and
+an explicit `evidence-not-instruction` role. `needs-review` remains visibly uncertain, `seed` remains
+exploratory, and archived patterns are excluded before ordinary candidate ranking unless they are
+explicit focus paths. `ContextPack.personal_patterns` exposes the same bounded metadata to typed
+callers. Pattern text cannot become a routed instruction or authorize mutation.
+
 When `.lifeos/retrieval/` is healthy, remaining source slots reuse the existing hybrid exact,
 lexical, semantic when configured, metadata, link, optional graph, pin, rerank, deduplication,
 and deterministic-ordering contracts. Context Packs do not own a parallel embedding index or
