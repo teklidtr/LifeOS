@@ -9,6 +9,7 @@ observation, and agent-assisted reflection.
 1. [System Architecture Diagram](01-system-architecture.md)
 2. [Executive Summary & Philosophy](02-executive-summary-and-philosophy.md)
 3. [Feature Breakdown](03-feature-breakdown.md)
+   - [Personal-pattern review triggers](personal-pattern-review-triggers.md)
 4. [Setup & Installation Guide](04-setup-and-installation.md)
 5. [Step-by-Step Usage Instructions](05-workflow.md)
 6. [Obsidian Desktop Cockpit](06-obsidian-desktop.md)
@@ -39,11 +40,13 @@ across multiple human-editable devices or transferring LifeOS mutation authority
 between nodes, Chapter 17 when operating a long-lived `lifeos serve` node or
 recovering from a runtime mount/path replacement, and Chapter 18 before asking an
 MCP-connected agent to acquire external evidence or turn research into durable
-knowledge. Chapter 13 also identifies which rich-capture capabilities are fully
-wired in the standard plugin, which depend on a host renderer, and which remain
-provider-ready contracts. Chapter 1 is useful when you want to understand the
-system boundaries, while Chapter 3 is the reference chapter for individual
-modules.
+knowledge. The focused [Personal-pattern review triggers](personal-pattern-review-triggers.md)
+guide explains why a working hypothesis may return for review and why counter-evidence
+never becomes an automatic truth decision. Chapter 13 also identifies which
+rich-capture capabilities are fully wired in the standard plugin, which depend on
+a host renderer, and which remain provider-ready contracts. Chapter 1 is useful
+when you want to understand the system boundaries, while Chapter 3 is the reference
+chapter for individual modules.
 
 ## Navigation
 
