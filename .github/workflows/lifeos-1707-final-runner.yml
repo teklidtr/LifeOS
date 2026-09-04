@@ -31,34 +31,12 @@ jobs:
           start = workflow.index(marker) + len(marker)
           end = workflow.index("\n          PY\n", start)
           raw = workflow[start:end]
-          script = "\n".join(
-              line[10:] if line.startswith("          ") else line
-              for line in raw.splitlines()
-          )
+          script = "\n".join(line[10:] if line.startswith("          ") else line for line in raw.splitlines())
           exec(compile(script, '<lifeos-1707-final>', 'exec'))
-
           test_path = Path('tests/patterns/test_context_final_review.py')
           text = test_path.read_text(encoding='utf-8')
-          old = '''    _write(vault, public_path, "# Public\\n\\nProvider-safe evidence.\\n")
-    policy = RetrievalPolicy(protected_prefixes=("patterns",), external_allowed_prefixes=())
-    scope = RetrievalScope(paths=(pattern_path, public_path), allow_protected=True)
-    service = KnowledgeConversationService(
-        vault_root=vault, runtime_dir=vault / ".lifeos", policy=policy
-    )
-'''
-          new = '''    _write(vault, public_path, "# Public\\n\\nProvider-safe evidence.\\n")
-    _write(
-        vault,
-        "system/retrieval-policy.yml",
-        "schema_version: 1\\n"
-        "protected_prefixes: [patterns]\\n"
-        "external_allowed_prefixes: []\\n",
-    )
-    scope = RetrievalScope(paths=(pattern_path, public_path), allow_protected=True)
-    service = KnowledgeConversationService(
-        vault_root=vault, runtime_dir=vault / ".lifeos"
-    )
-'''
+          old = "    _write(vault, public_path, \"# Public\\n\\nProvider-safe evidence.\\n\")\n    policy = RetrievalPolicy(protected_prefixes=(\"patterns\",), external_allowed_prefixes=())\n    scope = RetrievalScope(paths=(pattern_path, public_path), allow_protected=True)\n    service = KnowledgeConversationService(\n        vault_root=vault, runtime_dir=vault / \".lifeos\", policy=policy\n    )\n"
+          new = "    _write(vault, public_path, \"# Public\\n\\nProvider-safe evidence.\\n\")\n    _write(vault, \"system/retrieval-policy.yml\", \"schema_version: 1\\nprotected_prefixes: [patterns]\\nexternal_allowed_prefixes: []\\n\")\n    scope = RetrievalScope(paths=(pattern_path, public_path), allow_protected=True)\n    service = KnowledgeConversationService(vault_root=vault, runtime_dir=vault / \".lifeos\")\n"
           if text.count(old) != 1:
               raise SystemExit(f'expected one citation fixture replacement, found {text.count(old)}')
           test_path.write_text(text.replace(old, new, 1), encoding='utf-8')
