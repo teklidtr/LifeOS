@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -125,20 +125,32 @@ def _load(vault: Path, proposal_id: str):
     return loaded.proposal
 
 
+def _proposal_created_at(vault: Path, proposal_id: str) -> datetime:
+    created_at = _load(vault, proposal_id).metadata.created_at
+    return datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+
+
+def _timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _approve(vault: Path, proposal_id: str, *, minute: int) -> None:
     proposal = _load(vault, proposal_id)
+    created_at = _proposal_created_at(vault, proposal_id)
+    submitted_at = created_at + timedelta(minutes=minute + 1)
+    approved_at = created_at + timedelta(minutes=minute + 2)
     submit_proposal_for_review(
         proposal,
         proposals_root=vault / "proposals",
         submitted_by="trusted-human",
-        submitted_at=f"2026-09-04T20:{minute:02d}:00Z",
+        submitted_at=_timestamp(submitted_at),
     )
     pending = _load(vault, proposal_id)
     approve_proposal(
         pending,
         proposals_root=vault / "proposals",
         approved_by="trusted-human",
-        approved_at=f"2026-09-04T20:{minute + 1:02d}:00Z",
+        approved_at=_timestamp(approved_at),
     )
 
 
@@ -203,6 +215,7 @@ def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: 
     vault = tmp_path / "vault"
     proposal_id = _hidden_collision_draft(vault)
     _approve(vault, proposal_id, minute=0)
+    apply_time = _proposal_created_at(vault, proposal_id) + timedelta(minutes=3)
 
     authorizer = _ApplyAuthorizer()
     with pytest.raises(ToolConflictError, match="pattern identity is not unique"):
@@ -210,7 +223,7 @@ def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: 
             vault_root=vault,
             request=ApplyProposalRequest(proposal_id),
             authorizer=authorizer,
-            clock_fn=lambda: datetime(2026, 9, 4, 20, 2, tzinfo=timezone.utc),
+            clock_fn=lambda: apply_time,
         )
 
     assert [request.action for request in authorizer.requests] == [ConsequentialAction.APPLY]
@@ -221,6 +234,7 @@ def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: 
 def test_composite_accept_uses_the_same_trusted_pattern_identity_guard(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     proposal_id = _hidden_collision_draft(vault)
+    accept_time = _proposal_created_at(vault, proposal_id) + timedelta(minutes=1)
     authorizer = _ApplyAuthorizer()
 
     with pytest.raises(ToolConflictError, match="pattern identity is not unique"):
@@ -228,7 +242,7 @@ def test_composite_accept_uses_the_same_trusted_pattern_identity_guard(tmp_path:
             vault_root=vault,
             request=AcceptProposalRequest(proposal_id),
             authorizer=authorizer,
-            clock_fn=lambda: datetime(2026, 9, 4, 20, 2, tzinfo=timezone.utc),
+            clock_fn=lambda: accept_time,
         )
 
     assert [request.action for request in authorizer.requests] == [ConsequentialAction.APPLY]
@@ -264,11 +278,13 @@ def test_application_rechecks_identity_after_another_approved_seed_is_applied(
     first = _load(vault, first_id)
     second = _load(vault, second_id)
 
+    first_apply_at = _proposal_created_at(vault, first_id) + timedelta(minutes=30)
+    second_apply_at = _proposal_created_at(vault, second_id) + timedelta(minutes=31)
     applied = apply_proposal(
         first,
         vault_root=vault,
         applied_by="trusted-human",
-        applied_at="2026-09-04T21:00:00Z",
+        applied_at=_timestamp(first_apply_at),
     )
     assert applied.new_status.value == "applied"
     assert (vault / "patterns" / "focus-after-walk-a.md").exists()
@@ -278,7 +294,7 @@ def test_application_rechecks_identity_after_another_approved_seed_is_applied(
             second,
             vault_root=vault,
             applied_by="trusted-human",
-            applied_at="2026-09-04T21:01:00Z",
+            applied_at=_timestamp(second_apply_at),
         )
 
     assert raised.value.code is ApplicationErrorCode.PREFLIGHT_FAILED

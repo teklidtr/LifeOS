@@ -26,6 +26,7 @@ observation, and agent-assisted reflection.
 16. [Cross-Device Vault Coherence](16-cross-device-vault-coherence.md)
 17. [Home-Node Runtime Safety](17-home-node-runtime-safety.md)
 18. [Evidence-Grounded Research](18-evidence-grounded-research.md)
+19. [Evidence-Backed Personal Model](19-personal-model.md)
 
 ## Suggested reading path
 
@@ -39,17 +40,19 @@ contributed to them, Chapter 15 before giving an MCP-connected agent a broad
 vault exploration task, Chapter 16 before synchronizing one canonical vault
 across multiple human-editable devices or transferring LifeOS mutation authority
 between nodes, Chapter 17 when operating a long-lived `lifeos serve` node or
-recovering from a runtime mount/path replacement, and Chapter 18 before asking an
+recovering from a runtime mount/path replacement, Chapter 18 before asking an
 MCP-connected agent to acquire external evidence or turn research into durable
-knowledge. The focused [Personal Model workspace](personal-model.md) guide explains
-how to inspect evidence-backed working hypotheses, recover disposable model state,
-and move Track, Adopt, Revise, Contest, and Archive decisions through proposal
-preview instead of direct mutation. The focused [Personal-pattern review triggers](personal-pattern-review-triggers.md)
-guide explains why a working hypothesis may return for review and why counter-evidence
-never becomes an automatic truth decision. Chapter 13 also identifies which
-rich-capture capabilities are fully wired in the standard plugin, which depend on
-a host renderer, and which remain provider-ready contracts. Chapter 1 is useful
-when you want to understand the system boundaries, while Chapter 3 is the reference
+knowledge, and Chapter 19 before using the Personal Model as durable working
+context. Chapter 19 explains the complete evidence → proposal → canonical
+hypothesis → re-evaluation → review → context → Obsidian loop and the boundary
+between a working hypothesis and user truth. The focused [Personal Model
+workspace](personal-model.md) guide covers the Obsidian controls in more detail,
+while [Personal-pattern review triggers](personal-pattern-review-triggers.md)
+explains why a hypothesis may return for review and why counter-evidence never
+becomes an automatic truth decision. Chapter 13 also identifies which rich-capture
+capabilities are fully wired in the standard plugin, which depend on a host
+renderer, and which remain provider-ready contracts. Chapter 1 is useful when
+you want to understand the system boundaries, while Chapter 3 is the reference
 chapter for individual modules.
 
 ## Navigation
