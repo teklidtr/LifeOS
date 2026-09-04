@@ -96,8 +96,8 @@ inside the human-owned weekly reflection sections.
 Personal patterns are optional review evidence, not a recurring obligation list.
 A weekly review may show at most eight patterns that have a concrete maintenance
 reason: a newly tracked seed, a due review, `needs-review` status, materially
-changed evidence, or changed contesting evidence. An `active` pattern does not
-appear merely because it is active.
+changed evidence, or unresolved contesting evidence. An `active` pattern does
+not appear merely because it is active.
 
 Daily review is stricter. Pattern items are absent by default and may appear only
 when the caller or workspace explicitly supplies the stable pattern ID as urgent
