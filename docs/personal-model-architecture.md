@@ -128,6 +128,8 @@ An agent may propose a pattern but cannot select the approving identity, approve
 
 LIFEOS-1703 implements this boundary with typed `lifeos.patterns` proposal requests for Track, Adopt, Revise, Needs review, Resolve review, and Archive. The builder stops at a draft proposal, records the transition reason and reviewed evidence fingerprint in proposal metadata, uses `create_file` only for an absent new seed, and uses a current-content-hash-bound `patch_human_file` for every existing pattern. Resolving `needs-review` requires an explicit `seed` or `active` destination, so completing a review cannot silently become adoption. Submission, approval, rejection, stale-target checks, application, and interrupted-write recovery remain the shared proposal engine's responsibility.
 
+The proposal engine's generic rule still rejects `patch_human_file` for Markdown containing LifeOS-managed blocks. Canonical patterns are the narrow schema-owned exception because the required `personal-pattern-evidence` block is derived presentation inside an otherwise human-owned pattern file. Preflight and application permit that exception only when the original and candidate are both recognized canonical patterns, the stable pattern ID is unchanged, and serializing the candidate metadata plus its human-owned body regions reproduces the candidate bytes exactly. Ordinary managed Markdown, malformed pattern candidates, identity changes, and managed-summary text that disagrees with canonical pattern metadata remain rejected.
+
 ## Evidence references and lineage
 
 A durable personal interpretation must remain traceable to the exact evidence versions reviewed when the interpretation was created or changed.
@@ -277,7 +279,7 @@ The agent cannot establish a hypothesis as truth, infer immutable identity trait
 
 The Phase 17 Obsidian workspace is a thin client over Python read models and proposal builders. It will expose Active, Needs review, Seeds, and Archived views; evidence health; supporting and contesting sources; evidence changes; and proposal-backed Track, Adopt, Revise, Contest, and Archive actions.
 
-Refresh is read-only. TypeScript does not parse canonical pattern semantics into a parallel business-rule implementation and does not write pattern Markdown directly. Missing or corrupt derived state degrades to an explicit rebuild/recovery state rather than to canonical data loss.
+Refresh is read-only. TypeScript does not parse canonical pattern semantics into a parallel business-rule implementation and does not write pattern Markdown directly. Missing or corrupt derived Personal Model state degrades to an explicit rebuild/recovery state rather than to canonical data loss.
 
 ## Graph boundary
 
