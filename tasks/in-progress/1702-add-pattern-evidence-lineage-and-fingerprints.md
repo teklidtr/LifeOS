@@ -48,6 +48,7 @@ Status: required
 
 - `docs/personal-model-architecture.md`: document evidence-version semantics.
 - `docs/data-model.md`: document evidence-reference shape.
+- `docs/user-manual/03-feature-breakdown.md`: reviewed; no change required because LIFEOS-1702 adds no user-facing command, UI action, or lifecycle behavior.
 
 # Validation commands
 
@@ -55,6 +56,12 @@ Status: required
 - `ruff check src tests`
 - `mypy src`
 - `git diff --check`
+
+# Validation evidence
+
+- Local repository checkout is unavailable in the current execution environment: GitHub clone attempts fail DNS resolution, so the repository-wide commands above cannot be run locally here.
+- The available local substitute passed: the exact evidence module syntax-compiles, its authored lines stay within the repository line-length limit, the fixed fingerprint vector was independently reproduced, and isolated SQLite smoke coverage passed for fingerprint deduplication/role separation, all six evidence states, immutable reviewed hashes, and caller-authorized stable-ID resolution.
+- Repository fast checks and required full validation remain pending on the pull request; this task stays `in-progress` until those checks satisfy the completion rules.
 
 # Relevant design decisions
 
@@ -65,3 +72,4 @@ Status: required
 - DD-058
 - DD-064
 - DD-090
+- DD-095
