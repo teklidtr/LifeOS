@@ -159,7 +159,7 @@ def test_registry_resolution_distinguishes_all_evidence_states(tmp_path: Path) -
     assert diagnostics[1].current_content_hash == references[1].content_hash
     assert diagnostics[2].reference.content_hash == _digest(changed_before)
     assert diagnostics[2].current_content_hash == _digest(changed_after)
-    assert diagnostics[3].candidate_paths == ("journal/deleted.md",)
+    assert diagnostics[3].candidate_paths == ()
     assert diagnostics[4].candidate_paths == (
         "journal/ambiguous-a.md",
         "journal/ambiguous-b.md",
