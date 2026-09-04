@@ -31,6 +31,7 @@ PatternAssistanceState = Literal[
 
 _MAX_SEMANTIC_TEXT = 2_000
 _MAX_SEMANTIC_ITEMS = 12
+_MAX_PROVIDER_EVIDENCE_CHARACTERS = 24_000
 
 
 def _bounded_text(value: str, field: str) -> str:
@@ -82,9 +83,21 @@ class PatternSemanticSuggestion:
 
 
 @dataclass(frozen=True, slots=True)
+class PatternAssistanceEvidence:
+    """One already-authorized exact evidence reference plus bounded provider-visible text."""
+
+    reference: PatternEvidence
+    text: str
+
+    def __post_init__(self) -> None:
+        if type(self.text) is not str:
+            raise ValueError("evidence text must be a string")
+
+
+@dataclass(frozen=True, slots=True)
 class PatternAssistanceRequest:
     purpose: Literal["new-pattern", "review-existing"]
-    evidence: tuple[PatternEvidence, ...]
+    evidence: tuple[PatternAssistanceEvidence, ...]
     existing_statement: str | None = None
 
     def __post_init__(self) -> None:
@@ -94,6 +107,11 @@ class PatternAssistanceRequest:
             raise ValueError("semantic pattern assistance requires selected evidence")
         if len(self.evidence) > 32:
             raise ValueError("semantic pattern assistance supports at most 32 evidence references")
+        character_count = sum(len(item.text) for item in self.evidence)
+        if character_count > _MAX_PROVIDER_EVIDENCE_CHARACTERS:
+            raise ValueError(
+                "semantic pattern assistance evidence exceeds the provider disclosure budget"
+            )
         if self.existing_statement is not None:
             object.__setattr__(
                 self,
@@ -148,13 +166,21 @@ def assist_pattern(
             {"configured": True, "sent_paths": []},
             ("Pattern assistance requires a generation provider.",),
         )
+    if len(request.evidence) > provider.capabilities.max_batch_size:
+        return PatternAssistanceResult(
+            "provider-unavailable",
+            None,
+            {"configured": True, "sent_paths": []},
+            ("Selected evidence exceeds the provider batch limit.",),
+        )
     token = cancellation or CancellationToken()
     disclosure = {
         "configured": True,
         "adapter_key": provider.capabilities.adapter_key,
         "model_key": provider.capabilities.model_key,
         "local_only": provider.capabilities.local_only,
-        "sent_paths": [item.path for item in request.evidence],
+        "sent_paths": [item.reference.path for item in request.evidence],
+        "character_count": sum(len(item.text) for item in request.evidence),
     }
     try:
         suggestion = provider.suggest(
@@ -220,14 +246,21 @@ def _semantic_body(payload: AgentPatternReviewPayload) -> str:
             if isinstance(item, dict)
         ] or ["- None selected."]
 
-    competing = [f"- {item}" for item in payload.suggestion.competing_explanations] or ["- None recorded."]
-    limitations = [f"- {item}" for item in payload.suggestion.limitations] or ["- None recorded."]
+    competing = [
+        f"- {item}" for item in payload.suggestion.competing_explanations
+    ] or ["- None recorded."]
+    limitations = [f"- {item}" for item in payload.suggestion.limitations] or [
+        "- None recorded."
+    ]
     return "\n".join(
         [
             "",
             "## Agent-assisted semantic review context",
             "",
-            "This section is review context only. It does not establish a user trait, diagnosis, or truth.",
+            (
+                "This section is review context only. It does not establish a user trait, "
+                "diagnosis, or truth."
+            ),
             "",
             f"- Proposed confidence: `{payload.suggestion.proposed_confidence}`",
             f"- Rationale: {payload.suggestion.rationale}",
