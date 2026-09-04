@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TASK_ROOT = REPO_ROOT / "tasks"
 TASK_STATES = ("backlog", "ready", "in-progress", "completed")
+_TASK_ID_PATTERN = re.compile(r"LIFEOS-[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
 @dataclass(frozen=True)
@@ -43,11 +45,18 @@ def _scalar_value(lines: list[str], key: str) -> str:
     return value
 
 
+def _task_id_value(lines: list[str]) -> str:
+    task_id = _scalar_value(lines, "id")
+    if _TASK_ID_PATTERN.fullmatch(task_id) is None:
+        raise ValueError("frontmatter field 'id' must use plain LIFEOS-* task-ID syntax")
+    return task_id
+
+
 def parse_task_metadata(path: Path) -> TaskMetadata:
     lines = _frontmatter_lines(path)
     return TaskMetadata(
         path=path,
-        task_id=_scalar_value(lines, "id"),
+        task_id=_task_id_value(lines),
         status=_scalar_value(lines, "status"),
     )
 
