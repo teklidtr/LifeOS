@@ -1,8 +1,9 @@
-"""Bridge compatibility adapter for explicit personal-pattern review attention."""
+"""Bridge compatibility adapter for explicit personal-pattern desktop workflows."""
 
 from __future__ import annotations
 
 from lifeos.bridge.application import BridgeApplication as _BaseBridgeApplication
+from lifeos.bridge.personal_model_workspace import PersonalModelWorkspaceBridge
 from lifeos.bridge.protocol import ProtocolError
 from lifeos.reviews.pattern_integration import (
     push_pattern_review_attention,
@@ -11,15 +12,21 @@ from lifeos.reviews.pattern_integration import (
 
 
 class BridgeApplication(_BaseBridgeApplication):
-    """Accept bounded pattern-attention fields without widening the base dispatcher.
+    """Add bounded Phase 17 transport fields without widening the generic dispatcher.
 
-    The generic bridge keeps its strict allowlists unchanged. This public adapter
-    validates the two Phase 17 transport fields, removes them before generic
-    dispatch, and carries them through a request-local context consumed only by
-    daily review snapshot construction.
+    Review attention remains request-local. Personal Model workspace calls delegate
+    to the existing deterministic pattern read model and proposal services; the
+    TypeScript client receives presentation data but owns no pattern semantics.
     """
 
     def dispatch(self, method: str, params: object) -> object:
+        if method.startswith("personal-model."):
+            return PersonalModelWorkspaceBridge(
+                vault_root=self.daily.vault_root,
+                runtime_dir=self.daily.runtime_dir,
+                actor_id=self.actor_id,
+            ).dispatch(method, params)
+
         if method not in {"review.artifact.open", "review.artifact.refresh"} or not isinstance(
             params, dict
         ):

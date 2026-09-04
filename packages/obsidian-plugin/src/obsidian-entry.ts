@@ -27,6 +27,7 @@ import {
   proposalActionsForStatus,
   type ProposalWorkspaceController,
 } from "./index.js";
+import { LifeOSPersonalModelItemView } from "./personal-model-obsidian-view.js";
 import type { LifeOSSettings } from "./protocol.js";
 import { StdioBridgeClient } from "./stdio-bridge-client.js";
 
@@ -37,6 +38,7 @@ const VIEW_DETAILS: Record<string, { title: string; icon: string }> = {
   [LifeOSController.KNOWLEDGE_CONVERSATION_VIEW_TYPE]: { title: "Knowledge Conversation", icon: "messages-square" },
   [LifeOSController.EXPERIMENT_VIEW_TYPE]: { title: "Personal Experiments", icon: "flask-conical" },
   [LifeOSController.RICH_CAPTURE_VIEW_TYPE]: { title: "Rich Capture", icon: "camera" },
+  [LifeOSController.PERSONAL_MODEL_VIEW_TYPE]: { title: "Personal Model", icon: "brain-circuit" },
   [LifeOSController.PROPOSAL_VIEW_TYPE]: { title: "LifeOS Proposals", icon: "file-check-2" },
 };
 
@@ -483,6 +485,12 @@ class ObsidianHostAdapter implements ObsidianHost {
   registerView(type: string, factory: () => unknown): () => void {
     this.plugin.registerView(type, (leaf) => {
       const model = factory();
+      if (type === LifeOSController.PERSONAL_MODEL_VIEW_TYPE) {
+        const personalModelView = model as {
+          controller: import("./personal-model-workspace.js").PersonalModelWorkspaceController;
+        };
+        return new LifeOSPersonalModelItemView(leaf, personalModelView.controller);
+      }
       if (type === LifeOSController.PROPOSAL_VIEW_TYPE) {
         const proposalView = model as { controller: ProposalWorkspaceController };
         return new LifeOSProposalItemView(leaf, proposalView.controller);

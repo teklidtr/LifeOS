@@ -13,6 +13,7 @@ observation, and agent-assisted reflection.
 4. [Setup & Installation Guide](04-setup-and-installation.md)
 5. [Step-by-Step Usage Instructions](05-workflow.md)
 6. [Obsidian Desktop Cockpit](06-obsidian-desktop.md)
+   - [Personal Model workspace](personal-model.md)
 7. [Troubleshooting, Upgrades, and Removal](07-troubleshooting.md)
 8. [Adaptive Planning and Feedback](08-adaptive-planning.md)
 9. [Goal-to-Plan Copilot](09-goal-to-plan-copilot.md)
@@ -40,7 +41,10 @@ across multiple human-editable devices or transferring LifeOS mutation authority
 between nodes, Chapter 17 when operating a long-lived `lifeos serve` node or
 recovering from a runtime mount/path replacement, and Chapter 18 before asking an
 MCP-connected agent to acquire external evidence or turn research into durable
-knowledge. The focused [Personal-pattern review triggers](personal-pattern-review-triggers.md)
+knowledge. The focused [Personal Model workspace](personal-model.md) guide explains
+how to inspect evidence-backed working hypotheses, recover disposable model state,
+and move Track, Adopt, Revise, Contest, and Archive decisions through proposal
+preview instead of direct mutation. The focused [Personal-pattern review triggers](personal-pattern-review-triggers.md)
 guide explains why a working hypothesis may return for review and why counter-evidence
 never becomes an automatic truth decision. Chapter 13 also identifies which
 rich-capture capabilities are fully wired in the standard plugin, which depend on
