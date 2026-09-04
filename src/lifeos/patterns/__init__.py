@@ -15,10 +15,20 @@ from .contracts import (
     PatternStatus,
     metadata_from_dict,
 )
+from .evidence import (
+    EvidenceState,
+    NormalizedEvidenceReference,
+    PatternEvidenceDiagnostic,
+    compute_evidence_fingerprint,
+    normalize_evidence_reference,
+    resolve_evidence_states,
+)
 
 __all__ = [
     "PATTERN_SCHEMA_VERSION",
     "EvidenceRole",
+    "EvidenceState",
+    "NormalizedEvidenceReference",
     "OriginKind",
     "PatternArtifact",
     "PatternArtifactService",
@@ -26,10 +36,14 @@ __all__ = [
     "PatternError",
     "PatternEvaluation",
     "PatternEvidence",
+    "PatternEvidenceDiagnostic",
     "PatternMetadata",
     "PatternOrigin",
     "PatternStatus",
+    "compute_evidence_fingerprint",
     "metadata_from_dict",
+    "normalize_evidence_reference",
     "parse_pattern",
+    "resolve_evidence_states",
     "serialize_pattern",
 ]
