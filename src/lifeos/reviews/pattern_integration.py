@@ -27,12 +27,14 @@ from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate
 from lifeos.reviews.contracts import (
     DecisionKind,
     ReviewArtifact,
+    ReviewItemDecision,
     ReviewSectionSnapshot,
     ReviewSnapshot,
     ReviewSnapshotRecord,
 )
 from lifeos.reviews.decisions import ReviewDecisionService as _BaseReviewDecisionService
 from lifeos.reviews.history import (
+    ReviewContinuity,
     adjacent_reviews,
     apply_continuity_to_snapshot,
     build_review_continuity,
@@ -97,14 +99,14 @@ def _rehash_snapshot(
     snapshot: ReviewSnapshot,
     sections: tuple[ReviewSectionSnapshot, ...],
     *,
-    continuity: object | None = None,
+    continuity: ReviewContinuity | None = None,
 ) -> ReviewSnapshot:
     payload: dict[str, object] = {
         "generated_at": snapshot.generated_at,
         "sections": [asdict(section) for section in sections],
         "diagnostics": snapshot.diagnostics,
     }
-    if continuity is not None and hasattr(continuity, "to_dict"):
+    if continuity is not None:
         payload["continuity"] = continuity.to_dict()
     digest = "sha256:" + content_hash(json.dumps(payload, sort_keys=True, default=str))
     return ReviewSnapshot(
@@ -129,7 +131,9 @@ def _replace_section(
     return _rehash_snapshot(snapshot, sections)
 
 
-def _bound_pattern_sections(snapshot: ReviewSnapshot, continuity: object) -> ReviewSnapshot:
+def _bound_pattern_sections(
+    snapshot: ReviewSnapshot, continuity: ReviewContinuity
+) -> ReviewSnapshot:
     changed = False
     bounded: list[ReviewSectionSnapshot] = []
     for section in snapshot.sections:
@@ -212,7 +216,7 @@ def _effective_previous(
     if previous is None:
         return None
     current_key = (artifact.metadata.period_start.isoformat(), artifact.metadata.review_id)
-    latest: dict[str, object] = {}
+    latest: dict[str, ReviewItemDecision] = {}
     for entry in list_review_history(service=service, kind=artifact.metadata.review_kind):
         if (entry.period_start, entry.review_id) >= current_key:
             continue
