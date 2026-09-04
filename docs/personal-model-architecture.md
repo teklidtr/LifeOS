@@ -173,16 +173,24 @@ A later revision may change the statement or confidence only through a fresh pro
 
 Re-evaluation answers **does this deserve review?**, not **is this belief true?**
 
-For patterns that opt into a supported deterministic evaluation recipe, LifeOS may rerun factual analysis against current canonical observations. The initial supported family is deliberately narrow and reuses the cautious Phase 7 forms:
+LIFEOS-1704 implements the read-only assessment boundary in `lifeos.patterns`. A pattern can opt into one of two initial deterministic recipe kinds:
 
-- numeric metric association;
-- activity-versus-outcome comparison.
+- `numeric-metric-association` with `outcome`, `factor`, optional `min_samples`, and optional `stale_after_days` parameters;
+- `activity-outcome-comparison` with `outcome`, `activity`, optional `min_samples`, and optional `stale_after_days` parameters.
 
-The recalculation may detect materially new evidence, changed evidence versions, weaker evidence, direction reversal, new contesting evidence, stale evidence, missing or ambiguous evidence, or a due review date. Those facts become review reasons and a review recommendation. They never directly rewrite `statement`, `status`, `confidence`, or reviewed evidence.
+The recipes call the existing cautious Phase 7 numeric-association and activity-comparison analyzers rather than introducing another statistics implementation. When `min_samples` is omitted, each recipe inherits the corresponding analyzer default: 5 paired observations for numeric association and 3 observations per activity group. `stale_after_days` is opt-in; when present it must be a positive integer and creates a staleness review reason once the newest usable dated observation reaches that age. Unknown recipe kinds or recipe-specific parameters fail closed instead of being silently ignored.
 
-For semantic or manually authored patterns without a deterministic recipe, automation is limited to factual evidence-state checks and review timing. LifeOS does not run an autonomous vault-wide psychological contradiction search merely because a pattern exists.
+The last reviewed evidence fingerprint remains immutable review context. Re-evaluation first checks whether the currently declared evidence references still reproduce that fingerprint and separately resolves each reviewed source as unchanged, moved, changed, missing, deleted, or ambiguous. A changed fingerprint, changed source version, move, deletion, missing source, or ambiguity is an inspectable review reason; none of those facts is automatically interpreted as contradiction.
 
-No new observations is not evidence against a pattern. A weaker estimate is not automatically a contradiction. Direction reversal is a reason to inspect the evidence, not a deterministic declaration that the user's prior interpretation was false.
+For deterministic baseline comparison, LifeOS reconstructs the reviewed analysis only from journal evidence whose exact reviewed bytes are still identifiable as `unchanged` or same-hash `moved`. If a reviewed journal source changed, disappeared, was deleted, or became ambiguous, LifeOS does not invent historical bytes or compare a guessed baseline. It still runs the current recipe against authorized current observations and reports the factual evidence-state reason.
+
+New usable dated observations after `last_reviewed_at` that were not part of the reconstructable reviewed evidence are reported as materially new evidence. When the reconstructable reviewed result surfaced a candidate, a current result that disappears or drops to a lower Phase 7 evidence-strength class becomes `weaker-evidence`. An aggregate direction reversal becomes both a `direction-reversal` reason and deterministic counter-evidence to the previously reviewed direction. The wording remains deliberately narrow: reversal is a reason to inspect the evidence, not a declaration that the hypothesis is false.
+
+A due `review_due_at` timestamp is an independent review reason. Manual or semantic patterns without an evaluation recipe receive only factual evidence-state, fingerprint, and timing checks; LifeOS does not run an autonomous vault-wide psychological contradiction search. No new observations is not evidence against a pattern, and silence never becomes negative evidence under DD-041.
+
+`assess_pattern_review()` and `PatternReviewService.assess()` are read-only. They return the exact pattern version assessed, both fingerprint values, the deterministic reports when available, and explicit reason codes/messages. They do not rewrite `statement`, `status`, `confidence`, evidence references, or any Markdown. Archived patterns may still have diagnostics but are excluded from routine review recommendations.
+
+A review recommendation also does not create a proposal by itself. `PatternReviewService.create_review_proposal()` is a separate explicit action that turns a still-current assessment into the existing `mark-needs-review` draft proposal. It rejects a stale assessment if the canonical pattern changed after assessment, and the normal proposal workflow still governs submission, approval, rejection, application, authorization, and recovery. The re-evaluator never approves or applies its own recommendation.
 
 ## Reviews and attention
 
