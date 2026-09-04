@@ -23,6 +23,17 @@ test("Personal Model view keeps live status and tab semantics in the Obsidian re
   assert.match(source, /aria-label.*evidence/i);
 });
 
+test("Personal Model renderer restores owned focus and keeps Track preview outside selected detail", async () => {
+  const source = await readFile(
+    new URL("../../src/personal-model-obsidian-view.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /root\.contains\(root\.ownerDocument\.activeElement\)/);
+  assert.match(source, /element\.id === state\.focusTarget/);
+  assert.match(source, /this\.renderProposal\(root, state\)/);
+  assert.doesNotMatch(source, /this\.renderProposal\(detail, state\)/);
+});
+
 test("Personal Model styles scale with user text size and collapse to one column", async () => {
   const styles = await readFile(new URL("../../styles.css", import.meta.url), "utf8");
   const start = styles.indexOf(".lifeos-personal-model {");
