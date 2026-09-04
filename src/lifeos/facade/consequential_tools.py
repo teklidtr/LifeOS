@@ -19,8 +19,6 @@ from lifeos.facade.errors import (
     ToolUnavailableError,
 )
 from lifeos.facade.models import ToolDescriptor, ToolEffect
-from lifeos.patterns.artifact import PatternArtifactService
-from lifeos.patterns.contracts import PatternError
 from lifeos.proposals.application import ApplicationError, ApplicationErrorCode, apply_proposal
 from lifeos.proposals.lifecycle import (
     TransitionError,
@@ -115,6 +113,11 @@ def _map_lifecycle_error(e: TransitionError) -> Exception:
 def _map_application_error(e: ApplicationError) -> Exception:
     if e.code is ApplicationErrorCode.RECOVERY_REQUIRED:
         return ToolRecoveryRequiredError("Recovery is required before application can continue")
+    if (
+        e.code is ApplicationErrorCode.PREFLIGHT_FAILED
+        and "Canonical personal-pattern identity" in e.message
+    ):
+        return ToolConflictError("Conflict during application: pattern identity is not unique")
     if e.code in (
         ApplicationErrorCode.TARGET_CONFLICT,
         ApplicationErrorCode.TARGET_MUTATED,
@@ -141,34 +144,6 @@ def _load_proposal(proposal_id: str, proposals_root: Path) -> LoadedProposal:
             raise ToolNotFoundError(f"Proposal {proposal_id} not found")
         raise ToolExecutionError("Proposal is malformed or has load findings")
     return res.proposal
-
-
-def _require_trusted_pattern_identity_available(
-    proposal: LoadedProposal,
-    *,
-    vault_root: Path,
-) -> None:
-    """Enforce global pattern identity only after trusted APPLY authorization."""
-    extension = proposal.metadata.extensions.get("personal_pattern")
-    if not isinstance(extension, dict) or extension.get("action") != "create-seed":
-        return
-    pattern_id = extension.get("pattern_id")
-    target_path = extension.get("target_path")
-    if not isinstance(pattern_id, str) or not pattern_id.strip():
-        raise ToolExecutionError("Personal-pattern proposal identity metadata is invalid")
-    if not isinstance(target_path, str) or not target_path.strip():
-        raise ToolExecutionError("Personal-pattern proposal target metadata is invalid")
-    try:
-        artifacts = PatternArtifactService(vault_root=vault_root).list()
-    except PatternError as exc:
-        if exc.code == "duplicate_identity":
-            raise ToolConflictError("Conflict during application: pattern identity is ambiguous") from exc
-        raise ToolExecutionError("Could not verify pattern identity before application") from exc
-    if any(
-        artifact.metadata.pattern_id == pattern_id and artifact.path != target_path
-        for artifact in artifacts
-    ):
-        raise ToolConflictError("Conflict during application: pattern identity already exists")
 
 
 def submit_proposal_tool(
@@ -350,13 +325,9 @@ def apply_proposal_tool(
     if fresh_actual_digest != current_digest:
         raise ToolExecutionError("Proposal lock identity mismatch")
 
-    _require_trusted_pattern_identity_available(
-        fresh_load_res.proposal,
-        vault_root=vault_root,
-    )
-
     try:
-        # 9. Invoke apply_proposal with the fresh LoadedProposal
+        # 9. Invoke apply_proposal with the fresh LoadedProposal. Canonical pattern identity is
+        # revalidated by application preflight while the vault mutation lock is held.
         res = apply_proposal(
             fresh_load_res.proposal,
             vault_root=vault_root,
@@ -470,11 +441,6 @@ def accept_proposal_tool(
         raise ToolConflictError(
             f"Cannot apply accepted proposal from {proposal.metadata.status.value}"
         )
-
-    _require_trusted_pattern_identity_available(
-        proposal,
-        vault_root=vault_root,
-    )
 
     try:
         result = apply_proposal(
