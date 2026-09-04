@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Literal
 
 from lifeos.diagnostics import DomainDiagnostic
-from lifeos.observation import ObservationError, ObservationRecord, load_observations
+from lifeos.observation import ObservationError, ObservationRecord
+from lifeos.observation.scoped import load_scoped_observations
 from lifeos.publication import (
     PublicationError,
     active_generation_path,
@@ -18,7 +19,8 @@ from lifeos.publication import (
     publish_generation,
 )
 from lifeos.registry import Registry
-from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown
+from lifeos.vault import VaultAccessError, VaultMarkdownFile, read_vault_markdown
+from lifeos.vault_paths import iter_vault_markdown_paths
 
 from .artifact import parse_pattern
 from .contracts import (
@@ -33,6 +35,7 @@ from .contracts import (
 from .evidence import (
     EvidencePathPredicate,
     PatternEvidenceDiagnostic,
+    compute_evidence_fingerprint,
     resolve_evidence_states,
 )
 from .review import (
@@ -99,9 +102,22 @@ def _moment(value: datetime | None) -> datetime:
     return moment
 
 
-def _sources(vault_root: Path) -> tuple[VaultMarkdownFile, ...]:
+def _sources(
+    vault_root: Path,
+    *,
+    allow_path: EvidencePathPredicate,
+) -> tuple[VaultMarkdownFile, ...]:
+    """Read only pattern files authorized before path traversal reaches their bytes."""
+
+    def allowed_pattern_path(path: str) -> bool:
+        candidate = path.rstrip("/")
+        if candidate != "patterns" and not candidate.startswith("patterns/"):
+            return False
+        return allow_path(candidate)
+
     try:
-        return iter_vault_markdown(vault_root, roots=("patterns",))
+        paths = iter_vault_markdown_paths(vault_root, path_filter=allowed_pattern_path)
+        return tuple(read_vault_markdown(vault_root, path) for path in paths)
     except VaultAccessError as exc:
         if exc.code == "not-found":
             return ()
@@ -233,6 +249,32 @@ def _factual_only_artifact(artifact: PatternArtifact) -> PatternArtifact:
     return replace(artifact, metadata=replace(artifact.metadata, evaluation=None))
 
 
+def _scoped_artifact(
+    artifact: PatternArtifact,
+    *,
+    allow_path: EvidencePathPredicate,
+) -> PatternArtifact:
+    """Remove denied evidence references from this caller's derived view.
+
+    The canonical pattern remains untouched. The scoped fingerprint is recomputed
+    only for the derived view so protected/excluded references cannot alter review
+    triggers or review-item fingerprints available to an unauthorized caller.
+    """
+    visible_evidence = tuple(
+        evidence for evidence in artifact.metadata.evidence if allow_path(evidence.path)
+    )
+    if visible_evidence == artifact.metadata.evidence:
+        return artifact
+    return replace(
+        artifact,
+        metadata=replace(
+            artifact.metadata,
+            evidence=visible_evidence,
+            evidence_fingerprint=compute_evidence_fingerprint(visible_evidence),
+        ),
+    )
+
+
 def _freshness_days(assessment: PatternReviewAssessment) -> int | None:
     report = assessment.current_analysis
     if report is None or not report.candidates:
@@ -317,25 +359,26 @@ def build_personal_model_document(
     allow_path: EvidencePathPredicate,
     now: datetime | None = None,
 ) -> PersonalModelDocument:
-    """Rebuild a typed Personal Model entirely from canonical patterns and current facts."""
+    """Rebuild a typed Personal Model from canonical patterns inside the caller's scope."""
     moment = _moment(now)
-    sources = _sources(vault_root)
+    sources = _sources(vault_root, allow_path=allow_path)
     artifacts, parsed_diagnostics = _parse_unique_patterns(sources)
+    scoped_artifacts = tuple(
+        _scoped_artifact(artifact, allow_path=allow_path) for artifact in artifacts
+    )
     diagnostics = list(parsed_diagnostics)
 
     observations: tuple[ObservationRecord, ...] = ()
     observations_available = True
-    if any(item.metadata.evaluation is not None for item in artifacts):
+    if any(item.metadata.evaluation is not None for item in scoped_artifacts):
         try:
-            observations = tuple(
-                item for item in load_observations(vault_root) if allow_path(item.path)
-            )
+            observations = load_scoped_observations(vault_root, allow_path=allow_path)
         except ObservationError as exc:
             diagnostics.append(_observation_diagnostic(exc))
             observations_available = False
 
     items: list[PersonalModelItem] = []
-    for artifact in artifacts:
+    for artifact in scoped_artifacts:
         evidence_diagnostics = resolve_evidence_states(
             registry,
             artifact.metadata.evidence,
