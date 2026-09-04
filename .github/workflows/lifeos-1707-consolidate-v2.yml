@@ -39,7 +39,19 @@ jobs:
           new = '''            runtime_filter = _runtime_scan_filter(vault_root, runtime_dir)\n\n            def scan_allow_path(path: str) -> bool:\n                return runtime_filter(path) and allow_path(path)\n\n            entries = scan_vault(\n                vault_root,\n                path_filter=scan_allow_path,\n            )\n'''
           if text.count(old) != 1:
               raise SystemExit(f'expected one scoped-scan replacement, found {text.count(old)}')
-          target.write_text(text.replace(old, new, 1), encoding='utf-8')
+          text = text.replace(old, new, 1)
+
+          import_old = 'from typing import Literal\n'
+          import_new = 'from typing import Literal, cast\n'
+          if text.count(import_old) != 1:
+              raise SystemExit(f'expected one typing import replacement, found {text.count(import_old)}')
+          text = text.replace(import_old, import_new, 1)
+
+          count_old = '            counts[label] = counts.get(label, 0) + int(entry["occurrences"])\n'
+          count_new = '            counts[label] = counts.get(label, 0) + cast(int, entry["occurrences"])\n'
+          if text.count(count_old) != 1:
+              raise SystemExit(f'expected one redaction-count replacement, found {text.count(count_old)}')
+          target.write_text(text.replace(count_old, count_new, 1), encoding='utf-8')
           PYRUN
       - name: Install dependencies
         run: uv sync --frozen --extra dev --extra mcp
