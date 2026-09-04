@@ -4,20 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.facade.errors import ToolExecutionError
 from lifeos.facade.registry_tools import refresh_registry
 from lifeos.registry import Registry
-from lifeos.reviews.contracts import (
-    ReviewArtifact,
-    ReviewItemSnapshot,
-    ReviewSectionSnapshot,
-    ReviewSourceReference,
-    stable_fingerprint,
-)
-from lifeos.reviews.decisions import artifact_item_fingerprints
 
 from .contracts import PatternError
 from .model import (
@@ -27,6 +19,14 @@ from .model import (
     build_personal_model_document,
 )
 from .review import PatternReviewService
+
+if TYPE_CHECKING:
+    from lifeos.reviews.contracts import (
+        ReviewArtifact,
+        ReviewItemSnapshot,
+        ReviewSectionSnapshot,
+        ReviewSourceReference,
+    )
 
 WEEKLY_PATTERN_REVIEW_LIMIT = 8
 DAILY_PATTERN_REVIEW_LIMIT = 3
@@ -100,6 +100,8 @@ def _diagnostic_part(item: PersonalModelItem) -> tuple[str, ...]:
 
 def pattern_review_fingerprint(item: PersonalModelItem) -> str:
     """Fingerprint only the review-relevant pattern context, not arbitrary note prose."""
+    from lifeos.reviews.contracts import stable_fingerprint
+
     trigger_parts = tuple(
         f"{reason.code}|{reason.summary}|{','.join(reason.evidence_paths)}"
         for reason in item.review_trigger_reasons
@@ -120,6 +122,8 @@ def pattern_review_fingerprint(item: PersonalModelItem) -> str:
 
 
 def _source(item: PersonalModelItem, generated_at: str) -> tuple[ReviewSourceReference, ...]:
+    from lifeos.reviews.contracts import ReviewSourceReference
+
     return (
         ReviewSourceReference(
             path=item.pattern_path,
@@ -172,6 +176,8 @@ def _review_item(
     labels: Iterable[str],
     generated_at: str,
 ) -> ReviewItemSnapshot:
+    from lifeos.reviews.contracts import ReviewItemSnapshot
+
     reasons = tuple(labels)
     reason_text = ", ".join(reasons) if reasons else "explicitly selected"
     detail = (
@@ -191,6 +197,8 @@ def _review_item(
 
 
 def _unavailable(section_id: str, title: str, exc: Exception) -> ReviewSectionSnapshot:
+    from lifeos.reviews.contracts import ReviewSectionSnapshot
+
     return ReviewSectionSnapshot(
         section_id,
         title,
@@ -205,6 +213,8 @@ def weekly_pattern_review_section(
     *, vault_root: Path, runtime_dir: Path, generated_at: datetime
 ) -> ReviewSectionSnapshot:
     """Return a small optional weekly set without surfacing every active pattern."""
+    from lifeos.reviews.contracts import ReviewSectionSnapshot
+
     try:
         document = _review_model(
             vault_root=vault_root,
@@ -249,6 +259,8 @@ def daily_pattern_review_section(
     pinned_pattern_ids: Iterable[str] = (),
 ) -> ReviewSectionSnapshot:
     """Surface only explicitly urgent or pinned pattern IDs; default daily state is empty."""
+    from lifeos.reviews.contracts import ReviewSectionSnapshot
+
     urgent = frozenset(urgent_pattern_ids)
     pinned = frozenset(pinned_pattern_ids)
     selected_ids = urgent | pinned
@@ -311,6 +323,8 @@ def create_pattern_review_proposal(
     now: datetime,
 ) -> dict[str, object]:
     """Create a pattern needs-review draft from a still-current visible review item."""
+    from lifeos.reviews.decisions import artifact_item_fingerprints
+
     visible = artifact_item_fingerprints(review)
     if visible.get(item_id) != evidence_fingerprint:
         raise DailyInteractionError(
