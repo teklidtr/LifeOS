@@ -13,8 +13,10 @@ from ..markdown.parser import (
 from ..ownership import DEFAULT_OWNERSHIP_MANIFEST_PATH
 from ..ownership.manifest import GeneratedOwnership, ManifestError
 from ..wiki.layout import is_emergent_generated_parent
+from .human_patch_policy import allows_canonical_pattern_managed_patch
 from .loader import LoadedProposal
 from .patches import PatchOperation
+from .unified_diff import DiffError, apply_diff
 
 PreflightState = Literal["valid", "stale", "invalid"]
 
@@ -825,21 +827,62 @@ def _evaluate_operation(
                         ),
                     )
                 if parsed.managed_blocks:
-                    return OperationPreflightResult(
-                        operation_id=op.id,
-                        target_path=target_path,
-                        state="invalid",
-                        findings=(
-                            PreflightFinding(
-                                severity="error",
-                                code="managed_blocks_present",
-                                operation_id=op.id,
-                                target_path=target_path,
-                                field_path=None,
-                                message="Target contains managed blocks, cannot use patch_human_file",
+                    try:
+                        candidate_str = apply_diff(content_str, getattr(op, "unified_diff", ""))
+                    except DiffError:
+                        return OperationPreflightResult(
+                            operation_id=op.id,
+                            target_path=target_path,
+                            state="invalid",
+                            findings=(
+                                PreflightFinding(
+                                    severity="error",
+                                    code="malformed_candidate",
+                                    operation_id=op.id,
+                                    target_path=target_path,
+                                    field_path=None,
+                                    message="Candidate human-file patch is invalid",
+                                ),
                             ),
-                        ),
-                    )
+                        )
+                    if len(candidate_str.encode("utf-8")) > max_bytes:
+                        return OperationPreflightResult(
+                            operation_id=op.id,
+                            target_path=target_path,
+                            state="invalid",
+                            findings=(
+                                PreflightFinding(
+                                    severity="error",
+                                    code="candidate_too_large_for_inspection",
+                                    operation_id=op.id,
+                                    target_path=target_path,
+                                    field_path=None,
+                                    message="Candidate human-file patch exceeds max inspection bytes",
+                                ),
+                            ),
+                        )
+                    if not allows_canonical_pattern_managed_patch(
+                        target_path=target_path,
+                        original_text=content_str,
+                        candidate_text=candidate_str,
+                    ):
+                        return OperationPreflightResult(
+                            operation_id=op.id,
+                            target_path=target_path,
+                            state="invalid",
+                            findings=(
+                                PreflightFinding(
+                                    severity="error",
+                                    code="managed_blocks_present",
+                                    operation_id=op.id,
+                                    target_path=target_path,
+                                    field_path=None,
+                                    message=(
+                                        "Target contains managed blocks, cannot use patch_human_file"
+                                    ),
+                                ),
+                            ),
+                        )
 
             return OperationPreflightResult(
                 operation_id=op.id,
