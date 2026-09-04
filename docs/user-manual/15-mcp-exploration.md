@@ -139,7 +139,58 @@ applied
 
 Broad exploration therefore does not make the agent autonomous over canonical data.
 
-## 15.5 Folder and multi-source ingestion
+## 15.5 Personal-pattern proposal flow
+
+Personal-pattern interpretation uses the same rule with an even narrower semantic boundary. An
+agent may suggest a working hypothesis from **explicitly selected evidence**, but the suggestion
+enters LifeOS only as reviewable draft context.
+
+For a new hypothesis, use `personal_pattern_propose`. For an existing canonical pattern, use
+`personal_pattern_review_proposal` and also supply the exact content hash of the pattern version
+the agent reviewed. Each selected evidence item carries its vault-relative `path`, exact
+`content_hash`, and role: `supporting`, `contesting`, or `contextual`.
+
+A typical flow is:
+
+```text
+vault_search / vault_context
+  ↓ discover relevant, policy-allowed evidence
+vault_read_many
+  ↓ retain the exact path + content_hash snapshots actually inspected
+external agent proposes a cautious hypothesis
+  ↓ include rationale, counter-evidence, competing explanations, limitations, confidence class
+personal_pattern_propose(...) or personal_pattern_review_proposal(...)
+  ↓ LifeOS rechecks policy and exact source versions
+reviewable draft proposal, or no-change with no proposal
+```
+
+LifeOS independently applies the external retrieval policy before reading the selected evidence
+and re-verifies the source bytes against the supplied hashes immediately before proposal
+publication. A changed, missing, unsafe, or policy-denied source stops the draft. Reviewing an
+existing pattern also requires the exact canonical pattern hash the agent inspected; a changed or
+protected target cannot be silently rebound to a different version or bypass the disclosure
+policy.
+
+The proposal keeps the concise hypothesis, rationale, supporting and contesting evidence,
+competing explanations, limitations, and proposed `low | medium | high` confidence class visible
+as digest-bound review context. Those fields do not create a provider-specific pattern schema,
+do not store hidden chain-of-thought, and do not establish a personality fact, diagnosis, or
+causal truth. The canonical `patterns/*.md` file remains unchanged until the ordinary trusted
+proposal lifecycle reaches validated application.
+
+If an existing pattern's statement, confidence, and exact reviewed evidence set are already the
+same as the proposed result, the tool returns `no-change` and creates no draft. A model provider
+is also optional: deterministic source verification and proposal construction remain local
+LifeOS responsibilities, while any provider-assisted semantic suggestion uses a provider-neutral
+contract and gains no additional authority.
+
+Protected evidence or a protected existing pattern follows the same two-key disclosure rule from
+15.3: the request must explicitly set `allow_protected=true`, and policy must externally allow the
+path. On the authenticated home-node transport, these draft-producing personal-pattern tools are
+available through the same MCP core, but `proposal_approve` and `proposal_apply` remain absent.
+Bearer access therefore cannot turn a semantic suggestion into an accepted canonical pattern.
+
+## 15.6 Folder and multi-source ingestion
 
 When you ask an MCP-connected agent to ingest a folder, the folder is the **exploration scope**,
 not a command to create one proposal for every file. The preferred workflow is:
@@ -198,7 +249,7 @@ prevents partial publication of the other target operations.
 Zero durable changes is still a successful outcome. The agent should simply explain that the
 folder did not warrant a reusable knowledge change and create no proposal.
 
-## 15.6 Example crawl
+## 15.7 Example crawl
 
 For a question about driving-licence study material, an MCP-connected agent might:
 
@@ -239,7 +290,7 @@ The agent can search again, follow another reference, or stop. If a selected sou
 bytes; reread and reconsider the evidence. If it proposes a durable change, the normal proposal
 boundary applies.
 
-## 15.7 Supported MCP transports share one runtime core
+## 15.8 Supported MCP transports share one runtime core
 
 LifeOS supports two MCP deployment adapters over the same Python MCP/facade/business-rule core:
 

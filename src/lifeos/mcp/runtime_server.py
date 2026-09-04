@@ -29,6 +29,7 @@ from lifeos.mcp.exploration_tools import (
 )
 from lifeos.mcp.models import WikiSearchMCPResult
 from lifeos.mcp.multi_source_tools import build_multi_source_ingestion_tools
+from lifeos.mcp.personal_pattern_tools import build_personal_pattern_tools
 from lifeos.mcp.research_tools import build_research_tools
 from lifeos.mcp.server import (
     LIFEOS_MCP_INSTRUCTIONS as CORE_MCP_INSTRUCTIONS,
@@ -71,7 +72,12 @@ LIFEOS_MCP_INSTRUCTIONS = (
     "never acts as a protected-scope bypass. Semantic interpretation belongs to the external "
     "agent. LifeOS constrains mutation, not exploration: canonical changes remain available only "
     "through bounded proposal and consequential authorization tools; there is no generic vault "
-    "write, delete, move, or shell surface. Folder or multi-source ingestion is one logical batch: "
+    "write, delete, move, or shell surface. For personal hypotheses, carry the exact selected "
+    "path/content_hash evidence snapshots into personal_pattern_propose or "
+    "personal_pattern_review_proposal; those tools independently verify source versions and "
+    "store concise rationale, counter-evidence, competing explanations, and limitations only as "
+    "draft review context. They never establish a user trait, promote a pattern to active, or "
+    "write patterns/ directly. Folder or multi-source ingestion is one logical batch: "
     "discover the candidate sources, use vault_read_many to read the selected evidence together, "
     "carry the exact path/content_hash snapshots from vault_read_many into the batch proposal "
     "call, inspect applicable context and wiki knowledge, jointly reason about the durable delta, "
@@ -238,6 +244,11 @@ def create_mcp_server(
         activity=activity,
         invoke=runtime_scoped_invoke,
     )
+    personal_patterns = build_personal_pattern_tools(
+        vault_root=vault_root,
+        activity=activity,
+        invoke=runtime_scoped_invoke,
+    )
 
     def wiki_search_tool(query: str, limit: int = 8) -> WikiSearchMCPResult:
         def op() -> WikiSearchMCPResult:
@@ -286,6 +297,7 @@ def create_mcp_server(
             wiki_search,
             *multi_source_ingestion,
             *research,
+            *personal_patterns,
             *coherence,
         ],
         host=host,

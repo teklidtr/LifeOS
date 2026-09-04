@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Iterable
 
 import yaml
 
 from lifeos.markdown.parser import ManagedBlock, parse_markdown_note
 from lifeos.vault import (
     VaultAccessError,
+    VaultMarkdownFile,
     iter_vault_markdown,
     read_vault_markdown,
     validate_vault_relative_path,
 )
+from lifeos.vault_paths import iter_vault_markdown_paths
 
 from .contracts import PatternArtifact, PatternError, PatternMetadata, metadata_from_dict
 
@@ -157,8 +159,14 @@ def parse_pattern(path: Path, relative_path: str, content: str) -> PatternArtifa
 class PatternArtifactService:
     """Read canonical personal patterns directly from vault Markdown."""
 
-    def __init__(self, *, vault_root: Path) -> None:
+    def __init__(
+        self,
+        *,
+        vault_root: Path,
+        allow_path: Callable[[str], bool] | None = None,
+    ) -> None:
         self.vault_root = vault_root
+        self._allow_path = allow_path
 
     def load(self, relative_path: str) -> PatternArtifact:
         _validate_artifact_path(relative_path)
@@ -175,9 +183,26 @@ class PatternArtifactService:
             )
         return artifact
 
+    def _sources(self) -> tuple[VaultMarkdownFile, ...]:
+        allow_path = self._allow_path
+        if allow_path is None:
+            return iter_vault_markdown(self.vault_root, roots=("patterns",))
+
+        def allowed_pattern_path(path: str) -> bool:
+            candidate = path.rstrip("/")
+            if candidate != "patterns" and not candidate.startswith("patterns/"):
+                return False
+            return allow_path(candidate)
+
+        paths = iter_vault_markdown_paths(
+            self.vault_root,
+            path_filter=allowed_pattern_path,
+        )
+        return tuple(read_vault_markdown(self.vault_root, path) for path in paths)
+
     def list(self) -> tuple[PatternArtifact, ...]:
         try:
-            sources = iter_vault_markdown(self.vault_root, roots=("patterns",))
+            sources = self._sources()
         except VaultAccessError as exc:
             if exc.code == "not-found":
                 return ()

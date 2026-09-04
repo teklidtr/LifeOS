@@ -96,6 +96,8 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
                 "ingestion_create_wiki_proposal",
                 "ingestion_create_wiki_and_update_section_proposal",
                 "ingestion_update_wiki_section_proposal",
+                "personal_pattern_propose",
+                "personal_pattern_review_proposal",
                 "proposal_submit",
                 "proposal_approve",
                 "proposal_apply",

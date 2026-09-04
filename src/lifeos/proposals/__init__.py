@@ -7,7 +7,6 @@ from .application import (
     ProposalApplicationResult,
     apply_proposal,
 )
-from .coherence_validation import preflight_proposal as _coherent_preflight_proposal
 from .lifecycle import (
     ProposalTransitionResult,
     TransitionError,
@@ -56,6 +55,7 @@ from .patches import (
     serialize_patch_json_bytes,
     validate_patch_document,
 )
+from .pattern_identity_preflight import preflight_proposal as _full_preflight_proposal
 from .review_snapshot import (
     REVIEW_SNAPSHOT_FILENAME,
     REVIEW_SNAPSHOT_SCHEMA_VERSION,
@@ -98,10 +98,12 @@ from .validation import (
 
 # Validation and application both resolve their preflight callable through module globals at
 # runtime. Repoint both globals after normal imports so every public application path gets the
-# same fail-closed stable-identity checks without import-order side effects.
-_validation.preflight_proposal = _coherent_preflight_proposal
-setattr(_application, "preflight_proposal", _coherent_preflight_proposal)
-preflight_proposal = _coherent_preflight_proposal
+# same fail-closed stable-target and canonical personal-pattern identity checks without
+# import-order side effects. Application invokes this callable while holding the vault mutation
+# lock, making identity validation atomic with canonical mutation.
+_validation.preflight_proposal = _full_preflight_proposal
+setattr(_application, "preflight_proposal", _full_preflight_proposal)
+preflight_proposal = _full_preflight_proposal
 
 __all__ = [
     "AnyPatchDocument",

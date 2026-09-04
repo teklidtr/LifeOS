@@ -46,6 +46,7 @@ APPLY_PROPOSAL_DESCRIPTOR = ToolDescriptor(
     effect=ToolEffect.CONSEQUENTIAL,
 )
 
+
 @dataclass(frozen=True, slots=True)
 class SubmitProposalRequest:
     proposal_id: str
@@ -112,6 +113,11 @@ def _map_lifecycle_error(e: TransitionError) -> Exception:
 def _map_application_error(e: ApplicationError) -> Exception:
     if e.code is ApplicationErrorCode.RECOVERY_REQUIRED:
         return ToolRecoveryRequiredError("Recovery is required before application can continue")
+    if (
+        e.code is ApplicationErrorCode.PREFLIGHT_FAILED
+        and "Canonical personal-pattern identity" in e.message
+    ):
+        return ToolConflictError("Conflict during application: pattern identity is not unique")
     if e.code in (
         ApplicationErrorCode.TARGET_CONFLICT,
         ApplicationErrorCode.TARGET_MUTATED,
@@ -320,7 +326,8 @@ def apply_proposal_tool(
         raise ToolExecutionError("Proposal lock identity mismatch")
 
     try:
-        # 9. Invoke apply_proposal with the fresh LoadedProposal
+        # 9. Invoke apply_proposal with the fresh LoadedProposal. Canonical pattern identity is
+        # revalidated by application preflight while the vault mutation lock is held.
         res = apply_proposal(
             fresh_load_res.proposal,
             vault_root=vault_root,
