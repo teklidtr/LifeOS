@@ -29,9 +29,25 @@ test("Personal Model renderer restores owned focus and keeps Track preview outsi
     "utf8",
   );
   assert.match(source, /root\.contains\(root\.ownerDocument\.activeElement\)/);
-  assert.match(source, /element\.id === state\.focusTarget/);
+  assert.match(source, /state\.focusTarget/);
+  assert.match(source, /elements\.find\(\(element\) => element\.id === id\)/);
+  assert.match(source, /personal-model-track/);
   assert.match(source, /this\.renderProposal\(root, state\)/);
   assert.doesNotMatch(source, /this\.renderProposal\(detail, state\)/);
+});
+
+test("Personal Model state-changing controls are disabled while bridge work is busy", async () => {
+  const source = await readFile(
+    new URL("../../src/personal-model-obsidian-view.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /refresh\.disabled\s*=\s*state\.busy/);
+  assert.match(source, /rebuild\.disabled\s*=\s*state\.busy/);
+  assert.match(source, /recovery\.disabled\s*=\s*state\.busy/);
+  assert.match(source, /submit\.disabled\s*=\s*state\.busy/);
+  assert.match(source, /create\.disabled\s*=\s*state\.busy/);
+  assert.match(source, /cancel\.disabled\s*=\s*state\.busy/);
+  assert.ok((source.match(/button\.disabled\s*=\s*state\.busy/g) ?? []).length >= 3);
 });
 
 test("Personal Model styles scale with user text size and collapse to one column", async () => {
