@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Literal, Mapping, cast
 
 from lifeos.observation import (
@@ -357,7 +358,10 @@ def _analysis_reasons(
                     ),
                 )
             )
-        if current_candidate is not None and current_candidate.direction != reviewed_candidate.direction:
+        if (
+            current_candidate is not None
+            and current_candidate.direction != reviewed_candidate.direction
+        ):
             reasons.append(
                 PatternReviewReason(
                     code="direction-reversal",
@@ -409,6 +413,19 @@ def _review_due_reason(artifact: PatternArtifact, *, now: datetime) -> PatternRe
     )
 
 
+def _validate_diagnostics(
+    artifact: PatternArtifact,
+    diagnostics: tuple[PatternEvidenceDiagnostic, ...],
+) -> None:
+    references = tuple(item.reference for item in diagnostics)
+    if references != artifact.metadata.evidence:
+        raise PatternError(
+            "evidence_diagnostics_mismatch",
+            "Evidence diagnostics must describe the pattern's exact declared evidence context.",
+            {"pattern_id": artifact.metadata.pattern_id},
+        )
+
+
 def assess_pattern_review(
     *,
     artifact: PatternArtifact,
@@ -418,6 +435,7 @@ def assess_pattern_review(
 ) -> PatternReviewAssessment:
     """Re-evaluate one pattern without mutating it or creating a proposal."""
     moment = _aware_now(now)
+    _validate_diagnostics(artifact, evidence_diagnostics)
     declared_fingerprint = compute_evidence_fingerprint(artifact.metadata.evidence)
     reasons: list[PatternReviewReason] = []
     if declared_fingerprint != artifact.metadata.evidence_fingerprint:
@@ -500,14 +518,10 @@ class PatternReviewService:
     def __init__(
         self,
         *,
-        vault_root: object,
+        vault_root: Path,
         registry: Registry,
         allow_path: EvidencePathPredicate,
     ) -> None:
-        from pathlib import Path
-
-        if not isinstance(vault_root, Path):
-            raise TypeError("vault_root must be a pathlib.Path")
         self.vault_root = vault_root
         self.registry = registry
         self.allow_path = allow_path
@@ -549,7 +563,10 @@ class PatternReviewService:
                 "A needs-review proposal requires a current review recommendation.",
             )
         current = self.artifacts.find(assessment.pattern_id)
-        if current.path != assessment.pattern_path or current.content_hash != assessment.pattern_content_hash:
+        if (
+            current.path != assessment.pattern_path
+            or current.content_hash != assessment.pattern_content_hash
+        ):
             raise PatternError(
                 "stale_assessment",
                 "Pattern changed after the review assessment; re-evaluate before proposing a change.",
