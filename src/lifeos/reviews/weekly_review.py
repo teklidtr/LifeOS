@@ -9,7 +9,7 @@ from typing import Any, Literal
 from lifeos.reviews.artifact import ReviewArtifactService
 from lifeos.reviews.contracts import ReviewArtifact, ReviewSnapshot
 from lifeos.reviews.progress import ReviewProgressService
-from lifeos.reviews.snapshot import refresh_review_snapshot
+from lifeos.reviews.pattern_integration import refresh_review_snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +89,7 @@ def open_weekly_review(
     if refresh:
         artifact, snapshot = refresh_review_snapshot(service=service, artifact=artifact, runtime_dir=runtime_dir, generated_at=now, idempotency_key=f"{idempotency_key}-refresh")
     else:
-        from lifeos.reviews.snapshot import build_review_snapshot
+        from lifeos.reviews.pattern_integration import build_review_snapshot
         snapshot = build_review_snapshot(vault_root=service.vault_root, runtime_dir=runtime_dir, kind="weekly", day=day, generated_at=now)
     required = _required(snapshot)
     return WeeklyReviewState(artifact, snapshot, _PROMPTS, required, weekly_due_state(artifact, now), _next(snapshot, artifact))
