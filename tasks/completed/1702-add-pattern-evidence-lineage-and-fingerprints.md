@@ -44,7 +44,7 @@ Make every durable personal interpretation traceable to the exact evidence versi
 
 # Documentation impact
 
-Status: completed
+Status: required
 
 - `docs/personal-model-architecture.md`: documented evidence-version, fingerprint, source-state, and caller-authorized resolution semantics.
 - `docs/data-model.md`: documented the normalized evidence tuple and derived evidence-state diagnostic shape.
