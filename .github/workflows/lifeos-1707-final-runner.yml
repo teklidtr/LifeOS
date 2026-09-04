@@ -25,13 +25,16 @@ jobs:
         run: |
           python - <<'PYRUN'
           from pathlib import Path
-          import textwrap
 
           workflow = Path('.github/workflows/lifeos-1707-final-regressions.yml').read_text(encoding='utf-8')
           marker = "          python - <<'PY'\n"
           start = workflow.index(marker) + len(marker)
           end = workflow.index("\n          PY\n", start)
-          script = textwrap.dedent(workflow[start:end])
+          raw = workflow[start:end]
+          script = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in raw.splitlines()
+          )
           exec(compile(script, '<lifeos-1707-final>', 'exec'))
           PYRUN
       - name: Install dependencies
