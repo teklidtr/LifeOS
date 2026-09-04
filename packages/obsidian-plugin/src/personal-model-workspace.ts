@@ -361,8 +361,7 @@ export class PersonalModelWorkspaceController {
             ? "seeds"
             : "archived";
     }
-    const current = Object.values(document.groups)
-      .flat()
+    const current = document.groups[view]
       .find((item) => item.pattern_id === this.state.selectedPatternId);
     const selectedPatternId = current?.pattern_id ?? document.groups[view][0]?.pattern_id;
     this.lastProposalRequest = undefined;
