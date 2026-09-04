@@ -79,6 +79,8 @@ function failureState(
   if (["personal_model_blocked", "authorization_denied"].includes(failure.code ?? "")) return {
     ...common,
     stage: "blocked",
+    document: undefined,
+    selectedPatternId: undefined,
     recovery: "Review the local retrieval policy or protected scope before retrying.",
   };
   return {
@@ -123,6 +125,7 @@ export class PersonalModelWorkspaceController {
   }
 
   async load(now?: string): Promise<PersonalModelDocument | undefined> {
+    this.lastProposalRequest = undefined;
     this.setState({
       ...this.state,
       stage: "loading",
@@ -146,6 +149,7 @@ export class PersonalModelWorkspaceController {
   }
 
   async rebuild(now?: string): Promise<PersonalModelDocument | undefined> {
+    this.lastProposalRequest = undefined;
     this.setState({
       ...this.state,
       stage: "rebuilding",
@@ -286,6 +290,7 @@ export class PersonalModelWorkspaceController {
       });
       return result;
     } catch (error) {
+      this.lastProposalRequest = undefined;
       this.setState(failureState(this.state, error));
       return undefined;
     }
