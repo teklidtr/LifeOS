@@ -137,10 +137,12 @@ def test_release_history_matrix_keeps_uncertainty_and_lifecycle_visible(tmp_path
     for metadata in histories:
         _write_pattern(vault, f"patterns/{metadata.pattern_id}.md", metadata)
 
+    registry = Registry(tmp_path / "runtime" / "registry.db")
+    registry.initialize()
     service = PersonalModelService(
         vault_root=vault,
         runtime_dir=tmp_path / "runtime",
-        registry=Registry(tmp_path / "runtime" / "registry.db"),
+        registry=registry,
         allow_path=lambda _path: True,
     )
     document = service.rebuild(now=NOW)
@@ -181,7 +183,8 @@ def test_large_vault_rebuild_is_bounded_deterministic_and_preserves_ordinary_mar
         _write(
             vault,
             f"patterns/notes/{index:04d}.md",
-            f"# Ordinary pattern-area note {index}\n\nHuman-authored prose remains ordinary Markdown.\n",
+            f"# Ordinary pattern-area note {index}\n\n"
+            "Human-authored prose remains ordinary Markdown.\n",
         )
 
     runtime = tmp_path / "runtime"
@@ -213,7 +216,10 @@ def test_evidence_to_obsidian_release_flow_keeps_semantic_changes_proposal_gated
         "system/generated-ownership.json",
         serialize_generated_ownership_bytes({}).decode("utf-8"),
     )
-    source_before = "---\nid: journal-focus\ntype: journal\n---\nWalking preceded a focused block.\n"
+    source_before = (
+        "---\nid: journal-focus\ntype: journal\n---\n"
+        "Walking preceded a focused block.\n"
+    )
     source = _write(vault, "journal/focus.md", source_before)
     bridge = PersonalModelWorkspaceBridge(
         vault_root=vault,
@@ -284,7 +290,9 @@ def test_evidence_to_obsidian_release_flow_keeps_semantic_changes_proposal_gated
         runtime_dir=tmp_path / "runtime",
         question="focus after walk",
     )
-    item = next(candidate for candidate in context.items if candidate.pattern_id == "focus-after-walk")
+    item = next(
+        candidate for candidate in context.items if candidate.pattern_id == "focus-after-walk"
+    )
     assert item.interpretation == "reviewed-working-hypothesis"
     assert item.role == "evidence-not-instruction"
     assert item.can_authorize_mutation is False
