@@ -395,26 +395,35 @@ export class LifeOSPersonalModelItemView extends ItemView {
     const candidate = section.createEl("pre");
     candidate.setAttr("aria-label", "Candidate canonical pattern Markdown");
     setText(candidate, preview.candidate_content);
-    const controls = section.createDiv({ cls: "lifeos-personal-model__action-buttons" });
-    const create = this.button(controls, "Create draft proposal", "Create a draft proposal from this exact preview", () => {
-      void this.controller.createPreviewed();
-    });
-    create.disabled = state.busy;
-    const cancel = this.button(controls, "Cancel preview", "Close this preview without creating a proposal", () => {
-      this.controller.clearProposalPreview();
-    });
-    cancel.disabled = state.busy;
 
-    if (state.proposalResult) {
-      const created = section.createDiv({ cls: "lifeos-personal-model__proposal-created" });
-      created.setAttr("id", "personal-model-proposal-created");
-      created.setAttr("role", "status");
-      created.setAttr("tabindex", "-1");
-      created.createEl("strong", { text: `Draft ${state.proposalResult.proposal_id} created.` });
-      created.createEl("p", {
-        text: `Open Proposals from the command palette to inspect and accept it. ${state.proposalResult.proposal_path}`,
+    if (!state.proposalResult) {
+      const controls = section.createDiv({ cls: "lifeos-personal-model__action-buttons" });
+      const create = this.button(controls, "Create draft proposal", "Create a draft proposal from this exact preview", () => {
+        void this.controller.createPreviewed();
       });
+      create.disabled = state.busy;
+      const cancel = this.button(controls, "Cancel preview", "Close this preview without creating a proposal", () => {
+        this.controller.clearProposalPreview();
+      });
+      cancel.disabled = state.busy;
+      return;
     }
+
+    const created = section.createDiv({ cls: "lifeos-personal-model__proposal-created" });
+    created.setAttr("id", "personal-model-proposal-created");
+    created.setAttr("role", "status");
+    created.setAttr("tabindex", "-1");
+    created.createEl("strong", { text: `Draft ${state.proposalResult.proposal_id} created.` });
+    created.createEl("p", {
+      text: `Open Proposals from the command palette to inspect and accept it. ${state.proposalResult.proposal_path}`,
+    });
+    const close = this.button(
+      created,
+      "Close confirmation",
+      "Close the draft proposal confirmation; the draft remains in Proposals",
+      () => this.controller.clearCreatedProposal(),
+    );
+    close.disabled = state.busy;
   }
 
   private restoreFocus(state: PersonalModelWorkspaceState, shouldRestoreFocus: boolean): void {
