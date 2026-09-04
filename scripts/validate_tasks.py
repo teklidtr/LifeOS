@@ -70,7 +70,7 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
         if not state_root.is_dir():
             errors.append(f"{state_root}: missing task-state directory")
             continue
-        for path in sorted(state_root.glob("*.md")):
+        for path in sorted(state_root.rglob("*.md")):
             relative = path.relative_to(task_root.parent)
             try:
                 metadata = parse_task_metadata(path)
