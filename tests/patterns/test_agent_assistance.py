@@ -135,7 +135,7 @@ def test_new_agent_pattern_is_exact_evidence_bound_draft_with_counter_evidence(t
     proposal = _load_proposal(vault, result.proposal_id)
     operation = proposal.patch_document.operations[0]
     assert isinstance(operation, CreateFile)
-    assert operation.path == "patterns/focus-after-walk.md"
+    assert operation.target_path == "patterns/focus-after-walk.md"
     review = proposal.metadata.extensions["personal_pattern"]["agent_assistance"]
     assert review["authority"] == "proposal-only"
     assert review["hidden_reasoning_stored"] is False
