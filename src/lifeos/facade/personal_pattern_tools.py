@@ -155,14 +155,11 @@ def _external_allow_path(
     vault_root: Path,
     allow_protected: bool,
 ) -> Callable[[str], bool]:
-    try:
-        policy = load_retrieval_policy(vault_root)
-    except RetrievalError as exc:
-        raise ToolExecutionError("Retrieval policy is invalid") from exc
     scope = RetrievalScope(allow_protected=allow_protected)
 
     def allowed(path: str) -> bool:
         try:
+            policy = load_retrieval_policy(vault_root)
             return scope_decision(path, scope=scope, policy=policy, mode="external").allowed
         except RetrievalError as exc:
             raise ToolExecutionError("Retrieval policy is invalid") from exc
@@ -277,6 +274,10 @@ def _publish(
             vault_root=vault_root,
             allow_path=identity_allow_path,
         )
+    # Re-resolve target/evidence policy immediately before preview. The lower publication helper
+    # invokes the same callback again immediately before persistence, so a request never relies
+    # on a policy snapshot captured at its start.
+    final_scope_check()
     try:
         result = publish_agent_pattern_proposal(
             proposals,
@@ -360,6 +361,7 @@ def propose_agent_pattern(
             vault_root=vault_root,
             evidence=request.evidence,
             allow_protected=request.allow_protected,
+            target_path=request.target_path,
         ),
         identity_allow_path=identity_allow_path,
     )
