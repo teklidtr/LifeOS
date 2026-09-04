@@ -317,7 +317,7 @@ The existing optional `personal-patterns` Graphify view remains derived and non-
 
 ## Recovery, compatibility, and migration
 
-The shipped Phase 17 recovery contract is conservative:
+The Personal Model recovery contract is conservative:
 
 - delete/rebuild of `.lifeos/` loses no canonical pattern knowledge;
 - proposal interruption uses the existing recovery transaction model and preserves proposal/evidence lineage;
@@ -327,11 +327,11 @@ The shipped Phase 17 recovery contract is conservative:
 - migration preview never invents semantic status, confidence, evidence role, or reviewed meaning;
 - unsupported future pattern schemas fail with typed diagnostics rather than being guessed.
 
-No pre-Phase-17 canonical Personal Model schema is currently recognized, so Phase 17 ships no heuristic converter for legacy-looking `patterns/` Markdown. Frontmatter that happens to contain fields such as `type`, `status`, or `confidence` without the recognized `pattern_schema` declaration stays user-authored ordinary Markdown. A future migration requires a separately accepted deterministic legacy contract and preview before it may rewrite anything.
+No pre-Phase-17 canonical Personal Model schema is currently recognized, so the Personal Model release defines no heuristic converter for legacy-looking `patterns/` Markdown. Frontmatter that happens to contain fields such as `type`, `status`, or `confidence` without the recognized `pattern_schema` declaration stays user-authored ordinary Markdown. A future migration requires a separately accepted deterministic legacy contract and preview before it may rewrite anything.
 
-## Shipped Phase 17 sequence and release contract
+## Personal Model release sequence and validation contract
 
-Phase 17 shipped through the ordered task chain:
+The implementation sequence through the release checkpoint is:
 
 1. **LIFEOS-1700** defined the architecture and product semantics.
 2. **LIFEOS-1701** implemented the canonical pattern artifact contract.
@@ -343,8 +343,10 @@ Phase 17 shipped through the ordered task chain:
 8. **LIFEOS-1707** added bounded pattern evidence to context and reflection surfaces.
 9. **LIFEOS-1708** built the Obsidian Personal Model workspace.
 10. **LIFEOS-1709** added evidence-bounded agent-assisted pattern proposals.
-11. **LIFEOS-1710** closes the phase with release fixtures and documentation covering representative lifecycle/evidence histories, arbitrary `patterns/` preservation, derived-state rebuild, proposal interruption recovery, bounded large-vault behavior, local STDIO and authenticated home-node capability boundaries, and the evidence-to-Obsidian end-to-end lifecycle.
+11. **LIFEOS-1710** is the release-validation and documentation checkpoint covering representative lifecycle/evidence histories, arbitrary `patterns/` preservation, derived-state rebuild, proposal interruption recovery, bounded large-vault behavior, local STDIO and authenticated home-node capability boundaries, and the evidence-to-Obsidian end-to-end lifecycle.
 
 The complete user-facing workflow is documented in `docs/user-manual/19-personal-model.md`. Focused Obsidian controls remain in `docs/user-manual/personal-model.md`, and deterministic re-evaluation semantics remain in `docs/user-manual/personal-pattern-review-triggers.md`.
 
-The central shipped rule remains: **evidence may create a reason to review, but only trusted human review can turn a semantic interpretation into durable accepted working context.**
+Phase 17 continues beyond this Personal Model release slice with the capability-discoverability tasks `LIFEOS-1712` through `LIFEOS-1715`; completing LIFEOS-1710 does not close the phase as a whole.
+
+The central rule remains: **evidence may create a reason to review, but only trusted human review can turn a semantic interpretation into durable accepted working context.**
