@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from lifeos.patterns import (
     compute_evidence_fingerprint,
     serialize_pattern,
 )
+from lifeos.patterns.contracts import PatternStatus
 from lifeos.reviews import ReviewArtifactService, ReviewDecisionService
 from lifeos.reviews.pattern_integration import build_review_snapshot, refresh_review_snapshot
 
@@ -24,14 +26,20 @@ def _write(path: Path, content: str) -> Path:
     return path
 
 
-def _pattern(vault: Path, pattern_id: str, *, evidence: tuple[PatternEvidence, ...] = ()) -> Path:
+def _pattern(
+    vault: Path,
+    pattern_id: str,
+    *,
+    status: PatternStatus = "needs-review",
+    evidence: tuple[PatternEvidence, ...] = (),
+) -> Path:
     metadata = PatternMetadata(
         pattern_id=pattern_id,
         title=pattern_id,
         description=f"Pattern {pattern_id}",
-        status="needs-review",
+        status=status,
         confidence="medium",
-        review_reasons=("Existing review context.",),
+        review_reasons=("Existing review context.",) if status == "needs-review" else (),
         statement=f"Working hypothesis {pattern_id}.",
         origin=PatternOrigin("manual"),
         created_at="2026-09-01T09:00:00Z",
@@ -86,8 +94,6 @@ def test_protected_contesting_evidence_does_not_enter_review_scope(tmp_path: Pat
         "---\nid: private-counter\ntype: note\ntitle: Private\n---\nsecret counter evidence\n",
     )
     content = private.read_text(encoding="utf-8")
-    import hashlib
-
     evidence = (
         PatternEvidence(
             path="journal/private/counter.md",
@@ -96,12 +102,7 @@ def test_protected_contesting_evidence_does_not_enter_review_scope(tmp_path: Pat
             role="contesting",
         ),
     )
-    target = _pattern(vault, "private-evidence", evidence=evidence)
-    # Make the pattern quiet so the denied contesting source would be its only weekly reason.
-    text = target.read_text(encoding="utf-8").replace("status: needs-review", "status: active").replace(
-        "review_reasons:\n- Existing review context.\n", "review_reasons: []\n"
-    )
-    target.write_text(text, encoding="utf-8")
+    _pattern(vault, "private-evidence", status="active", evidence=evidence)
 
     snapshot = build_review_snapshot(
         vault_root=vault,
