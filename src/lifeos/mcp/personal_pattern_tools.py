@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, TypeVar, cast
 
 from mcp.server.fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict
 
+from lifeos.facade.errors import ToolValidationError
 from lifeos.facade.personal_pattern_tools import (
     PERSONAL_PATTERN_PROPOSE_DESCRIPTOR,
     PERSONAL_PATTERN_REVIEW_DESCRIPTOR,
@@ -24,6 +25,7 @@ from lifeos.mcp.activity_store import MCPActivityStore
 from lifeos.mcp.exploration_tools import _strict_tool
 
 Invoke = Callable[[Callable[[], object]], object]
+InputT = TypeVar("InputT")
 
 PERSONAL_PATTERN_PROPOSE_MCP_DESCRIPTION = (
     f"{PERSONAL_PATTERN_PROPOSE_DESCRIPTOR.description} Supply only evidence the agent actually "
@@ -62,26 +64,37 @@ class PersonalPatternSemanticMCPInput(BaseModel):
     limitations: list[str] | None = None
 
 
+def _validated(factory: Callable[[], InputT]) -> InputT:
+    try:
+        return factory()
+    except ValueError as exc:
+        raise ToolValidationError(str(exc)) from exc
+
+
 def _semantic(value: PersonalPatternSemanticMCPInput) -> AgentPatternSemanticInput:
-    return AgentPatternSemanticInput(
-        hypothesis=value.hypothesis,
-        rationale=value.rationale,
-        proposed_confidence=value.proposed_confidence,
-        competing_explanations=tuple(value.competing_explanations or ()),
-        limitations=tuple(value.limitations or ()),
+    return _validated(
+        lambda: AgentPatternSemanticInput(
+            hypothesis=value.hypothesis,
+            rationale=value.rationale,
+            proposed_confidence=value.proposed_confidence,
+            competing_explanations=tuple(value.competing_explanations or ()),
+            limitations=tuple(value.limitations or ()),
+        )
     )
 
 
 def _evidence(values: list[PersonalPatternEvidenceMCPInput]) -> tuple[ObservedPatternEvidence, ...]:
-    return tuple(
-        ObservedPatternEvidence(
-            path=item.path,
-            content_hash=item.content_hash,
-            role=item.role,
-            observation_id=item.observation_id,
-            event_id=item.event_id,
+    return _validated(
+        lambda: tuple(
+            ObservedPatternEvidence(
+                path=item.path,
+                content_hash=item.content_hash,
+                role=item.role,
+                observation_id=item.observation_id,
+                event_id=item.event_id,
+            )
+            for item in values
         )
-        for item in values
     )
 
 
@@ -155,7 +168,15 @@ def build_personal_pattern_tools(
 
         return cast(dict[str, object], invoke(op))
 
-    annotations = ToolAnnotations(
+    propose_annotations = ToolAnnotations(
+        title="Propose personal pattern",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
+    )
+    review_annotations = ToolAnnotations(
+        title="Review personal pattern",
         readOnlyHint=False,
         destructiveHint=False,
         idempotentHint=False,
@@ -167,11 +188,11 @@ def build_personal_pattern_tools(
             name="personal_pattern_propose",
             description=PERSONAL_PATTERN_PROPOSE_MCP_DESCRIPTION,
             title="Propose personal pattern",
-        ).model_copy(update={"annotations": annotations}),
+        ).model_copy(update={"annotations": propose_annotations}),
         _strict_tool(
             personal_pattern_review_proposal_tool,
             name="personal_pattern_review_proposal",
             description=PERSONAL_PATTERN_REVIEW_MCP_DESCRIPTION,
             title="Review personal pattern",
-        ).model_copy(update={"annotations": annotations}),
+        ).model_copy(update={"annotations": review_annotations}),
     )
