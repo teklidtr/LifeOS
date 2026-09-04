@@ -60,6 +60,17 @@ def test_duplicate_task_ids_are_rejected(tmp_path: Path) -> None:
     )
 
 
+def test_nested_duplicate_task_ids_are_rejected(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(task_root, "completed", "001-historical.md", "LIFEOS-001")
+    _write_task(task_root, "backlog", "team/999-reused.md", "LIFEOS-001")
+
+    assert validate_task_tree(task_root) == (
+        "duplicate task id 'LIFEOS-001': "
+        "tasks/backlog/team/999-reused.md, tasks/completed/001-historical.md",
+    )
+
+
 def test_task_id_with_inline_yaml_comment_is_rejected(tmp_path: Path) -> None:
     task_root = _task_root(tmp_path)
     _write_task(task_root, "completed", "001-historical.md", "LIFEOS-001")
