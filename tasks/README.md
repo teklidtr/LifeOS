@@ -13,7 +13,7 @@ A task moves between directories without changing its filename. When a task move
 
 Every task must contain metadata, goal, scope, out-of-scope boundaries, acceptance criteria, documentation impact, validation commands, and relevant decisions.
 
-Task `id` values are globally unique across backlog, ready, in-progress, and completed history. Never reuse a completed task ID for new work. `python scripts/validate_tasks.py` validates global ID uniqueness and directory/status agreement; PR `fast-checks` run this validation even for task-only or documentation-only changes. Historical dependency metadata remains governed by the task records themselves and is not normalized by this identity validator.
+Task `id` values are globally unique across backlog, ready, in-progress, and completed history. Never reuse a completed task ID for new work. IDs must be plain `LIFEOS-*` scalar identifiers; inline YAML comments or other trailing syntax in the `id` value are rejected. `python scripts/validate_tasks.py` validates global ID uniqueness and directory/status agreement; PR `fast-checks` run this validation even for task-only or documentation-only changes. Historical dependency metadata remains governed by the task records themselves and is not normalized by this identity validator.
 
 Only `ready/` tasks may be selected for implementation. Backlog tasks must never be implemented directly.
 
