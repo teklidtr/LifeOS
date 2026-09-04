@@ -19,7 +19,7 @@ test("Personal Model view keeps live status and tab semantics in the Obsidian re
   );
   assert.match(source, /aria-live/);
   assert.match(source, /role", "tablist"/);
-  assert.match(source, /role", "tab"/);
+  assert.match(source, /role:\s*"tab"/);
   assert.match(source, /aria-label.*evidence/i);
 });
 
