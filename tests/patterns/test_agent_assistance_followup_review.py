@@ -10,7 +10,12 @@ from lifeos.facade.authorization import (
     ConsequentialAction,
     ConsequentialAuthorizationRequest,
 )
-from lifeos.facade.consequential_tools import ApplyProposalRequest, apply_proposal_tool
+from lifeos.facade.consequential_tools import (
+    AcceptProposalRequest,
+    ApplyProposalRequest,
+    accept_proposal_tool,
+    apply_proposal_tool,
+)
 from lifeos.facade.errors import ToolConflictError
 from lifeos.facade.personal_pattern_tools import (
     AgentPatternSemanticInput,
@@ -105,17 +110,7 @@ def _load(vault: Path, proposal_id: str):
     return loaded.proposal
 
 
-class _ApplyAuthorizer:
-    def __init__(self) -> None:
-        self.requests: list[ConsequentialAuthorizationRequest] = []
-
-    def authorize(self, request: ConsequentialAuthorizationRequest, /) -> AuthorizedPrincipal:
-        self.requests.append(request)
-        return AuthorizedPrincipal("trusted-human")
-
-
-def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: Path) -> None:
-    vault = tmp_path / "vault"
+def _hidden_collision_draft(vault: Path) -> str:
     source_hash = _write_source(vault, "journal/source.md", "Walked, then focused.\n")
     evidence = (
         PatternEvidence(
@@ -131,7 +126,6 @@ def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: 
         evidence=evidence,
     )
     _write_pattern_policy(vault)
-
     draft = propose_agent_pattern(
         vault_root=vault,
         request=ProposeAgentPatternRequest(
@@ -145,15 +139,30 @@ def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: 
     )
     assert draft.state == "draft"
     assert draft.proposal_id is not None
+    return draft.proposal_id
 
-    proposal = _load(vault, draft.proposal_id)
+
+class _ApplyAuthorizer:
+    def __init__(self) -> None:
+        self.requests: list[ConsequentialAuthorizationRequest] = []
+
+    def authorize(self, request: ConsequentialAuthorizationRequest, /) -> AuthorizedPrincipal:
+        self.requests.append(request)
+        return AuthorizedPrincipal("trusted-human")
+
+
+def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    proposal_id = _hidden_collision_draft(vault)
+
+    proposal = _load(vault, proposal_id)
     submit_proposal_for_review(
         proposal,
         proposals_root=vault / "proposals",
         submitted_by="trusted-human",
         submitted_at="2026-09-04T18:00:00Z",
     )
-    pending = _load(vault, draft.proposal_id)
+    pending = _load(vault, proposal_id)
     approve_proposal(
         pending,
         proposals_root=vault / "proposals",
@@ -165,7 +174,7 @@ def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: 
     with pytest.raises(ToolConflictError, match="pattern identity already exists"):
         apply_proposal_tool(
             vault_root=vault,
-            request=ApplyProposalRequest(draft.proposal_id),
+            request=ApplyProposalRequest(proposal_id),
             authorizer=authorizer,
             clock_fn=lambda: datetime(2026, 9, 4, 18, 2, tzinfo=timezone.utc),
         )
@@ -173,6 +182,24 @@ def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: 
     assert [request.action for request in authorizer.requests] == [ConsequentialAction.APPLY]
     assert not (vault / "patterns" / "focus-after-walk.md").exists()
     assert (vault / "patterns" / "private" / "hidden.md").exists()
+
+
+def test_composite_accept_uses_the_same_trusted_pattern_identity_guard(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    proposal_id = _hidden_collision_draft(vault)
+    authorizer = _ApplyAuthorizer()
+
+    with pytest.raises(ToolConflictError, match="pattern identity already exists"):
+        accept_proposal_tool(
+            vault_root=vault,
+            request=AcceptProposalRequest(proposal_id),
+            authorizer=authorizer,
+            clock_fn=lambda: datetime(2026, 9, 4, 18, 2, tzinfo=timezone.utc),
+        )
+
+    assert [request.action for request in authorizer.requests] == [ConsequentialAction.APPLY]
+    assert _load(vault, proposal_id).metadata.status.value == "approved"
+    assert not (vault / "patterns" / "focus-after-walk.md").exists()
 
 
 def test_create_uses_normalized_hypothesis_for_review_and_canonical_candidate(tmp_path: Path) -> None:
