@@ -15,6 +15,7 @@ from lifeos.proposals.patches import PatchDocumentV2, serialize_patch_json_bytes
 from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.proposals.schema import validate_metadata
 from lifeos.retrieval.contracts import CancellationToken, ProviderCapabilities, ProviderError
+from lifeos.vault import VaultAccessError, read_vault_bytes
 
 from .contracts import PatternConfidence, PatternError, PatternEvidence
 from .proposals import PatternProposalRequest, PatternProposalService, _publish_proposal
@@ -252,6 +253,34 @@ def _semantic_body(payload: AgentPatternReviewPayload) -> str:
     )
 
 
+def _reverify_review_evidence(
+    vault_root: Path,
+    evidence: tuple[PatternEvidence, ...],
+) -> None:
+    """Recheck exact evidence bytes at the final proposal-publication boundary."""
+    for item in evidence:
+        try:
+            content = read_vault_bytes(vault_root, item.path)
+        except VaultAccessError as exc:
+            code = "evidence_missing" if exc.code == "not-found" else "evidence_unavailable"
+            raise PatternError(
+                code,
+                "Selected personal-pattern evidence became unavailable before draft publication.",
+                {"path": item.path},
+            ) from exc
+        current_hash = "sha256:" + hashlib.sha256(content).hexdigest()
+        if current_hash != item.content_hash:
+            raise PatternError(
+                "stale_evidence",
+                "Selected personal-pattern evidence changed before draft publication.",
+                {
+                    "path": item.path,
+                    "expected_hash": item.content_hash,
+                    "current_hash": current_hash,
+                },
+            )
+
+
 def publish_agent_pattern_proposal(
     service: PatternProposalService,
     request: PatternProposalRequest,
@@ -295,6 +324,7 @@ def publish_agent_pattern_proposal(
         vault_root=service.vault_root,
         patches_json=patches_json,
     )
+    _reverify_review_evidence(service.vault_root, review_payload.evidence)
     _publish_proposal(
         vault_root=service.vault_root,
         proposal_id=proposal_id,
