@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -211,6 +212,30 @@ def _verified_evidence(
     return tuple(verified)
 
 
+def _final_scope_check(
+    *,
+    vault_root: Path,
+    evidence: tuple[ObservedPatternEvidence, ...],
+    allow_protected: bool,
+    target_path: str | None = None,
+) -> Callable[[], None]:
+    def check() -> None:
+        if target_path is not None:
+            _require_external_markdown_path(
+                vault_root=vault_root,
+                path=target_path,
+                allow_protected=allow_protected,
+            )
+        for item in evidence:
+            _require_external_markdown_path(
+                vault_root=vault_root,
+                path=item.path,
+                allow_protected=allow_protected,
+            )
+
+    return check
+
+
 def _publish(
     *,
     vault_root: Path,
@@ -218,6 +243,7 @@ def _publish(
     semantic: AgentPatternSemanticInput,
     evidence: tuple[PatternEvidence, ...],
     expected_base_hash: str | None,
+    final_scope_check: Callable[[], None],
 ) -> AgentPatternProposalResult:
     try:
         suggestion = semantic.suggestion()
@@ -232,6 +258,7 @@ def _publish(
             ),
             request,
             review_payload=review,
+            final_scope_check=final_scope_check,
             expected_base_hash=expected_base_hash,
         )
     except PatternError as exc:
@@ -295,6 +322,11 @@ def propose_agent_pattern(
         semantic=request.semantic,
         evidence=verified,
         expected_base_hash=None,
+        final_scope_check=_final_scope_check(
+            vault_root=vault_root,
+            evidence=request.evidence,
+            allow_protected=request.allow_protected,
+        ),
     )
 
 
@@ -350,4 +382,10 @@ def review_agent_pattern(
         semantic=request.semantic,
         evidence=verified,
         expected_base_hash=request.observed_pattern_hash,
+        final_scope_check=_final_scope_check(
+            vault_root=vault_root,
+            evidence=request.evidence,
+            allow_protected=request.allow_protected,
+            target_path=request.target_path,
+        ),
     )
