@@ -37,6 +37,15 @@ from .proposals import (
     ResolvePatternReviewRequest,
     RevisePatternRequest,
 )
+from .review import (
+    PatternReviewAssessment,
+    PatternReviewReason,
+    PatternReviewService,
+    ReviewReasonCode,
+    ReviewRecommendation,
+    SupportedEvaluationKind,
+    assess_pattern_review,
+)
 
 __all__ = [
     "PATTERN_SCHEMA_VERSION",
@@ -61,11 +70,18 @@ __all__ = [
     "PatternProposalPreview",
     "PatternProposalRequest",
     "PatternProposalService",
+    "PatternReviewAssessment",
+    "PatternReviewReason",
+    "PatternReviewService",
     "PatternStatus",
     "PromotePatternRequest",
     "ResolvedPatternStatus",
     "ResolvePatternReviewRequest",
+    "ReviewReasonCode",
+    "ReviewRecommendation",
     "RevisePatternRequest",
+    "SupportedEvaluationKind",
+    "assess_pattern_review",
     "compute_evidence_fingerprint",
     "metadata_from_dict",
     "normalize_evidence_reference",
