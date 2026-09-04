@@ -65,6 +65,8 @@ The two MCP operations are:
 
 Both stop at a **draft proposal**. They cannot approve, apply, diagnose, promote a hypothesis to `active`, select the approving identity, or directly edit `patterns/`. If an existing pattern already has the same statement, confidence, and exact reviewed evidence set, `personal_pattern_review_proposal` returns `no-change` and creates nothing.
 
+Protected pattern content and identity do not become an agent-visible duplicate-ID oracle while a new seed draft is being prepared. A privacy-safe draft can therefore survive the external proposal boundary even when a hidden canonical pattern later proves to use the same stable ID. After a trusted human authorizes **Apply** or **Accept changes**, LifeOS checks global canonical pattern identity before mutation and refuses the application rather than creating two canonical patterns with the same ID. The conflict does not reveal the protected pattern's path or content.
+
 A model provider is optional. LifeOS can deterministically validate evidence and persist an externally supplied typed semantic candidate without a local model. When a provider is used, the contract is provider-neutral; timeout, provider failure, malformed output, or a provider returning no proposal creates no durable semantic authority.
 
 On an authenticated home node, the same draft-producing tools are available through the shared MCP core, but remote clients still do not receive `proposal_approve` or `proposal_apply`. A remote agent can therefore help prepare something for review, not accept it on your behalf.
