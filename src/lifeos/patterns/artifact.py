@@ -12,6 +12,7 @@ import yaml
 from lifeos.markdown.parser import ManagedBlock, parse_markdown_note
 from lifeos.vault import (
     VaultAccessError,
+    VaultMarkdownFile,
     iter_vault_markdown,
     read_vault_markdown,
     validate_vault_relative_path,
@@ -165,7 +166,7 @@ class PatternArtifactService:
         allow_path: Callable[[str], bool] | None = None,
     ) -> None:
         self.vault_root = vault_root
-        self.allow_path = allow_path
+        self._allow_path = allow_path
 
     def load(self, relative_path: str) -> PatternArtifact:
         _validate_artifact_path(relative_path)
@@ -182,15 +183,16 @@ class PatternArtifactService:
             )
         return artifact
 
-    def _sources(self):  # type: ignore[no-untyped-def]
-        if self.allow_path is None:
+    def _sources(self) -> tuple[VaultMarkdownFile, ...]:
+        allow_path = self._allow_path
+        if allow_path is None:
             return iter_vault_markdown(self.vault_root, roots=("patterns",))
 
         def allowed_pattern_path(path: str) -> bool:
             candidate = path.rstrip("/")
             if candidate != "patterns" and not candidate.startswith("patterns/"):
                 return False
-            return self.allow_path(candidate)
+            return allow_path(candidate)
 
         paths = iter_vault_markdown_paths(
             self.vault_root,
