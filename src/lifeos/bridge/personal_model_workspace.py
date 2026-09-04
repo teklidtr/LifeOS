@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -73,7 +74,14 @@ def _optional_string(data: dict[str, Any], field: str) -> str | None:
     return value.strip()
 
 
-def _local_allow_path(vault_root: Path):
+def _string(data: dict[str, Any], field: str, default: str = "") -> str:
+    value = data.get(field, default)
+    if not isinstance(value, str):
+        raise ProtocolError("invalid_params", f"{field} must be a string.")
+    return value
+
+
+def _local_allow_path(vault_root: Path) -> Callable[[str], bool]:
     """Apply the ordinary local retrieval policy before opening Personal Model sources."""
     try:
         policy = load_retrieval_policy(vault_root)
@@ -349,7 +357,7 @@ class PersonalModelWorkspaceBridge:
                     target_path=target_path,
                     pattern_id=_required_string(data, "pattern_id"),
                     title=_required_string(data, "title"),
-                    description=str(data.get("description", "")),
+                    description=_string(data, "description"),
                     statement=_required_string(data, "statement"),
                     confidence=confidence,
                     origin=_origin(data.get("origin")),
