@@ -19,7 +19,7 @@ jobs:
         with:
           version: '0.12.0'
           enable-cache: true
-      - name: Apply compatibility and documentation updates
+      - name: Apply compatibility, typing, and documentation updates
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -41,19 +41,32 @@ jobs:
               '''    archived_patterns = archived_personal_pattern_paths_for_scope(\n        vault_root=vault_root,\n        mode=cast(Literal["local", "external"], retrieval_mode),\n        retrieval_scope=scope,\n        explicit_paths=focus_paths,\n    )\n''',
               '''    try:\n        archived_patterns = archived_personal_pattern_paths_for_scope(\n            vault_root=vault_root,\n            mode=cast(Literal["local", "external"], retrieval_mode),\n            retrieval_scope=scope,\n            explicit_paths=focus_paths,\n        )\n    except RetrievalError as exc:\n        raise ContextSearchExecutionError("Retrieval policy is invalid") from exc\n''',
           )
+          replace_once(
+              'src/lifeos/patterns/context.py',
+              'from .model import EvidenceHealth, PersonalModelItem, build_personal_model_document\n',
+              '''from .model import (\n    EvidenceHealth,\n    PersonalModelDocument,\n    PersonalModelItem,\n    build_personal_model_document,\n)\n''',
+          )
+          replace_once(
+              'src/lifeos/patterns/context.py',
+              '''    allow_path: Callable[[str], bool],\n):\n    del runtime_dir\n''',
+              '''    allow_path: Callable[[str], bool],\n) -> PersonalModelDocument:\n    del runtime_dir\n''',
+          )
+          replace_once(
+              'src/lifeos/context/packs.py',
+              '''        for item in pack.personal_patterns:\n            lines.append(\n                f"  - {item.pattern_id}: {item.status}, {item.confidence}, "\n                f"evidence {item.evidence_health} ({item.pattern_path})"\n            )\n''',
+              '''        for pattern in pack.personal_patterns:\n            lines.append(\n                f"  - {pattern.pattern_id}: {pattern.status}, {pattern.confidence}, "\n                f"evidence {pattern.evidence_health} ({pattern.pattern_path})"\n            )\n''',
+          )
 
           replace_once(
               'docs/personal-model-architecture.md',
               '''The aggregate Personal Model is never injected wholesale into every provider request. Relevance and size are bounded for the question at hand, and local deterministic operation remains possible without a model provider.\n''',
               '''The aggregate Personal Model is never injected wholesale into every provider request. Relevance and size are bounded for the question at hand, and local deterministic operation remains possible without a model provider.\n\nLIFEOS-1707 makes that boundary concrete through `build_personal_pattern_context()`. The typed read contract carries the canonical pattern ID, path and content hash, lifecycle status, confidence, evidence health and fingerprint, and at most three canonical evidence references. Each item is explicitly marked `evidence-not-instruction` with `can_authorize_mutation: false`. Lifecycle meaning remains visible as `reviewed-working-hypothesis` for `active`, `exploratory-hypothesis` for `seed`, `uncertain-needs-review` for `needs-review`, and `archived-history` only when an archived pattern is explicitly referenced.\n\nContext Packs reuse their existing source bound and relevance ranking rather than appending a second Personal Model payload. A selected pattern source receives the evidence envelope above, while ordinary archived patterns are removed from candidate scope before retrieval. Knowledge conversations reuse those bounded excerpts; goal-to-plan clarification adds only relevant pattern evidence without changing readiness or planner selection; experiment previews apply the same provider-scope and redaction rules; canonical daily and weekly review items continue to expose their existing bounded pattern evidence and source explanations.\n''',
           )
-
           replace_once(
               'docs/architecture.md',
               '''Instruction applicability is evaluated against the final selected source set and grants no\nmutation authority.\n''',
               '''Instruction applicability is evaluated against the final selected source set and grants no\nmutation authority.\n\nRecognized `patterns/*.md` artifacts participate through the same bounded source selection rather\nthan through a universal profile prompt. Selected patterns are accompanied by typed Personal Model\nevidence containing lifecycle status, confidence, evidence health, canonical hashes/references, and\nan explicit `evidence-not-instruction` role. `needs-review` remains visibly uncertain, `seed` remains\nexploratory, and archived patterns are excluded before ordinary candidate ranking unless they are\nexplicit focus paths. `ContextPack.personal_patterns` exposes the same bounded metadata to typed\ncallers. Pattern text cannot become a routed instruction or authorize mutation.\n''',
           )
-
           replace_once(
               'docs/user-manual/11-semantic-retrieval-and-knowledge-conversations.md',
               '''When no embedding provider is configured, exact, lexical, metadata, link, and\ngraph retrieval still work. The workspace remains useful in local-only mode.\n\n## Read evidence before the answer\n''',
@@ -75,6 +88,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lifeos/context/packs.py docs/personal-model-architecture.md docs/architecture.md docs/user-manual/11-semantic-retrieval-and-knowledge-conversations.md
+          git add src/lifeos/context/packs.py src/lifeos/patterns/context.py docs/personal-model-architecture.md docs/architecture.md docs/user-manual/11-semantic-retrieval-and-knowledge-conversations.md
           git commit -m "LIFEOS-1707: finalize context contract and docs"
           git push origin HEAD:lifeos-1707-personal-model-context
