@@ -507,15 +507,17 @@ current_content_hash: optional current sha256 digest
 candidate_paths: []  # active paths only when identity resolution is ambiguous
 ```
 
-`source_id`, when present, is the identity lookup key. A unique same-hash identity
-at a new path is `moved`; a unique different-hash identity is `changed`. Without a
-stable source ID, resolution stays path-bound and does not invent rename continuity.
-A known registry deletion is `deleted`, while no resolvable current or historical
-registry fact is `missing`. The diagnostic retains the original reviewed reference,
-including its role, path, and content hash, so current facts cannot silently advance
-historical reviewed evidence. Internal registry tombstone locations are not
-canonical evidence paths and are never exposed as `current_path` or
-`candidate_paths`.
+Resolution is evaluated only over a caller-supplied authorized path predicate.
+Denied registry rows do not participate in ambiguity and cannot expose current
+path/hash facts through the diagnostic. `source_id`, when present, is the identity
+lookup key. A unique same-hash identity at a new path is `moved`; a unique
+different-hash identity is `changed`. Without a stable source ID, resolution stays
+path-bound and does not invent rename continuity. A known visible registry deletion
+is `deleted`, while no resolvable visible current or historical registry fact is
+`missing`. The diagnostic retains the original reviewed reference, including its
+role, path, and content hash, so current facts cannot silently advance historical
+reviewed evidence. Internal registry tombstone locations are not canonical evidence
+paths and are never exposed as `current_path` or `candidate_paths`.
 
 Canonical serialization emits exactly one `personal-pattern-evidence` managed
 block for the refreshable evidence summary. Human reflection and user-created
