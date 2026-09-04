@@ -137,6 +137,22 @@ def _authorize_evidence(
         )
 
 
+def _origin_path(origin: PatternOrigin) -> str | None:
+    source_ref = origin.source_ref
+    if source_ref and source_ref.endswith(".md"):
+        return source_ref
+    return None
+
+
+def _authorize_origin(
+    allow_path: Callable[[str], bool],
+    origin: PatternOrigin,
+) -> None:
+    path = _origin_path(origin)
+    if path is not None:
+        _authorize_path(allow_path, path, subject="Pattern origin")
+
+
 def _evidence(value: object) -> tuple[PatternEvidence, ...]:
     if value is None:
         return ()
@@ -195,33 +211,42 @@ def _review_reasons(value: object, fallback: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item.strip() for item in value))
 
 
-def _related_paths(item: PersonalModelItem) -> list[dict[str, str]]:
+def _related_paths(
+    item: PersonalModelItem,
+    allow_path: Callable[[str], bool],
+) -> list[dict[str, str]]:
     related: dict[str, str] = {}
-    origin = item.origin.source_ref
-    if origin and origin.endswith(".md"):
+
+    def add(path: str, kind: str) -> None:
+        if allow_path(path):
+            related[path] = kind
+
+    origin = _origin_path(item.origin)
+    if origin is not None:
         if origin.startswith("reviews/"):
-            related[origin] = "review"
+            add(origin, "review")
         elif origin.startswith("experiments/"):
-            related[origin] = "experiment"
+            add(origin, "experiment")
     for evidence in item.evidence:
         if evidence.path.startswith("reviews/"):
-            related[evidence.path] = "review"
+            add(evidence.path, "review")
         elif evidence.path.startswith("experiments/"):
-            related[evidence.path] = "experiment"
+            add(evidence.path, "experiment")
     for diagnostic in item.evidence_diagnostics:
         path = diagnostic.current_path
         if not path:
             continue
         if path.startswith("reviews/"):
-            related[path] = "review"
+            add(path, "review")
         elif path.startswith("experiments/"):
-            related[path] = "experiment"
+            add(path, "experiment")
     return [{"path": path, "kind": related[path]} for path in sorted(related)]
 
 
 def _workspace_item(
     item: PersonalModelItem,
     artifacts: PatternArtifactService,
+    allow_path: Callable[[str], bool],
 ) -> dict[str, object]:
     artifact = artifacts.load(item.pattern_path)
     if artifact.content_hash != item.pattern_content_hash:
@@ -232,8 +257,13 @@ def _workspace_item(
             {"path": item.pattern_path},
         )
     result = asdict(item)
+    origin = asdict(item.origin)
+    origin_path = _origin_path(item.origin)
+    if origin_path is not None and not allow_path(origin_path):
+        origin["source_ref"] = None
+    result["origin"] = origin
     result["statement"] = artifact.metadata.statement
-    result["related_paths"] = _related_paths(item)
+    result["related_paths"] = _related_paths(item, allow_path)
     result["evidence_changes"] = [
         {
             "role": diagnostic.reference.role,
@@ -252,18 +282,26 @@ def _workspace_item(
 def _workspace_document(
     document: PersonalModelDocument,
     artifacts: PatternArtifactService,
+    allow_path: Callable[[str], bool],
 ) -> dict[str, object]:
     return {
         "schema_version": document.schema_version,
         "source_hash": document.source_hash,
         "runtime_state": "ready",
         "groups": {
-            "active": [_workspace_item(item, artifacts) for item in document.active],
-            "needs_review": [
-                _workspace_item(item, artifacts) for item in document.needs_review
+            "active": [
+                _workspace_item(item, artifacts, allow_path) for item in document.active
             ],
-            "seeds": [_workspace_item(item, artifacts) for item in document.seeds],
-            "archived": [_workspace_item(item, artifacts) for item in document.archived],
+            "needs_review": [
+                _workspace_item(item, artifacts, allow_path)
+                for item in document.needs_review
+            ],
+            "seeds": [
+                _workspace_item(item, artifacts, allow_path) for item in document.seeds
+            ],
+            "archived": [
+                _workspace_item(item, artifacts, allow_path) for item in document.archived
+            ],
         },
         "diagnostics": [asdict(item) for item in document.diagnostics],
     }
@@ -428,7 +466,7 @@ class PersonalModelWorkspaceBridge:
                 allow_path=allow_path,
                 now=now,
             )
-            return _workspace_document(document, self.artifacts)
+            return _workspace_document(document, self.artifacts, allow_path)
         except ProtocolError:
             raise
         except RegistryError as exc:
@@ -462,7 +500,7 @@ class PersonalModelWorkspaceBridge:
                 allow_path=allow_path,
             )
             document = model.rebuild(now=now)
-            return _workspace_document(document, self.artifacts)
+            return _workspace_document(document, self.artifacts, allow_path)
         except (RegistryError, ToolExecutionError, PersonalModelError) as exc:
             raise ProtocolError(
                 "personal_model_rebuild_failed",
@@ -518,7 +556,9 @@ class PersonalModelWorkspaceBridge:
                     )
                 confidence = cast(PatternConfidence, _required_string(data, "confidence"))
                 evidence = _evidence(data.get("evidence"))
+                origin = _origin(data.get("origin"))
                 _authorize_evidence(allow_path, evidence)
+                _authorize_origin(allow_path, origin)
                 request: PatternProposalRequest = CreatePatternSeedRequest(
                     target_path=target_path,
                     pattern_id=_required_string(data, "pattern_id"),
@@ -526,7 +566,7 @@ class PersonalModelWorkspaceBridge:
                     description=_string(data, "description"),
                     statement=_required_string(data, "statement"),
                     confidence=confidence,
-                    origin=_origin(data.get("origin")),
+                    origin=origin,
                     evidence=evidence,
                     transition_reason=reason,
                 )
@@ -539,6 +579,7 @@ class PersonalModelWorkspaceBridge:
                     "workspace item.",
                 )
             current = self.artifacts.load(target_path)
+            _authorize_origin(allow_path, current.metadata.origin)
             _authorize_evidence(allow_path, current.metadata.evidence)
             if action == "adopt":
                 request = (
