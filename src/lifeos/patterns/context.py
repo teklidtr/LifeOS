@@ -19,7 +19,12 @@ from lifeos.vault_paths import iter_vault_markdown_paths
 
 from .artifact import parse_pattern
 from .contracts import PatternConfidence, PatternError, PatternStatus
-from .model import EvidenceHealth, PersonalModelItem, build_personal_model_document
+from .model import (
+    EvidenceHealth,
+    PersonalModelDocument,
+    PersonalModelItem,
+    build_personal_model_document,
+)
 
 PatternContextInterpretation = Literal[
     "reviewed-working-hypothesis",
@@ -182,7 +187,7 @@ def _document(
     vault_root: Path,
     runtime_dir: Path,
     allow_path: Callable[[str], bool],
-):
+) -> PersonalModelDocument:
     del runtime_dir
     with TemporaryDirectory(prefix="lifeos-personal-model-context-") as temporary:
         registry = Registry(Path(temporary) / "registry.db")

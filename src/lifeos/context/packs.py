@@ -480,7 +480,7 @@ def build_context_pack(
     reranker: RerankingProvider | None = None,
     graph_hints: Mapping[str, float] | None = None,
 ) -> ContextPack:
-    from lifeos.retrieval import RetrievalScope
+    from lifeos.retrieval import RetrievalError, RetrievalScope
 
     if type(limit) is not int or limit <= 0:
         raise ContextSearchError("limit must be a positive integer")
@@ -494,12 +494,15 @@ def build_context_pack(
     scope = retrieval_scope or RetrievalScope()
     from lifeos.patterns.context import archived_personal_pattern_paths_for_scope
 
-    archived_patterns = archived_personal_pattern_paths_for_scope(
-        vault_root=vault_root,
-        mode=cast(Literal["local", "external"], retrieval_mode),
-        retrieval_scope=scope,
-        explicit_paths=focus_paths,
-    )
+    try:
+        archived_patterns = archived_personal_pattern_paths_for_scope(
+            vault_root=vault_root,
+            mode=cast(Literal["local", "external"], retrieval_mode),
+            retrieval_scope=scope,
+            explicit_paths=focus_paths,
+        )
+    except RetrievalError as exc:
+        raise ContextSearchExecutionError("Retrieval policy is invalid") from exc
     if archived_patterns:
         scope = replace(
             scope,
@@ -796,10 +799,10 @@ def format_context_pack(pack: ContextPack) -> str:
     lines.append("")
     lines.append("Personal pattern evidence")
     if pack.personal_patterns:
-        for item in pack.personal_patterns:
+        for pattern in pack.personal_patterns:
             lines.append(
-                f"  - {item.pattern_id}: {item.status}, {item.confidence}, "
-                f"evidence {item.evidence_health} ({item.pattern_path})"
+                f"  - {pattern.pattern_id}: {pattern.status}, {pattern.confidence}, "
+                f"evidence {pattern.evidence_health} ({pattern.pattern_path})"
             )
     else:
         lines.append("  none")

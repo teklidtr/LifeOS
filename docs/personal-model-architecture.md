@@ -235,6 +235,10 @@ Every inclusion keeps the pattern's stable ID, lifecycle status, confidence clas
 
 The aggregate Personal Model is never injected wholesale into every provider request. Relevance and size are bounded for the question at hand, and local deterministic operation remains possible without a model provider.
 
+LIFEOS-1707 makes that boundary concrete through `build_personal_pattern_context()`. The typed read contract carries the canonical pattern ID, path and content hash, lifecycle status, confidence, evidence health and fingerprint, and at most three canonical evidence references. Each item is explicitly marked `evidence-not-instruction` with `can_authorize_mutation: false`. Lifecycle meaning remains visible as `reviewed-working-hypothesis` for `active`, `exploratory-hypothesis` for `seed`, `uncertain-needs-review` for `needs-review`, and `archived-history` only when an archived pattern is explicitly referenced.
+
+Context Packs reuse their existing source bound and relevance ranking rather than appending a second Personal Model payload. A selected pattern source receives the evidence envelope above, while ordinary archived patterns are removed from candidate scope before retrieval. Knowledge conversations reuse those bounded excerpts; goal-to-plan clarification adds only relevant pattern evidence without changing readiness or planner selection; experiment previews apply the same provider-scope and redaction rules; canonical daily and weekly review items continue to expose their existing bounded pattern evidence and source explanations.
+
 ## Privacy and provider disclosure
 
 Personal-pattern evidence uses the existing retrieval-policy boundary rather than introducing a weaker privacy path.
