@@ -28,6 +28,7 @@ from lifeos.patterns.contracts import (
     PatternEvidence,
     PatternOrigin,
 )
+from lifeos.patterns.evidence import compute_evidence_fingerprint
 from lifeos.patterns.proposals import (
     CreatePatternSeedRequest,
     PatternProposalService,
@@ -142,6 +143,26 @@ def _require_request_shape(
         raise ToolValidationError("At most 32 selected evidence snapshots are supported")
 
 
+def _external_allow_path(
+    *,
+    vault_root: Path,
+    allow_protected: bool,
+) -> Callable[[str], bool]:
+    try:
+        policy = load_retrieval_policy(vault_root)
+    except RetrievalError as exc:
+        raise ToolExecutionError("Retrieval policy is invalid") from exc
+    scope = RetrievalScope(allow_protected=allow_protected)
+
+    def allowed(path: str) -> bool:
+        try:
+            return scope_decision(path, scope=scope, policy=policy, mode="external").allowed
+        except RetrievalError as exc:
+            raise ToolExecutionError("Retrieval policy is invalid") from exc
+
+    return allowed
+
+
 def _require_external_markdown_path(
     *,
     vault_root: Path,
@@ -150,17 +171,10 @@ def _require_external_markdown_path(
 ) -> None:
     if not is_markdown_path(path):
         raise ToolValidationError("Selected personal-pattern path must be canonical Markdown")
-    try:
-        policy = load_retrieval_policy(vault_root)
-        decision = scope_decision(
-            path,
-            scope=RetrievalScope(paths=(path,), allow_protected=allow_protected),
-            policy=policy,
-            mode="external",
-        )
-    except RetrievalError as exc:
-        raise ToolExecutionError("Retrieval policy is invalid") from exc
-    if not decision.allowed:
+    if not _external_allow_path(
+        vault_root=vault_root,
+        allow_protected=allow_protected,
+    )(path):
         raise ToolValidationError(
             "Selected personal-pattern path is unavailable under the external retrieval policy"
         )
@@ -244,18 +258,25 @@ def _publish(
     evidence: tuple[PatternEvidence, ...],
     expected_base_hash: str | None,
     final_scope_check: Callable[[], None],
+    identity_allow_path: Callable[[str], bool] | None = None,
 ) -> AgentPatternProposalResult:
     try:
         suggestion = semantic.suggestion()
         review = AgentPatternReviewPayload(suggestion=suggestion, evidence=evidence)
     except ValueError as exc:
         raise ToolValidationError(str(exc)) from exc
+    proposals = PatternProposalService(
+        vault_root=vault_root,
+        actor_id="lifeos.external-agent.personal-pattern",
+    )
+    if identity_allow_path is not None:
+        proposals.artifacts = PatternArtifactService(
+            vault_root=vault_root,
+            allow_path=identity_allow_path,
+        )
     try:
         result = publish_agent_pattern_proposal(
-            PatternProposalService(
-                vault_root=vault_root,
-                actor_id="lifeos.external-agent.personal-pattern",
-            ),
+            proposals,
             request,
             review_payload=review,
             final_scope_check=final_scope_check,
@@ -297,6 +318,15 @@ def propose_agent_pattern(
     request: ProposeAgentPatternRequest,
 ) -> AgentPatternProposalResult:
     _require_request_shape(evidence=request.evidence, allow_protected=request.allow_protected)
+    _require_external_markdown_path(
+        vault_root=vault_root,
+        path=request.target_path,
+        allow_protected=request.allow_protected,
+    )
+    identity_allow_path = _external_allow_path(
+        vault_root=vault_root,
+        allow_protected=request.allow_protected,
+    )
     verified = _verified_evidence(
         vault_root=vault_root,
         evidence=request.evidence,
@@ -327,6 +357,7 @@ def propose_agent_pattern(
             evidence=request.evidence,
             allow_protected=request.allow_protected,
         ),
+        identity_allow_path=identity_allow_path,
     )
 
 
@@ -365,7 +396,8 @@ def review_agent_pattern(
     if (
         current.metadata.statement == request.semantic.hypothesis
         and current.metadata.confidence == request.semantic.proposed_confidence
-        and current.metadata.evidence == verified
+        and compute_evidence_fingerprint(current.metadata.evidence)
+        == compute_evidence_fingerprint(verified)
     ):
         return AgentPatternProposalResult("no-change", None, None, request.target_path)
     return _publish(
