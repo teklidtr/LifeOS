@@ -286,6 +286,7 @@ def _evidence_state_reasons(
         path = diagnostic.reference.path
         if diagnostic.state == "unchanged":
             continue
+        paths: tuple[str, ...]
         if diagnostic.state == "changed":
             summary = f"Reviewed evidence changed since the reviewed version: {path}."
             code: ReviewReasonCode = "changed-evidence"
