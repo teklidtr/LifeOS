@@ -37,6 +37,10 @@ def _registry(tmp_path: Path) -> Registry:
     return registry
 
 
+def _allow_all(_path: str) -> bool:
+    return True
+
+
 def test_fingerprint_is_normalized_order_independent_and_deduplicated() -> None:
     supporting = PatternEvidence(
         path="journal/a.md",
@@ -145,7 +149,7 @@ def test_registry_resolution_distinguishes_all_evidence_states(tmp_path: Path) -
         ),
     )
 
-    diagnostics = resolve_evidence_states(registry, references)
+    diagnostics = resolve_evidence_states(registry, references, allow_path=_allow_all)
 
     assert [item.state for item in diagnostics] == [
         "unchanged",
@@ -167,6 +171,42 @@ def test_registry_resolution_distinguishes_all_evidence_states(tmp_path: Path) -
     assert diagnostics[5].current_path is None
 
 
+def test_identity_resolution_uses_only_caller_authorized_paths(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    public_text = _note("shared-id", "public")
+    private_text = _note("private-id", "private")
+    _write(vault, "public/evidence.md", public_text)
+    _write(vault, "private/evidence.md", private_text)
+    registry = _registry(tmp_path)
+    register_scan(registry, vault, scan_vault(vault))
+
+    with registry.connect() as connection:
+        connection.execute(
+            "UPDATE files SET stable_id = 'shared-id' WHERE vault_path = 'private/evidence.md'"
+        )
+        connection.commit()
+
+    reference = PatternEvidence(
+        "public/evidence.md",
+        _digest(public_text),
+        "supporting",
+        source_id="shared-id",
+    )
+    unrestricted = resolve_evidence_states(registry, (reference,), allow_path=_allow_all)[0]
+    public_only = resolve_evidence_states(
+        registry,
+        (reference,),
+        allow_path=lambda path: path.startswith("public/"),
+    )[0]
+
+    assert unrestricted.state == "ambiguous"
+    assert unrestricted.candidate_paths == ("private/evidence.md", "public/evidence.md")
+    assert public_only.state == "unchanged"
+    assert public_only.current_path == "public/evidence.md"
+    assert public_only.current_content_hash == reference.content_hash
+    assert public_only.candidate_paths == ()
+
+
 def test_relocated_and_modified_stable_source_is_changed_not_moved(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     original_text = _note("source-id", "before")
@@ -185,7 +225,7 @@ def test_relocated_and_modified_stable_source_is_changed_not_moved(tmp_path: Pat
         "supporting",
         source_id="source-id",
     )
-    diagnostic = resolve_evidence_states(registry, (reference,))[0]
+    diagnostic = resolve_evidence_states(registry, (reference,), allow_path=_allow_all)[0]
 
     assert diagnostic.state == "changed"
     assert diagnostic.current_path == "journal/new.md"
@@ -206,7 +246,7 @@ def test_path_only_reference_uses_path_without_inventing_stable_identity(tmp_pat
         _digest(content),
         "contextual",
     )
-    diagnostic = resolve_evidence_states(registry, (reference,))[0]
+    diagnostic = resolve_evidence_states(registry, (reference,), allow_path=_allow_all)[0]
 
     assert diagnostic.state == "unchanged"
     assert diagnostic.reference.source_id is None
