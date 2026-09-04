@@ -9,7 +9,7 @@ from typing import Any, Literal
 from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate
 from lifeos.reviews.contracts import ReviewArtifact, ReviewSnapshot
 from lifeos.reviews.progress import ReviewProgressService
-from lifeos.reviews.snapshot import refresh_review_snapshot
+from lifeos.reviews.pattern_integration import refresh_review_snapshot
 
 DailyPhase = Literal["morning", "evening"]
 
@@ -126,7 +126,8 @@ def open_daily_review(
             pinned_pattern_ids=pinned_pattern_ids,
         )
     else:
-        from lifeos.reviews.snapshot import build_review_snapshot
+        from lifeos.reviews.pattern_integration import build_review_snapshot
+
         snapshot = build_review_snapshot(
             vault_root=service.vault_root,
             runtime_dir=runtime_dir,
