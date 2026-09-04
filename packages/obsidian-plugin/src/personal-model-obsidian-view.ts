@@ -56,11 +56,16 @@ export class LifeOSPersonalModelItemView extends ItemView {
 
   private render(): void {
     const root = this.contentEl;
+    const state = this.controller.state;
+    const shouldRestoreFocus = root.contains(root.ownerDocument.activeElement);
     root.empty();
     root.addClass("lifeos-personal-model");
 
     const header = root.createDiv({ cls: "lifeos-personal-model__header" });
-    header.createEl("h2", { text: "Personal Model", attr: { id: "personal-model-workspace-title" } });
+    header.createEl("h2", {
+      text: "Personal Model",
+      attr: { id: "personal-model-workspace-title", tabindex: "-1" },
+    });
     header.createEl("p", {
       text: "Evidence-backed working hypotheses. These are revisable context, not personality facts.",
       cls: "lifeos-personal-model__lede",
@@ -73,11 +78,11 @@ export class LifeOSPersonalModelItemView extends ItemView {
       void this.controller.rebuild(now());
     });
 
-    const state = this.controller.state;
     const status = root.createDiv({ cls: `lifeos-personal-model__status is-${state.stage}` });
     status.setAttr("id", "personal-model-status");
     status.setAttr("role", "status");
     status.setAttr("aria-live", "polite");
+    status.setAttr("tabindex", "-1");
     status.createEl("strong", { text: humanState(state.stage) });
     if (state.detail) status.createEl("span", { text: ` ${state.detail}` });
     if (state.recovery) status.createEl("p", { text: state.recovery });
@@ -90,38 +95,43 @@ export class LifeOSPersonalModelItemView extends ItemView {
 
     this.renderTrack(root, state);
 
-    if (!state.document) return;
-    this.renderTabs(root, state);
+    if (state.document) {
+      this.renderTabs(root, state);
 
-    if (state.stage === "empty") {
-      const empty = root.createDiv({ cls: "lifeos-personal-model__empty" });
-      empty.setAttr("id", "personal-model-empty");
-      empty.createEl("h3", { text: "No tracked hypotheses yet" });
-      empty.createEl("p", {
-        text: "Track a seed only when there is a working hypothesis worth revisiting. LifeOS will not invent a profile for you.",
-      });
-      return;
-    }
-
-    const layout = root.createDiv({ cls: "lifeos-personal-model__layout" });
-    this.renderList(layout, state);
-    this.renderDetail(layout, state);
-
-    if (state.document.diagnostics.length) {
-      const diagnostics = root.createEl("details", { cls: "lifeos-personal-model__diagnostics" });
-      diagnostics.createEl("summary", { text: `${state.document.diagnostics.length} model diagnostics` });
-      const list = diagnostics.createEl("ul");
-      for (const diagnostic of state.document.diagnostics) {
-        list.createEl("li", {
-          text: `${diagnostic.source_path}:${diagnostic.line} · ${diagnostic.code} · ${diagnostic.message}`,
+      if (state.stage === "empty") {
+        const empty = root.createDiv({ cls: "lifeos-personal-model__empty" });
+        empty.setAttr("id", "personal-model-empty");
+        empty.setAttr("tabindex", "-1");
+        empty.createEl("h3", { text: "No tracked hypotheses yet" });
+        empty.createEl("p", {
+          text: "Track a seed only when there is a working hypothesis worth revisiting. LifeOS will not invent a profile for you.",
         });
+      } else {
+        const layout = root.createDiv({ cls: "lifeos-personal-model__layout" });
+        this.renderList(layout, state);
+        this.renderDetail(layout, state);
+
+        if (state.document.diagnostics.length) {
+          const diagnostics = root.createEl("details", { cls: "lifeos-personal-model__diagnostics" });
+          diagnostics.createEl("summary", { text: `${state.document.diagnostics.length} model diagnostics` });
+          const list = diagnostics.createEl("ul");
+          for (const diagnostic of state.document.diagnostics) {
+            list.createEl("li", {
+              text: `${diagnostic.source_path}:${diagnostic.line} · ${diagnostic.code} · ${diagnostic.message}`,
+            });
+          }
+        }
       }
     }
+
+    this.renderProposal(root, state);
+    this.restoreFocus(state, shouldRestoreFocus);
   }
 
   private renderTrack(root: HTMLElement, state: PersonalModelWorkspaceState): void {
     const details = root.createEl("details", { cls: "lifeos-personal-model__track" });
-    details.createEl("summary", { text: "Track a new seed hypothesis" });
+    const summary = details.createEl("summary", { text: "Track a new seed hypothesis" });
+    summary.setAttr("id", "personal-model-track");
     details.createEl("p", {
       text: "Tracking creates a proposal preview first. A seed is a question to revisit, not an adopted fact.",
     });
@@ -190,6 +200,7 @@ export class LifeOSPersonalModelItemView extends ItemView {
     panel.setAttr("id", "personal-model-list");
     panel.setAttr("role", "tabpanel");
     panel.setAttr("aria-labelledby", `personal-model-tab-${state.view}`);
+    panel.setAttr("tabindex", "-1");
     const items = this.controller.visibleItems;
     if (!items.length) {
       panel.createEl("p", { text: `No ${PERSONAL_MODEL_VIEW_LABELS[state.view].toLowerCase()} patterns.` });
@@ -238,7 +249,6 @@ export class LifeOSPersonalModelItemView extends ItemView {
     this.renderEvidence(detail, item);
     this.renderRelated(detail, item);
     this.renderActions(detail, item, state);
-    this.renderProposal(detail, state);
   }
 
   private renderReviewReasons(detail: HTMLElement, item: PersonalModelItem): void {
@@ -317,6 +327,7 @@ export class LifeOSPersonalModelItemView extends ItemView {
     if (!actions.length) return;
     const section = detail.createEl("section", { cls: "lifeos-personal-model__actions" });
     section.setAttr("id", "personal-model-actions");
+    section.setAttr("tabindex", "-1");
     section.createEl("h4", { text: "Proposal-backed actions" });
     section.createEl("p", {
       text: "Actions below only prepare a proposal preview. Evidence stays visible above so adoption and revision are inspectable decisions.",
@@ -350,10 +361,10 @@ export class LifeOSPersonalModelItemView extends ItemView {
     }, now());
   }
 
-  private renderProposal(detail: HTMLElement, state: PersonalModelWorkspaceState): void {
+  private renderProposal(parent: HTMLElement, state: PersonalModelWorkspaceState): void {
     const preview = state.proposalPreview;
     if (!preview) return;
-    const section = detail.createEl("section", { cls: "lifeos-personal-model__proposal" });
+    const section = parent.createEl("section", { cls: "lifeos-personal-model__proposal" });
     section.setAttr("id", "personal-model-proposal-preview");
     section.setAttr("tabindex", "-1");
     section.createEl("h4", { text: "Proposal preview" });
@@ -377,11 +388,19 @@ export class LifeOSPersonalModelItemView extends ItemView {
       const created = section.createDiv({ cls: "lifeos-personal-model__proposal-created" });
       created.setAttr("id", "personal-model-proposal-created");
       created.setAttr("role", "status");
+      created.setAttr("tabindex", "-1");
       created.createEl("strong", { text: `Draft ${state.proposalResult.proposal_id} created.` });
       created.createEl("p", {
         text: `Open Proposals from the command palette to inspect and accept it. ${state.proposalResult.proposal_path}`,
       });
     }
+  }
+
+  private restoreFocus(state: PersonalModelWorkspaceState, shouldRestoreFocus: boolean): void {
+    if (!shouldRestoreFocus) return;
+    const target = Array.from(this.contentEl.querySelectorAll<HTMLElement>("[id]"))
+      .find((element) => element.id === state.focusTarget);
+    target?.focus();
   }
 
   private fact(list: HTMLElement, label: string, value: string): void {
