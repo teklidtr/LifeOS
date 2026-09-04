@@ -139,7 +139,7 @@ def _daily_evidence_section(
                     item_id=f"daily-evidence:{phase}-checkin",
                     section_id="daily-evidence",
                     title=f"{phase.title()} check-in",
-                    detail=f"No {phase} check-in is recorded; this remains unknown, not a failure.",
+                    detail=f"No journal evidence is available for the {phase} check-in; this remains unknown.",
                     evidence_fingerprint=stable_fingerprint(journal_path, phase, "missing"),
                     state="ready",
                     action="checkin",
@@ -369,6 +369,11 @@ def build_review_snapshot(
             ),
         )
     else:
+        pattern_section = weekly_pattern_review_section(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            generated_at=generated_at,
+        )
         sections = (
             *sections,
             *_weekly_evidence_sections(
@@ -381,11 +386,7 @@ def build_review_snapshot(
                 range_end=workflow.range_end,
                 generated_at=generated_at,
             ),
-            weekly_pattern_review_section(
-                vault_root=vault_root,
-                runtime_dir=runtime_dir,
-                generated_at=generated_at,
-            ),
+            pattern_section,
         )
     diagnostics = tuple(
         f"{section.section_id}: {section.diagnostic}"
