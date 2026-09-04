@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Literal, cast
+from typing import Literal
 
 from lifeos.context.search import lexical_search_report
 from lifeos.facade.registry_tools import refresh_registry
@@ -13,10 +14,11 @@ from lifeos.registry import Registry
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.vault import VaultAccessError, read_vault_markdown
+from lifeos.vault_paths import iter_vault_markdown_paths
 
 from .artifact import parse_pattern
 from .contracts import PatternConfidence, PatternError, PatternStatus
-from .model import EvidenceHealth, PersonalModelDocument, PersonalModelItem, build_personal_model_document
+from .model import EvidenceHealth, PersonalModelItem, build_personal_model_document
 
 PatternContextInterpretation = Literal[
     "reviewed-working-hypothesis",
@@ -115,15 +117,19 @@ def _scope_allow_path(
     *,
     vault_root: Path,
     mode: PatternContextMode,
-    allow_protected: bool,
-):
+    scope: RetrievalScope,
+    path_filter: Callable[[str], bool] | None = None,
+) -> Callable[[str], bool]:
     try:
         policy = load_retrieval_policy(vault_root)
     except RetrievalError as exc:
-        raise PersonalPatternContextError("Personal pattern context requires a valid retrieval policy.") from exc
-    scope = RetrievalScope(allow_protected=allow_protected)
+        raise PersonalPatternContextError(
+            "Personal pattern context requires a valid retrieval policy."
+        ) from exc
 
     def allowed(path: str) -> bool:
+        if path_filter is not None and not path_filter(path):
+            return False
         try:
             return scope_decision(path, scope=scope, policy=policy, mode=mode).allowed
         except RetrievalError:
@@ -132,28 +138,69 @@ def _scope_allow_path(
     return allowed
 
 
+def archived_personal_pattern_paths_for_scope(
+    *,
+    vault_root: Path,
+    mode: PatternContextMode = "local",
+    retrieval_scope: RetrievalScope | None = None,
+    explicit_paths: Iterable[str] = (),
+    path_filter: Callable[[str], bool] | None = None,
+) -> tuple[str, ...]:
+    """Find archived canonical patterns that ordinary context must exclude before retrieval."""
+    scope = retrieval_scope or RetrievalScope()
+    explicit = frozenset(str(path).strip() for path in explicit_paths if str(path).strip())
+    allow_path = _scope_allow_path(
+        vault_root=vault_root,
+        mode=mode,
+        scope=scope,
+        path_filter=path_filter,
+    )
+
+    def allowed_pattern_path(path: str) -> bool:
+        candidate = path.rstrip("/")
+        return (
+            (candidate == "patterns" or candidate.startswith("patterns/"))
+            and allow_path(candidate)
+        )
+
+    try:
+        paths = iter_vault_markdown_paths(vault_root, path_filter=allowed_pattern_path)
+    except VaultAccessError as exc:
+        if exc.code == "not-found":
+            return ()
+        raise PersonalPatternContextError(str(exc)) from exc
+
+    archived: list[str] = []
+    for path in paths:
+        if path in explicit:
+            continue
+        try:
+            source = read_vault_markdown(vault_root, path)
+            artifact = parse_pattern(source.path, path, source.content)
+        except (VaultAccessError, PatternError):
+            continue
+        if artifact is not None and artifact.metadata.status == "archived":
+            archived.append(path)
+    return tuple(sorted(archived))
+
+
 def _document(
     *,
     vault_root: Path,
     runtime_dir: Path,
-    allow_path,
-) -> PersonalModelDocument:
+    allow_path: Callable[[str], bool],
+):
     registry = Registry(runtime_dir / "registry.db")
-    try:
-        refresh_registry(
-            vault_root=vault_root,
-            registry=registry,
-            identity_allow_path=allow_path,
-        )
-        return build_personal_model_document(
-            vault_root=vault_root,
-            registry=registry,
-            allow_path=allow_path,
-        )
-    except Exception as exc:
-        if isinstance(exc, PersonalPatternContextError):
-            raise
-        raise PersonalPatternContextError(f"Could not assemble Personal Model context: {exc}") from exc
+    refresh_registry(
+        vault_root=vault_root,
+        registry=registry,
+        identity_allow_path=allow_path,
+    )
+    return build_personal_model_document(
+        vault_root=vault_root,
+        registry=registry,
+        allow_path=allow_path,
+    )
 
 
 def _redact(
@@ -207,44 +254,6 @@ def _references(item: PersonalModelItem) -> tuple[PersonalPatternContextReferenc
     )
 
 
-def personal_pattern_candidate_allowed(
-    *,
-    vault_root: Path,
-    path: str,
-    explicit: bool = False,
-) -> bool:
-    """Exclude archived canonical patterns from ordinary context before retrieval/provider use."""
-    if not path.startswith("patterns/") or not path.endswith(".md"):
-        return True
-    try:
-        source = read_vault_markdown(vault_root, path)
-        artifact = parse_pattern(source.path, path, source.content)
-    except (VaultAccessError, PatternError):
-        # Preserve existing diagnostics for malformed/unavailable candidates rather than hiding them.
-        return True
-    if artifact is None:
-        return True
-    return explicit or artifact.metadata.status != "archived"
-
-
-def archived_personal_pattern_paths(
-    *,
-    vault_root: Path,
-    candidate_paths: Iterable[str],
-    explicit_paths: Iterable[str] = (),
-) -> tuple[str, ...]:
-    explicit = frozenset(explicit_paths)
-    return tuple(
-        path
-        for path in dict.fromkeys(candidate_paths)
-        if not personal_pattern_candidate_allowed(
-            vault_root=vault_root,
-            path=path,
-            explicit=path in explicit,
-        )
-    )
-
-
 def build_personal_pattern_context(
     *,
     vault_root: Path,
@@ -253,9 +262,11 @@ def build_personal_pattern_context(
     limit: int = DEFAULT_PERSONAL_PATTERN_CONTEXT_LIMIT,
     mode: PatternContextMode = "local",
     allow_protected: bool = False,
+    retrieval_scope: RetrievalScope | None = None,
     candidate_paths: Iterable[str] | None = None,
     explicit_paths: Iterable[str] = (),
     redact_terms: Iterable[str] = (),
+    path_filter: Callable[[str], bool] | None = None,
 ) -> PersonalPatternContext:
     """Build bounded Personal Model evidence using existing lexical relevance and path policy."""
     if not isinstance(question, str) or not question.strip():
@@ -267,26 +278,27 @@ def build_personal_pattern_context(
 
     normalized_question = question.strip()
     explicit = frozenset(str(path).strip() for path in explicit_paths if str(path).strip())
-    redactions = tuple(sorted({str(term).strip() for term in redact_terms if str(term).strip()}))
+    redactions = tuple(
+        sorted({str(term).strip() for term in redact_terms if str(term).strip()})
+    )
+    scope = retrieval_scope or RetrievalScope(allow_protected=allow_protected)
     allow_path = _scope_allow_path(
         vault_root=vault_root,
-        mode=cast(PatternContextMode, mode),
-        allow_protected=allow_protected,
+        mode=mode,
+        scope=scope,
+        path_filter=path_filter,
     )
     document = _document(vault_root=vault_root, runtime_dir=runtime_dir, allow_path=allow_path)
     by_path = {item.pattern_path: item for item in document.items}
 
     if candidate_paths is None:
-        try:
-            search = lexical_search_report(
-                vault_root=vault_root,
-                query=normalized_question,
-                limit=max(16, limit * 4),
-                path_prefix="patterns",
-                path_filter=allow_path,
-            )
-        except Exception as exc:
-            raise PersonalPatternContextError(f"Could not select relevant personal patterns: {exc}") from exc
+        search = lexical_search_report(
+            vault_root=vault_root,
+            query=normalized_question,
+            limit=max(16, limit * 4),
+            path_prefix="patterns",
+            path_filter=allow_path,
+        )
         paths = tuple(item.path for item in search.results)
     else:
         paths = tuple(
