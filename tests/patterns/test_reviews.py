@@ -12,8 +12,10 @@ from lifeos.patterns import (
     compute_evidence_fingerprint,
     serialize_pattern,
 )
+from lifeos.patterns.contracts import PatternStatus
 from lifeos.patterns.reviews import (
     DAILY_PATTERN_REVIEW_LIMIT,
+    PATTERN_REVIEW_EVIDENCE_SOURCE_LIMIT,
     WEEKLY_PATTERN_REVIEW_LIMIT,
     create_pattern_review_proposal,
 )
@@ -37,7 +39,7 @@ def _write(path: Path, content: str) -> Path:
 def _metadata(
     pattern_id: str,
     *,
-    status: str = "active",
+    status: PatternStatus = "active",
     evidence: tuple[PatternEvidence, ...] = (),
     review_due_at: str | None = None,
     last_reviewed_at: str | None = "2026-09-01T09:00:00Z",
@@ -46,7 +48,7 @@ def _metadata(
         pattern_id=pattern_id,
         title=pattern_id.replace("-", " ").title(),
         description=f"Reviewable working hypothesis for {pattern_id}.",
-        status=status,  # type: ignore[arg-type]
+        status=status,
         confidence="medium",
         review_reasons=("Existing review context.",) if status == "needs-review" else (),
         statement=f"Working hypothesis for {pattern_id}.",
@@ -61,8 +63,22 @@ def _metadata(
     )
 
 
-def _write_pattern(vault: Path, pattern_id: str, **kwargs: object) -> Path:
-    metadata = _metadata(pattern_id, **kwargs)  # type: ignore[arg-type]
+def _write_pattern(
+    vault: Path,
+    pattern_id: str,
+    *,
+    status: PatternStatus = "active",
+    evidence: tuple[PatternEvidence, ...] = (),
+    review_due_at: str | None = None,
+    last_reviewed_at: str | None = "2026-09-01T09:00:00Z",
+) -> Path:
+    metadata = _metadata(
+        pattern_id,
+        status=status,
+        evidence=evidence,
+        review_due_at=review_due_at,
+        last_reviewed_at=last_reviewed_at,
+    )
     return _write(vault / "patterns" / f"{pattern_id}.md", serialize_pattern(metadata))
 
 
@@ -216,7 +232,9 @@ def test_dismissed_pattern_stays_suppressed_until_evidence_changes(tmp_path: Pat
         idempotency_key="refresh-first",
     )
     first_item = _section(first_snapshot, "personal-patterns-weekly").items[0]
-    first = ReviewDecisionService(service).decide(
+    assert len(first_item.sources) <= PATTERN_REVIEW_EVIDENCE_SOURCE_LIMIT + 1
+    assert first_item.sources[1].path == "journal/source.md"
+    ReviewDecisionService(service).decide(
         review_id=first.metadata.review_id,
         item_id=first_item.item_id,
         evidence_fingerprint=first_item.evidence_fingerprint,
@@ -243,7 +261,7 @@ def test_dismissed_pattern_stays_suppressed_until_evidence_changes(tmp_path: Pat
     assert _section(unchanged_snapshot, "personal-patterns-weekly").items == ()
 
     source.write_text(before.replace("before", "after"), encoding="utf-8")
-    second, changed_snapshot = refresh_review_snapshot(
+    _, changed_snapshot = refresh_review_snapshot(
         service=service,
         artifact=second,
         runtime_dir=runtime,
