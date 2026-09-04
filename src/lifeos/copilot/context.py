@@ -155,6 +155,7 @@ def build_planning_context(
             question=pattern_query,
             limit=3,
             mode="external",
+            explicit_paths=includes,
             redact_terms=redactions,
             path_filter=pattern_context_path_filter,
         )

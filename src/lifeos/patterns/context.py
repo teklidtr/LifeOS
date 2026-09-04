@@ -132,11 +132,21 @@ def _scope_allow_path(
     path_filter: Callable[[str], bool] | None = None,
 ) -> Callable[[str], bool]:
     policy = load_retrieval_policy(vault_root)
+    selected = tuple(dict.fromkeys((*scope.paths, *scope.folders)))
 
     def allowed(path: str) -> bool:
         if path_filter is not None and not path_filter(path):
             return False
-        return scope_decision(path, scope=scope, policy=policy, mode=mode).allowed
+        decision = scope_decision(path, scope=scope, policy=policy, mode=mode)
+        if decision.allowed:
+            return True
+        if decision.reason not in {"outside-selected-paths", "outside-selected-folders"}:
+            return False
+        candidate = path.rstrip("/")
+        return any(
+            target == candidate or target.startswith(candidate + "/")
+            for target in selected
+        )
 
     return allowed
 
@@ -369,7 +379,10 @@ def build_personal_pattern_context(
         raise PersonalPatternContextError("mode must be local or external")
 
     normalized_question = question.strip()
-    explicit = frozenset(str(path).strip() for path in explicit_paths if str(path).strip())
+    explicit_ordered = tuple(
+        dict.fromkeys(str(path).strip() for path in explicit_paths if str(path).strip())
+    )
+    explicit = frozenset(explicit_ordered)
     redactions = tuple(
         sorted({str(term).strip() for term in redact_terms if str(term).strip()})
     )
@@ -408,6 +421,11 @@ def build_personal_pattern_context(
                 if str(path).strip().startswith("patterns/")
             )
         )
+
+    explicit_pattern_paths = tuple(
+        path for path in explicit_ordered if path.startswith("patterns/")
+    )
+    paths = tuple(dict.fromkeys((*explicit_pattern_paths, *paths)))
 
     items: list[PersonalPatternContextItem] = []
     omissions: list[PersonalPatternContextOmission] = []

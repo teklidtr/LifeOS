@@ -244,7 +244,9 @@ class KnowledgeConversationService:
                         runtime_dir=self.runtime_dir,
                         question=query,
                         limit=limit,
-                        mode="external",
+                        mode=(
+                            "local" if answer_provider.capabilities.local_only else "external"
+                        ),
                         retrieval_scope=scope,
                         candidate_paths=local_pattern_paths,
                         explicit_paths=scope.pinned_paths,
@@ -265,6 +267,7 @@ class KnowledgeConversationService:
                         item for item in provider_results if item.path not in local_pattern_paths
                     )
             answer_evidence = tuple(item.answer_evidence() for item in provider_results)
+            provider_saved_evidence = tuple(_saved_evidence(item) for item in provider_results)
             generation_disclosure = build_provider_disclosure(
                 evidence=answer_evidence,
                 capabilities=answer_provider.capabilities,
@@ -284,7 +287,9 @@ class KnowledgeConversationService:
                         timeout_seconds=timeout_seconds,
                         cancellation=token,
                     )
-                    paragraphs = validate_generated_answer(generated, evidence)
+                    paragraphs = validate_generated_answer(
+                        generated, provider_saved_evidence
+                    )
                     explanation = generated.explanation
                 except ProviderError as exc:
                     state = "timeout" if exc.code == "timeout" else "malformed-response"
