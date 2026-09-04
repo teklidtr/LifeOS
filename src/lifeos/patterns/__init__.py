@@ -16,6 +16,7 @@ from .contracts import (
     metadata_from_dict,
 )
 from .evidence import (
+    EvidencePathPredicate,
     EvidenceState,
     NormalizedEvidenceReference,
     PatternEvidenceDiagnostic,
@@ -26,6 +27,7 @@ from .evidence import (
 
 __all__ = [
     "PATTERN_SCHEMA_VERSION",
+    "EvidencePathPredicate",
     "EvidenceRole",
     "EvidenceState",
     "NormalizedEvidenceReference",
