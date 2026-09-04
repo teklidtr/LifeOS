@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -197,9 +198,12 @@ def test_large_vault_rebuild_is_bounded_deterministic_and_preserves_ordinary_mar
         allow_path=lambda _path: True,
     )
 
+    started = time.perf_counter()
     first = service.rebuild(now=NOW)
+    elapsed = time.perf_counter() - started
     second = service.rebuild(now=NOW)
 
+    assert elapsed < 5.0
     assert len(first.items) == LARGE_VAULT_PATTERN_COUNT
     assert first == second
     assert arbitrary.read_bytes() == arbitrary_before
