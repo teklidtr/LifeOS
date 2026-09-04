@@ -141,14 +141,14 @@ def _require_request_shape(
         raise ToolValidationError("At most 32 selected evidence snapshots are supported")
 
 
-def _require_external_evidence_path(
+def _require_external_markdown_path(
     *,
     vault_root: Path,
     path: str,
     allow_protected: bool,
 ) -> None:
     if not is_markdown_path(path):
-        raise ToolValidationError("Personal-pattern evidence must be canonical Markdown")
+        raise ToolValidationError("Selected personal-pattern path must be canonical Markdown")
     try:
         policy = load_retrieval_policy(vault_root)
         decision = scope_decision(
@@ -161,7 +161,7 @@ def _require_external_evidence_path(
         raise ToolExecutionError("Retrieval policy is invalid") from exc
     if not decision.allowed:
         raise ToolValidationError(
-            "Selected evidence path is unavailable under the external retrieval policy"
+            "Selected personal-pattern path is unavailable under the external retrieval policy"
         )
 
 
@@ -173,7 +173,7 @@ def _verified_evidence(
 ) -> tuple[PatternEvidence, ...]:
     verified: list[PatternEvidence] = []
     for observed in evidence:
-        _require_external_evidence_path(
+        _require_external_markdown_path(
             vault_root=vault_root,
             path=observed.path,
             allow_protected=allow_protected,
@@ -219,8 +219,11 @@ def _publish(
     evidence: tuple[PatternEvidence, ...],
     expected_base_hash: str | None,
 ) -> AgentPatternProposalResult:
-    suggestion = semantic.suggestion()
-    review = AgentPatternReviewPayload(suggestion=suggestion, evidence=evidence)
+    try:
+        suggestion = semantic.suggestion()
+        review = AgentPatternReviewPayload(suggestion=suggestion, evidence=evidence)
+    except ValueError as exc:
+        raise ToolValidationError(str(exc)) from exc
     try:
         result = publish_agent_pattern_proposal(
             PatternProposalService(
@@ -234,9 +237,14 @@ def _publish(
     except PatternError as exc:
         if exc.code == "no_change":
             return AgentPatternProposalResult("no-change", None, None, request.target_path)
-        if exc.code in {"stale_target", "target_exists", "duplicate_identity"}:
+        if exc.code in {
+            "stale_target",
+            "target_exists",
+            "duplicate_identity",
+            "stale_evidence",
+        }:
             raise ToolConflictError(str(exc)) from exc
-        if exc.code in {"not-found"}:
+        if exc.code in {"not-found", "evidence_missing"}:
             raise ToolNotFoundError(str(exc)) from exc
         if exc.code in {
             "invalid_field",
@@ -304,6 +312,11 @@ def review_agent_pattern(
         )
     except PatternError as exc:
         raise ToolValidationError("observed_pattern_hash must be an exact sha256 content hash") from exc
+    _require_external_markdown_path(
+        vault_root=vault_root,
+        path=request.target_path,
+        allow_protected=request.allow_protected,
+    )
     verified = _verified_evidence(
         vault_root=vault_root,
         evidence=request.evidence,
