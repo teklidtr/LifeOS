@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
+import lifeos.proposals.application as application_module
 from lifeos.bridge.personal_model_workspace import PersonalModelWorkspaceBridge
 from lifeos.ownership.manifest import serialize_generated_ownership_bytes
 from lifeos.patterns import (
+    PatternArtifactService,
     PatternEvidence,
     PatternMetadata,
     PatternOrigin,
@@ -17,17 +22,23 @@ from lifeos.patterns import (
     serialize_pattern,
 )
 from lifeos.proposals import (
+    ProposalStatus,
     apply_proposal,
     approve_proposal,
     load_proposal_directory,
     submit_proposal_for_review,
 )
+from lifeos.proposals.recovery_service import RecoveryAction, recover_interrupted_applications
 from lifeos.registry import Registry
 
 NOW = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
 NOW_TEXT = "2026-09-04T12:00:00+00:00"
 LARGE_VAULT_PATTERN_COUNT = 192
 LARGE_VAULT_ORDINARY_PATTERN_NOTES = 768
+
+
+class _InjectedInterruption(BaseException):
+    pass
 
 
 def _digest(content: str) -> str:
@@ -80,7 +91,7 @@ def _load_proposal(vault: Path, proposal_id: str):
     return result.proposal
 
 
-def _approve_and_apply(vault: Path, proposal_id: str, *, minute: int) -> None:
+def _submit_and_approve(vault: Path, proposal_id: str, *, minute: int):
     draft = _load_proposal(vault, proposal_id)
     submit_proposal_for_review(
         draft,
@@ -95,7 +106,11 @@ def _approve_and_apply(vault: Path, proposal_id: str, *, minute: int) -> None:
         approved_by="release-approver",
         approved_at=f"2026-09-04T12:{minute + 1:02d}:00Z",
     )
-    approved = _load_proposal(vault, proposal_id)
+    return _load_proposal(vault, proposal_id)
+
+
+def _approve_and_apply(vault: Path, proposal_id: str, *, minute: int) -> None:
+    approved = _submit_and_approve(vault, proposal_id, minute=minute)
     apply_proposal(
         approved,
         vault_root=vault,
@@ -164,6 +179,42 @@ def test_release_history_matrix_keeps_uncertainty_and_lifecycle_visible(tmp_path
     assert not hasattr(document, "score")
 
 
+def test_runtime_deletion_and_rebuild_preserve_canonical_personal_model(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    target = _write_pattern(
+        vault,
+        "patterns/rebuild.md",
+        _metadata("pattern-rebuild", status="active"),
+    )
+    canonical_before = target.read_bytes()
+    runtime = vault / ".lifeos"
+
+    first_bridge = PersonalModelWorkspaceBridge(
+        vault_root=vault,
+        runtime_dir=runtime,
+        actor_id="obsidian-local",
+    )
+    first = first_bridge.dispatch("personal-model.rebuild", {"now": NOW_TEXT})
+    assert first["groups"]["active"][0]["pattern_id"] == "pattern-rebuild"
+    assert runtime.exists()
+
+    shutil.rmtree(runtime)
+    assert not runtime.exists()
+    assert target.read_bytes() == canonical_before
+
+    rebuilt_bridge = PersonalModelWorkspaceBridge(
+        vault_root=vault,
+        runtime_dir=runtime,
+        actor_id="obsidian-local",
+    )
+    rebuilt = rebuilt_bridge.dispatch("personal-model.rebuild", {"now": NOW_TEXT})
+
+    assert rebuilt["groups"]["active"][0]["pattern_id"] == "pattern-rebuild"
+    assert target.read_bytes() == canonical_before
+    assert runtime.exists()
+
+
 def test_large_vault_rebuild_is_bounded_deterministic_and_preserves_ordinary_markdown(
     tmp_path: Path,
 ) -> None:
@@ -208,6 +259,83 @@ def test_large_vault_rebuild_is_bounded_deterministic_and_preserves_ordinary_mar
     assert first == second
     assert arbitrary.read_bytes() == arbitrary_before
     assert all(item.pattern_id.startswith("pattern-release-") for item in first.items)
+
+
+def test_personal_model_proposal_interruption_rolls_back_and_preserves_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _write(
+        vault,
+        "system/generated-ownership.json",
+        serialize_generated_ownership_bytes({}).decode("utf-8"),
+    )
+    source_text = "---\nid: journal-recovery\ntype: journal\n---\nA recovery observation.\n"
+    _write(vault, "journal/recovery.md", source_text)
+    evidence = (
+        PatternEvidence(
+            path="journal/recovery.md",
+            content_hash=_digest(source_text),
+            role="supporting",
+        ),
+    )
+    target = _write_pattern(
+        vault,
+        "patterns/recovery.md",
+        _metadata("pattern-recovery", status="active", evidence=evidence),
+    )
+    artifact_service = PatternArtifactService(vault_root=vault)
+    before_artifact = artifact_service.load("patterns/recovery.md")
+    before_bytes = target.read_bytes()
+
+    bridge = PersonalModelWorkspaceBridge(
+        vault_root=vault,
+        runtime_dir=tmp_path / "runtime-recovery",
+        actor_id="obsidian-local",
+    )
+    document = bridge.dispatch("personal-model.rebuild", {"now": NOW_TEXT})
+    active = document["groups"]["active"][0]
+    proposal = bridge.dispatch(
+        "personal-model.proposal.create",
+        {
+            "action": "revise",
+            "target_path": active["pattern_path"],
+            "expected_target_hash": active["pattern_content_hash"],
+            "statement": "Recovery should preserve the exact reviewed evidence lineage.",
+            "transition_reason": "Exercise the shared interruption recovery boundary.",
+            "now": NOW_TEXT,
+        },
+    )
+    proposal_id = str(proposal["proposal_id"])
+    approved = _submit_and_approve(vault, proposal_id, minute=20)
+
+    def checkpoint(name: str) -> None:
+        if name == "after_all_targets":
+            raise _InjectedInterruption(name)
+
+    monkeypatch.setattr(application_module, "_application_checkpoint", checkpoint)
+    with pytest.raises(_InjectedInterruption):
+        apply_proposal(
+            approved,
+            vault_root=vault,
+            applied_by="release-operator",
+            applied_at="2026-09-04T12:22:00Z",
+        )
+
+    assert target.read_bytes() != before_bytes
+    recovered = recover_interrupted_applications(vault_root=vault)
+
+    assert recovered.transactions[0].action is RecoveryAction.ROLLED_BACK
+    assert target.read_bytes() == before_bytes
+    after_artifact = artifact_service.load("patterns/recovery.md")
+    assert after_artifact.metadata.evidence == before_artifact.metadata.evidence
+    assert (
+        after_artifact.metadata.evidence_fingerprint
+        == before_artifact.metadata.evidence_fingerprint
+    )
+    assert _load_proposal(vault, proposal_id).metadata.status is ProposalStatus.APPROVED
 
 
 def test_evidence_to_obsidian_release_flow_keeps_semantic_changes_proposal_gated(
