@@ -40,12 +40,13 @@ def _pattern(
     status: str,
     statement: str,
     description: str = "Sleep recovery evidence.",
+    title: str | None = None,
     evidence: tuple[PatternEvidence, ...] = (),
 ) -> str:
     path = f"patterns/{name}.md"
     metadata = PatternMetadata(
         pattern_id=f"pattern-{name}",
-        title=f"Sleep {name}",
+        title=title or f"Sleep {name}",
         description=description,
         status=status,  # type: ignore[arg-type]
         confidence="medium",
@@ -233,11 +234,22 @@ def _protocol() -> ExperimentProtocol:
 
 def test_experiment_preview_uses_bounded_redacted_pattern_evidence(tmp_path: Path) -> None:
     vault = _vault(tmp_path)
+    source = "SecretName source evidence."
+    _write(vault, "notes/SecretName-source.md", source)
+    evidence = (
+        PatternEvidence(
+            path="notes/SecretName-source.md",
+            content_hash=_digest(source),
+            role="supporting",
+        ),
+    )
     _pattern(
         vault,
         "experiment",
         status="seed",
+        title="SecretName sleep experiment",
         statement="SecretName sleep timing may affect focus.",
+        evidence=evidence,
     )
     service = ExperimentArtifactService(vault_root=vault, runtime_dir=vault / ".lifeos")
     experiment = service.create(
@@ -264,7 +276,10 @@ def test_experiment_preview_uses_bounded_redacted_pattern_evidence(tmp_path: Pat
     assert "SecretName" not in str(item.to_dict())
     assert item.personal_pattern is not None
     assert "[REDACTED-1]" in item.personal_pattern.statement
+    assert "SecretName" not in item.personal_pattern.title
+    assert "SecretName" not in item.personal_pattern.references[0].reviewed_path
     assert item.redactions
+    assert item.included_bytes <= 8_000
 
 
 def test_context_pack_forwards_caller_filter_to_all_pattern_scans(
@@ -323,6 +338,7 @@ def test_personal_pattern_context_bounds_statement_and_rendered_envelope(
         vault,
         "large",
         status="active",
+        title="Sleep " + ("z" * 5_000),
         statement="sleep " + ("x" * 5_000),
     )
 
@@ -337,6 +353,113 @@ def test_personal_pattern_context_bounds_statement_and_rendered_envelope(
         matched_excerpt="sleep " + ("y" * 5_000),
     )
 
+    assert len(item.title) <= pattern_context_module.PERSONAL_PATTERN_TITLE_MAX_CHARS
     assert len(item.statement) <= pattern_context_module.PERSONAL_PATTERN_STATEMENT_MAX_CHARS
     assert len(rendered) <= pattern_context_module.PERSONAL_PATTERN_RENDER_MAX_CHARS
     assert "Canonical pattern: patterns/large.md" in rendered
+
+
+def test_planning_exclusions_apply_before_personal_pattern_ranking(tmp_path: Path) -> None:
+    vault = _vault(tmp_path)
+    excluded = tuple(
+        _pattern(
+            vault,
+            f"aa-excluded-{index}",
+            status="active",
+            statement="Sleep recovery consistency evidence.",
+        )
+        for index in range(3)
+    )
+    allowed = _pattern(
+        vault,
+        "zz-allowed",
+        status="active",
+        statement="Sleep recovery consistency evidence.",
+    )
+    goal_text = "---\nid: goal-filter\ntype: goal\ntitle: Improve sleep recovery\n---\nGoal\n"
+    _write(vault, "goals/filter.md", goal_text)
+    goal = GoalRecord(
+        schema_version=1,
+        goal_id="goal-filter",
+        title="Improve sleep recovery",
+        status="active",
+        path="goals/filter.md",
+        content_hash=_digest(goal_text),
+        description="Improve sleep recovery consistency.",
+        readiness="clarifying",
+    )
+
+    context = build_planning_context(
+        vault_root=vault,
+        goal=goal,
+        index=CopilotIndex((goal,), (), ()),
+        exclude_paths=excluded,
+    )
+
+    assert allowed in {item.path for item in context.items}
+    assert not set(excluded) & {item.path for item in context.items}
+
+
+def test_personal_pattern_context_excludes_archived_before_rank_cap(tmp_path: Path) -> None:
+    vault = _vault(tmp_path)
+    for index in range(20):
+        _pattern(
+            vault,
+            f"aa-archive-{index:02d}",
+            status="archived",
+            statement="Sleep recovery pattern evidence.",
+        )
+    active = _pattern(
+        vault,
+        "zz-active",
+        status="active",
+        statement="Sleep recovery pattern evidence.",
+    )
+
+    context = build_personal_pattern_context(
+        vault_root=vault,
+        runtime_dir=vault / ".lifeos",
+        question="sleep recovery pattern evidence",
+        limit=1,
+    )
+
+    assert [item.pattern_path for item in context.items] == [active]
+
+
+def test_personal_pattern_context_preserves_registry_deleted_state(tmp_path: Path) -> None:
+    from lifeos.registry import Registry, register_scan
+    from lifeos.scanner import scan_vault
+
+    vault = _vault(tmp_path)
+    runtime_dir = vault / ".lifeos"
+    runtime_dir.mkdir()
+    source = "---\nid: source-sleep\n---\nReviewed sleep evidence.\n"
+    _write(vault, "notes/source.md", source)
+    evidence = (
+        PatternEvidence(
+            path="notes/source.md",
+            source_id="source-sleep",
+            content_hash=_digest(source),
+            role="supporting",
+        ),
+    )
+    _pattern(
+        vault,
+        "history",
+        status="active",
+        statement="Sleep evidence has historical lineage.",
+        evidence=evidence,
+    )
+    registry = Registry(runtime_dir / "registry.db")
+    registry.initialize()
+    register_scan(registry, vault, scan_vault(vault))
+    (vault / "notes/source.md").unlink()
+    register_scan(registry, vault, scan_vault(vault))
+
+    context = build_personal_pattern_context(
+        vault_root=vault,
+        runtime_dir=runtime_dir,
+        question="sleep evidence historical lineage",
+    )
+
+    assert context.items[0].references[0].state == "deleted"

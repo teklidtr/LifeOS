@@ -142,6 +142,12 @@ def build_planning_context(
         )
         if value
     )
+    def pattern_context_path_filter(path: str) -> bool:
+        if path in excludes:
+            return False
+        root = path.split("/", 1)[0]
+        return root not in policy.sensitive_roots
+
     try:
         pattern_context = build_personal_pattern_context(
             vault_root=vault_root,
@@ -149,6 +155,8 @@ def build_planning_context(
             question=pattern_query,
             limit=3,
             mode="external",
+            redact_terms=redactions,
+            path_filter=pattern_context_path_filter,
         )
         pattern_by_path = {item.pattern_path: item for item in pattern_context.items}
         candidates.extend(

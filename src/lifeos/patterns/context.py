@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import re
+import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Literal
+from typing import Literal, cast
 
 from lifeos.context.search import lexical_search_report
-from lifeos.registry import Registry, register_scan
+from lifeos.registry import FileTrackingError, Registry, RegistryError, register_scan
 from lifeos.retrieval import RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
-from lifeos.scanner import scan_vault
+from lifeos.scanner import ScannerError, scan_vault
 from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.vault_paths import iter_vault_markdown_paths
 
@@ -36,6 +38,7 @@ PatternContextMode = Literal["local", "external"]
 
 DEFAULT_PERSONAL_PATTERN_CONTEXT_LIMIT = 4
 PERSONAL_PATTERN_REFERENCE_LIMIT = 3
+PERSONAL_PATTERN_TITLE_MAX_CHARS = 240
 PERSONAL_PATTERN_STATEMENT_MAX_CHARS = 600
 PERSONAL_PATTERN_RENDER_MAX_CHARS = 1_200
 _PERSONAL_PATTERN_ROLE = "evidence-not-instruction"
@@ -184,27 +187,77 @@ def archived_personal_pattern_paths_for_scope(
     return tuple(sorted(archived))
 
 
+def _runtime_scan_filter(
+    vault_root: Path, runtime_dir: Path
+) -> Callable[[str], bool]:
+    root = Path(os.path.abspath(os.fspath(vault_root)))
+    runtime = Path(os.path.abspath(os.fspath(runtime_dir)))
+    try:
+        relative_runtime = runtime.relative_to(root)
+    except ValueError:
+        return lambda _path: True
+    if relative_runtime == Path("."):
+        raise PersonalPatternContextError(
+            "Personal Model runtime directory cannot overlap the canonical vault root"
+        )
+    prefix = relative_runtime.as_posix().rstrip("/")
+
+    def allowed(path: str) -> bool:
+        candidate = path.rstrip("/")
+        return candidate != prefix and not candidate.startswith(prefix + "/")
+
+    return allowed
+
+
+def _snapshot_registry(*, runtime_dir: Path, temporary: str) -> Registry:
+    snapshot = Registry(Path(temporary) / "registry.db")
+    snapshot.initialize()
+    source = Registry(runtime_dir / "registry.db")
+    try:
+        if source.schema_version:
+            with source.connect_read_only() as source_connection:
+                with snapshot.connect() as snapshot_connection:
+                    source_connection.backup(snapshot_connection)
+    except (RegistryError, sqlite3.Error) as exc:
+        raise PersonalPatternContextError(
+            f"Could not snapshot registry history for Personal Model context: {exc}"
+        ) from exc
+    return snapshot
+
+
 def _document(
     *,
     vault_root: Path,
     runtime_dir: Path,
     allow_path: Callable[[str], bool],
 ) -> PersonalModelDocument:
-    del runtime_dir
     with TemporaryDirectory(prefix="lifeos-personal-model-context-") as temporary:
-        registry = Registry(Path(temporary) / "registry.db")
-        registry.initialize()
-        register_scan(
-            registry,
-            vault_root,
-            scan_vault(vault_root, path_filter=allow_path),
-            identity_allow_path=allow_path,
-        )
-        return build_personal_model_document(
-            vault_root=vault_root,
-            registry=registry,
-            allow_path=allow_path,
-        )
+        registry = _snapshot_registry(runtime_dir=runtime_dir, temporary=temporary)
+        try:
+            runtime_filter = _runtime_scan_filter(vault_root, runtime_dir)
+
+            def scan_allow_path(path: str) -> bool:
+                return runtime_filter(path) and allow_path(path)
+
+            entries = scan_vault(
+                vault_root,
+                path_filter=scan_allow_path,
+            )
+            register_scan(
+                registry,
+                vault_root,
+                entries,
+                identity_allow_path=allow_path,
+            )
+            return build_personal_model_document(
+                vault_root=vault_root,
+                registry=registry,
+                allow_path=allow_path,
+            )
+        except (FileTrackingError, RegistryError, ScannerError) as exc:
+            raise PersonalPatternContextError(
+                f"Could not refresh scoped registry facts for Personal Model context: {exc}"
+            ) from exc
 
 
 def _bounded_text(text: str, *, limit: int) -> str:
@@ -227,6 +280,20 @@ def _redact(
     return result, tuple(applied)
 
 
+def _merge_redactions(
+    *groups: tuple[dict[str, object], ...],
+) -> tuple[dict[str, object], ...]:
+    counts: dict[str, int] = {}
+    for group in groups:
+        for entry in group:
+            label = str(entry["label"])
+            counts[label] = counts.get(label, 0) + cast(int, entry["occurrences"])
+    return tuple(
+        {"label": label, "occurrences": counts[label]}
+        for label in sorted(counts)
+    )
+
+
 def _statement(vault_root: Path, item: PersonalModelItem) -> str:
     try:
         source = read_vault_markdown(vault_root, item.pattern_path)
@@ -242,7 +309,12 @@ def _statement(vault_root: Path, item: PersonalModelItem) -> str:
     return artifact.metadata.statement
 
 
-def _references(item: PersonalModelItem) -> tuple[PersonalPatternContextReference, ...]:
+def _references(
+    item: PersonalModelItem, terms: tuple[str, ...]
+) -> tuple[
+    tuple[PersonalPatternContextReference, ...],
+    tuple[dict[str, object], ...],
+]:
     ordered = sorted(
         item.evidence_diagnostics,
         key=lambda diagnostic: (
@@ -251,17 +323,27 @@ def _references(item: PersonalModelItem) -> tuple[PersonalPatternContextReferenc
             diagnostic.reference.content_hash,
         ),
     )
-    return tuple(
-        PersonalPatternContextReference(
-            role=diagnostic.reference.role,
-            state=diagnostic.state,
-            reviewed_path=diagnostic.reference.path,
-            reviewed_content_hash=diagnostic.reference.content_hash,
-            current_path=diagnostic.current_path,
-            current_content_hash=diagnostic.current_content_hash,
+    references: list[PersonalPatternContextReference] = []
+    redaction_groups: list[tuple[dict[str, object], ...]] = []
+    for diagnostic in ordered[:PERSONAL_PATTERN_REFERENCE_LIMIT]:
+        reviewed_path, reviewed_redactions = _redact(diagnostic.reference.path, terms)
+        if diagnostic.current_path is None:
+            current_path = None
+            current_redactions: tuple[dict[str, object], ...] = ()
+        else:
+            current_path, current_redactions = _redact(diagnostic.current_path, terms)
+        references.append(
+            PersonalPatternContextReference(
+                role=diagnostic.reference.role,
+                state=diagnostic.state,
+                reviewed_path=reviewed_path,
+                reviewed_content_hash=diagnostic.reference.content_hash,
+                current_path=current_path,
+                current_content_hash=diagnostic.current_content_hash,
+            )
         )
-        for diagnostic in ordered[:PERSONAL_PATTERN_REFERENCE_LIMIT]
-    )
+        redaction_groups.extend((reviewed_redactions, current_redactions))
+    return tuple(references), _merge_redactions(*redaction_groups)
 
 
 def build_personal_pattern_context(
@@ -300,14 +382,22 @@ def build_personal_pattern_context(
     )
     document = _document(vault_root=vault_root, runtime_dir=runtime_dir, allow_path=allow_path)
     by_path = {item.pattern_path: item for item in document.items}
+    archived_default_paths = frozenset(
+        item.pattern_path
+        for item in document.archived
+        if item.pattern_path not in explicit
+    )
 
     if candidate_paths is None:
+        def search_allow_path(path: str) -> bool:
+            return allow_path(path) and path not in archived_default_paths
+
         search = lexical_search_report(
             vault_root=vault_root,
             query=normalized_question,
             limit=max(16, limit * 4),
             path_prefix="patterns",
-            path_filter=allow_path,
+            path_filter=search_allow_path,
         )
         paths = tuple(item.path for item in search.results)
     else:
@@ -347,27 +437,34 @@ def build_personal_pattern_context(
         eligible_seen += 1
         if len(items) >= limit:
             continue
-        statement, applied = _redact(
+        title, title_redactions = _redact(
+            _bounded_text(model_item.title, limit=PERSONAL_PATTERN_TITLE_MAX_CHARS),
+            redactions,
+        )
+        statement, statement_redactions = _redact(
             _bounded_text(
                 _statement(vault_root, model_item),
                 limit=PERSONAL_PATTERN_STATEMENT_MAX_CHARS,
             ),
             redactions,
         )
+        references, reference_redactions = _references(model_item, redactions)
         items.append(
             PersonalPatternContextItem(
                 pattern_id=model_item.pattern_id,
                 pattern_path=model_item.pattern_path,
                 pattern_content_hash=model_item.pattern_content_hash,
-                title=model_item.title,
+                title=title,
                 statement=statement,
                 status=model_item.status,
                 confidence=model_item.confidence,
                 evidence_health=model_item.evidence_health,
                 evidence_fingerprint=model_item.evidence_fingerprint,
                 interpretation=_INTERPRETATION_BY_STATUS[model_item.status],
-                references=_references(model_item),
-                redactions=applied,
+                references=references,
+                redactions=_merge_redactions(
+                    title_redactions, statement_redactions, reference_redactions
+                ),
             )
         )
 
