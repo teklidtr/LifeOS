@@ -1,0 +1,122 @@
+name: LIFEOS-1707 Codex review fixes
+
+on:
+  push:
+    branches: [lifeos-1707-personal-model-context]
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-validate:
+    if: "${{ github.event.head_commit.message != 'LIFEOS-1707: address Codex review findings' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lifeos-1707-personal-model-context
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: '0.12.0'
+          enable-cache: true
+      - name: Apply Codex review fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement, found {count}')
+              target.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'src/lifeos/context/packs.py',
+              '''            retrieval_scope=scope,\n            explicit_paths=focus_paths,\n        )\n''',
+              '''            retrieval_scope=scope,\n            explicit_paths=focus_paths,\n            path_filter=path_filter,\n        )\n''',
+          )
+          replace_once(
+              'src/lifeos/context/packs.py',
+              '''            candidate_paths=(source.path for source in sources),\n            explicit_paths=focus_paths,\n        )\n''',
+              '''            candidate_paths=(source.path for source in sources),\n            explicit_paths=focus_paths,\n            path_filter=path_filter,\n        )\n''',
+          )
+
+          replace_once(
+              'src/lifeos/patterns/context.py',
+              '''DEFAULT_PERSONAL_PATTERN_CONTEXT_LIMIT = 4\nPERSONAL_PATTERN_REFERENCE_LIMIT = 3\n_PERSONAL_PATTERN_ROLE = "evidence-not-instruction"\n''',
+              '''DEFAULT_PERSONAL_PATTERN_CONTEXT_LIMIT = 4\nPERSONAL_PATTERN_REFERENCE_LIMIT = 3\nPERSONAL_PATTERN_STATEMENT_MAX_CHARS = 600\nPERSONAL_PATTERN_RENDER_MAX_CHARS = 1_200\n_PERSONAL_PATTERN_ROLE = "evidence-not-instruction"\n''',
+          )
+          replace_once(
+              'src/lifeos/patterns/context.py',
+              '''def _redact(\n    text: str,\n    terms: tuple[str, ...],\n) -> tuple[str, tuple[dict[str, object], ...]]:\n''',
+              '''def _bounded_text(text: str, *, limit: int) -> str:\n    if len(text) <= limit:\n        return text\n    return text[: max(0, limit - 1)].rstrip() + "…"\n\n\ndef _redact(\n    text: str,\n    terms: tuple[str, ...],\n) -> tuple[str, tuple[dict[str, object], ...]]:\n''',
+          )
+          replace_once(
+              'src/lifeos/patterns/context.py',
+              '''        statement, applied = _redact(_statement(vault_root, model_item), redactions)\n''',
+              '''        statement, applied = _redact(\n            _bounded_text(\n                _statement(vault_root, model_item),\n                limit=PERSONAL_PATTERN_STATEMENT_MAX_CHARS,\n            ),\n            redactions,\n        )\n''',
+          )
+          replace_once(
+              'src/lifeos/patterns/context.py',
+              '''        f"Canonical pattern: {item.pattern_path} ({item.pattern_content_hash}).",\n        f"Statement: {item.statement}",\n    ]\n    if item.references:\n        lines.append(\n            "Evidence references: "\n            + "; ".join(\n                (\n                    f"{reference.role}:{reference.state}:"\n                    f"{reference.current_path or reference.reviewed_path}"\n                )\n                for reference in item.references\n            )\n        )\n    excerpt = " ".join((matched_excerpt or "").split())\n    if excerpt and excerpt.casefold() not in item.statement.casefold():\n        lines.append(f"Matched canonical excerpt: {excerpt[:600]}")\n    return "\\n".join(lines)\n''',
+              '''        f"Canonical pattern: {item.pattern_path} ({item.pattern_content_hash}).",\n    ]\n    if item.references:\n        lines.append(\n            "Evidence references: "\n            + "; ".join(\n                (\n                    f"{reference.role}:{reference.state}:"\n                    f"{reference.current_path or reference.reviewed_path}"\n                )\n                for reference in item.references\n            )\n        )\n    lines.append(f"Statement: {item.statement}")\n    excerpt = " ".join((matched_excerpt or "").split())\n    if excerpt and excerpt.casefold() not in item.statement.casefold():\n        lines.append(f"Matched canonical excerpt: {excerpt[:260]}")\n    return _bounded_text(\n        "\\n".join(lines),\n        limit=PERSONAL_PATTERN_RENDER_MAX_CHARS,\n    )\n''',
+          )
+
+          replace_once(
+              'src/lifeos/experiments/privacy.py',
+              '''            limit=3,\n            mode="external",\n            path_filter=provider_filter,\n''',
+              '''            limit=3,\n            mode="external",\n            redact_terms=redactions,\n            path_filter=provider_filter,\n''',
+          )
+          replace_once(
+              'src/lifeos/experiments/privacy.py',
+              '''            candidate_paths=explicit_pattern_paths,\n            explicit_paths=explicit_pattern_paths,\n            path_filter=provider_filter,\n''',
+              '''            candidate_paths=explicit_pattern_paths,\n            explicit_paths=explicit_pattern_paths,\n            redact_terms=redactions,\n            path_filter=provider_filter,\n''',
+          )
+          replace_once(
+              'src/lifeos/experiments/privacy.py',
+              '''        excerpt, included_bytes, item_truncated = _truncate(visible, allowance)\n        truncated = truncated or item_truncated\n        items.append(\n            ExperimentContextItem(\n''',
+              '''        excerpt, included_bytes, item_truncated = _truncate(visible, allowance)\n        truncated = truncated or item_truncated\n        item_redactions = (\n            *applied,\n            *(pattern_item.redactions if pattern_item is not None else ()),\n        )\n        items.append(\n            ExperimentContextItem(\n''',
+          )
+          replace_once(
+              'src/lifeos/experiments/privacy.py',
+              '''                truncated=item_truncated,\n                redactions=applied,\n                personal_pattern=pattern_item,\n''',
+              '''                truncated=item_truncated,\n                redactions=item_redactions,\n                personal_pattern=pattern_item,\n''',
+          )
+
+          replace_once(
+              'tests/patterns/test_context_integration.py',
+              '''from lifeos.patterns import (\n    PatternEvidence,\n''',
+              '''from lifeos.patterns import context as pattern_context_module\nfrom lifeos.patterns import (\n    PatternEvidence,\n''',
+          )
+          replace_once(
+              'tests/patterns/test_context_integration.py',
+              '''    assert "exploratory-hypothesis" in item.excerpt\n    assert "SecretName" not in item.excerpt\n    assert "[REDACTED-1]" in item.excerpt\n''',
+              '''    assert "exploratory-hypothesis" in item.excerpt\n    assert "SecretName" not in item.excerpt\n    assert "[REDACTED-1]" in item.excerpt\n    assert "SecretName" not in str(item.to_dict())\n    assert item.personal_pattern is not None\n    assert "[REDACTED-1]" in item.personal_pattern.statement\n    assert item.redactions\n\n\ndef test_context_pack_forwards_caller_filter_to_all_pattern_scans(\n    tmp_path: Path, monkeypatch\n) -> None:\n    vault = _vault(tmp_path)\n    hidden = _pattern(\n        vault,\n        "hidden",\n        status="archived",\n        statement="Hidden sleep history.",\n    )\n    excluded_source = "Excluded sleep evidence."\n    _write(vault, "notes/excluded.md", excluded_source)\n    evidence = (\n        PatternEvidence(\n            path="notes/excluded.md",\n            content_hash=_digest(excluded_source),\n            role="supporting",\n        ),\n    )\n    visible = _pattern(\n        vault,\n        "visible",\n        status="active",\n        statement="Visible sleep evidence.",\n        evidence=evidence,\n    )\n    original_read = pattern_context_module.read_vault_markdown\n\n    def guarded_read(vault_root: Path, path: str):\n        if path == hidden:\n            raise AssertionError("caller-filtered pattern was read")\n        return original_read(vault_root, path)\n\n    monkeypatch.setattr(pattern_context_module, "read_vault_markdown", guarded_read)\n    pack = build_context_pack(\n        vault_root=vault,\n        runtime_dir=vault / ".lifeos",\n        question="sleep evidence",\n        focus_paths=(visible,),\n        limit=1,\n        path_filter=lambda path: path != hidden and not path.startswith("notes"),\n    )\n\n    assert pack.personal_patterns[0].pattern_path == visible\n    assert pack.personal_patterns[0].references == ()\n    assert "notes/excluded.md" not in str(pack.personal_patterns[0].to_dict())\n\n\ndef test_personal_pattern_context_bounds_statement_and_rendered_envelope(\n    tmp_path: Path,\n) -> None:\n    vault = _vault(tmp_path)\n    _pattern(\n        vault,\n        "large",\n        status="active",\n        statement="sleep " + ("x" * 5_000),\n    )\n\n    context = build_personal_pattern_context(\n        vault_root=vault,\n        runtime_dir=vault / ".lifeos",\n        question="sleep",\n    )\n    item = context.items[0]\n    rendered = pattern_context_module.render_personal_pattern_evidence(\n        item,\n        matched_excerpt="sleep " + ("y" * 5_000),\n    )\n\n    assert len(item.statement) <= pattern_context_module.PERSONAL_PATTERN_STATEMENT_MAX_CHARS\n    assert len(rendered) <= pattern_context_module.PERSONAL_PATTERN_RENDER_MAX_CHARS\n    assert "Canonical pattern: patterns/large.md" in rendered\n''',
+          )
+
+          replace_once(
+              'docs/personal-model-architecture.md',
+              '''Context Packs reuse their existing source bound and relevance ranking rather than appending a second Personal Model payload. A selected pattern source receives the evidence envelope above, while ordinary archived patterns are removed from candidate scope before retrieval. Knowledge conversations reuse those bounded excerpts; goal-to-plan clarification adds only relevant pattern evidence without changing readiness or planner selection; experiment previews apply the same provider-scope and redaction rules; canonical daily and weekly review items continue to expose their existing bounded pattern evidence and source explanations.\n''',
+              '''Context Packs reuse their existing source bound and relevance ranking rather than appending a second Personal Model payload. A selected pattern source receives the evidence envelope above, while ordinary archived patterns are removed from candidate scope before retrieval. Caller path filters are forwarded into both archived-pattern discovery and Personal Model evidence scans, and both the statement payload and rendered evidence envelope have explicit per-item character caps. Knowledge conversations reuse those bounded excerpts; goal-to-plan clarification adds only relevant pattern evidence without changing readiness or planner selection; experiment previews apply the same provider-scope and redaction rules to both rendered excerpts and nested typed pattern metadata; canonical daily and weekly review items continue to expose their existing bounded pattern evidence and source explanations.\n''',
+          )
+          PY
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+      - name: Validate review fixes
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          uv run pytest -q tests/patterns/test_context_integration.py
+          uv run pytest -q
+          uv run ruff check src tests
+          uv run mypy src
+          git diff --check
+      - name: Commit review fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lifeos/context/packs.py src/lifeos/patterns/context.py src/lifeos/experiments/privacy.py tests/patterns/test_context_integration.py docs/personal-model-architecture.md
+          git commit -m "LIFEOS-1707: address Codex review findings"
+          git push origin HEAD:lifeos-1707-personal-model-context
