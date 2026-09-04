@@ -71,12 +71,24 @@ export class LifeOSPersonalModelItemView extends ItemView {
       cls: "lifeos-personal-model__lede",
     });
     const headerActions = header.createDiv({ cls: "lifeos-personal-model__toolbar" });
-    this.button(headerActions, "Refresh", "Refresh Personal Model without changing canonical Markdown", () => {
-      void this.controller.load(now());
-    });
-    this.button(headerActions, "Rebuild derived state", "Rebuild disposable Personal Model state from canonical Markdown", () => {
-      void this.controller.rebuild(now());
-    });
+    const refresh = this.button(
+      headerActions,
+      "Refresh",
+      "Refresh Personal Model without changing canonical Markdown",
+      () => {
+        void this.controller.load(now());
+      },
+    );
+    refresh.disabled = state.busy;
+    const rebuild = this.button(
+      headerActions,
+      "Rebuild derived state",
+      "Rebuild disposable Personal Model state from canonical Markdown",
+      () => {
+        void this.controller.rebuild(now());
+      },
+    );
+    rebuild.disabled = state.busy;
 
     const status = root.createDiv({ cls: `lifeos-personal-model__status is-${state.stage}` });
     status.setAttr("id", "personal-model-status");
@@ -88,9 +100,15 @@ export class LifeOSPersonalModelItemView extends ItemView {
     if (state.recovery) status.createEl("p", { text: state.recovery });
 
     if (state.stage === "missing-runtime" || state.stage === "blocked") {
-      this.button(status, "Rebuild Personal Model", "Rebuild disposable Personal Model state", () => {
-        void this.controller.rebuild(now());
-      });
+      const recovery = this.button(
+        status,
+        "Rebuild Personal Model",
+        "Rebuild disposable Personal Model state",
+        () => {
+          void this.controller.rebuild(now());
+        },
+      );
+      recovery.disabled = state.busy;
     }
 
     this.renderTrack(root, state);
@@ -179,6 +197,7 @@ export class LifeOSPersonalModelItemView extends ItemView {
           tabindex: state.view === view ? "0" : "-1",
         },
       });
+      button.disabled = state.busy;
       button.addEventListener("click", () => this.controller.setView(view));
       button.addEventListener("keydown", (event) => this.onTabKeydown(event, view));
     }
@@ -212,6 +231,7 @@ export class LifeOSPersonalModelItemView extends ItemView {
         attr: { type: "button", id: `personal-model-pattern-${item.pattern_id}` },
       });
       button.setAttr("aria-label", `Inspect ${item.title}. ${humanState(item.status)}, ${item.confidence} confidence, ${humanState(item.evidence_health)} evidence health.`);
+      button.disabled = state.busy;
       button.createEl("strong", { text: item.title });
       button.createEl("span", { text: item.statement });
       button.createEl("small", {
@@ -380,9 +400,10 @@ export class LifeOSPersonalModelItemView extends ItemView {
       void this.controller.createPreviewed();
     });
     create.disabled = state.busy;
-    this.button(controls, "Cancel preview", "Close this preview without creating a proposal", () => {
+    const cancel = this.button(controls, "Cancel preview", "Close this preview without creating a proposal", () => {
       this.controller.clearProposalPreview();
     });
+    cancel.disabled = state.busy;
 
     if (state.proposalResult) {
       const created = section.createDiv({ cls: "lifeos-personal-model__proposal-created" });
@@ -398,8 +419,15 @@ export class LifeOSPersonalModelItemView extends ItemView {
 
   private restoreFocus(state: PersonalModelWorkspaceState, shouldRestoreFocus: boolean): void {
     if (!shouldRestoreFocus) return;
-    const target = Array.from(this.contentEl.querySelectorAll<HTMLElement>("[id]"))
-      .find((element) => element.id === state.focusTarget);
+    const ids = [
+      state.focusTarget,
+      state.focusTarget === "personal-model-actions" ? "personal-model-track" : undefined,
+      "personal-model-status",
+    ].filter((value): value is string => Boolean(value));
+    const elements = Array.from(this.contentEl.querySelectorAll<HTMLElement>("[id]"));
+    const target = ids
+      .map((id) => elements.find((element) => element.id === id))
+      .find((element): element is HTMLElement => element !== undefined);
     target?.focus();
   }
 
