@@ -32,6 +32,14 @@ jobs:
           end = workflow.index("\n          PY\n", start)
           script = textwrap.dedent(workflow[start:end])
           exec(compile(script, '<lifeos-1707-consolidation>', 'exec'))
+
+          target = Path('src/lifeos/patterns/context.py')
+          text = target.read_text(encoding='utf-8')
+          old = '''            entries = scan_vault(\n                vault_root,\n                path_filter=_runtime_scan_filter(vault_root, runtime_dir),\n            )\n'''
+          new = '''            runtime_filter = _runtime_scan_filter(vault_root, runtime_dir)\n\n            def scan_allow_path(path: str) -> bool:\n                return runtime_filter(path) and allow_path(path)\n\n            entries = scan_vault(\n                vault_root,\n                path_filter=scan_allow_path,\n            )\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one scoped-scan replacement, found {text.count(old)}')
+          target.write_text(text.replace(old, new, 1), encoding='utf-8')
           PYRUN
       - name: Install dependencies
         run: uv sync --frozen --extra dev --extra mcp
@@ -39,7 +47,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
-          uv run pytest -q tests/patterns/test_context_integration.py
+          uv run pytest -q tests/patterns/test_context_integration.py tests/context/test_hybrid_context_security_review.py::test_hybrid_health_prunes_protected_subtree_before_metadata_access tests/context/test_hybrid_context_second_review.py::test_invalid_retrieval_policy_remains_execution_error
           uv run pytest -q
           uv run ruff check src tests
           uv run mypy src
