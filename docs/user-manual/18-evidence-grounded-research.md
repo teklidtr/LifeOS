@@ -1,4 +1,4 @@
-[← Previous: Home-Node Runtime Safety](17-home-node-runtime-safety.md) · [Manual home](README.md)
+[← Previous: Home-Node Runtime Safety](17-home-node-runtime-safety.md) · [Manual home](README.md) · [Next: Evidence-Backed Personal Model →](19-personal-model.md)
 
 # 18. Evidence-Grounded Research
 
@@ -91,4 +91,4 @@ External evidence alone never authorizes an automatic wiki edit.
 
 ---
 
-[← Previous: Home-Node Runtime Safety](17-home-node-runtime-safety.md) · [Manual home](README.md)
+[← Previous: Home-Node Runtime Safety](17-home-node-runtime-safety.md) · [Manual home](README.md) · [Next: Evidence-Backed Personal Model →](19-personal-model.md)
