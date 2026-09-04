@@ -2,7 +2,8 @@
 
 LifeOS is a private, local, Obsidian-native system for durable knowledge, study and
 flashcards, adaptive planning, journals and metrics, personal observation, experiments,
-rich capture, evidence-grounded conversations, and proposal-based agent assistance.
+rich capture, evidence-grounded conversations, an evidence-backed Personal Model of
+reviewable working hypotheses, and proposal-based agent assistance.
 
 Its purpose is to help the user understand how they work, not merely maximize task
 completion.
@@ -81,6 +82,7 @@ Home Assistant Yellow path, doctor exit semantics, and Obsidian plugin installat
 - [Setup & Installation](docs/user-manual/04-setup-and-installation.md)
 - [Step-by-Step Workflow](docs/user-manual/05-workflow.md)
 - [Obsidian Desktop Cockpit](docs/user-manual/06-obsidian-desktop.md)
+- [Evidence-Backed Personal Model](docs/user-manual/19-personal-model.md)
 - [Generated Wiki Source History / References](docs/user-manual/14-generated-wiki-source-history.md)
 - [System architecture](docs/architecture.md)
 - [Design decisions](docs/design-decisions.md)
