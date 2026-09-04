@@ -131,14 +131,14 @@ def _approve(vault: Path, proposal_id: str, *, minute: int) -> None:
         proposal,
         proposals_root=vault / "proposals",
         submitted_by="trusted-human",
-        submitted_at=f"2026-09-04T18:{minute:02d}:00Z",
+        submitted_at=f"2026-09-04T20:{minute:02d}:00Z",
     )
     pending = _load(vault, proposal_id)
     approve_proposal(
         pending,
         proposals_root=vault / "proposals",
         approved_by="trusted-human",
-        approved_at=f"2026-09-04T18:{minute + 1:02d}:00Z",
+        approved_at=f"2026-09-04T20:{minute + 1:02d}:00Z",
     )
 
 
@@ -210,7 +210,7 @@ def test_hidden_pattern_id_collision_is_blocked_only_at_trusted_apply(tmp_path: 
             vault_root=vault,
             request=ApplyProposalRequest(proposal_id),
             authorizer=authorizer,
-            clock_fn=lambda: datetime(2026, 9, 4, 18, 2, tzinfo=timezone.utc),
+            clock_fn=lambda: datetime(2026, 9, 4, 20, 2, tzinfo=timezone.utc),
         )
 
     assert [request.action for request in authorizer.requests] == [ConsequentialAction.APPLY]
@@ -228,7 +228,7 @@ def test_composite_accept_uses_the_same_trusted_pattern_identity_guard(tmp_path:
             vault_root=vault,
             request=AcceptProposalRequest(proposal_id),
             authorizer=authorizer,
-            clock_fn=lambda: datetime(2026, 9, 4, 18, 2, tzinfo=timezone.utc),
+            clock_fn=lambda: datetime(2026, 9, 4, 20, 2, tzinfo=timezone.utc),
         )
 
     assert [request.action for request in authorizer.requests] == [ConsequentialAction.APPLY]
@@ -268,7 +268,7 @@ def test_application_rechecks_identity_after_another_approved_seed_is_applied(
         first,
         vault_root=vault,
         applied_by="trusted-human",
-        applied_at="2026-09-04T18:30:00Z",
+        applied_at="2026-09-04T21:00:00Z",
     )
     assert applied.new_status.value == "applied"
     assert (vault / "patterns" / "focus-after-walk-a.md").exists()
@@ -278,7 +278,7 @@ def test_application_rechecks_identity_after_another_approved_seed_is_applied(
             second,
             vault_root=vault,
             applied_by="trusted-human",
-            applied_at="2026-09-04T18:31:00Z",
+            applied_at="2026-09-04T21:01:00Z",
         )
 
     assert raised.value.code is ApplicationErrorCode.PREFLIGHT_FAILED
