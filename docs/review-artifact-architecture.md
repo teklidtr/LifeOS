@@ -198,8 +198,9 @@ decisions, continuity suppression, and proposal handoff defined here.
 
 Weekly review may show at most eight pattern items. Eligible items are newly
 tracked seeds, due patterns, `needs-review` patterns, materially changed active
-patterns, and patterns with newly changed contesting evidence. Merely being
-`active` is not a selection reason. Selection is deterministic and stable.
+patterns, and patterns with unresolved contesting evidence, including newly
+changed contesting evidence. Merely being `active` is not a selection reason.
+Selection is deterministic and stable.
 
 Daily review is fail-closed for pattern attention. The section is empty unless an
 explicit caller or workspace supplies stable pattern IDs as urgent or pinned.
