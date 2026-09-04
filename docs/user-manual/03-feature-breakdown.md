@@ -779,9 +779,10 @@ lifecycle state, qualitative confidence, review reasons, origin, evidence
 references, reviewed SHA-256 versions, and an evidence fingerprint.
 
 These notes are hypotheses, not user truths, diagnoses, personality labels, or
-instructions. `active` means the user currently accepts a hypothesis as useful
-working context. `needs-review` means the evidence or timing deserves another
-look. `confidence` remains separate from lifecycle and is never a numeric model
+instructions. `seed` means **track this hypothesis** while it remains exploratory.
+`active` means **adopt this as useful working context for now** after explicit
+review. `needs-review` means the evidence or timing deserves another look.
+`confidence` remains separate from lifecycle and is never a numeric model
 probability.
 
 LifeOS uses the `personal-pattern-evidence` managed block for the refreshable
@@ -793,15 +794,32 @@ ordinary content.
 
 The schema parser validates stable IDs, lifecycle values, evidence roles, safe
 vault-relative evidence paths, exact lowercase SHA-256 digests, timestamps, and
-portable optional evaluation parameters. It also detects duplicate pattern IDs
-when canonical patterns are enumerated. Parsing reads directly from Markdown and
-does not require `.lifeos/` or another disposable runtime database.
+portable optional evaluation parameters. Evidence references can be normalized
+and fingerprinted deterministically while retaining supporting, contesting, and
+contextual roles and the exact reviewed source versions. Parsing reads directly
+from Markdown and does not require `.lifeos/` or another disposable runtime
+database.
 
-This artifact layer does not yet generate hypotheses, recalculate evidence
-fingerprints, change lifecycle states, build the aggregate Personal Model, or
-alter planner ranking. Those behaviors remain separate Phase 17 steps so evidence
-storage cannot quietly turn into interpretation or planning authority. See
-[Evidence-Backed Personal Model Architecture](../personal-model-architecture.md).
+Pattern lifecycle changes use typed proposal builders rather than direct
+canonical writes. **Track** creates a draft `create_file` proposal for an absent
+human-owned `seed`; it does not create the pattern merely because a candidate was
+detected. **Adopt** proposes `seed → active`. Revise, mark needs-review, resolve
+review, change confidence, and archive operations produce base-hash-bound
+`patch_human_file` proposals against the current pattern snapshot. Resolving a
+review requires an explicit choice to return to `seed` or `active`, so finishing
+a review does not silently mean adopting the hypothesis.
+
+The draft records the transition reason and reviewed evidence fingerprint and
+uses the ordinary proposal review snapshot. Rejection leaves canonical Markdown
+unchanged, a stale target blocks application, and interrupted application uses
+the shared proposal recovery machinery. The proposal builder does not choose an
+approver and cannot approve or apply its own interpretation.
+
+The aggregate Personal Model, automatic re-evaluation/review triggers, bounded
+review/context integration, Obsidian workspace, and any planner influence remain
+separate Phase 17 steps. In particular, a tracked or active pattern does not
+silently become planner policy. See [Evidence-Backed Personal Model
+Architecture](../personal-model-architecture.md).
 
 ---
 
