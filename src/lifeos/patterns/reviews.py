@@ -12,13 +12,14 @@ from lifeos.facade.registry_tools import refresh_registry
 from lifeos.registry import Registry
 
 from .contracts import PatternError
+from .evidence import compute_evidence_fingerprint
 from .model import (
     PersonalModelDocument,
     PersonalModelError,
     PersonalModelItem,
     build_personal_model_document,
 )
-from .review import PatternReviewService
+from .review import PatternReviewAssessment, PatternReviewService
 
 if TYPE_CHECKING:
     from lifeos.reviews.contracts import (
@@ -349,11 +350,19 @@ def create_pattern_review_proposal(
             "Refresh the review and propose from the current evidence.",
             {"item_id": item_id},
         )
-    registry = Registry(runtime_dir / "registry.db")
-    service = PatternReviewService(
-        vault_root=vault_root,
-        registry=registry,
-        allow_path=_allow_all,
+    assessment = PatternReviewAssessment(
+        pattern_id=current.pattern_id,
+        pattern_path=current.pattern_path,
+        pattern_content_hash=current.pattern_content_hash,
+        reviewed_evidence_fingerprint=current.evidence_fingerprint,
+        declared_evidence_fingerprint=compute_evidence_fingerprint(current.evidence),
+        recommendation=current.review_recommendation,
+        reasons=current.review_trigger_reasons,
+        reviewed_analysis=None,
+        current_analysis=None,
     )
-    assessment = service.assess(pattern_id, now=now)
-    return service.create_review_proposal(assessment, actor_id=actor_id, now=now)
+    return PatternReviewService(
+        vault_root=vault_root,
+        registry=Registry(runtime_dir / "registry.db"),
+        allow_path=_allow_all,
+    ).create_review_proposal(assessment, actor_id=actor_id, now=now)
