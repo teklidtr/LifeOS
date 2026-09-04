@@ -773,3 +773,32 @@ reviewable proposals rather than editing pattern Markdown directly.
 Missing or corrupt derived Personal Model state degrades to explicit rebuild/recovery behavior.
 Daily and weekly review integration is bounded and optional, and evidence-fingerprint-scoped
 dismissals remain suppressed until the evidence context changes.
+
+## DD-100: Agent-assisted personal interpretation is evidence-bound and proposal-only
+
+External agents may propose a new personal-pattern seed or a revision of an existing canonical
+pattern only from an explicitly selected, bounded evidence set. Every selected source carries the
+canonical vault-relative path, the exact SHA-256 version the agent inspected, and its supporting,
+contesting, or contextual role. Existing-pattern review is additionally bound to the exact
+canonical pattern hash the agent inspected.
+
+LifeOS remains the deterministic authority for trust boundaries. It applies external retrieval
+policy before content access, independently re-reads and hashes selected evidence, derives stable
+source identity only from verified current content, and re-verifies the selected versions
+immediately before proposal persistence. Missing, changed, unsafe, excluded, or non-authorized
+protected sources fail closed. Protected existing patterns follow the same disclosure boundary;
+path knowledge is not permission.
+
+The semantic payload is provider-neutral and review-only: a concise hypothesis, rationale,
+proposed confidence class, supporting and contesting evidence, competing explanations, and
+limitations. It is digest-bound to the ordinary proposal review surface, stores no hidden
+chain-of-thought, creates no provider-specific canonical fields, and does not establish a user
+trait, diagnosis, or truth. Canonical candidate content continues to use the existing personal
+pattern schema and proposal builders.
+
+Agent-assisted operations stop at `draft`. They cannot choose the approving identity, promote a
+hypothesis to `active`, apply canonical Markdown, or bypass the normal proposal lifecycle. If an
+existing pattern already matches the proposed statement, confidence, and exact verified evidence
+set, LifeOS returns a deterministic no-change result and persists no proposal. Optional semantic
+providers may be absent, unavailable, timed out, or malformed without disabling ordinary local
+deterministic Personal Model operation.
