@@ -19,6 +19,7 @@ from lifeos.patterns.agent_assistance import (
     PatternSemanticSuggestion,
     publish_agent_pattern_proposal,
 )
+from lifeos.patterns.artifact import PatternArtifactService
 from lifeos.patterns.contracts import (
     EvidenceRole,
     PatternConfidence,
@@ -196,11 +197,7 @@ def _verified_evidence(
             raise ToolExecutionError("Selected personal-pattern evidence is not valid UTF-8") from exc
         parsed = parse_markdown_note(vault_root / observed.path, content=text)
         raw_source_id = parsed.frontmatter.get("id")
-        source_id = (
-            raw_source_id
-            if isinstance(raw_source_id, str) and raw_source_id.strip()
-            else None
-        )
+        source_id = raw_source_id if isinstance(raw_source_id, str) and raw_source_id.strip() else None
         verified.append(
             PatternEvidence(
                 path=observed.path,
@@ -312,6 +309,20 @@ def review_agent_pattern(
         evidence=request.evidence,
         allow_protected=request.allow_protected,
     )
+    try:
+        current = PatternArtifactService(vault_root=vault_root).load(request.target_path)
+    except PatternError as exc:
+        if exc.code == "not-found":
+            raise ToolNotFoundError(str(exc)) from exc
+        raise ToolValidationError(str(exc)) from exc
+    if current.content_hash != request.observed_pattern_hash:
+        raise ToolConflictError("The personal pattern changed after the agent inspected it")
+    if (
+        current.metadata.statement == request.semantic.hypothesis
+        and current.metadata.confidence == request.semantic.proposed_confidence
+        and current.metadata.evidence == verified
+    ):
+        return AgentPatternProposalResult("no-change", None, None, request.target_path)
     return _publish(
         vault_root=vault_root,
         request=RevisePatternRequest(
