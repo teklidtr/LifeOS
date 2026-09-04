@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -14,6 +14,7 @@ from lifeos.registry import Registry
 from .contracts import EvidenceRole, PatternEvidence
 
 EvidenceState = Literal["unchanged", "moved", "changed", "missing", "ambiguous", "deleted"]
+EvidencePathPredicate = Callable[[str], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +98,8 @@ def compute_evidence_fingerprint(references: Iterable[PatternEvidence]) -> str:
 def _rows_for_reference(
     connection: sqlite3.Connection,
     reference: PatternEvidence,
+    *,
+    allow_path: EvidencePathPredicate,
 ) -> tuple[_RegistryEvidenceRow, ...]:
     if reference.source_id is not None:
         rows = connection.execute(
@@ -118,14 +121,20 @@ def _rows_for_reference(
             """,
             (reference.path,),
         ).fetchall()
-    return tuple(
-        _RegistryEvidenceRow(
-            path=str(row["vault_path"]),
-            content_hash=None if row["content_hash"] is None else str(row["content_hash"]),
-            is_deleted=bool(row["is_deleted"]),
+
+    visible: list[_RegistryEvidenceRow] = []
+    for row in rows:
+        path = str(row["vault_path"])
+        if not allow_path(path):
+            continue
+        visible.append(
+            _RegistryEvidenceRow(
+                path=path,
+                content_hash=None if row["content_hash"] is None else str(row["content_hash"]),
+                is_deleted=bool(row["is_deleted"]),
+            )
         )
-        for row in rows
-    )
+    return tuple(visible)
 
 
 def _pattern_hash(registry_hash: str | None) -> str | None:
@@ -139,8 +148,10 @@ def _pattern_hash(registry_hash: str | None) -> str | None:
 def _diagnose_reference(
     connection: sqlite3.Connection,
     reference: PatternEvidence,
+    *,
+    allow_path: EvidencePathPredicate,
 ) -> PatternEvidenceDiagnostic:
-    rows = _rows_for_reference(connection, reference)
+    rows = _rows_for_reference(connection, reference, allow_path=allow_path)
     active = tuple(row for row in rows if not row.is_deleted)
 
     if len(active) > 1:
@@ -176,8 +187,13 @@ def _diagnose_reference(
 def resolve_evidence_states(
     registry: Registry,
     references: Iterable[PatternEvidence],
+    *,
+    allow_path: EvidencePathPredicate,
 ) -> tuple[PatternEvidenceDiagnostic, ...]:
-    """Resolve current factual state while preserving every reviewed reference unchanged."""
+    """Resolve factual state within the caller-authorized path scope without advancing reviews."""
     reviewed = tuple(references)
     with registry.connect_read_only() as connection:
-        return tuple(_diagnose_reference(connection, reference) for reference in reviewed)
+        return tuple(
+            _diagnose_reference(connection, reference, allow_path=allow_path)
+            for reference in reviewed
+        )
