@@ -104,13 +104,24 @@ def test_weekly_pattern_section_is_empty_without_patterns(tmp_path: Path) -> Non
     assert section.items == ()
 
 
-def test_weekly_surfaces_due_patterns_and_new_seeds_but_not_quiet_active_patterns(
+def test_weekly_surfaces_due_contesting_and_new_seeds_but_not_quiet_active_patterns(
     tmp_path: Path,
 ) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
     _write_pattern(vault, "due", review_due_at="2026-09-03T09:00:00Z")
     _write_pattern(vault, "quiet")
+    contesting_source = "---\nid: contesting-source\ntype: note\ntitle: Counter\n---\nCounter evidence.\n"
+    _write(vault / "raw" / "counter.md", contesting_source)
+    contesting = (
+        PatternEvidence(
+            path="raw/counter.md",
+            source_id="contesting-source",
+            content_hash=_digest(contesting_source),
+            role="contesting",
+        ),
+    )
+    _write_pattern(vault, "contested", evidence=contesting)
     _write_pattern(vault, "seed", status="seed", last_reviewed_at=None)
 
     snapshot = build_review_snapshot(
@@ -124,8 +135,10 @@ def test_weekly_surfaces_due_patterns_and_new_seeds_but_not_quiet_active_pattern
     section = _section(snapshot, "personal-patterns-weekly")
     assert [item.item_id for item in section.items] == [
         "personal-pattern:due",
+        "personal-pattern:contested",
         "personal-pattern:seed",
     ]
+    assert "unresolved contesting evidence" in section.items[1].detail
     assert all(item.action == "open-source" for item in section.items)
 
 
