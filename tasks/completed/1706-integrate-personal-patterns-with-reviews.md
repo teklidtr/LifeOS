@@ -44,7 +44,7 @@ Make personal hypotheses maintainable over time without turning reviews into an 
 
 # Documentation impact
 
-Status: completed
+Status: required
 
 - `docs/review-artifact-architecture.md`: pattern review evidence documented.
 - `docs/user-manual/10-first-class-reviews.md`: pattern workflow documented.
