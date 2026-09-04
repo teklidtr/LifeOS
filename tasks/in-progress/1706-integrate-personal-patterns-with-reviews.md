@@ -57,6 +57,8 @@ Status: required
 - `mypy src`
 - `git diff --check`
 
+Local validation limitation: the available execution container cannot resolve `github.com`, so the branch cannot be cloned into the local runtime and the listed commands cannot be executed there. The closest practical pre-push substitute was a repository-wide static seam audit of every changed shared call shape (`build_review_snapshot`, `refresh_review_snapshot`, and `open_daily_review`), review/proposal invariants, and the complete branch diff. Required deterministic validation is therefore left explicitly to GitHub CI rather than treated as locally passed.
+
 # Relevant design decisions
 
 - DD-055
