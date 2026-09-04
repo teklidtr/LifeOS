@@ -295,6 +295,16 @@ An external agent may:
 
 The agent cannot establish a hypothesis as truth, infer immutable identity traits, diagnose the user, approve a proposal, bypass protected-scope policy, or directly write canonical pattern semantics.
 
+### Agent-assisted proposal boundary
+
+LIFEOS-1709 exposes two bounded proposal-producing operations through the shared MCP runtime: one for a new `seed` hypothesis and one for a revision of an existing canonical pattern. The external agent supplies only evidence it actually inspected, including each canonical vault-relative path, exact observed SHA-256 content hash, and supporting, contesting, or contextual role. Existing-pattern review also carries the exact canonical pattern hash the agent inspected.
+
+LifeOS applies external retrieval policy before reading those selected sources, independently re-reads and hashes them, derives stable source identity only from the verified current note, and verifies the selected evidence again immediately before proposal persistence. Missing, changed, unsafe, excluded, or non-authorized protected evidence fails closed. A protected existing pattern is subject to the same external-disclosure rule before review. Protected access therefore requires both policy permission and explicit request intent; knowing a path or tool name is not sufficient.
+
+The semantic payload is deliberately provider-neutral and review-only: concise hypothesis, rationale, proposed confidence, supporting and contesting references, competing explanations, and limitations. It is digest-bound inside ordinary proposal metadata/body and never becomes a provider-specific canonical field or hidden reasoning store. The proposal's canonical candidate remains the existing personal-pattern schema, and the existing proposal builder still owns create-versus-base-hash-bound-patch semantics.
+
+Both operations stop at `draft`. They cannot choose an approving identity, promote a pattern to `active`, or apply canonical Markdown. When an existing pattern already has the proposed statement, confidence, and exact verified evidence set, the operation returns a deterministic no-change result and creates no proposal. Optional semantic providers may return no suggestion, time out, be unavailable, or produce malformed output without making ordinary local deterministic Personal Model operation unavailable.
+
 ## Obsidian boundary
 
 The Phase 17 Obsidian workspace is a thin client over Python read models and proposal builders. It will expose Active, Needs review, Seeds, and Archived views; evidence health; supporting and contesting sources; evidence changes; and proposal-backed Track, Adopt, Revise, Contest, and Archive actions.
