@@ -143,6 +143,13 @@ def _require_request_shape(
         raise ToolValidationError("At most 32 selected evidence snapshots are supported")
 
 
+def _validated_suggestion(semantic: AgentPatternSemanticInput) -> PatternSemanticSuggestion:
+    try:
+        return semantic.suggestion()
+    except ValueError as exc:
+        raise ToolValidationError(str(exc)) from exc
+
+
 def _external_allow_path(
     *,
     vault_root: Path,
@@ -254,17 +261,13 @@ def _publish(
     *,
     vault_root: Path,
     request: CreatePatternSeedRequest | RevisePatternRequest,
-    semantic: AgentPatternSemanticInput,
+    suggestion: PatternSemanticSuggestion,
     evidence: tuple[PatternEvidence, ...],
     expected_base_hash: str | None,
     final_scope_check: Callable[[], None],
     identity_allow_path: Callable[[str], bool] | None = None,
 ) -> AgentPatternProposalResult:
-    try:
-        suggestion = semantic.suggestion()
-        review = AgentPatternReviewPayload(suggestion=suggestion, evidence=evidence)
-    except ValueError as exc:
-        raise ToolValidationError(str(exc)) from exc
+    review = AgentPatternReviewPayload(suggestion=suggestion, evidence=evidence)
     proposals = PatternProposalService(
         vault_root=vault_root,
         actor_id="lifeos.external-agent.personal-pattern",
@@ -318,6 +321,7 @@ def propose_agent_pattern(
     request: ProposeAgentPatternRequest,
 ) -> AgentPatternProposalResult:
     _require_request_shape(evidence=request.evidence, allow_protected=request.allow_protected)
+    suggestion = _validated_suggestion(request.semantic)
     _require_external_markdown_path(
         vault_root=vault_root,
         path=request.target_path,
@@ -341,15 +345,15 @@ def propose_agent_pattern(
             pattern_id=request.pattern_id,
             title=request.title,
             description=request.description,
-            statement=request.semantic.hypothesis,
-            confidence=request.semantic.proposed_confidence,
+            statement=suggestion.hypothesis,
+            confidence=suggestion.proposed_confidence,
             origin=PatternOrigin("agent"),
             evidence=verified,
             transition_reason=(
                 "Agent-assisted evidence-bounded seed draft; trusted review is required."
             ),
         ),
-        semantic=request.semantic,
+        suggestion=suggestion,
         evidence=verified,
         expected_base_hash=None,
         final_scope_check=_final_scope_check(
@@ -367,6 +371,7 @@ def review_agent_pattern(
     request: ReviewAgentPatternRequest,
 ) -> AgentPatternProposalResult:
     _require_request_shape(evidence=request.evidence, allow_protected=request.allow_protected)
+    suggestion = _validated_suggestion(request.semantic)
     try:
         PatternEvidence(
             path="patterns/hash-check.md",
@@ -394,8 +399,8 @@ def review_agent_pattern(
     if current.content_hash != request.observed_pattern_hash:
         raise ToolConflictError("The personal pattern changed after the agent inspected it")
     if (
-        current.metadata.statement == request.semantic.hypothesis
-        and current.metadata.confidence == request.semantic.proposed_confidence
+        current.metadata.statement == suggestion.hypothesis
+        and current.metadata.confidence == suggestion.proposed_confidence
         and compute_evidence_fingerprint(current.metadata.evidence)
         == compute_evidence_fingerprint(verified)
     ):
@@ -407,11 +412,11 @@ def review_agent_pattern(
             transition_reason=(
                 "Agent-assisted evidence-bounded pattern review; trusted review is required."
             ),
-            statement=request.semantic.hypothesis,
+            statement=suggestion.hypothesis,
             evidence=verified,
-            confidence=request.semantic.proposed_confidence,
+            confidence=suggestion.proposed_confidence,
         ),
-        semantic=request.semantic,
+        suggestion=suggestion,
         evidence=verified,
         expected_base_hash=request.observed_pattern_hash,
         final_scope_check=_final_scope_check(
