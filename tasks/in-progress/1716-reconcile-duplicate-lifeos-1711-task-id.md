@@ -50,12 +50,14 @@ Completed task identity is implementation history and must not be reassigned. Th
 
 # Documentation impact
 
-Status: none
-Reason: this repairs repository task metadata and references without changing user-facing behavior or architecture.
+Status: required
+
+- `tasks/README.md`: document global repository task-ID uniqueness and the deterministic validation command now enforced by PR fast checks.
 
 # Validation commands
 
-- Run the repository's task/workflow validation covering task IDs and dependencies.
+- `python scripts/validate_tasks.py`
+- `pytest -q tests/project`
 - `git diff --check`
 
 # Relevant decisions
