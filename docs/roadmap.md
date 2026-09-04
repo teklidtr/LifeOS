@@ -234,21 +234,25 @@ personality instructions, or automatic planning policy. Canonical hypotheses liv
 as human-owned Markdown under `patterns/`; the aggregate Personal Model is a
 rebuildable read model under `.lifeos/`.
 
-The accepted architecture is documented in
-`docs/personal-model-architecture.md`. Implementation proceeds through
-`LIFEOS-1700` to `LIFEOS-1710` in dependency order:
+Shipped delivery through `LIFEOS-1700` to `LIFEOS-1710` includes:
 
-- define the Phase 17 canonical, derived, privacy, proposal, review, and UI boundaries;
-- add the versioned canonical pattern artifact contract;
-- preserve exact evidence lineage, roles, source versions, and deterministic fingerprints;
-- add proposal-gated Track, Adopt, Revise, Contest, review-resolution, and Archive workflows;
-- re-evaluate supported deterministic patterns only to explain why review may be needed;
-- build the disposable Personal Model index and typed read model;
-- integrate bounded optional maintenance with daily and weekly reviews;
-- expose relevant reviewed pattern evidence to context and reflection without granting instruction authority;
-- build the Obsidian Personal Model workspace over Python business rules;
-- add evidence-bounded agent-assisted semantic proposals that stop at draft;
-- validate migration, recovery, large-vault behavior, local/remote MCP boundaries, end-to-end flows, and complete user documentation.
+- versioned human-owned canonical pattern artifacts under `patterns/`;
+- exact evidence lineage, roles, reviewed source versions, and deterministic fingerprints;
+- proposal-gated Track, Adopt, Revise, Contest, review-resolution, and Archive workflows;
+- deterministic re-evaluation that explains why review may be needed without deciding truth;
+- a disposable Personal Model read model that can be deleted and rebuilt from Markdown;
+- bounded daily and weekly review integration without creating another obligation queue;
+- bounded context and reflection integration that marks patterns as evidence, never instructions;
+- an Obsidian Personal Model workspace over Python business rules;
+- evidence-bounded agent-assisted semantic proposals that stop at draft;
+- local STDIO MCP and authenticated home-node draft boundaries;
+- conservative handling of pre-existing `patterns/` Markdown with no guessed semantic migration;
+- representative history, interruption/recovery, runtime rebuild, large-vault, MCP, and end-to-end release fixtures;
+- complete user documentation of the evidence → proposal → canonical hypothesis → review → context loop.
+
+Phase 17 is shipped. The accepted architecture is documented in
+`docs/personal-model-architecture.md`, and the complete workflow is in
+`docs/user-manual/19-personal-model.md`.
 
 Direct pattern-driven planner scoring or ranking, personality typing, diagnosis,
 immutable inferred traits, aggregate life/productivity/wellness scores, and a
