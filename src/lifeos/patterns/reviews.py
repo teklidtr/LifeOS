@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Callable, Iterable
 
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.facade.errors import ToolExecutionError
 from lifeos.facade.registry_tools import refresh_registry
 from lifeos.registry import Registry
+from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
+from lifeos.retrieval.policy import load_retrieval_policy
 
 from .contracts import PatternError
 from .model import (
@@ -52,25 +54,42 @@ _MATERIAL_REVIEW_CODES = frozenset(
 )
 
 
-def _allow_all(_path: str) -> bool:
-    return True
+def _review_allow_path(vault_root: Path) -> Callable[[str], bool]:
+    """Build the ordinary local review scope before any review evidence is opened."""
+    try:
+        policy = load_retrieval_policy(vault_root)
+    except RetrievalError as exc:
+        raise PersonalModelError(f"Could not load retrieval policy for pattern review: {exc}") from exc
+    scope = RetrievalScope()
+
+    def allowed(path: str) -> bool:
+        try:
+            return scope_decision(path, scope=scope, policy=policy, mode="local").allowed
+        except RetrievalError:
+            # Scanner and canonical artifact paths should already be valid, but a
+            # malformed path at this boundary must fail closed rather than widening scope.
+            return False
+
+    return allowed
 
 
 def _review_model(
     *, vault_root: Path, runtime_dir: Path, generated_at: datetime
 ) -> PersonalModelDocument:
     registry = Registry(runtime_dir / "registry.db")
+    allow_path = _review_allow_path(vault_root)
     # Pattern review depends on current file identity and content hashes. Refresh only
-    # deterministic file facts here; proposal indexing is unrelated to this snapshot.
+    # deterministic file facts inside the ordinary retrieval scope; denied paths remain
+    # presence-only observations and their bytes are never opened by this review pass.
     refresh_registry(
         vault_root=vault_root,
         registry=registry,
-        identity_allow_path=_allow_all,
+        identity_allow_path=allow_path,
     )
     return build_personal_model_document(
         vault_root=vault_root,
         registry=registry,
-        allow_path=_allow_all,
+        allow_path=allow_path,
         now=generated_at,
     )
 
@@ -226,11 +245,22 @@ def _unavailable(section_id: str, title: str, exc: Exception) -> ReviewSectionSn
 
 
 def weekly_pattern_review_section(
-    *, vault_root: Path, runtime_dir: Path, generated_at: datetime
+    *,
+    vault_root: Path,
+    runtime_dir: Path,
+    generated_at: datetime,
+    limit: int | None = WEEKLY_PATTERN_REVIEW_LIMIT,
 ) -> ReviewSectionSnapshot:
-    """Return a small optional weekly set without surfacing every active pattern."""
+    """Return a small optional weekly set without surfacing every active pattern.
+
+    ``limit=None`` is reserved for the refresh pipeline so continuity suppression can
+    run before the public section bound is enforced. Ordinary callers retain the
+    documented eight-item limit.
+    """
     from lifeos.reviews.contracts import ReviewSectionSnapshot
 
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ValueError("weekly pattern review limit must be positive or None")
     try:
         document = _review_model(
             vault_root=vault_root,
@@ -246,7 +276,7 @@ def weekly_pattern_review_section(
         if item.status != "archived" and _weekly_labels(item)
     ]
     candidates.sort(key=_weekly_priority)
-    bounded = candidates[:WEEKLY_PATTERN_REVIEW_LIMIT]
+    bounded = candidates if limit is None else candidates[:limit]
     generated = generated_at.isoformat()
     items = tuple(
         _review_item(
@@ -273,10 +303,17 @@ def daily_pattern_review_section(
     generated_at: datetime,
     urgent_pattern_ids: Iterable[str] = (),
     pinned_pattern_ids: Iterable[str] = (),
+    limit: int | None = DAILY_PATTERN_REVIEW_LIMIT,
 ) -> ReviewSectionSnapshot:
-    """Surface only explicitly urgent or pinned pattern IDs; default daily state is empty."""
+    """Surface only explicitly urgent or pinned pattern IDs; default daily state is empty.
+
+    ``limit=None`` is reserved for refresh so previously dismissed items can be
+    suppressed before the documented three-item daily bound is applied.
+    """
     from lifeos.reviews.contracts import ReviewSectionSnapshot
 
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ValueError("daily pattern review limit must be positive or None")
     urgent = frozenset(urgent_pattern_ids)
     pinned = frozenset(pinned_pattern_ids)
     selected_ids = urgent | pinned
@@ -317,7 +354,7 @@ def daily_pattern_review_section(
                 generated_at=generated,
             )
         )
-        if len(items) >= DAILY_PATTERN_REVIEW_LIMIT:
+        if limit is not None and len(items) >= limit:
             break
     return ReviewSectionSnapshot(
         _DAILY_SECTION_ID,
