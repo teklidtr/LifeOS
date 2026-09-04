@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterable
@@ -52,6 +53,20 @@ _MATERIAL_REVIEW_CODES = frozenset(
         "stale-evidence",
     }
 )
+_ReviewModelCache = dict[tuple[str, str, str], PersonalModelDocument]
+_REVIEW_MODEL_CACHE: ContextVar[_ReviewModelCache | None] = ContextVar(
+    "lifeos_pattern_review_model_cache",
+    default=None,
+)
+
+
+def push_pattern_review_model_cache() -> Token[_ReviewModelCache | None]:
+    """Cache one scoped Personal Model inside a single higher-level review refresh."""
+    return _REVIEW_MODEL_CACHE.set({})
+
+
+def reset_pattern_review_model_cache(token: Token[_ReviewModelCache | None]) -> None:
+    _REVIEW_MODEL_CACHE.reset(token)
 
 
 def _review_allow_path(vault_root: Path) -> Callable[[str], bool]:
@@ -76,6 +91,11 @@ def _review_allow_path(vault_root: Path) -> Callable[[str], bool]:
 def _review_model(
     *, vault_root: Path, runtime_dir: Path, generated_at: datetime
 ) -> PersonalModelDocument:
+    key = (str(vault_root), str(runtime_dir), generated_at.isoformat())
+    cache = _REVIEW_MODEL_CACHE.get()
+    if cache is not None and key in cache:
+        return cache[key]
+
     registry = Registry(runtime_dir / "registry.db")
     allow_path = _review_allow_path(vault_root)
     # Pattern review depends on current file identity and content hashes. Refresh only
@@ -86,12 +106,15 @@ def _review_model(
         registry=registry,
         identity_allow_path=allow_path,
     )
-    return build_personal_model_document(
+    document = build_personal_model_document(
         vault_root=vault_root,
         registry=registry,
         allow_path=allow_path,
         now=generated_at,
     )
+    if cache is not None:
+        cache[key] = document
+    return document
 
 
 def _diagnostic_part(item: PersonalModelItem) -> tuple[str, ...]:
