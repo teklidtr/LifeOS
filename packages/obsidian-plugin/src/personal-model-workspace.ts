@@ -310,6 +310,20 @@ export class PersonalModelWorkspaceController {
     });
   }
 
+  clearCreatedProposal(): void {
+    this.lastProposalRequest = undefined;
+    this.setState({
+      ...this.state,
+      stage: this.state.document ? (this.itemCount(this.state.document) ? "ready" : "empty") : "idle",
+      proposalPreview: undefined,
+      proposalResult: undefined,
+      detail: undefined,
+      recovery: undefined,
+      statusAnnouncement: "Draft proposal confirmation closed. The draft remains available in Proposals.",
+      focusTarget: "personal-model-actions",
+    });
+  }
+
   private bridgeRequest(input: PersonalModelProposalInput, now?: string): Record<string, unknown> {
     const reason = input.transitionReason.trim();
     if (!reason) throw { code: "invalid_params", message: "A proposal reason is required." };
@@ -341,14 +355,36 @@ export class PersonalModelWorkspaceController {
     if (!actionsForPersonalModelItem(item).includes(input.action)) {
       throw { code: "invalid_transition", message: `${input.action} is not available for ${item.status} patterns.` };
     }
+
+    let statement: string | undefined;
+    let confidence: PersonalModelItem["confidence"] | undefined;
+    let evidence = input.evidence;
+    if (input.action === "revise") {
+      const candidateStatement = input.statement?.trim();
+      statement = candidateStatement && candidateStatement !== item.statement
+        ? candidateStatement
+        : undefined;
+      confidence = input.confidence && input.confidence !== item.confidence
+        ? input.confidence
+        : undefined;
+      if (statement === undefined && confidence === undefined && evidence === undefined) {
+        throw {
+          code: "empty_revision",
+          message: "Change the statement, confidence, or evidence before previewing a revision.",
+        };
+      }
+    } else {
+      evidence = undefined;
+    }
+
     return {
       action: input.action,
       target_path: item.pattern_path,
       expected_target_hash: item.pattern_content_hash,
       transition_reason: reason,
-      statement: input.statement,
-      confidence: input.confidence,
-      evidence: input.evidence,
+      statement,
+      confidence,
+      evidence,
       review_reasons: input.reviewReasons,
       now,
     };
