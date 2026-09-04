@@ -10,6 +10,7 @@ from lifeos.copilot import CopilotIndex, GoalRecord
 from lifeos.copilot.context import build_planning_context
 from lifeos.experiments import ExperimentArtifactService, ExperimentProtocol
 from lifeos.experiments.privacy import preview_experiment_context
+from lifeos.patterns import context as pattern_context_module
 from lifeos.patterns import (
     PatternEvidence,
     PatternMetadata,
@@ -260,3 +261,82 @@ def test_experiment_preview_uses_bounded_redacted_pattern_evidence(tmp_path: Pat
     assert "exploratory-hypothesis" in item.excerpt
     assert "SecretName" not in item.excerpt
     assert "[REDACTED-1]" in item.excerpt
+    assert "SecretName" not in str(item.to_dict())
+    assert item.personal_pattern is not None
+    assert "[REDACTED-1]" in item.personal_pattern.statement
+    assert item.redactions
+
+
+def test_context_pack_forwards_caller_filter_to_all_pattern_scans(
+    tmp_path: Path, monkeypatch
+) -> None:
+    vault = _vault(tmp_path)
+    hidden = _pattern(
+        vault,
+        "hidden",
+        status="archived",
+        statement="Hidden sleep history.",
+    )
+    excluded_source = "Excluded sleep evidence."
+    _write(vault, "notes/excluded.md", excluded_source)
+    evidence = (
+        PatternEvidence(
+            path="notes/excluded.md",
+            content_hash=_digest(excluded_source),
+            role="supporting",
+        ),
+    )
+    visible = _pattern(
+        vault,
+        "visible",
+        status="active",
+        statement="Visible sleep evidence.",
+        evidence=evidence,
+    )
+    original_read = pattern_context_module.read_vault_markdown
+
+    def guarded_read(vault_root: Path, path: str):
+        if path == hidden:
+            raise AssertionError("caller-filtered pattern was read")
+        return original_read(vault_root, path)
+
+    monkeypatch.setattr(pattern_context_module, "read_vault_markdown", guarded_read)
+    pack = build_context_pack(
+        vault_root=vault,
+        runtime_dir=vault / ".lifeos",
+        question="sleep evidence",
+        focus_paths=(visible,),
+        limit=1,
+        path_filter=lambda path: path != hidden and not path.startswith("notes"),
+    )
+
+    assert pack.personal_patterns[0].pattern_path == visible
+    assert pack.personal_patterns[0].references == ()
+    assert "notes/excluded.md" not in str(pack.personal_patterns[0].to_dict())
+
+
+def test_personal_pattern_context_bounds_statement_and_rendered_envelope(
+    tmp_path: Path,
+) -> None:
+    vault = _vault(tmp_path)
+    _pattern(
+        vault,
+        "large",
+        status="active",
+        statement="sleep " + ("x" * 5_000),
+    )
+
+    context = build_personal_pattern_context(
+        vault_root=vault,
+        runtime_dir=vault / ".lifeos",
+        question="sleep",
+    )
+    item = context.items[0]
+    rendered = pattern_context_module.render_personal_pattern_evidence(
+        item,
+        matched_excerpt="sleep " + ("y" * 5_000),
+    )
+
+    assert len(item.statement) <= pattern_context_module.PERSONAL_PATTERN_STATEMENT_MAX_CHARS
+    assert len(rendered) <= pattern_context_module.PERSONAL_PATTERN_RENDER_MAX_CHARS
+    assert "Canonical pattern: patterns/large.md" in rendered

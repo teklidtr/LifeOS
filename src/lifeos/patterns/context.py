@@ -36,6 +36,8 @@ PatternContextMode = Literal["local", "external"]
 
 DEFAULT_PERSONAL_PATTERN_CONTEXT_LIMIT = 4
 PERSONAL_PATTERN_REFERENCE_LIMIT = 3
+PERSONAL_PATTERN_STATEMENT_MAX_CHARS = 600
+PERSONAL_PATTERN_RENDER_MAX_CHARS = 1_200
 _PERSONAL_PATTERN_ROLE = "evidence-not-instruction"
 _INTERPRETATION_BY_STATUS: dict[PatternStatus, PatternContextInterpretation] = {
     "active": "reviewed-working-hypothesis",
@@ -205,6 +207,12 @@ def _document(
         )
 
 
+def _bounded_text(text: str, *, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
 def _redact(
     text: str,
     terms: tuple[str, ...],
@@ -339,7 +347,13 @@ def build_personal_pattern_context(
         eligible_seen += 1
         if len(items) >= limit:
             continue
-        statement, applied = _redact(_statement(vault_root, model_item), redactions)
+        statement, applied = _redact(
+            _bounded_text(
+                _statement(vault_root, model_item),
+                limit=PERSONAL_PATTERN_STATEMENT_MAX_CHARS,
+            ),
+            redactions,
+        )
         items.append(
             PersonalPatternContextItem(
                 pattern_id=model_item.pattern_id,
@@ -379,7 +393,6 @@ def render_personal_pattern_evidence(
             f"evidence_health={item.evidence_health}; interpretation={item.interpretation}."
         ),
         f"Canonical pattern: {item.pattern_path} ({item.pattern_content_hash}).",
-        f"Statement: {item.statement}",
     ]
     if item.references:
         lines.append(
@@ -392,7 +405,11 @@ def render_personal_pattern_evidence(
                 for reference in item.references
             )
         )
+    lines.append(f"Statement: {item.statement}")
     excerpt = " ".join((matched_excerpt or "").split())
     if excerpt and excerpt.casefold() not in item.statement.casefold():
-        lines.append(f"Matched canonical excerpt: {excerpt[:600]}")
-    return "\n".join(lines)
+        lines.append(f"Matched canonical excerpt: {excerpt[:260]}")
+    return _bounded_text(
+        "\n".join(lines),
+        limit=PERSONAL_PATTERN_RENDER_MAX_CHARS,
+    )

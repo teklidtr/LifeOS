@@ -218,6 +218,7 @@ def preview_experiment_context(
             question=pattern_query,
             limit=3,
             mode="external",
+            redact_terms=redactions,
             path_filter=provider_filter,
         )
         explicit_pattern_paths = tuple(
@@ -232,6 +233,7 @@ def preview_experiment_context(
             allow_protected=True,
             candidate_paths=explicit_pattern_paths,
             explicit_paths=explicit_pattern_paths,
+            redact_terms=redactions,
             path_filter=provider_filter,
         )
         for item in (*explicit_patterns.items, *automatic.items):
@@ -291,6 +293,10 @@ def preview_experiment_context(
             continue
         excerpt, included_bytes, item_truncated = _truncate(visible, allowance)
         truncated = truncated or item_truncated
+        item_redactions = (
+            *applied,
+            *(pattern_item.redactions if pattern_item is not None else ()),
+        )
         items.append(
             ExperimentContextItem(
                 path=decision.path,
@@ -300,7 +306,7 @@ def preview_experiment_context(
                 byte_count=raw_bytes,
                 included_bytes=included_bytes,
                 truncated=item_truncated,
-                redactions=applied,
+                redactions=item_redactions,
                 personal_pattern=pattern_item,
             )
         )

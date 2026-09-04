@@ -500,6 +500,7 @@ def build_context_pack(
             mode=cast(Literal["local", "external"], retrieval_mode),
             retrieval_scope=scope,
             explicit_paths=focus_paths,
+            path_filter=path_filter,
         )
     except RetrievalError as exc:
         raise ContextSearchExecutionError("Retrieval policy is invalid") from exc
@@ -654,6 +655,7 @@ def build_context_pack(
             retrieval_scope=scope,
             candidate_paths=(source.path for source in sources),
             explicit_paths=focus_paths,
+            path_filter=path_filter,
         )
         by_path = {item.pattern_path: item for item in pattern_context.items}
         sources = tuple(
