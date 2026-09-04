@@ -143,6 +143,28 @@ test("mixed workspace prioritizes needs-review while preserving all four views",
   assert.deepEqual(actionsForPersonalModelItem(controller.selected!), ["adopt", "revise", "contest", "archive"]);
 });
 
+test("refresh keeps the selected pattern inside the visible lifecycle group", async () => {
+  const bridge = new PersonalModelBridge();
+  bridge.workspace = document({
+    seeds: [item("seed-a", "seed"), item("seed-b", "seed")],
+  });
+  const controller = new PersonalModelWorkspaceController(bridge);
+  await controller.load();
+  controller.setView("seeds");
+  controller.select("seed-b");
+  assert.equal(controller.selected?.pattern_id, "seed-b");
+
+  bridge.workspace = document({
+    active: [item("seed-b", "active")],
+    seeds: [item("seed-a", "seed")],
+  });
+  await controller.load();
+
+  assert.equal(controller.state.view, "seeds");
+  assert.equal(controller.selected?.pattern_id, "seed-a");
+  assert.deepEqual(controller.visibleItems.map((candidate) => candidate.pattern_id), ["seed-a"]);
+});
+
 test("empty workspace is explicit and rebuildable rather than an error", async () => {
   const bridge = new PersonalModelBridge();
   const controller = new PersonalModelWorkspaceController(bridge);
