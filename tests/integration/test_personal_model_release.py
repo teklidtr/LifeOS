@@ -343,6 +343,7 @@ def test_evidence_to_obsidian_release_flow_keeps_semantic_changes_proposal_gated
 ) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
+    (vault / "patterns").mkdir()
     _write(
         vault,
         "system/generated-ownership.json",
