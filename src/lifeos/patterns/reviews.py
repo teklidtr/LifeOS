@@ -160,6 +160,8 @@ def _weekly_labels(item: PersonalModelItem) -> tuple[str, ...]:
         labels.append("already marked needs review")
     if item.review_due:
         labels.append("review due")
+    if any(reference.role == "contesting" for reference in item.evidence):
+        labels.append("unresolved contesting evidence")
     if item.status == "active" and codes & _MATERIAL_REVIEW_CODES:
         labels.append("evidence changed")
     if "new-counter-evidence" in codes:
@@ -175,7 +177,7 @@ def _weekly_priority(item: PersonalModelItem) -> tuple[int, str]:
         priority = 0
     elif "review due" in labels:
         priority = 1
-    elif "contesting evidence changed" in labels:
+    elif labels & {"unresolved contesting evidence", "contesting evidence changed"}:
         priority = 2
     elif "evidence changed" in labels:
         priority = 3
