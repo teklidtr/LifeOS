@@ -21,6 +21,8 @@ from lifeos.patterns.reviews import (
     WEEKLY_PATTERN_REVIEW_LIMIT,
     create_pattern_review_proposal,
     daily_pattern_review_section,
+    push_pattern_review_model_cache,
+    reset_pattern_review_model_cache,
     weekly_pattern_review_section,
 )
 from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate
@@ -171,34 +173,40 @@ def build_review_snapshot(
     )
     if kind != "daily" and (attention.urgent_pattern_ids or attention.pinned_pattern_ids):
         raise ValueError("Explicit pattern attention is supported only for daily reviews.")
-    snapshot = _base_build_review_snapshot(
-        vault_root=vault_root,
-        runtime_dir=runtime_dir,
-        kind=kind,
-        day=day,
-        generated_at=generated_at,
-        urgent_pattern_ids=attention.urgent_pattern_ids,
-        pinned_pattern_ids=attention.pinned_pattern_ids,
-    )
-    if enforce_pattern_limits:
-        return snapshot
-    if kind == "daily":
-        replacement = daily_pattern_review_section(
+
+    cache_token = push_pattern_review_model_cache() if not enforce_pattern_limits else None
+    try:
+        snapshot = _base_build_review_snapshot(
             vault_root=vault_root,
             runtime_dir=runtime_dir,
+            kind=kind,
+            day=day,
             generated_at=generated_at,
             urgent_pattern_ids=attention.urgent_pattern_ids,
             pinned_pattern_ids=attention.pinned_pattern_ids,
-            limit=None,
         )
-    else:
-        replacement = weekly_pattern_review_section(
-            vault_root=vault_root,
-            runtime_dir=runtime_dir,
-            generated_at=generated_at,
-            limit=None,
-        )
-    return _replace_section(snapshot, replacement)
+        if enforce_pattern_limits:
+            return snapshot
+        if kind == "daily":
+            replacement = daily_pattern_review_section(
+                vault_root=vault_root,
+                runtime_dir=runtime_dir,
+                generated_at=generated_at,
+                urgent_pattern_ids=attention.urgent_pattern_ids,
+                pinned_pattern_ids=attention.pinned_pattern_ids,
+                limit=None,
+            )
+        else:
+            replacement = weekly_pattern_review_section(
+                vault_root=vault_root,
+                runtime_dir=runtime_dir,
+                generated_at=generated_at,
+                limit=None,
+            )
+        return _replace_section(snapshot, replacement)
+    finally:
+        if cache_token is not None:
+            reset_pattern_review_model_cache(cache_token)
 
 
 def _effective_previous(
