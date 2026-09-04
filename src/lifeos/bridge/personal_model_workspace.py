@@ -139,8 +139,11 @@ def _authorize_evidence(
 
 def _origin_path(origin: PatternOrigin) -> str | None:
     source_ref = origin.source_ref
-    if source_ref and source_ref.endswith(".md"):
-        return source_ref
+    if not source_ref:
+        return None
+    path = source_ref.split("#", 1)[0]
+    if path.endswith(".md"):
+        return path
     return None
 
 
@@ -431,11 +434,22 @@ class PersonalModelWorkspaceBridge:
                 vault_root=self.vault_root,
                 allow_path=allow_path,
             )
+            expected_base_hash = (
+                None if isinstance(request, CreatePatternSeedRequest) else expected_hash
+            )
             try:
                 if method.endswith("preview"):
-                    preview, _, _ = proposals.preview(request, now=now)
+                    preview, _, _ = proposals.preview(
+                        request,
+                        now=now,
+                        expected_base_hash=expected_base_hash,
+                    )
                     return {"preview": preview.to_dict()}
-                return proposals.publish(request, now=now)
+                return proposals.publish(
+                    request,
+                    now=now,
+                    expected_base_hash=expected_base_hash,
+                )
             except PatternError as exc:
                 raise ProtocolError(exc.code, exc.message, exc.data) from exc
         raise ProtocolError(
