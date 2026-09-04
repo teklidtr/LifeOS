@@ -60,6 +60,22 @@ def test_duplicate_task_ids_are_rejected(tmp_path: Path) -> None:
     )
 
 
+def test_task_id_with_inline_yaml_comment_is_rejected(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(task_root, "completed", "001-historical.md", "LIFEOS-001")
+    _write_task(
+        task_root,
+        "backlog",
+        "999-commented.md",
+        "LIFEOS-001 # historical identifier",
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/backlog/999-commented.md: "
+        "frontmatter field 'id' must use plain LIFEOS-* task-ID syntax",
+    )
+
+
 def test_status_must_match_task_state_directory(tmp_path: Path) -> None:
     task_root = _task_root(tmp_path)
     _write_task(
