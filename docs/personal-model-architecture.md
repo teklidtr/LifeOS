@@ -142,6 +142,8 @@ This follows DD-090: identity, location, and version are different facts. A path
 
 The evidence fingerprint is deterministic and ordering-independent. LIFEOS-1702 normalizes each reference to the tuple of role, stable source ID when present, reviewed path, reviewed content hash, observation ID when present, and event ID when present; references are sorted by that normalized tuple, encoded with the repository's canonical JSON rules, and SHA-256 hashed with the `sha256:` prefix. Exact duplicate normalized references do not create multiple fingerprint contributions.
 
+`lifeos.patterns.normalize_evidence_reference()` exposes that normalized tuple without mutating the canonical reference, while `compute_evidence_fingerprint()` performs the deterministic deduplication, ordering, canonical JSON encoding, and hashing. Evidence role is part of the tuple, so the same reviewed source cannot collapse supporting and contesting evidence into one fingerprint contribution.
+
 Historical reviewed hashes never silently advance. A current source may therefore be:
 
 - `unchanged`: reviewed identity/path resolves and the reviewed hash still matches;
@@ -150,6 +152,8 @@ Historical reviewed hashes never silently advance. A current source may therefor
 - `missing`: the reviewed source cannot be resolved;
 - `ambiguous`: stable identity resolves to more than one canonical source;
 - `deleted`: deletion is known from available canonical/registry evidence rather than merely inferred from silence.
+
+`lifeos.patterns.resolve_evidence_states()` resolves those facts against the caller's current registry snapshot. When `source_id` exists it is the identity lookup key; more than one active match is `ambiguous`, a unique same-hash match at a new path is `moved`, and a unique different-hash match is `changed`. Without `source_id`, resolution is path-bound and does not invent rename continuity. A registry deletion observation yields `deleted`; complete absence yields `missing`. Diagnostics retain the immutable reviewed reference and report current path/hash separately. Internal registry tombstone paths are never surfaced as canonical evidence locations.
 
 A moved source may be explained as a relocation, but the canonical reviewed reference is not silently rewritten. Changed, missing, moved, deleted, or ambiguous evidence becomes explicit review evidence. Missing evidence is **unknown**, not counter-evidence. A changed source is not automatically interpreted as support or contradiction.
 
