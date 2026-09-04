@@ -24,6 +24,16 @@ from .evidence import (
     normalize_evidence_reference,
     resolve_evidence_states,
 )
+from .model import (
+    PERSONAL_MODEL_SCHEMA_VERSION,
+    EvidenceHealth,
+    PersonalModelDocument,
+    PersonalModelError,
+    PersonalModelItem,
+    PersonalModelService,
+    build_personal_model_document,
+    serialize_personal_model,
+)
 from .proposals import (
     ArchivePatternRequest,
     CreatePatternSeedRequest,
@@ -49,8 +59,10 @@ from .review import (
 
 __all__ = [
     "PATTERN_SCHEMA_VERSION",
+    "PERSONAL_MODEL_SCHEMA_VERSION",
     "ArchivePatternRequest",
     "CreatePatternSeedRequest",
+    "EvidenceHealth",
     "EvidencePathPredicate",
     "EvidenceRole",
     "EvidenceState",
@@ -74,6 +86,10 @@ __all__ = [
     "PatternReviewReason",
     "PatternReviewService",
     "PatternStatus",
+    "PersonalModelDocument",
+    "PersonalModelError",
+    "PersonalModelItem",
+    "PersonalModelService",
     "PromotePatternRequest",
     "ResolvedPatternStatus",
     "ResolvePatternReviewRequest",
@@ -82,10 +98,12 @@ __all__ = [
     "RevisePatternRequest",
     "SupportedEvaluationKind",
     "assess_pattern_review",
+    "build_personal_model_document",
     "compute_evidence_fingerprint",
     "metadata_from_dict",
     "normalize_evidence_reference",
     "parse_pattern",
     "resolve_evidence_states",
     "serialize_pattern",
+    "serialize_personal_model",
 ]

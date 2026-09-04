@@ -44,6 +44,25 @@ New dated observations that enter the recipe after the last review are reported 
 
 **Counter-evidence is not a verdict.** A reversal says that the current deterministic result points the other way. It does not diagnose you, establish causation, or automatically declare the working hypothesis false. Likewise, no new observations is not evidence against a pattern, and missing evidence remains unknown rather than negative evidence.
 
+## Canonical patterns versus the derived Personal Model
+
+The durable hypothesis always lives in its human-readable `patterns/*.md` file. That canonical file owns the statement, lifecycle status, confidence, reviewed evidence references, review timing, origin, and human reflection.
+
+LifeOS can rebuild a lightweight aggregate index under `.lifeos/personal-model/`. The derived Personal Model groups unique healthy patterns into Active, Seeds, Needs review, and Archived views and records inspectable metadata such as stable pattern ID, canonical path and content hash, title and description, confidence, review reasons, origin, review-due state, evidence health, evidence diagnostics, and deterministic freshness when an evaluation recipe can establish it.
+
+The derived index is a map, not another source of truth. It does not create `profile/personal-model.md`, does not generate a personality narrative, and does not assign a hidden life, wellness, readiness, or productivity score. It also does not copy the pattern's human reflection into the index. To inspect or change the actual hypothesis, follow the canonical pattern path.
+
+Evidence health is deliberately categorical rather than scored:
+
+- `none`: the pattern declares no reviewed evidence references;
+- `healthy`: every reviewed reference still resolves to the exact reviewed version;
+- `attention`: a reviewed source moved or changed and deserves inspection;
+- `unavailable`: one or more reviewed sources are missing, deleted, ambiguous, or otherwise cannot be established safely.
+
+Malformed declared patterns and duplicate stable IDs do not disappear and do not masquerade as healthy entries. They appear as diagnostics while unaffected unique patterns remain inspectable. Ordinary Markdown under `patterns/` without a recognized pattern schema remains ordinary user content and is ignored by the Personal Model index.
+
+Deleting `.lifeos/personal-model/` deletes only disposable derived state. Rebuilding rereads canonical patterns and recomputes the same typed view and evidence diagnostics; deleting the index cannot delete, downgrade, archive, or rewrite a canonical hypothesis.
+
 ## What LifeOS does not do automatically
 
 Running review assessment is read-only. It does not rewrite the pattern statement, lifecycle status, confidence, evidence list, evidence fingerprint, or human reflection. Manual or semantic patterns without a deterministic recipe receive only factual evidence-state, fingerprint, and timing checks; LifeOS does not launch a vault-wide psychological contradiction search.
@@ -54,7 +73,7 @@ Archived patterns may still have factual diagnostics when inspected, but they ar
 
 ## Current integration boundary
 
-LIFEOS-1704 provides the deterministic Python assessment and explicit draft-proposal boundary. It does not add a new standalone CLI, MCP, or Obsidian review screen. The derived Personal Model, bounded daily/weekly review integration, context integration, and Obsidian workspace are later Phase 17 layers that consume this same read-only assessment contract rather than reimplementing its rules.
+LIFEOS-1704 provides the deterministic Python assessment and explicit draft-proposal boundary. LIFEOS-1705 adds the rebuildable Python Personal Model read model and crash-consistent disposable index under `.lifeos/personal-model/`. Neither task adds a standalone CLI, MCP, or Obsidian Personal Model screen. Bounded daily/weekly review integration, context integration, and the Obsidian workspace remain later Phase 17 layers that consume these Python contracts rather than reimplementing their rules.
 
 ---
 
