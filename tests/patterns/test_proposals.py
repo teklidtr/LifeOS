@@ -27,7 +27,6 @@ from lifeos.patterns import (
 )
 from lifeos.proposals import (
     ApplicationError,
-    ApplicationErrorCode,
     CreateFile,
     PatchHumanFile,
     ProposalStatus,
@@ -37,6 +36,7 @@ from lifeos.proposals import (
     reject_proposal,
     submit_proposal_for_review,
 )
+from lifeos.proposals.application import ApplicationErrorCode
 from lifeos.proposals.recovery_service import RecoveryAction, recover_interrupted_applications
 
 HASH_A = "sha256:" + "a" * 64
