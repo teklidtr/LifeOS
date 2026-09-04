@@ -36,6 +36,32 @@ jobs:
               for line in raw.splitlines()
           )
           exec(compile(script, '<lifeos-1707-final>', 'exec'))
+
+          test_path = Path('tests/patterns/test_context_final_review.py')
+          text = test_path.read_text(encoding='utf-8')
+          old = '''    _write(vault, public_path, "# Public\\n\\nProvider-safe evidence.\\n")
+    policy = RetrievalPolicy(protected_prefixes=("patterns",), external_allowed_prefixes=())
+    scope = RetrievalScope(paths=(pattern_path, public_path), allow_protected=True)
+    service = KnowledgeConversationService(
+        vault_root=vault, runtime_dir=vault / ".lifeos", policy=policy
+    )
+'''
+          new = '''    _write(vault, public_path, "# Public\\n\\nProvider-safe evidence.\\n")
+    _write(
+        vault,
+        "system/retrieval-policy.yml",
+        "schema_version: 1\\n"
+        "protected_prefixes: [patterns]\\n"
+        "external_allowed_prefixes: []\\n",
+    )
+    scope = RetrievalScope(paths=(pattern_path, public_path), allow_protected=True)
+    service = KnowledgeConversationService(
+        vault_root=vault, runtime_dir=vault / ".lifeos"
+    )
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one citation fixture replacement, found {text.count(old)}')
+          test_path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PYRUN
       - name: Install dependencies
         run: uv sync --frozen --extra dev --extra mcp
