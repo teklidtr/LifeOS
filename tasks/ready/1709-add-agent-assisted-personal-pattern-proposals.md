@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1709
 title: Add evidence-bounded agent-assisted personal-pattern proposals
-status: backlog
+status: ready
 phase: 17
 depends_on:
   - LIFEOS-1703
