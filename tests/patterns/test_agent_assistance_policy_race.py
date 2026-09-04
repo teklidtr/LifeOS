@@ -109,7 +109,7 @@ def test_policy_revocation_before_identity_scan_prunes_newly_excluded_pattern(
                 confidence="low",
                 review_reasons=(),
                 statement="Hidden pattern content must not influence an external draft.",
-                origin=PatternOrigin("human"),
+                origin=PatternOrigin("manual"),
                 created_at="2026-09-04T08:00:00Z",
                 updated_at="2026-09-04T08:00:00Z",
                 evidence_fingerprint=compute_evidence_fingerprint(evidence),
