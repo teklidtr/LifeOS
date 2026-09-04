@@ -91,6 +91,34 @@ Generated evidence may prompt a question, but it cannot claim why something
 happened. Write themes, corrections, changed constraints, and next orientation
 inside the human-owned weekly reflection sections.
 
+## Personal patterns in reviews
+
+Personal patterns are optional review evidence, not a recurring obligation list.
+A weekly review may show at most eight patterns that have a concrete maintenance
+reason: a newly tracked seed, a due review, `needs-review` status, materially
+changed evidence, or unresolved contesting evidence. An `active` pattern does
+not appear merely because it is active.
+
+Daily review is stricter. Pattern items are absent by default and may appear only
+when the caller or workspace explicitly supplies the stable pattern ID as urgent
+or pinned. Daily review shows at most three such items, with urgent items first.
+LifeOS does not infer urgency or pinning from free-form `review_reasons` text.
+
+Each pattern item links to the canonical `patterns/*.md` artifact and a bounded
+set of reviewed evidence sources. Its review fingerprint describes the relevant
+pattern status, confidence, review timing, trigger reasons, and current evidence
+state. Editing unrelated human reflection in the pattern note therefore does not
+by itself resurrect a dismissed review prompt.
+
+The ordinary review decisions apply to pattern items. You can acknowledge,
+defer, dismiss unchanged, open the source, or propose a change. A
+`dismiss_for_review` decision suppresses the same fingerprint in later reviews;
+changed evidence creates a new fingerprint and may surface again. **Propose
+change** creates only the existing pattern `needs-review` draft proposal. The
+pattern itself changes only through the normal submit, approve, and apply
+lifecycle. Completing the daily or weekly review never means that you agree with
+a pattern.
+
 ## Item decisions and continuity
 
 A review item decision is attached to the exact evidence fingerprint displayed

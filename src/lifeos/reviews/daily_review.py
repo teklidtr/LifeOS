@@ -9,7 +9,7 @@ from typing import Any, Literal
 from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate
 from lifeos.reviews.contracts import ReviewArtifact, ReviewSnapshot
 from lifeos.reviews.progress import ReviewProgressService
-from lifeos.reviews.snapshot import refresh_review_snapshot
+from lifeos.reviews.pattern_integration import refresh_review_snapshot
 
 DailyPhase = Literal["morning", "evening"]
 
@@ -97,6 +97,8 @@ def open_daily_review(
     idempotency_key: str,
     phase: DailyPhase = "morning",
     refresh: bool = True,
+    urgent_pattern_ids: tuple[str, ...] = (),
+    pinned_pattern_ids: tuple[str, ...] = (),
 ) -> DailyReviewState:
     artifact = service.open_or_create(
         kind="daily",
@@ -120,15 +122,20 @@ def open_daily_review(
             runtime_dir=runtime_dir,
             generated_at=now,
             idempotency_key=f"{idempotency_key}-refresh",
+            urgent_pattern_ids=urgent_pattern_ids,
+            pinned_pattern_ids=pinned_pattern_ids,
         )
     else:
-        from lifeos.reviews.snapshot import build_review_snapshot
+        from lifeos.reviews.pattern_integration import build_review_snapshot
+
         snapshot = build_review_snapshot(
             vault_root=service.vault_root,
             runtime_dir=runtime_dir,
             kind="daily",
             day=day,
             generated_at=now,
+            urgent_pattern_ids=urgent_pattern_ids,
+            pinned_pattern_ids=pinned_pattern_ids,
         )
     return DailyReviewState(
         artifact,

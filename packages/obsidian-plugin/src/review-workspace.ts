@@ -13,6 +13,7 @@ export type ReviewWorkspaceStage = "idle" | "loading" | "ready" | "stale" | "blo
 export interface ReviewPrompt { prompt_id: string; label: string; optional: boolean; phase_id?: ReviewPhaseId; }
 export interface ReviewDueState { state: string; reason: string; phase_id?: ReviewPhaseId; }
 export interface ReviewHistoryEntry { review_id: string; path: string; review_kind: ReviewKind; period_start: string; period_end: string; status: string; updated_at: string; previous_review_id?: string; next_review_id?: string; }
+export interface ReviewPatternAttention { urgentPatternIds?: string[]; pinnedPatternIds?: string[]; }
 export interface ReviewOpenState {
   artifact: ReviewArtifact;
   snapshot: ReviewSnapshot;
@@ -50,12 +51,18 @@ export interface ReviewWorkspaceState {
   activePhase?: ReviewPhaseId;
   history: ReviewHistoryEntry[];
   focusTarget: string;
+  urgentPatternIds: string[];
+  pinnedPatternIds: string[];
   detail?: string;
   recovery?: string;
 }
 
 function key(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function stableIds(values: string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter((value) => value.length > 0))].sort();
 }
 
 function errorState(current: ReviewWorkspaceState, error: unknown): ReviewWorkspaceState {
@@ -79,6 +86,8 @@ export class ReviewWorkspaceController {
     requiredSections: [],
     history: [],
     focusTarget: "review-workspace-title",
+    urgentPatternIds: [],
+    pinnedPatternIds: [],
   };
 
   constructor(private readonly client: BridgeClient, private readonly openPath: (path: string) => void = () => undefined) {}
@@ -111,11 +120,24 @@ export class ReviewWorkspaceController {
     return this.state.artifact;
   }
 
-  async open(kind: ReviewKind, day: string, timezone: string, now: string, origin: ReviewWorkspaceOrigin, phase?: ReviewPhaseId): Promise<ReviewOpenState> {
+  setPatternAttention(attention: ReviewPatternAttention): void {
+    this.state = {
+      ...this.state,
+      urgentPatternIds: stableIds(attention.urgentPatternIds),
+      pinnedPatternIds: stableIds(attention.pinnedPatternIds),
+    };
+  }
+
+  async open(kind: ReviewKind, day: string, timezone: string, now: string, origin: ReviewWorkspaceOrigin, phase?: ReviewPhaseId, patternAttention: ReviewPatternAttention = {}): Promise<ReviewOpenState> {
+    if (kind === "daily") this.setPatternAttention(patternAttention);
+    else this.setPatternAttention({});
     this.loading(origin);
     try {
       const result = await this.client.call<ReviewOpenState>("review.artifact.open", {
-        kind, day, timezone, now, phase, refresh: true, idempotency_key: key(`review-open-${kind}-${day}`),
+        kind, day, timezone, now, phase, refresh: true,
+        urgent_pattern_ids: kind === "daily" ? this.state.urgentPatternIds : undefined,
+        pinned_pattern_ids: kind === "daily" ? this.state.pinnedPatternIds : undefined,
+        idempotency_key: key(`review-open-${kind}-${day}`),
       });
       return this.accept(result, origin);
     } catch (error) {
@@ -124,8 +146,8 @@ export class ReviewWorkspaceController {
     }
   }
 
-  openDaily(day: string, timezone: string, now: string, phase: ReviewPhaseId = "morning", origin: ReviewWorkspaceOrigin = "today"): Promise<ReviewOpenState> {
-    return this.open("daily", day, timezone, now, origin, phase);
+  openDaily(day: string, timezone: string, now: string, phase: ReviewPhaseId = "morning", origin: ReviewWorkspaceOrigin = "today", patternAttention: ReviewPatternAttention = {}): Promise<ReviewOpenState> {
+    return this.open("daily", day, timezone, now, origin, phase, patternAttention);
   }
 
   openWeekly(day: string, timezone: string, now: string, origin: ReviewWorkspaceOrigin = "week"): Promise<ReviewOpenState> {
@@ -138,6 +160,7 @@ export class ReviewWorkspaceController {
       const loaded = await this.client.call<{ artifact: ReviewArtifact; snapshot: ReviewSnapshot }>("review.artifact.load", {
         review_id: input.reviewId, path: input.path, now,
       });
+      this.setPatternAttention({});
       return this.accept({ artifact: loaded.artifact, snapshot: loaded.snapshot, prompts: [], required_sections: [], due: { state: loaded.artifact.metadata.status, reason: "Loaded from canonical Markdown." } }, origin);
     } catch (error) {
       this.state = errorState(this.state, error);
@@ -151,6 +174,8 @@ export class ReviewWorkspaceController {
     try {
       const result = await this.client.call<{ artifact: ReviewArtifact; snapshot: ReviewSnapshot }>("review.artifact.refresh", {
         review_id: artifact.metadata.review_id, expected_hash: artifact.content_hash, now,
+        urgent_pattern_ids: artifact.metadata.review_kind === "daily" ? this.state.urgentPatternIds : undefined,
+        pinned_pattern_ids: artifact.metadata.review_kind === "daily" ? this.state.pinnedPatternIds : undefined,
         idempotency_key: key(`review-refresh-${artifact.metadata.review_id}`),
       });
       this.accept({ artifact: result.artifact, snapshot: result.snapshot, prompts: this.state.prompts, required_sections: this.state.requiredSections, due: this.state.due ?? { state: "open", reason: "Refreshed." }, next_section: this.state.nextSection, active_phase: this.state.activePhase });
@@ -206,6 +231,17 @@ export class ReviewWorkspaceController {
 
   async createProposal(input: ReviewProposalInput, now: string): Promise<ReviewProposalResult> {
     const artifact = this.requireArtifact();
+    if (input.itemId.startsWith("personal-pattern:")) {
+      const updated = await this.decide(input.itemId, input.evidenceFingerprint, "propose_change", now, input.rationale);
+      const decision = updated.metadata.item_decisions.find((item) => item.item_id === input.itemId && item.evidence_fingerprint === input.evidenceFingerprint && item.decision === "propose_change");
+      if (!decision?.proposal_id) throw new Error("Pattern propose-change did not return a draft proposal.");
+      return {
+        proposal_id: decision.proposal_id,
+        proposal_path: `proposals/${decision.proposal_id}`,
+        target_path: input.targetPath,
+        base_hash: input.expectedTargetHash,
+      };
+    }
     return this.client.call<ReviewProposalResult>("review.proposal.create", {
       review_id: artifact.metadata.review_id,
       item_id: input.itemId,
