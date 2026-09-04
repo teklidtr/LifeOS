@@ -491,6 +491,34 @@ supporting material cannot erase contesting evidence. Missing evidence is unknow
 not negative evidence. `evaluation` is optional and only names a supported
 deterministic re-evaluation recipe; it cannot encode an autonomous semantic model.
 
+For fingerprinting, each reviewed reference normalizes to the ordered tuple
+`(role, source_id-or-null, path, content_hash, observation_id-or-null,
+event_id-or-null)`. Exact duplicate normalized tuples contribute once. The unique
+tuples are sorted by their normalized fields, encoded with canonical compact JSON,
+and hashed as a lowercase `sha256:` digest. The stored reference itself is not
+rewritten when current source facts later differ.
+
+Current source health is a derived diagnostic rather than canonical pattern state:
+
+```yaml
+state: unchanged | moved | changed | missing | ambiguous | deleted
+current_path: optional current canonical path
+current_content_hash: optional current sha256 digest
+candidate_paths: []  # active paths only when identity resolution is ambiguous
+```
+
+Resolution is evaluated only over a caller-supplied authorized path predicate.
+Denied registry rows do not participate in ambiguity and cannot expose current
+path/hash facts through the diagnostic. `source_id`, when present, is the identity
+lookup key. A unique same-hash identity at a new path is `moved`; a unique
+different-hash identity is `changed`. Without a stable source ID, resolution stays
+path-bound and does not invent rename continuity. A known visible registry deletion
+is `deleted`, while no resolvable visible current or historical registry fact is
+`missing`. The diagnostic retains the original reviewed reference, including its
+role, path, and content hash, so current facts cannot silently advance historical
+reviewed evidence. Internal registry tombstone locations are not canonical evidence
+paths and are never exposed as `current_path` or `candidate_paths`.
+
 Canonical serialization emits exactly one `personal-pattern-evidence` managed
 block for the refreshable evidence summary. Human reflection and user-created
 prose before and after that block remain outside machine ownership and can be
