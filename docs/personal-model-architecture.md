@@ -204,9 +204,17 @@ Weekly review may surface a bounded optional set of:
 - `needs-review` patterns;
 - unresolved contesting evidence.
 
-Daily review may surface only an urgent or explicitly pinned pattern-review item. A pattern is never inserted into every daily or weekly review merely because it is `active`.
+LIFEOS-1706 makes that bound concrete at eight items per weekly snapshot. Selection is deterministic: `needs-review` items sort before due items, contesting-evidence changes, other material evidence changes, and new seeds; stable pattern ID breaks ties. A quiet `active` pattern is not selected simply because it is active.
 
-Review decisions remain evidence-fingerprint scoped under DD-058. A dismissal suppresses the unchanged prompt; changed evidence creates a new context that may surface again. Completing a review never implies agreement with the pattern and never mutates the pattern directly. Proposed changes use the normal proposal engine.
+Daily review is fail-closed for personal patterns. It may surface at most three pattern items and only when the caller or workspace explicitly passes stable IDs as urgent or pinned, with urgent items first. In the absence of those IDs the daily pattern section is empty, even when a pattern is due or already `needs-review`. Urgency and pinning are not inferred from free-form `review_reasons`, and Phase 17 does not add a second canonical pin field merely to make daily review noisy.
+
+Each selected item reuses the canonical review item identity `personal-pattern:<pattern-id>`. Its review fingerprint is derived from review-relevant context rather than the whole pattern note: lifecycle status, confidence, reviewed evidence fingerprint, evidence health, review timing, review reasons, deterministic trigger reasons, and current evidence diagnostics. Arbitrary edits to human-owned reflection prose therefore do not by themselves create a new review context. Source presentation stays bounded to the canonical pattern plus up to three evidence references.
+
+Review decisions remain evidence-fingerprint scoped under DD-058. A `dismiss_for_review` decision suppresses the same fingerprint in later continuity; changed evidence or another review-relevant state change creates a new fingerprint that may surface again. Acknowledge, defer, dismiss, and open-source behavior uses the ordinary review decision machinery rather than a pattern-specific state machine.
+
+Completing a review never implies agreement with the pattern and never mutates the pattern directly. `propose_change` is an explicit handoff that validates the still-visible review fingerprint and still-current pattern context before creating the existing `mark-needs-review` draft. The normal submit, approve, and apply lifecycle remains required after that draft exists.
+
+Pattern review resolution uses the disposable registry only to resolve current source identity and content-hash facts before building the Personal Model item. Refreshing those derived facts does not advance reviewed hashes or make SQLite authoritative; canonical pattern Markdown and canonical review artifacts remain the durable sources of truth.
 
 ## Context, retrieval, and reflection
 
