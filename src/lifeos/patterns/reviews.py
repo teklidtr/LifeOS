@@ -12,14 +12,13 @@ from lifeos.facade.registry_tools import refresh_registry
 from lifeos.registry import Registry
 
 from .contracts import PatternError
-from .evidence import compute_evidence_fingerprint
 from .model import (
     PersonalModelDocument,
     PersonalModelError,
     PersonalModelItem,
     build_personal_model_document,
 )
-from .review import PatternReviewAssessment, PatternReviewService
+from .proposals import MarkPatternNeedsReviewRequest, PatternProposalService
 
 if TYPE_CHECKING:
     from lifeos.reviews.contracts import (
@@ -366,19 +365,24 @@ def create_pattern_review_proposal(
             "Refresh the review and propose from the current evidence.",
             {"item_id": item_id},
         )
-    assessment = PatternReviewAssessment(
-        pattern_id=current.pattern_id,
-        pattern_path=current.pattern_path,
-        pattern_content_hash=current.pattern_content_hash,
-        reviewed_evidence_fingerprint=current.evidence_fingerprint,
-        declared_evidence_fingerprint=compute_evidence_fingerprint(current.evidence),
-        recommendation=current.review_recommendation,
-        reasons=current.review_trigger_reasons,
-        reviewed_analysis=None,
-        current_analysis=None,
+    if current.status == "needs-review":
+        raise PatternError(
+            "invalid_transition",
+            "The pattern is already marked needs-review; revise or resolve the existing review instead.",
+            {"pattern_id": pattern_id},
+        )
+    review_reasons = _weekly_labels(current) or (
+        "Explicitly proposed from a personal-pattern review item.",
     )
-    return PatternReviewService(
-        vault_root=vault_root,
-        registry=Registry(runtime_dir / "registry.db"),
-        allow_path=_allow_all,
-    ).create_review_proposal(assessment, actor_id=actor_id, now=now)
+    transition_reason = (
+        "User explicitly proposed marking this pattern needs-review from canonical review "
+        f"{review.metadata.review_id}."
+    )
+    return PatternProposalService(vault_root=vault_root, actor_id=actor_id).publish(
+        MarkPatternNeedsReviewRequest(
+            target_path=current.pattern_path,
+            transition_reason=transition_reason,
+            review_reasons=review_reasons,
+        ),
+        now=now,
+    )
