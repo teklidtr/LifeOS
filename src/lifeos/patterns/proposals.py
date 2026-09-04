@@ -166,20 +166,31 @@ class PatternProposalService:
         request: PatternProposalRequest,
         *,
         now: datetime | None = None,
+        expected_base_hash: str | None = None,
     ) -> tuple[PatternProposalPreview, PatchDocumentV2, bytes]:
         moment = _utc_moment(now)
         reason = _transition_reason(request.transition_reason)
         if isinstance(request, CreatePatternSeedRequest):
             return self._preview_create(request, moment=moment, reason=reason)
-        return self._preview_existing(request, moment=moment, reason=reason)
+        return self._preview_existing(
+            request,
+            moment=moment,
+            reason=reason,
+            expected_base_hash=expected_base_hash,
+        )
 
     def publish(
         self,
         request: PatternProposalRequest,
         *,
         now: datetime | None = None,
+        expected_base_hash: str | None = None,
     ) -> dict[str, object]:
-        preview, patch, proposal_markdown = self.preview(request, now=now)
+        preview, patch, proposal_markdown = self.preview(
+            request,
+            now=now,
+            expected_base_hash=expected_base_hash,
+        )
         patches_json = serialize_patch_json_bytes(patch)
         review_json = build_review_snapshot_bytes_from_patches(
             vault_root=self.vault_root,
@@ -252,6 +263,7 @@ class PatternProposalService:
         *,
         moment: datetime,
         reason: str,
+        expected_base_hash: str | None,
     ) -> tuple[PatternProposalPreview, PatchDocumentV2, bytes]:
         target_path = _validate_artifact_path(request.target_path)
         try:
@@ -264,6 +276,16 @@ class PatternProposalService:
                 "unsupported_artifact",
                 "Target Markdown does not declare a recognized personal-pattern schema.",
                 {"target_path": target_path},
+            )
+        if expected_base_hash is not None and artifact.content_hash != expected_base_hash:
+            raise PatternError(
+                "stale_target",
+                "The pattern changed after it was inspected. Refresh before creating a proposal.",
+                {
+                    "path": artifact.path,
+                    "expected_hash": expected_base_hash,
+                    "current_hash": artifact.content_hash,
+                },
             )
 
         action, metadata = _transition(
