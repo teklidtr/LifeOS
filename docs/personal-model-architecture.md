@@ -126,6 +126,8 @@ New pattern files use the existing human-file creation boundary. Changes to exis
 
 An agent may propose a pattern but cannot select the approving identity, approve its own interpretation, or directly mutate `patterns/`. MCP and authenticated home-node transport do not weaken that rule.
 
+LIFEOS-1703 implements this boundary with typed `lifeos.patterns` proposal requests for Track, Adopt, Revise, Needs review, Resolve review, and Archive. The builder stops at a draft proposal, records the transition reason and reviewed evidence fingerprint in proposal metadata, uses `create_file` only for an absent new seed, and uses a current-content-hash-bound `patch_human_file` for every existing pattern. Resolving `needs-review` requires an explicit `seed` or `active` destination, so completing a review cannot silently become adoption. Submission, approval, rejection, stale-target checks, application, and interrupted-write recovery remain the shared proposal engine's responsibility.
+
 ## Evidence references and lineage
 
 A durable personal interpretation must remain traceable to the exact evidence versions reviewed when the interpretation was created or changed.
@@ -234,7 +236,7 @@ A canonical pattern itself follows normal path policy. Phase 17 does not classif
 Patterns may inform reflection without becoming automatic control policy.
 
 - **Goals and plans:** relevant patterns may appear as bounded evidence during clarification or replanning. A pattern cannot directly create, reprioritize, or rewrite a goal, plan, or task.
-- **Today:** pattern review attention may be surfaced when urgent or explicitly pinned. Direct pattern-driven planner scoring, ranking, selection, duration, energy, or motivation changes are deferred beyond Phase 17.
+- **Today:** pattern review attention may be surfaced when urgent or explicitly pinned. Direct pattern-driven planner scoring, ranking, selection, duration, energy, motivation changes are deferred beyond Phase 17.
 - **Experiments:** a pattern may motivate an experiment, and experiment evidence may later support, contest, or contextualize a pattern. Experiment completion never auto-revises the pattern.
 - **Conversations:** an evidence-grounded conversation may propose a new or revised pattern, but the result stops at a draft proposal.
 
