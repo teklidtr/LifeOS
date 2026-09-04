@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1710
 title: Validate, recover, migrate, and document the Personal Model
-status: backlog
+status: ready
 phase: 17
 depends_on:
   - LIFEOS-1701
