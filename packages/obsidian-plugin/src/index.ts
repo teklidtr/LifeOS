@@ -8,6 +8,7 @@ import { emptyScope } from "./knowledge-conversation.js";
 import { ExperimentWorkspaceController, ExperimentWorkspaceOrigin } from "./experiment-workspace.js";
 import { RichCaptureOrigin, RichCaptureWorkspaceController } from "./rich-capture-workspace.js";
 import { CaptureType } from "./rich-capture.js";
+import { PersonalModelWorkspaceController } from "./personal-model-workspace.js";
 import {
   ConfirmationChallenge,
   ProposalInspection,
@@ -67,6 +68,10 @@ export class RichCaptureWorkspaceView {
   refresh(): void { this.refreshCount += 1; }
 }
 
+export class PersonalModelWorkspaceView {
+  constructor(readonly controller: PersonalModelWorkspaceController) {}
+}
+
 export class ProposalWorkspaceView {
   constructor(readonly controller: ProposalWorkspaceController) {}
 }
@@ -78,6 +83,7 @@ export class LifeOSPlugin {
   static readonly KNOWLEDGE_CONVERSATION_VIEW_TYPE = "lifeos-knowledge-conversation";
   static readonly EXPERIMENT_VIEW_TYPE = "lifeos-experiments";
   static readonly RICH_CAPTURE_VIEW_TYPE = "lifeos-rich-capture";
+  static readonly PERSONAL_MODEL_VIEW_TYPE = "lifeos-personal-model";
   static readonly PROPOSAL_VIEW_TYPE = "lifeos-proposals";
   readonly view = new LifeOSView();
   readonly copilot: GoalPlanWorkspaceController;
@@ -90,6 +96,8 @@ export class LifeOSPlugin {
   readonly experimentView: ExperimentWorkspaceView;
   readonly richCaptures: RichCaptureWorkspaceController;
   readonly richCaptureView: RichCaptureWorkspaceView;
+  readonly personalModel: PersonalModelWorkspaceController;
+  readonly personalModelView: PersonalModelWorkspaceView;
   readonly proposals: ProposalWorkspaceController;
   readonly proposalView: ProposalWorkspaceView;
   readonly connection: ConnectionManager;
@@ -114,6 +122,8 @@ export class LifeOSPlugin {
     this.experimentView = new ExperimentWorkspaceView(this.experiments);
     this.richCaptures = new RichCaptureWorkspaceController(client, (path) => this.host.openFilePath?.(path));
     this.richCaptureView = new RichCaptureWorkspaceView(this.richCaptures);
+    this.personalModel = new PersonalModelWorkspaceController(client, (path) => this.host.openFilePath?.(path));
+    this.personalModelView = new PersonalModelWorkspaceView(this.personalModel);
     this.proposals = new ProposalWorkspaceController(
       client,
       (challenge, inspection) => this.host.confirmProposal?.(challenge, inspection)
@@ -129,11 +139,13 @@ export class LifeOSPlugin {
     this.disposers.push(this.host.registerView(LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE, () => this.knowledgeConversationView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.EXPERIMENT_VIEW_TYPE, () => this.experimentView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE, () => this.richCaptureView));
+    this.disposers.push(this.host.registerView(LifeOSPlugin.PERSONAL_MODEL_VIEW_TYPE, () => this.personalModelView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.PROPOSAL_VIEW_TYPE, () => this.proposalView));
     this.disposers.push(this.host.addRibbonIcon("layout-dashboard", "Open LifeOS", () => this.openToday()));
     this.disposers.push(this.host.addRibbonIcon("messages-square", "Open Knowledge Conversation", () => this.openKnowledgeConversation("ribbon")));
     this.disposers.push(this.host.addRibbonIcon("flask-conical", "Open Personal Experiments", () => this.openExperiments("ribbon")));
     this.disposers.push(this.host.addRibbonIcon("camera", "Open Rich Capture", () => this.openRichCapture("ribbon")));
+    this.disposers.push(this.host.addRibbonIcon("brain-circuit", "Open Personal Model", () => this.openPersonalModel()));
     this.disposers.push(this.host.addCommand("lifeos-open-today", "Open LifeOS Today", () => this.openToday()));
     this.disposers.push(this.host.addCommand("lifeos-open-goal-plan", "Open Goal-to-Plan Copilot", () => this.openGoalPlan("command-palette")));
     this.disposers.push(this.host.addCommand("lifeos-plan-active-goal", "Plan from Active Goal Note", () => {
@@ -192,6 +204,7 @@ export class LifeOSPlugin {
       this.openExperiments("history"); void this.experiments.loadHistory();
     }));
     this.disposers.push(this.host.addCommand("lifeos-open-rich-capture", "Open Rich Capture", () => this.openRichCapture("command-palette")));
+    this.disposers.push(this.host.addCommand("lifeos-open-personal-model", "Open Personal Model", () => this.openPersonalModel()));
     this.disposers.push(this.host.addCommand("lifeos-open-proposals", "Open Proposals", () => this.openProposals()));
     this.disposers.push(this.host.addCommand("lifeos-quick-capture-meal", "Quick Capture Meal", () => this.openRichCapture("command-palette", "meal")));
     this.disposers.push(this.host.addCommand("lifeos-quick-capture-exercise", "Quick Capture Exercise", () => this.openRichCapture("command-palette", "exercise")));
@@ -223,7 +236,6 @@ export class LifeOSPlugin {
     this.host.openView(LifeOSPlugin.COPILOT_VIEW_TYPE);
   }
 
-
   openKnowledgeConversation(origin: KnowledgeConversationOrigin, scope: Record<string, unknown> = {}, query = ""): void {
     this.knowledgeConversations.prepare(origin, { ...emptyScope(), ...scope }, query);
     this.host.openView(LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE);
@@ -242,6 +254,10 @@ export class LifeOSPlugin {
   openRichCapture(origin: RichCaptureOrigin, captureType: CaptureType = "attachment", description = "", sourcePath?: string): void {
     this.richCaptures.prepare(origin, captureType, description, sourcePath);
     this.host.openView(LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE);
+  }
+
+  openPersonalModel(): void {
+    this.host.openView(LifeOSPlugin.PERSONAL_MODEL_VIEW_TYPE);
   }
 
   openProposals(): void {
@@ -300,3 +316,5 @@ export * from "./experiment.js";
 export * from "./experiment-workspace.js";
 export * from "./rich-capture.js";
 export * from "./rich-capture-workspace.js";
+export * from "./personal-model.js";
+export * from "./personal-model-workspace.js";
