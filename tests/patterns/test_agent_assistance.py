@@ -22,6 +22,7 @@ from lifeos.patterns import (
     serialize_pattern,
 )
 from lifeos.patterns.agent_assistance import (
+    PatternAssistanceEvidence,
     PatternAssistanceRequest,
     PatternSemanticSuggestion,
     assist_pattern,
@@ -85,6 +86,17 @@ def _write_pattern(vault: Path, evidence: tuple[PatternEvidence, ...]) -> Path:
     )
     target.write_text(serialize_pattern(metadata), encoding="utf-8")
     return target
+
+
+def _provider_evidence(text: str = "Walked, then completed a focused study block."):
+    return PatternAssistanceEvidence(
+        reference=PatternEvidence(
+            path="journal/source.md",
+            content_hash="sha256:" + "a" * 64,
+            role="supporting",
+        ),
+        text=text,
+    )
 
 
 def test_new_agent_pattern_is_exact_evidence_bound_draft_with_counter_evidence(tmp_path: Path) -> None:
@@ -280,14 +292,10 @@ class _ZeroProvider:
 
 
 def test_optional_provider_failures_do_not_create_semantic_authority() -> None:
-    evidence = (
-        PatternEvidence(
-            path="journal/source.md",
-            content_hash="sha256:" + "a" * 64,
-            role="supporting",
-        ),
+    request = PatternAssistanceRequest(
+        purpose="new-pattern",
+        evidence=(_provider_evidence(),),
     )
-    request = PatternAssistanceRequest(purpose="new-pattern", evidence=evidence)
 
     assert assist_pattern(request, provider=None).state == "no-model"
     assert assist_pattern(request, provider=_ZeroProvider()).state == "no-proposal"
@@ -297,7 +305,9 @@ def test_optional_provider_failures_do_not_create_semantic_authority() -> None:
     assert malformed.suggestion is None
 
 
-def test_typed_provider_output_is_only_a_suggestion() -> None:
+def test_typed_provider_receives_only_bounded_selected_evidence() -> None:
+    seen = {}
+
     class Provider:
         capabilities = ProviderCapabilities(
             kind="generation",
@@ -308,6 +318,8 @@ def test_typed_provider_output_is_only_a_suggestion() -> None:
         )
 
         def suggest(self, request, *, timeout_seconds, cancellation):
+            seen["path"] = request.evidence[0].reference.path
+            seen["text"] = request.evidence[0].text
             return PatternSemanticSuggestion(
                 hypothesis="A cautious hypothesis.",
                 rationale="Selected evidence supports review.",
@@ -316,17 +328,42 @@ def test_typed_provider_output_is_only_a_suggestion() -> None:
                 proposed_confidence="low",
             )
 
+    evidence_text = "Walked, then completed a focused study block."
     request = PatternAssistanceRequest(
         purpose="new-pattern",
-        evidence=(
-            PatternEvidence(
-                path="journal/source.md",
-                content_hash="sha256:" + "b" * 64,
-                role="supporting",
-            ),
-        ),
+        evidence=(_provider_evidence(evidence_text),),
     )
     result = assist_pattern(request, provider=Provider())
+
     assert result.state == "ready"
     assert result.suggestion is not None
     assert result.suggestion.hypothesis == "A cautious hypothesis."
+    assert seen == {"path": "journal/source.md", "text": evidence_text}
+    assert result.provider_disclosure["sent_paths"] == ["journal/source.md"]
+    assert result.provider_disclosure["character_count"] == len(evidence_text)
+
+
+def test_provider_batch_and_total_evidence_budget_fail_closed() -> None:
+    class Provider:
+        capabilities = ProviderCapabilities(
+            kind="generation",
+            adapter_key="test-small-batch",
+            model_key="test-model",
+            local_only=True,
+            max_batch_size=1,
+        )
+
+        def suggest(self, request, *, timeout_seconds, cancellation):
+            raise AssertionError("provider must not receive an oversized batch")
+
+    batch = PatternAssistanceRequest(
+        purpose="new-pattern",
+        evidence=(_provider_evidence("one"), _provider_evidence("two")),
+    )
+    assert assist_pattern(batch, provider=Provider()).state == "provider-unavailable"
+
+    with pytest.raises(ValueError, match="disclosure budget"):
+        PatternAssistanceRequest(
+            purpose="new-pattern",
+            evidence=(_provider_evidence("x" * 24_001),),
+        )
