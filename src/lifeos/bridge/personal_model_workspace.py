@@ -6,12 +6,18 @@ from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Literal, cast
 
 from lifeos.bridge.protocol import ProtocolError, strict_object
 from lifeos.facade.errors import ToolExecutionError
 from lifeos.facade.registry_tools import refresh_registry
-from lifeos.patterns.artifact import PatternArtifactService
+from lifeos.patterns.artifact import PatternArtifactService, parse_pattern
+from lifeos.patterns.context import (
+    PersonalPatternContextError,
+    _runtime_scan_filter,
+    _snapshot_registry,
+)
 from lifeos.patterns.contracts import (
     EvidenceRole,
     OriginKind,
@@ -37,9 +43,12 @@ from lifeos.patterns.proposals import (
     ResolvePatternReviewRequest,
     RevisePatternRequest,
 )
-from lifeos.registry import Registry, RegistryError
+from lifeos.registry import FileTrackingError, Registry, RegistryError, register_scan
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
+from lifeos.scanner import ScannerError, scan_vault
+from lifeos.vault import VaultAccessError, read_vault_markdown
+from lifeos.vault_paths import iter_vault_markdown_paths
 
 PersonalModelAction = Literal["track", "adopt", "revise", "contest", "archive"]
 
@@ -82,7 +91,7 @@ def _string(data: dict[str, Any], field: str, default: str = "") -> str:
 
 
 def _local_allow_path(vault_root: Path) -> Callable[[str], bool]:
-    """Apply the ordinary local retrieval policy before opening Personal Model sources."""
+    """Apply ordinary local retrieval policy before opening Personal Model sources."""
     try:
         policy = load_retrieval_policy(vault_root)
     except RetrievalError as exc:
@@ -99,6 +108,33 @@ def _local_allow_path(vault_root: Path) -> Callable[[str], bool]:
             return False
 
     return allowed
+
+
+def _authorize_path(
+    allow_path: Callable[[str], bool],
+    path: str,
+    *,
+    subject: str,
+) -> None:
+    if allow_path(path):
+        return
+    raise ProtocolError(
+        "authorization_denied",
+        f"{subject} is outside the Personal Model workspace's authorized local scope.",
+        {"path": path},
+    )
+
+
+def _authorize_evidence(
+    allow_path: Callable[[str], bool],
+    evidence: tuple[PatternEvidence, ...],
+) -> None:
+    for reference in evidence:
+        _authorize_path(
+            allow_path,
+            reference.path,
+            subject="Pattern evidence",
+        )
 
 
 def _evidence(value: object) -> tuple[PatternEvidence, ...]:
@@ -125,7 +161,11 @@ def _evidence(value: object) -> tuple[PatternEvidence, ...]:
                 )
             )
         except PatternError as exc:
-            raise ProtocolError(exc.code, exc.message, {"evidence_index": index, **exc.data}) from exc
+            raise ProtocolError(
+                exc.code,
+                exc.message,
+                {"evidence_index": index, **exc.data},
+            ) from exc
     return tuple(result)
 
 
@@ -149,7 +189,8 @@ def _review_reasons(value: object, fallback: str) -> tuple[str, ...]:
         isinstance(item, str) and item.strip() for item in value
     ):
         raise ProtocolError(
-            "invalid_params", "review_reasons must be a non-empty list of non-empty strings."
+            "invalid_params",
+            "review_reasons must be a non-empty list of non-empty strings.",
         )
     return tuple(dict.fromkeys(item.strip() for item in value))
 
@@ -178,12 +219,16 @@ def _related_paths(item: PersonalModelItem) -> list[dict[str, str]]:
     return [{"path": path, "kind": related[path]} for path in sorted(related)]
 
 
-def _workspace_item(item: PersonalModelItem, artifacts: PatternArtifactService) -> dict[str, object]:
+def _workspace_item(
+    item: PersonalModelItem,
+    artifacts: PatternArtifactService,
+) -> dict[str, object]:
     artifact = artifacts.load(item.pattern_path)
     if artifact.content_hash != item.pattern_content_hash:
         raise ProtocolError(
             "stale_target",
-            "The pattern changed while the Personal Model workspace was loading. Refresh and review it again.",
+            "The pattern changed while the Personal Model workspace was loading. "
+            "Refresh and review it again.",
             {"path": item.pattern_path},
         )
     result = asdict(item)
@@ -214,12 +259,103 @@ def _workspace_document(
         "runtime_state": "ready",
         "groups": {
             "active": [_workspace_item(item, artifacts) for item in document.active],
-            "needs_review": [_workspace_item(item, artifacts) for item in document.needs_review],
+            "needs_review": [
+                _workspace_item(item, artifacts) for item in document.needs_review
+            ],
             "seeds": [_workspace_item(item, artifacts) for item in document.seeds],
             "archived": [_workspace_item(item, artifacts) for item in document.archived],
         },
         "diagnostics": [asdict(item) for item in document.diagnostics],
     }
+
+
+class _ScopedPatternArtifactService(PatternArtifactService):
+    """List only authorized pattern bytes for Track duplicate-identity checks."""
+
+    def __init__(
+        self,
+        *,
+        vault_root: Path,
+        allow_path: Callable[[str], bool],
+    ) -> None:
+        super().__init__(vault_root=vault_root)
+        self.allow_path = allow_path
+
+    def list(self):  # type: ignore[no-untyped-def]
+        def allowed_pattern_path(path: str) -> bool:
+            candidate = path.rstrip("/")
+            if candidate != "patterns" and not candidate.startswith("patterns/"):
+                return False
+            return self.allow_path(candidate)
+
+        try:
+            paths = iter_vault_markdown_paths(
+                self.vault_root,
+                path_filter=allowed_pattern_path,
+            )
+        except VaultAccessError as exc:
+            if exc.code == "not-found":
+                return ()
+            raise PatternError(exc.code, str(exc)) from exc
+
+        artifacts = []
+        by_id: dict[str, str] = {}
+        for relative_path in paths:
+            try:
+                source = read_vault_markdown(self.vault_root, relative_path)
+            except VaultAccessError as exc:
+                raise PatternError(exc.code, str(exc), {"path": relative_path}) from exc
+            artifact = parse_pattern(source.path, source.relative_path, source.content)
+            if artifact is None:
+                continue
+            previous = by_id.get(artifact.metadata.pattern_id)
+            if previous is not None:
+                raise PatternError(
+                    "duplicate_identity",
+                    "Pattern identity must resolve to exactly one canonical artifact.",
+                    {
+                        "pattern_id": artifact.metadata.pattern_id,
+                        "paths": [previous, artifact.path],
+                    },
+                )
+            by_id[artifact.metadata.pattern_id] = artifact.path
+            artifacts.append(artifact)
+        return tuple(sorted(artifacts, key=lambda item: (item.metadata.pattern_id, item.path)))
+
+
+def _current_document(
+    *,
+    vault_root: Path,
+    runtime_dir: Path,
+    allow_path: Callable[[str], bool],
+    now: datetime | None,
+) -> PersonalModelDocument:
+    """Refresh evidence facts in a disposable registry snapshot, never persisted runtime."""
+    try:
+        with TemporaryDirectory(prefix="lifeos-personal-model-workspace-") as temporary:
+            registry = _snapshot_registry(runtime_dir=runtime_dir, temporary=temporary)
+            runtime_filter = _runtime_scan_filter(vault_root, runtime_dir)
+
+            def scan_allow_path(path: str) -> bool:
+                return runtime_filter(path) and allow_path(path)
+
+            entries = scan_vault(vault_root, path_filter=scan_allow_path)
+            register_scan(
+                registry,
+                vault_root,
+                entries,
+                identity_allow_path=allow_path,
+            )
+            return build_personal_model_document(
+                vault_root=vault_root,
+                registry=registry,
+                allow_path=allow_path,
+                now=now,
+            )
+    except (PersonalPatternContextError, FileTrackingError, RegistryError, ScannerError) as exc:
+        raise PersonalModelError(
+            f"Could not refresh current Personal Model evidence facts safely: {exc}"
+        ) from exc
 
 
 class PersonalModelWorkspaceBridge:
@@ -228,8 +364,8 @@ class PersonalModelWorkspaceBridge:
     def __init__(self, *, vault_root: Path, runtime_dir: Path, actor_id: str) -> None:
         self.vault_root = vault_root
         self.runtime_dir = runtime_dir
+        self.actor_id = actor_id
         self.artifacts = PatternArtifactService(vault_root=vault_root)
-        self.proposals = PatternProposalService(vault_root=vault_root, actor_id=actor_id)
 
     def dispatch(self, method: str, params: object) -> object:
         if method == "personal-model.workspace.get":
@@ -239,16 +375,36 @@ class PersonalModelWorkspaceBridge:
             data = strict_object(params, allowed={"now"})
             return self.rebuild(now=_moment(data.get("now")))
         if method in {"personal-model.proposal.preview", "personal-model.proposal.create"}:
-            request, expected_hash, now = self._proposal_request(params)
-            self._check_expected_target(request, expected_hash)
+            allow_path = _local_allow_path(self.vault_root)
+            request, expected_hash, now = self._proposal_request(
+                params,
+                allow_path=allow_path,
+            )
+            self._check_expected_target(
+                request,
+                expected_hash,
+                allow_path=allow_path,
+            )
+            proposals = PatternProposalService(
+                vault_root=self.vault_root,
+                actor_id=self.actor_id,
+            )
+            proposals.artifacts = _ScopedPatternArtifactService(
+                vault_root=self.vault_root,
+                allow_path=allow_path,
+            )
             try:
                 if method.endswith("preview"):
-                    preview, _, _ = self.proposals.preview(request, now=now)
+                    preview, _, _ = proposals.preview(request, now=now)
                     return {"preview": preview.to_dict()}
-                return self.proposals.publish(request, now=now)
+                return proposals.publish(request, now=now)
             except PatternError as exc:
                 raise ProtocolError(exc.code, exc.message, exc.data) from exc
-        raise ProtocolError("method_not_found", "Unknown Personal Model bridge method.", {"method": method})
+        raise ProtocolError(
+            "method_not_found",
+            "Unknown Personal Model bridge method.",
+            {"method": method},
+        )
 
     def load(self, *, now: datetime | None = None) -> dict[str, object]:
         allow_path = _local_allow_path(self.vault_root)
@@ -260,15 +416,15 @@ class PersonalModelWorkspaceBridge:
             allow_path=allow_path,
         )
         try:
-            if model.active_path() is None:
+            if model.active_path() is None or registry.schema_version == 0:
                 raise ProtocolError(
                     "personal_model_rebuild_required",
                     "The disposable Personal Model is missing. Rebuild it from canonical patterns.",
                     {"recovery": "rebuild"},
                 )
-            document = build_personal_model_document(
+            document = _current_document(
                 vault_root=self.vault_root,
-                registry=registry,
+                runtime_dir=self.runtime_dir,
                 allow_path=allow_path,
                 now=now,
             )
@@ -317,7 +473,10 @@ class PersonalModelWorkspaceBridge:
             raise ProtocolError(exc.code, exc.message, exc.data) from exc
 
     def _proposal_request(
-        self, params: object
+        self,
+        params: object,
+        *,
+        allow_path: Callable[[str], bool],
     ) -> tuple[PatternProposalRequest, str | None, datetime | None]:
         data = strict_object(
             params,
@@ -340,8 +499,12 @@ class PersonalModelWorkspaceBridge:
         )
         action = _required_string(data, "action")
         if action not in {"track", "adopt", "revise", "contest", "archive"}:
-            raise ProtocolError("invalid_params", "action is not supported by the Personal Model workspace.")
+            raise ProtocolError(
+                "invalid_params",
+                "action is not supported by the Personal Model workspace.",
+            )
         target_path = _required_string(data, "target_path")
+        _authorize_path(allow_path, target_path, subject="Pattern target")
         reason = _required_string(data, "transition_reason")
         now = _moment(data.get("now"))
         expected_hash = _optional_string(data, "expected_target_hash")
@@ -350,9 +513,12 @@ class PersonalModelWorkspaceBridge:
             if action == "track":
                 if expected_hash not in {None, "absent"}:
                     raise ProtocolError(
-                        "invalid_params", "Track expects an absent target rather than a content hash."
+                        "invalid_params",
+                        "Track expects an absent target rather than a content hash.",
                     )
                 confidence = cast(PatternConfidence, _required_string(data, "confidence"))
+                evidence = _evidence(data.get("evidence"))
+                _authorize_evidence(allow_path, evidence)
                 request: PatternProposalRequest = CreatePatternSeedRequest(
                     target_path=target_path,
                     pattern_id=_required_string(data, "pattern_id"),
@@ -361,7 +527,7 @@ class PersonalModelWorkspaceBridge:
                     statement=_required_string(data, "statement"),
                     confidence=confidence,
                     origin=_origin(data.get("origin")),
-                    evidence=_evidence(data.get("evidence")),
+                    evidence=evidence,
                     transition_reason=reason,
                 )
                 return request, expected_hash, now
@@ -369,9 +535,11 @@ class PersonalModelWorkspaceBridge:
             if expected_hash is None:
                 raise ProtocolError(
                     "invalid_params",
-                    "Existing-pattern actions require expected_target_hash from the inspected workspace item.",
+                    "Existing-pattern actions require expected_target_hash from the inspected "
+                    "workspace item.",
                 )
             current = self.artifacts.load(target_path)
+            _authorize_evidence(allow_path, current.metadata.evidence)
             if action == "adopt":
                 request = (
                     PromotePatternRequest(target_path=target_path, transition_reason=reason)
@@ -386,13 +554,20 @@ class PersonalModelWorkspaceBridge:
                 statement = _optional_string(data, "statement")
                 confidence_value = _optional_string(data, "confidence")
                 evidence_value = data.get("evidence")
+                revised_evidence = (
+                    None if evidence_value is None else _evidence(evidence_value)
+                )
+                if revised_evidence is not None:
+                    _authorize_evidence(allow_path, revised_evidence)
                 request = RevisePatternRequest(
                     target_path=target_path,
                     transition_reason=reason,
                     statement=statement,
-                    evidence=None if evidence_value is None else _evidence(evidence_value),
+                    evidence=revised_evidence,
                     confidence=(
-                        None if confidence_value is None else cast(PatternConfidence, confidence_value)
+                        None
+                        if confidence_value is None
+                        else cast(PatternConfidence, confidence_value)
                     ),
                 )
             elif action == "contest":
@@ -402,17 +577,25 @@ class PersonalModelWorkspaceBridge:
                     review_reasons=_review_reasons(data.get("review_reasons"), reason),
                 )
             else:
-                request = ArchivePatternRequest(target_path=target_path, transition_reason=reason)
+                request = ArchivePatternRequest(
+                    target_path=target_path,
+                    transition_reason=reason,
+                )
             return request, expected_hash, now
         except PatternError as exc:
             raise ProtocolError(exc.code, exc.message, exc.data) from exc
 
     def _check_expected_target(
-        self, request: PatternProposalRequest, expected_hash: str | None
+        self,
+        request: PatternProposalRequest,
+        expected_hash: str | None,
+        *,
+        allow_path: Callable[[str], bool],
     ) -> None:
         if isinstance(request, CreatePatternSeedRequest):
             return
         assert expected_hash is not None
+        _authorize_path(allow_path, request.target_path, subject="Pattern target")
         try:
             artifact = self.artifacts.load(request.target_path)
         except PatternError as exc:
