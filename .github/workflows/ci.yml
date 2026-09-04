@@ -48,6 +48,29 @@ jobs:
         if: steps.scope.outputs.docs_only != 'true'
         run: uv sync --frozen --extra dev --extra mcp
 
+      - name: Set up Node.js for LIFEOS-1708 plugin validation
+        if: steps.scope.outputs.docs_only != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: packages/obsidian-plugin/package-lock.json
+
+      - name: Install Obsidian plugin dependencies
+        if: steps.scope.outputs.docs_only != 'true'
+        run: npm --prefix packages/obsidian-plugin ci
+
+      - name: Test Obsidian plugin
+        if: steps.scope.outputs.docs_only != 'true'
+        run: npm --prefix packages/obsidian-plugin test
+
+      - name: Typecheck Obsidian plugin
+        if: steps.scope.outputs.docs_only != 'true'
+        run: npm --prefix packages/obsidian-plugin run typecheck
+
+      - name: Check diff whitespace
+        run: git diff --check "origin/${{ github.base_ref }}...HEAD"
+
       - name: Restore mypy incremental cache
         if: steps.scope.outputs.docs_only != 'true'
         id: mypy-cache
