@@ -128,6 +128,17 @@ export const PERSONAL_MODEL_VIEW_LABELS: Record<PersonalModelView, string> = {
   archived: "Archived",
 };
 
+export const PERSONAL_MODEL_ACTION_LABELS: Record<
+  PersonalModelAction,
+  { label: string; ariaLabel: string }
+> = {
+  track: { label: "Track", ariaLabel: "Track a new working hypothesis as a seed proposal" },
+  adopt: { label: "Adopt", ariaLabel: "Preview adopting this working hypothesis" },
+  revise: { label: "Revise", ariaLabel: "Preview a revision to this working hypothesis" },
+  contest: { label: "Contest", ariaLabel: "Preview marking this working hypothesis as needing review" },
+  archive: { label: "Archive", ariaLabel: "Preview archiving this working hypothesis" },
+};
+
 export function actionsForPersonalModelItem(item: PersonalModelItem): PersonalModelAction[] {
   if (item.status === "archived") return [];
   if (item.status === "needs-review") return ["adopt", "revise", "archive"];
