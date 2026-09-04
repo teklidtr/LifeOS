@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 WEEKLY_PATTERN_REVIEW_LIMIT = 8
 DAILY_PATTERN_REVIEW_LIMIT = 3
+PATTERN_REVIEW_EVIDENCE_SOURCE_LIMIT = 3
 
 _WEEKLY_SECTION_ID = "personal-patterns-weekly"
 _DAILY_SECTION_ID = "personal-patterns-daily"
@@ -125,14 +126,27 @@ def pattern_review_fingerprint(item: PersonalModelItem) -> str:
 def _source(item: PersonalModelItem, generated_at: str) -> tuple[ReviewSourceReference, ...]:
     from lifeos.reviews.contracts import ReviewSourceReference
 
-    return (
+    sources = [
         ReviewSourceReference(
             path=item.pattern_path,
             content_hash=item.pattern_content_hash,
             detail="Canonical personal-pattern artifact.",
             observed_at=generated_at,
-        ),
-    )
+        )
+    ]
+    for diagnostic in item.evidence_diagnostics[:PATTERN_REVIEW_EVIDENCE_SOURCE_LIMIT]:
+        sources.append(
+            ReviewSourceReference(
+                path=diagnostic.current_path or diagnostic.reference.path,
+                content_hash=diagnostic.current_content_hash or diagnostic.reference.content_hash,
+                detail=(
+                    f"{diagnostic.reference.role.title()} evidence; current state "
+                    f"{diagnostic.state}."
+                ),
+                observed_at=generated_at,
+            )
+        )
+    return tuple(sources)
 
 
 def _trigger_codes(item: PersonalModelItem) -> frozenset[str]:
