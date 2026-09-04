@@ -21,6 +21,7 @@ from lifeos.reviews.contracts import (
     stable_fingerprint,
 )
 from lifeos.markdown.parser import parse_markdown_note
+from lifeos.patterns.reviews import daily_pattern_review_section, weekly_pattern_review_section
 from lifeos.reviews.workflow import ReviewItem, ReviewSection, build_review_workflow
 from lifeos.vault import VaultAccessError, iter_vault_markdown, read_vault_markdown
 
@@ -138,7 +139,7 @@ def _daily_evidence_section(
                     item_id=f"daily-evidence:{phase}-checkin",
                     section_id="daily-evidence",
                     title=f"{phase.title()} check-in",
-                    detail=f"No journal evidence is available for the {phase} check-in; this remains unknown.",
+                    detail=f"No {phase} check-in is recorded; this remains unknown, not a failure.",
                     evidence_fingerprint=stable_fingerprint(journal_path, phase, "missing"),
                     state="ready",
                     action="checkin",
@@ -333,6 +334,8 @@ def build_review_snapshot(
     kind: str,
     day: date,
     generated_at: datetime,
+    urgent_pattern_ids: tuple[str, ...] = (),
+    pinned_pattern_ids: tuple[str, ...] = (),
 ) -> ReviewSnapshot:
     if generated_at.tzinfo is None:
         raise ValueError("generated_at must include a timezone")
@@ -357,6 +360,13 @@ def build_review_snapshot(
             daily_experiment_section(
                 vault_root=vault_root, runtime_dir=runtime_dir, day=day, generated_at=generated_at
             ),
+            daily_pattern_review_section(
+                vault_root=vault_root,
+                runtime_dir=runtime_dir,
+                generated_at=generated_at,
+                urgent_pattern_ids=urgent_pattern_ids,
+                pinned_pattern_ids=pinned_pattern_ids,
+            ),
         )
     else:
         sections = (
@@ -369,6 +379,11 @@ def build_review_snapshot(
                 runtime_dir=runtime_dir,
                 range_start=workflow.range_start,
                 range_end=workflow.range_end,
+                generated_at=generated_at,
+            ),
+            weekly_pattern_review_section(
+                vault_root=vault_root,
+                runtime_dir=runtime_dir,
                 generated_at=generated_at,
             ),
         )
@@ -442,6 +457,8 @@ def refresh_review_snapshot(
     runtime_dir: Path,
     generated_at: datetime,
     idempotency_key: str,
+    urgent_pattern_ids: tuple[str, ...] = (),
+    pinned_pattern_ids: tuple[str, ...] = (),
 ) -> tuple[ReviewArtifact, ReviewSnapshot]:
     snapshot = build_review_snapshot(
         vault_root=service.vault_root,
@@ -449,6 +466,8 @@ def refresh_review_snapshot(
         kind=artifact.metadata.review_kind,
         day=artifact.metadata.period_start,
         generated_at=generated_at,
+        urgent_pattern_ids=urgent_pattern_ids,
+        pinned_pattern_ids=pinned_pattern_ids,
     )
     from lifeos.reviews.history import (
         adjacent_reviews,
