@@ -768,58 +768,56 @@ Other controller origins, provider-backed OCR or transcription, exclusion
 toggles, destructive deletion, and several bulk actions need additional UI or
 host wiring. See [Rich Capture for Meals, Exercise, and Attachments](13-rich-capture.md).
 
-## 3.19 Canonical personal working hypotheses
+## 3.19 Evidence-backed Personal Model
 
 ### What it is
 
-LifeOS can recognize individual canonical working hypotheses as human-owned
-Markdown under `patterns/`. A recognized artifact declares `pattern_schema: 1`
-and `type: pattern`, then records a stable ID, the concise hypothesis statement,
-lifecycle state, qualitative confidence, review reasons, origin, evidence
-references, reviewed SHA-256 versions, and an evidence fingerprint.
+LifeOS keeps selected personal interpretations as human-owned canonical Markdown
+under `patterns/`. A recognized artifact declares `pattern_schema: 1` and
+`type: pattern`, then records a stable ID, concise working hypothesis, lifecycle
+state, qualitative confidence, review reasons, origin, exact evidence references,
+reviewed SHA-256 versions, and a deterministic evidence fingerprint.
 
-These notes are hypotheses, not user truths, diagnoses, personality labels, or
-instructions. `seed` means **track this hypothesis** while it remains exploratory.
-`active` means **adopt this as useful working context for now** after explicit
-review. `needs-review` means the evidence or timing deserves another look.
-`confidence` remains separate from lifecycle and is never a numeric model
-probability.
+These notes are hypotheses, not user truths, diagnoses, personality labels,
+scores, or instructions. `seed` means **track this hypothesis** while it remains
+exploratory. `active` means the user explicitly reviewed it and currently accepts
+it as useful working context. `needs-review` means evidence, timing, or an
+explicit decision deserves another look. `archived` preserves lineage outside
+ordinary active context. Confidence stays separate from lifecycle and is never a
+numeric model probability.
 
-LifeOS uses the `personal-pattern-evidence` managed block for the refreshable
-evidence summary. Reflection and other user prose before or after that block stay
-human-owned. Markdown in `patterns/` without a recognized pattern schema remains
-ordinary content.
+Markdown in `patterns/` without a recognized `pattern_schema` remains ordinary
+user content. LifeOS does not silently infer status or confidence from legacy-looking
+frontmatter, and Phase 17 does not include a guessed semantic migration.
 
 ### How it connects
 
-The schema parser validates stable IDs, lifecycle values, evidence roles, safe
-vault-relative evidence paths, exact lowercase SHA-256 digests, timestamps, and
-portable optional evaluation parameters. Evidence references can be normalized
-and fingerprinted deterministically while retaining supporting, contesting, and
-contextual roles and the exact reviewed source versions. Parsing reads directly
-from Markdown and does not require `.lifeos/` or another disposable runtime
-database.
+Pattern lifecycle changes are proposal-gated. Track, Adopt, Revise, Contest,
+review resolution, confidence changes, and Archive bind to exact inspected
+content/evidence versions and use the shared proposal review, stale-target, and
+interruption-recovery machinery. Agent-assisted `personal_pattern_propose` and
+`personal_pattern_review_proposal` operations independently reverify selected
+evidence and stop at draft. Authenticated home-node clients retain those draft
+helpers but do not receive approval or application authority.
 
-Pattern lifecycle changes use typed proposal builders rather than direct
-canonical writes. **Track** creates a draft `create_file` proposal for an absent
-human-owned `seed`; it does not create the pattern merely because a candidate was
-detected. **Adopt** proposes `seed → active`. Revise, mark needs-review, resolve
-review, change confidence, and archive operations produce base-hash-bound
-`patch_human_file` proposals against the current pattern snapshot. Resolving a
-review requires an explicit choice to return to `seed` or `active`, so finishing
-a review does not silently mean adopting the hypothesis.
+The aggregate Personal Model is a deterministic, disposable read model under
+`.lifeos/personal-model/`. It can be deleted and rebuilt from recognized canonical
+patterns without losing personal knowledge. Re-evaluation can explain why a
+hypothesis deserves review, including new, weaker, reversing, stale, changed,
+missing, moved, deleted, or ambiguous evidence, but it does not decide whether
+the hypothesis is true or false.
 
-The draft records the transition reason and reviewed evidence fingerprint and
-uses the ordinary proposal review snapshot. Rejection leaves canonical Markdown
-unchanged, a stale target blocks application, and interrupted application uses
-the shared proposal recovery machinery. The proposal builder does not choose an
-approver and cannot approve or apply its own interpretation.
+Daily and weekly reviews surface only bounded Personal Model attention. Relevant
+patterns can also enter context and reflection as typed `evidence-not-instruction`
+items with `can_authorize_mutation: false`; a pattern never silently becomes
+planner policy. The Obsidian **Personal Model** workspace exposes Needs review,
+Active, Seeds, and Archived views, evidence lineage and changes, source links,
+proposal previews, stale-target protection, and explicit derived-state rebuild.
 
-The aggregate Personal Model, automatic re-evaluation/review triggers, bounded
-review/context integration, Obsidian workspace, and any planner influence remain
-separate Phase 17 steps. In particular, a tracked or active pattern does not
-silently become planner policy. See [Evidence-Backed Personal Model
-Architecture](../personal-model-architecture.md).
+See [Evidence-Backed Personal Model](19-personal-model.md) for the complete
+workflow, the focused [Personal Model workspace](personal-model.md) guide for
+Obsidian controls, and [Personal-pattern review triggers](personal-pattern-review-triggers.md)
+for deterministic re-evaluation semantics.
 
 ---
 
