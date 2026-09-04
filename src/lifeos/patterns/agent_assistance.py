@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -319,6 +320,7 @@ def publish_agent_pattern_proposal(
     request: PatternProposalRequest,
     *,
     review_payload: AgentPatternReviewPayload,
+    final_scope_check: Callable[[], None] | None = None,
     now: datetime | None = None,
     expected_base_hash: str | None = None,
 ) -> dict[str, object]:
@@ -357,6 +359,8 @@ def publish_agent_pattern_proposal(
         vault_root=service.vault_root,
         patches_json=patches_json,
     )
+    if final_scope_check is not None:
+        final_scope_check()
     _reverify_review_evidence(service.vault_root, review_payload.evidence)
     _publish_proposal(
         vault_root=service.vault_root,
