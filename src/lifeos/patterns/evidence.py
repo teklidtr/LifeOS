@@ -63,7 +63,6 @@ class PatternEvidenceDiagnostic:
 
 @dataclass(frozen=True, slots=True)
 class _RegistryEvidenceRow:
-    stable_id: str | None
     path: str
     content_hash: str | None
     is_deleted: bool
@@ -102,7 +101,7 @@ def _rows_for_reference(
     if reference.source_id is not None:
         rows = connection.execute(
             """
-            SELECT stable_id, vault_path, content_hash, is_deleted
+            SELECT vault_path, content_hash, is_deleted
             FROM files
             WHERE stable_id = ?
             ORDER BY is_deleted, vault_path
@@ -112,7 +111,7 @@ def _rows_for_reference(
     else:
         rows = connection.execute(
             """
-            SELECT stable_id, vault_path, content_hash, is_deleted
+            SELECT vault_path, content_hash, is_deleted
             FROM files
             WHERE vault_path = ?
             ORDER BY is_deleted, vault_path
@@ -121,7 +120,6 @@ def _rows_for_reference(
         ).fetchall()
     return tuple(
         _RegistryEvidenceRow(
-            stable_id=None if row["stable_id"] is None else str(row["stable_id"]),
             path=str(row["vault_path"]),
             content_hash=None if row["content_hash"] is None else str(row["content_hash"]),
             is_deleted=bool(row["is_deleted"]),
