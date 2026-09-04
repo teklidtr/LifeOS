@@ -39,7 +39,11 @@ jobs:
           new = "    _write(vault, public_path, \"# Public\\n\\nProvider-safe evidence.\\n\")\n    _write(vault, \"system/retrieval-policy.yml\", \"schema_version: 1\\nprotected_prefixes: [patterns]\\nexternal_allowed_prefixes: []\\n\")\n    scope = RetrievalScope(paths=(pattern_path, public_path), allow_protected=True)\n    service = KnowledgeConversationService(vault_root=vault, runtime_dir=vault / \".lifeos\")\n"
           if text.count(old) != 1:
               raise SystemExit(f'expected one citation fixture replacement, found {text.count(old)}')
-          test_path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          text = text.replace(old, new, 1)
+          old_assert = "    assert turn.paragraphs == ()\n"
+          if text.count(old_assert) != 1:
+              raise SystemExit(f'expected one answer assertion replacement, found {text.count(old_assert)}')
+          test_path.write_text(text.replace(old_assert, "    assert turn.answer == ()\n", 1), encoding='utf-8')
           PYRUN
       - name: Install dependencies
         run: uv sync --frozen --extra dev --extra mcp
