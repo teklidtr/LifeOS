@@ -65,6 +65,13 @@ Status: required
 - `mypy src`
 - `git diff --check`
 
+Local execution note: this implementation session has repository write/read access through the
+GitHub connector but no working local checkout because direct GitHub DNS/network access from the
+execution container is unavailable. Repository-wide dependency/seam search and branch diff audit
+are therefore the pre-push static substitute required by `AGENTS.md`; deterministic validation is
+left explicitly to the PR `fast-checks` and final `full-validation` checkpoints rather than being
+silently treated as locally executed.
+
 # Relevant design decisions
 
 - DD-002
@@ -75,3 +82,4 @@ Status: required
 - DD-066
 - DD-087
 - DD-091
+- DD-100
