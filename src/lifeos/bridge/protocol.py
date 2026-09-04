@@ -152,6 +152,10 @@ CAPABILITIES = (
     "capture.migration.apply",
     "capture.proposal.preview",
     "capture.proposal.create",
+    "personal-model.workspace.get",
+    "personal-model.rebuild",
+    "personal-model.proposal.preview",
+    "personal-model.proposal.create",
     "request.cancel",
 )
 
