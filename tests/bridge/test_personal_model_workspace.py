@@ -70,7 +70,8 @@ def _write_policy(vault: Path) -> None:
         "schema_version: 1\n"
         "protected_prefixes:\n"
         "  - patterns/private\n"
-        "  - journal/private\n",
+        "  - journal/private\n"
+        "  - reviews/private\n",
     )
 
 
@@ -244,6 +245,36 @@ def test_proposal_preview_does_not_reexpose_protected_preserved_evidence(tmp_pat
                 "target_path": "patterns/allowed.md",
                 "expected_target_hash": current_hash,
                 "transition_reason": "Protected evidence must remain outside the preview.",
+                "now": NOW_TEXT,
+            },
+        )
+
+    assert denied.value.code == "authorization_denied"
+    assert not (vault / "proposals").exists()
+
+
+def test_workspace_and_proposals_do_not_disclose_protected_origin_paths(tmp_path: Path) -> None:
+    bridge, vault = _bridge(tmp_path)
+    _write_policy(vault)
+    metadata = replace(
+        _metadata("allowed-origin"),
+        origin=PatternOrigin("manual", source_ref="reviews/private/secret.md"),
+    )
+    pattern = _write_pattern(vault, "allowed-origin.md", metadata)
+
+    workspace = bridge.dispatch("personal-model.rebuild", {"now": NOW_TEXT})
+    item = workspace["groups"]["seeds"][0]
+    assert item["origin"] == {"kind": "manual", "source_ref": None}
+    assert item["related_paths"] == []
+
+    with pytest.raises(ProtocolError) as denied:
+        bridge.dispatch(
+            "personal-model.proposal.preview",
+            {
+                "action": "adopt",
+                "target_path": "patterns/allowed-origin.md",
+                "expected_target_hash": _digest(pattern.read_text(encoding="utf-8")),
+                "transition_reason": "Protected origin identity must not enter a candidate.",
                 "now": NOW_TEXT,
             },
         )
