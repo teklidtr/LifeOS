@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1706
 title: Integrate personal patterns with daily and weekly reviews
-status: in-progress
+status: completed
 phase: 17
 depends_on:
   - LIFEOS-1704
@@ -44,20 +44,20 @@ Make personal hypotheses maintainable over time without turning reviews into an 
 
 # Documentation impact
 
-Status: required
+Status: completed
 
-- `docs/review-artifact-architecture.md`: add pattern review evidence.
-- `docs/user-manual/10-first-class-reviews.md`: document the pattern workflow.
-- `docs/personal-model-architecture.md`: document review integration.
+- `docs/review-artifact-architecture.md`: pattern review evidence documented.
+- `docs/user-manual/10-first-class-reviews.md`: pattern workflow documented.
+- `docs/personal-model-architecture.md`: review integration documented.
 
-# Validation commands
+# Validation
 
-- `pytest -q`
-- `ruff check src tests`
-- `mypy src`
-- `git diff --check`
+- Current implementation head passed `fast-checks`, including Ruff, mypy, Python compilation, test collection, and project contract smoke tests.
+- Full-validation run `33863082297` passed on implementation head `3feb7bb211181edefa79df96ab3d3f1134a6d576`: all four full pytest shards passed, aggregate `full-test` passed, and `docker-setup-e2e` passed.
+- Two Codex review rounds were completed. All actionable review threads were addressed and resolved. Security review was intentionally skipped per user instruction.
+- This task-completion move changes only task metadata/path; repository workflow requires a fresh current-head `fast-checks` and full-validation checkpoint before merge, so those checks are rerun after this commit.
 
-Local validation limitation: the available execution container cannot resolve `github.com`, so the branch cannot be cloned into the local runtime and the listed commands cannot be executed there. The closest practical pre-push substitute was a repository-wide static seam audit of every changed shared call shape (`build_review_snapshot`, `refresh_review_snapshot`, and `open_daily_review`), review/proposal invariants, and the complete branch diff. Required deterministic validation is therefore left explicitly to GitHub CI rather than treated as locally passed.
+Local validation limitation: the available execution container could not resolve `github.com`, so the branch could not be cloned into the local runtime. Repository-wide seam/invariant audits were used as the closest practical local substitute, with deterministic behavioral validation performed by GitHub CI as explicitly documented in the PR.
 
 # Relevant design decisions
 
