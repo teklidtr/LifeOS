@@ -170,19 +170,8 @@ def _diagnose_reference(
             current_content_hash=current_hash,
         )
 
-    deleted = tuple(row for row in rows if row.is_deleted)
-    if reference.source_id is not None and len(deleted) > 1:
-        return PatternEvidenceDiagnostic(
-            reference=reference,
-            state="ambiguous",
-            candidate_paths=tuple(sorted(row.path for row in deleted)),
-        )
-    if deleted:
-        return PatternEvidenceDiagnostic(
-            reference=reference,
-            state="deleted",
-            candidate_paths=tuple(sorted(row.path for row in deleted)),
-        )
+    if any(row.is_deleted for row in rows):
+        return PatternEvidenceDiagnostic(reference=reference, state="deleted")
     return PatternEvidenceDiagnostic(reference=reference, state="missing")
 
 
