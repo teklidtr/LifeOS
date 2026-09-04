@@ -27,20 +27,19 @@ from lifeos.reviews.history import (
 )
 from lifeos.reviews.decisions import (
     DuplicateReviewProposal,
-    ReviewDecisionService,
     ReviewProposalError,
     ReviewProposalRequest,
     ReviewProposalResult,
     artifact_item_fingerprints,
     create_review_proposal,
 )
-from lifeos.reviews.progress import ReviewProgressService, rebuild_progress_cache
-from lifeos.reviews.snapshot import (
+from lifeos.reviews.pattern_integration import (
+    ReviewDecisionService,
     build_review_snapshot,
     refresh_review_snapshot,
-    render_snapshot_facts,
-    render_snapshot_items,
 )
+from lifeos.reviews.progress import ReviewProgressService, rebuild_progress_cache
+from lifeos.reviews.snapshot import render_snapshot_facts, render_snapshot_items
 from lifeos.reviews.artifact import (
     ReviewArtifactService,
     ReviewArtifactUpdate,
