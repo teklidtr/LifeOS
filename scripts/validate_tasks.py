@@ -13,7 +13,6 @@ class TaskMetadata:
     path: Path
     task_id: str
     status: str
-    depends_on: tuple[str, ...]
 
 
 def _strip_scalar(value: str) -> str:
@@ -44,55 +43,17 @@ def _scalar_value(lines: list[str], key: str) -> str:
     return value
 
 
-def _depends_on(lines: list[str]) -> tuple[str, ...]:
-    prefix = "depends_on:"
-    indexes = [index for index, line in enumerate(lines) if line.startswith(prefix)]
-    if len(indexes) != 1:
-        raise ValueError("frontmatter must contain exactly one 'depends_on' field")
-
-    index = indexes[0]
-    raw = lines[index][len(prefix) :].strip()
-    if raw:
-        if raw == "[]":
-            return ()
-        if raw.startswith("[") and raw.endswith("]"):
-            body = raw[1:-1].strip()
-            if not body:
-                return ()
-            values = tuple(_strip_scalar(item) for item in body.split(","))
-            if any(not item for item in values):
-                raise ValueError("'depends_on' contains an empty dependency")
-            return values
-        return (_strip_scalar(raw),)
-
-    dependencies: list[str] = []
-    for line in lines[index + 1 :]:
-        if not line.startswith((" ", "\t")):
-            break
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if not stripped.startswith("- "):
-            raise ValueError("'depends_on' must be a YAML-style list")
-        dependency = _strip_scalar(stripped[2:])
-        if not dependency:
-            raise ValueError("'depends_on' contains an empty dependency")
-        dependencies.append(dependency)
-    return tuple(dependencies)
-
-
 def parse_task_metadata(path: Path) -> TaskMetadata:
     lines = _frontmatter_lines(path)
     return TaskMetadata(
         path=path,
         task_id=_scalar_value(lines, "id"),
         status=_scalar_value(lines, "status"),
-        depends_on=_depends_on(lines),
     )
 
 
 def validate_task_tree(task_root: Path) -> tuple[str, ...]:
-    parsed: list[tuple[str, TaskMetadata]] = []
+    parsed: list[TaskMetadata] = []
     errors: list[str] = []
 
     for state in TASK_STATES:
@@ -107,14 +68,14 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
             except (OSError, ValueError) as exc:
                 errors.append(f"{relative}: {exc}")
                 continue
-            parsed.append((state, metadata))
+            parsed.append(metadata)
             if metadata.status != state:
                 errors.append(
                     f"{relative}: status {metadata.status!r} does not match directory {state!r}"
                 )
 
     by_id: dict[str, list[Path]] = {}
-    for _state, metadata in parsed:
+    for metadata in parsed:
         by_id.setdefault(metadata.task_id, []).append(metadata.path)
 
     for task_id, paths in sorted(by_id.items()):
@@ -123,15 +84,6 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
                 str(path.relative_to(task_root.parent)) for path in sorted(paths)
             )
             errors.append(f"duplicate task id {task_id!r}: {rendered}")
-
-    known_ids = set(by_id)
-    for _state, metadata in parsed:
-        relative = metadata.path.relative_to(task_root.parent)
-        for dependency in metadata.depends_on:
-            if dependency not in known_ids:
-                errors.append(
-                    f"{relative}: dependency {dependency!r} does not match any task id"
-                )
 
     return tuple(errors)
 
