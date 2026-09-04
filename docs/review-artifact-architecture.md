@@ -190,6 +190,46 @@ No field stores hidden model reasoning.
 6. A stale source never causes silent deletion from history.
 7. Managed facts are useful without a model.
 
+## Personal-pattern review evidence
+
+Personal-pattern maintenance is a bounded optional review section, not a second
+review engine. It reuses the canonical item markers, evidence-fingerprint scoped
+decisions, continuity suppression, and proposal handoff defined here.
+
+Weekly review may show at most eight pattern items. Eligible items are newly
+tracked seeds, due patterns, `needs-review` patterns, materially changed active
+patterns, and patterns with newly changed contesting evidence. Merely being
+`active` is not a selection reason. Selection is deterministic and stable.
+
+Daily review is fail-closed for pattern attention. The section is empty unless an
+explicit caller or workspace supplies stable pattern IDs as urgent or pinned.
+At most three items are shown, urgent items first. The implementation does not
+infer either state from free-form `review_reasons` text.
+
+A pattern item uses `personal-pattern:<pattern-id>` as its stable review item ID.
+Its fingerprint covers review-relevant context: lifecycle status, confidence,
+review timing and reasons, reviewed evidence fingerprint, deterministic trigger
+reasons, and current evidence diagnostics. Arbitrary human reflection prose is
+not fingerprint input. The item links to the canonical pattern artifact plus a
+bounded set of evidence references so source inspection remains available
+without expanding the snapshot indefinitely.
+
+All ordinary item decisions remain available. In particular, an unchanged
+`dismiss_for_review` remains suppressed by continuity until the pattern review
+fingerprint changes. A changed source version, changed evidence state, or other
+review-relevant context can therefore create a new review context without
+turning every weekly review into a repeated prompt.
+
+`propose_change` remains proposal-gated. For a still-current pattern item, the
+pattern integration may create the existing `mark-needs-review` draft, but it
+does not apply that draft or mutate `patterns/*.md`. Completing a review never
+means accepting, adopting, or revising the hypothesis.
+
+Pattern snapshot construction may refresh the disposable registry facts needed
+to resolve current evidence identity and content hashes. That refresh does not
+make SQLite canonical; the review artifact and pattern Markdown remain the
+durable authorities.
+
 ## Durable progress
 
 Progress is canonical in frontmatter. It includes:
