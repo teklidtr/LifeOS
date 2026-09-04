@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1703
 title: Add proposal-gated personal-pattern lifecycle
-status: backlog
+status: completed
 phase: 17
 depends_on:
   - LIFEOS-1701

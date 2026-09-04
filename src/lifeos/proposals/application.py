@@ -43,6 +43,7 @@ from ..ownership.manifest import (
     ManifestEntry,
     serialize_generated_ownership_bytes,
 )
+from .human_patch_policy import allows_canonical_pattern_managed_patch
 from .lifecycle import serialize_proposal_markdown
 from .loader import LoadedProposal
 from .patches import CreateGeneratedFile, PatchOperation, ReplaceGeneratedFile
@@ -610,9 +611,17 @@ def _candidate_for_operation(
         candidate_content = operation.new_content.encode("utf-8")
     elif operation.op == "patch_human_file":
         assert original_content is not None
-        new_content = apply_diff(original_content.decode("utf-8"), operation.unified_diff)
-        parsed = parse_markdown_note(vault_root / target_path, content=new_content)
-        if parsed.managed_blocks:
+        original_text = original_content.decode("utf-8")
+        new_content = apply_diff(original_text, operation.unified_diff)
+        original_parsed = parse_markdown_note(vault_root / target_path, content=original_text)
+        candidate_parsed = parse_markdown_note(vault_root / target_path, content=new_content)
+        if (
+            original_parsed.managed_blocks or candidate_parsed.managed_blocks
+        ) and not allows_canonical_pattern_managed_patch(
+            target_path=target_path,
+            original_text=original_text,
+            candidate_text=new_content,
+        ):
             raise TransactionError("Markdown result contains managed blocks")
         candidate_content = new_content.encode("utf-8")
     elif operation.op == "replace_managed_block":
