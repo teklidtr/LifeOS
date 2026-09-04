@@ -307,39 +307,44 @@ Both operations stop at `draft`. They cannot choose an approving identity, promo
 
 ## Obsidian boundary
 
-The Phase 17 Obsidian workspace is a thin client over Python read models and proposal builders. It will expose Active, Needs review, Seeds, and Archived views; evidence health; supporting and contesting sources; evidence changes; and proposal-backed Track, Adopt, Revise, Contest, and Archive actions.
+The shipped Phase 17 Obsidian workspace is a thin client over Python read models and proposal builders. It exposes Active, Needs review, Seeds, and Archived views; hypothesis statement and confidence; evidence health and freshness; supporting and contesting sources; reviewed source versions and evidence changes; related review/experiment links; and proposal-backed Track, Adopt, Revise, Contest, and Archive actions.
 
-Refresh is read-only. TypeScript does not parse canonical pattern semantics into a parallel business-rule implementation and does not write pattern Markdown directly. Missing or corrupt derived Personal Model state degrades to an explicit rebuild/recovery state rather than to canonical data loss.
+Refresh is read-only. Rebuild explicitly recreates disposable Personal Model state. TypeScript does not parse canonical pattern semantics into a parallel business-rule implementation and does not write pattern Markdown directly. Missing or corrupt derived Personal Model state degrades to an explicit rebuild/recovery state rather than to canonical data loss. Existing-pattern actions bind to the inspected canonical content hash so an Obsidian edit after inspection produces a stale-target failure instead of rebasing a semantic decision onto unseen bytes.
 
 ## Graph boundary
 
 The existing optional `personal-patterns` Graphify view remains derived and non-authoritative. It may help find relationships or navigation paths, but an inferred graph edge does not promote a pattern, change confidence, or become canonical evidence without a normal reviewed proposal.
 
-## Recovery and migration
+## Recovery, compatibility, and migration
 
-The Phase 17 recovery contract is conservative:
+The shipped Phase 17 recovery contract is conservative:
 
 - delete/rebuild of `.lifeos/` loses no canonical pattern knowledge;
-- proposal interruption uses the existing recovery transaction model;
+- proposal interruption uses the existing recovery transaction model and preserves proposal/evidence lineage;
 - arbitrary existing Markdown under `patterns/` remains untouched;
+- only `pattern_schema` artifacts enter the canonical Phase 17 pattern contract;
 - migration is offered only when a recognizable legacy contract can be identified deterministically;
 - migration preview never invents semantic status, confidence, evidence role, or reviewed meaning;
 - unsupported future pattern schemas fail with typed diagnostics rather than being guessed.
 
-## Phase 17 implementation sequence
+No pre-Phase-17 canonical Personal Model schema is currently recognized, so Phase 17 ships no heuristic converter for legacy-looking `patterns/` Markdown. Frontmatter that happens to contain fields such as `type`, `status`, or `confidence` without the recognized `pattern_schema` declaration stays user-authored ordinary Markdown. A future migration requires a separately accepted deterministic legacy contract and preview before it may rewrite anything.
 
-The task chain is intentionally ordered:
+## Shipped Phase 17 sequence and release contract
 
-1. **LIFEOS-1700** defines these architecture and product semantics.
-2. **LIFEOS-1701** implements the canonical pattern artifact contract.
-3. **LIFEOS-1702** implements evidence lineage, source-state resolution, and fingerprints.
-4. **LIFEOS-1703** adds proposal-gated pattern lifecycle workflows.
-5. **LIFEOS-1704** adds deterministic re-evaluation and review triggers.
-6. **LIFEOS-1705** builds the rebuildable Personal Model read model.
-7. **LIFEOS-1706** integrates bounded pattern maintenance with daily and weekly reviews.
-8. **LIFEOS-1707** adds bounded pattern evidence to context and reflection surfaces.
-9. **LIFEOS-1708** builds the Obsidian Personal Model workspace.
-10. **LIFEOS-1709** adds evidence-bounded agent-assisted pattern proposals.
-11. **LIFEOS-1710** validates recovery, migration, release, end-to-end behavior, and complete user documentation.
+Phase 17 shipped through the ordered task chain:
 
-This sequence preserves one central rule: **evidence may create a reason to review, but only trusted human review can turn a semantic interpretation into durable accepted working context.**
+1. **LIFEOS-1700** defined the architecture and product semantics.
+2. **LIFEOS-1701** implemented the canonical pattern artifact contract.
+3. **LIFEOS-1702** implemented evidence lineage, source-state resolution, and fingerprints.
+4. **LIFEOS-1703** added proposal-gated pattern lifecycle workflows.
+5. **LIFEOS-1704** added deterministic re-evaluation and review triggers.
+6. **LIFEOS-1705** built the rebuildable Personal Model read model.
+7. **LIFEOS-1706** integrated bounded pattern maintenance with daily and weekly reviews.
+8. **LIFEOS-1707** added bounded pattern evidence to context and reflection surfaces.
+9. **LIFEOS-1708** built the Obsidian Personal Model workspace.
+10. **LIFEOS-1709** added evidence-bounded agent-assisted pattern proposals.
+11. **LIFEOS-1710** closes the phase with release fixtures and documentation covering representative lifecycle/evidence histories, arbitrary `patterns/` preservation, derived-state rebuild, proposal interruption recovery, bounded large-vault behavior, local STDIO and authenticated home-node capability boundaries, and the evidence-to-Obsidian end-to-end lifecycle.
+
+The complete user-facing workflow is documented in `docs/user-manual/19-personal-model.md`. Focused Obsidian controls remain in `docs/user-manual/personal-model.md`, and deterministic re-evaluation semantics remain in `docs/user-manual/personal-pattern-review-triggers.md`.
+
+The central shipped rule remains: **evidence may create a reason to review, but only trusted human review can turn a semantic interpretation into durable accepted working context.**
