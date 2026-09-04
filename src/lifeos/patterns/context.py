@@ -6,13 +6,14 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Literal
 
 from lifeos.context.search import lexical_search_report
-from lifeos.facade.registry_tools import refresh_registry
-from lifeos.registry import Registry
-from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
+from lifeos.registry import Registry, register_scan
+from lifeos.retrieval import RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
+from lifeos.scanner import scan_vault
 from lifeos.vault import VaultAccessError, read_vault_markdown
 from lifeos.vault_paths import iter_vault_markdown_paths
 
@@ -120,20 +121,12 @@ def _scope_allow_path(
     scope: RetrievalScope,
     path_filter: Callable[[str], bool] | None = None,
 ) -> Callable[[str], bool]:
-    try:
-        policy = load_retrieval_policy(vault_root)
-    except RetrievalError as exc:
-        raise PersonalPatternContextError(
-            "Personal pattern context requires a valid retrieval policy."
-        ) from exc
+    policy = load_retrieval_policy(vault_root)
 
     def allowed(path: str) -> bool:
         if path_filter is not None and not path_filter(path):
             return False
-        try:
-            return scope_decision(path, scope=scope, policy=policy, mode=mode).allowed
-        except RetrievalError:
-            return False
+        return scope_decision(path, scope=scope, policy=policy, mode=mode).allowed
 
     return allowed
 
@@ -190,17 +183,21 @@ def _document(
     runtime_dir: Path,
     allow_path: Callable[[str], bool],
 ):
-    registry = Registry(runtime_dir / "registry.db")
-    refresh_registry(
-        vault_root=vault_root,
-        registry=registry,
-        identity_allow_path=allow_path,
-    )
-    return build_personal_model_document(
-        vault_root=vault_root,
-        registry=registry,
-        allow_path=allow_path,
-    )
+    del runtime_dir
+    with TemporaryDirectory(prefix="lifeos-personal-model-context-") as temporary:
+        registry = Registry(Path(temporary) / "registry.db")
+        registry.initialize()
+        register_scan(
+            registry,
+            vault_root,
+            scan_vault(vault_root, path_filter=allow_path),
+            identity_allow_path=allow_path,
+        )
+        return build_personal_model_document(
+            vault_root=vault_root,
+            registry=registry,
+            allow_path=allow_path,
+        )
 
 
 def _redact(
