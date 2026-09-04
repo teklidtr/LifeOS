@@ -234,7 +234,7 @@ personality instructions, or automatic planning policy. Canonical hypotheses liv
 as human-owned Markdown under `patterns/`; the aggregate Personal Model is a
 rebuildable read model under `.lifeos/`.
 
-Shipped delivery through `LIFEOS-1700` to `LIFEOS-1710` includes:
+The Personal Model implementation through `LIFEOS-1709` includes:
 
 - versioned human-owned canonical pattern artifacts under `patterns/`;
 - exact evidence lineage, roles, reviewed source versions, and deterministic fingerprints;
@@ -246,14 +246,24 @@ Shipped delivery through `LIFEOS-1700` to `LIFEOS-1710` includes:
 - an Obsidian Personal Model workspace over Python business rules;
 - evidence-bounded agent-assisted semantic proposals that stop at draft;
 - local STDIO MCP and authenticated home-node draft boundaries;
-- conservative handling of pre-existing `patterns/` Markdown with no guessed semantic migration;
-- representative history, interruption/recovery, runtime rebuild, large-vault, MCP, and end-to-end release fixtures;
-- complete user documentation of the evidence → proposal → canonical hypothesis → review → context loop.
+- conservative handling of pre-existing `patterns/` Markdown with no guessed semantic migration.
 
-Phase 17 is shipped. The accepted architecture is documented in
-`docs/personal-model-architecture.md`, and the complete workflow is in
+`LIFEOS-1710` is the Personal Model release-validation and documentation checkpoint. Its
+release contract covers representative histories, proposal interruption/recovery,
+runtime deletion/rebuild, bounded large-vault behavior, MCP boundaries, end-to-end
+Obsidian lifecycle coverage, and the complete user workflow. Task completion is the
+record that this Personal Model release slice satisfied those gates; the roadmap must
+not present that validation as complete while the task remains in progress.
+
+Phase 17 also contains the later capability-discoverability work tracked by
+`LIFEOS-1712` through `LIFEOS-1715`. Completing the Personal Model release checkpoint
+therefore does not by itself close Phase 17 as a whole.
+
+The accepted Personal Model architecture is documented in
+`docs/personal-model-architecture.md`, and the complete user workflow is in
 `docs/user-manual/19-personal-model.md`.
 
 Direct pattern-driven planner scoring or ranking, personality typing, diagnosis,
 immutable inferred traits, aggregate life/productivity/wellness scores, and a
-canonical generated `profile/personal-model.md` biography remain outside Phase 17.
+canonical generated `profile/personal-model.md` biography remain outside the
+Personal Model release scope.
