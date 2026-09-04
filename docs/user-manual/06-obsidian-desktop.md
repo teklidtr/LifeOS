@@ -106,6 +106,25 @@ intentional. Review the resulting red-line manifest diff and use **Accept change
 to release ownership. Creating the draft alone does not change ownership, and
 Refresh does not resolve or hide the orphan.
 
+## Personal Model
+
+Open **Personal Model** from the brain-circuit ribbon button or run **Open Personal
+Model** from the command palette. The dockable workspace groups evidence-backed
+working hypotheses into **Active**, **Needs review**, **Seeds**, and **Archived**.
+Select a hypothesis to inspect its statement, confidence class, evidence health,
+freshness, review reasons, reviewed source hashes, evidence changes, and related
+reviews or experiments. Supporting and contesting sources open as canonical notes.
+
+**Refresh** is read-only. If disposable Personal Model runtime state is missing or
+unsafe, use **Rebuild derived state**; canonical `patterns/*.md` remain the source
+of truth. **Track**, **Adopt**, **Revise**, **Contest**, and **Archive** first build
+a Python-computed proposal preview. Creating the draft still does not mutate the
+pattern. Accept it later through **Open Proposals**. If the pattern changed since
+you inspected it, the action fails stale and requires a fresh review instead of
+silently binding your decision to newer content. See [Personal Model workspace](personal-model.md)
+for the full evidence-first workflow, keyboard behavior, recovery states, and
+proposal boundary.
+
 ## Personal experiments
 
 Open **Personal Experiments** from the ribbon, command palette, or a relevant goal,
