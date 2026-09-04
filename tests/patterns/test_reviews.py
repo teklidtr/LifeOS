@@ -286,7 +286,9 @@ def test_dismissed_pattern_stays_suppressed_until_evidence_changes(tmp_path: Pat
     assert changed_items[0].evidence_fingerprint != first_item.evidence_fingerprint
 
 
-def test_pattern_review_proposal_is_explicit_and_does_not_mutate_pattern(tmp_path: Path) -> None:
+def test_pattern_review_proposal_from_pinned_item_is_explicit_and_does_not_mutate_pattern(
+    tmp_path: Path,
+) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
     runtime = tmp_path / "runtime"
@@ -294,11 +296,11 @@ def test_pattern_review_proposal_is_explicit_and_does_not_mutate_pattern(tmp_pat
         vault / "system" / "generated-ownership.json",
         serialize_generated_ownership_bytes({}).decode("utf-8"),
     )
-    target = _write_pattern(vault, "due", review_due_at="2026-09-03T09:00:00Z")
+    target = _write_pattern(vault, "quiet")
     before = target.read_text(encoding="utf-8")
     service = ReviewArtifactService(vault_root=vault, runtime_dir=runtime)
     artifact = service.open_or_create(
-        kind="weekly",
+        kind="daily",
         day=date(2026, 9, 4),
         timezone="UTC",
         now=NOW,
@@ -310,8 +312,10 @@ def test_pattern_review_proposal_is_explicit_and_does_not_mutate_pattern(tmp_pat
         runtime_dir=runtime,
         generated_at=NOW,
         idempotency_key="refresh",
+        pinned_pattern_ids=("quiet",),
     )
-    item = _section(snapshot, "personal-patterns-weekly").items[0]
+    item = _section(snapshot, "personal-patterns-daily").items[0]
+    assert "explicitly pinned" in item.detail
 
     result = create_pattern_review_proposal(
         vault_root=vault,
