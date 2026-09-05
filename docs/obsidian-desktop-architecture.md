@@ -95,6 +95,25 @@ Unknown methods, unknown fields, incompatible major versions, and malformed enve
 rejected. Minor versions negotiate a capability list. Retryable mutations require an
 idempotency key. Read requests may be retried; writes may only be retried with the same key.
 
+## Semantic capability discovery
+
+The handshake capability list remains protocol negotiation: it is an ordered list of supported
+low-level bridge method names. It does not become a user-facing feature catalog. The additive,
+read-only methods `capability.list` and `capability.get` expose a separate versioned semantic
+catalog owned by Python. `capability.list` accepts no parameters; `capability.get` requires a
+stable `capability_id` and returns `capability_not_found` for an unknown ID.
+
+Semantic capability responses carry `semantic_capability_schema` plus rich metadata such as the
+stable capability ID, name, description, human-facing category, visibility, maturity, static
+requirements, concrete backing references, direct entry points, and optional example prompts.
+Entries are returned in stable ID order. These calls read static application metadata only and do
+not touch canonical Markdown or derived vault state.
+
+A future Explore view is therefore a consumer of Python-owned metadata, not another authority.
+TypeScript may render, filter, and navigate the returned records, but it must not maintain a
+parallel hard-coded feature list or treat example prompts as proof that LifeOS implements a
+capability. The registry requires concrete LifeOS backing behavior independently of prompts.
+
 ## State ownership
 
 | State | Authority | Examples |
