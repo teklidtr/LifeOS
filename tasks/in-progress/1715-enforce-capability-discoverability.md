@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1715
 title: Enforce capability discoverability in agent rules and CI
-status: ready
+status: in-progress
 phase: 17
 depends_on:
   - LIFEOS-1712
