@@ -194,6 +194,18 @@ def test_baseline_inventory_covers_audited_feature_families_and_bridge_methods()
         assert capability.maturity in {"stable", "beta", "experimental"}
         assert capability.backing
 
+    graph_requirements = explore["knowledge.graph-views"].requirements
+    export_requirements = explore["sharing.purpose-specific-exports"].requirements
+    home_node_requirements = explore["system.home-node-service"].requirements
+    assert any("features.graphify" in requirement for requirement in graph_requirements)
+    assert any("features.exports" in requirement for requirement in export_requirements)
+    assert any("configuration" in requirement.lower() for requirement in home_node_requirements)
+    assert any("--actor-id" in requirement for requirement in home_node_requirements)
+    assert any(
+        "LIFEOS_SERVICE_TOKEN" in requirement and "LIFEOS_SERVICE_TOKEN_FILE" in requirement
+        for requirement in home_node_requirements
+    )
+
 
 def _bridge(tmp_path: Path) -> BridgeApplication:
     vault = tmp_path / "vault"
