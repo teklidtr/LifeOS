@@ -198,12 +198,12 @@ class CapabilityRegistry:
                 raise CapabilityDefinitionError(
                     f"Malformed bridge method for {capability.capability_id}: {reference.ref!r}"
                 )
-            key = (reference.kind, reference.ref)
-            if key in backing_seen:
+            backing_key = (reference.kind, reference.ref)
+            if backing_key in backing_seen:
                 raise CapabilityDefinitionError(
                     f"Duplicate backing reference for {capability.capability_id}: {reference.ref}"
                 )
-            backing_seen.add(key)
+            backing_seen.add(backing_key)
 
         entry_seen: set[tuple[str, str]] = set()
         for entry_point in capability.entry_points:
@@ -219,12 +219,12 @@ class CapabilityRegistry:
             )
             if entry_point.label is not None:
                 cls._require_text(entry_point.label, "entry-point label", capability.capability_id)
-            key = (entry_point.kind, entry_point.target)
-            if key in entry_seen:
+            entry_key = (entry_point.kind, entry_point.target)
+            if entry_key in entry_seen:
                 raise CapabilityDefinitionError(
                     f"Duplicate entry point for {capability.capability_id}: {entry_point.target}"
                 )
-            entry_seen.add(key)
+            entry_seen.add(entry_key)
 
     @staticmethod
     def _require_text(value: object, field: str, capability_id: str) -> None:
