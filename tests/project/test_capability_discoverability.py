@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 import pytest
 
 from lifeos.bridge.protocol import CAPABILITIES
@@ -8,6 +6,7 @@ from lifeos.capabilities import (
     CapabilityBackingReference,
     CapabilityDefinitionError,
     CapabilityRegistry,
+    CapabilityVisibility,
     SemanticCapability,
 )
 from lifeos.capability_coverage import validate_capability_coverage
@@ -16,20 +15,19 @@ from lifeos.capability_coverage import validate_capability_coverage
 def _capability(
     *,
     capability_id: str = "example.feature",
-    visibility: str = "explore",
+    visibility: CapabilityVisibility = "explore",
     description: str = "A concrete LifeOS capability used by the discoverability audit.",
     bridge_method: str = "example.run",
 ) -> SemanticCapability:
-    capability = SemanticCapability(
+    return SemanticCapability(
         capability_id=capability_id,
         name="Example feature",
         description=description,
         category="Example",
-        visibility="explore",
+        visibility=visibility,
         maturity="stable",
         backing=(CapabilityBackingReference("bridge_method", bridge_method),),
     )
-    return replace(capability, visibility=visibility)  # type: ignore[arg-type]
 
 
 def test_repository_desktop_protocol_has_semantic_capability_coverage() -> None:
