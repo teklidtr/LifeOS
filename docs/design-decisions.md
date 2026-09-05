@@ -802,3 +802,18 @@ existing pattern already matches the proposed statement, confidence, and exact v
 set, LifeOS returns a deterministic no-change result and persists no proposal. Optional semantic
 providers may be absent, unavailable, timed out, or malformed without disabling ordinary local
 deterministic Personal Model operation.
+
+## DD-101: User-facing capability discovery is Python-owned semantic metadata
+
+LifeOS maintains one validated Python-owned semantic capability registry for first-party feature
+discovery. A semantic capability composes concrete LifeOS bridge methods, named workflows, or
+data sources into a human-facing ability with stable identity and discovery metadata. The
+Obsidian plugin may render and navigate that metadata but does not maintain a parallel capability
+catalog or become the authority for feature definitions.
+
+The desktop `system.handshake.capabilities` list remains low-level protocol negotiation and is
+not repurposed as the semantic catalog. Read-only `capability.list` and `capability.get` methods
+expose the richer versioned registry in deterministic ID order. Example prompts are optional
+teaching metadata only and cannot establish a capability without concrete LifeOS backing. The
+registry is static application metadata, not canonical Markdown and not disposable vault-derived
+state.
