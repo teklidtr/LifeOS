@@ -4,13 +4,53 @@ from pathlib import Path
 import pytest
 
 from lifeos.bridge import BridgeApplication, ProtocolError, ReferenceBridgeClient
+from lifeos.bridge.protocol import CAPABILITIES
 from lifeos.capabilities import (
+    CAPABILITY_REGISTRY,
     CapabilityBackingReference,
     CapabilityDefinitionError,
     CapabilityEntryPoint,
     CapabilityRegistry,
     SemanticCapability,
 )
+
+_EXPLORE_CAPABILITY_IDS = {
+    "capture.rich-capture",
+    "change.proposal-review",
+    "experiments.personal-experiments",
+    "knowledge.conversations",
+    "knowledge.evidence-grounded-research",
+    "knowledge.graph-views",
+    "knowledge.semantic-retrieval",
+    "knowledge.vault-exploration",
+    "knowledge.wiki-evolution",
+    "observation.pattern-analysis",
+    "personal-model.evidence-backed-reflection",
+    "planning.adaptive-feedback",
+    "planning.goal-to-plan",
+    "planning.today",
+    "reflection.reviews",
+    "sharing.purpose-specific-exports",
+    "study.learning-evolution",
+    "study.review-sessions",
+    "system.health-diagnostics",
+    "system.home-node-service",
+    "system.vault-setup",
+}
+
+_INTERNAL_CAPABILITY_IDS = {
+    "capture.maintenance",
+    "experiments.maintenance",
+    "knowledge.ingestion-compatibility",
+    "knowledge.retrieval-maintenance",
+    "personal-model.maintenance",
+    "planning.feedback-maintenance",
+    "reflection.review-maintenance",
+    "system.capability-discovery",
+    "system.desktop-runtime",
+    "system.registry-maintenance",
+    "system.scheduler-runtime",
+}
 
 
 def _capability(capability_id: str = "planning.today") -> SemanticCapability:
@@ -64,6 +104,21 @@ def test_registry_rejects_duplicate_ids_and_invalid_enums() -> None:
         CapabilityRegistry((replace(capability, maturity="preview"),))  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    ("field", "message"),
+    (
+        ("name", "empty name"),
+        ("description", "empty description"),
+        ("category", "empty category"),
+    ),
+)
+def test_registry_rejects_missing_required_metadata(field: str, message: str) -> None:
+    capability = _capability()
+
+    with pytest.raises(CapabilityDefinitionError, match=message):
+        CapabilityRegistry((replace(capability, **{field: "   "}),))
+
+
 def test_registry_rejects_malformed_runtime_shapes_deterministically() -> None:
     capability = _capability()
 
@@ -97,6 +152,61 @@ def test_registry_can_validate_bridge_references_against_protocol_methods() -> N
         registry.validate_bridge_methods({"system.health"})
 
 
+def test_baseline_inventory_covers_audited_feature_families_and_bridge_methods() -> None:
+    capabilities = CAPABILITY_REGISTRY.list_capabilities()
+    ids = [capability.capability_id for capability in capabilities]
+    explore = {
+        capability.capability_id: capability
+        for capability in capabilities
+        if capability.visibility == "explore"
+    }
+    internal = {
+        capability.capability_id: capability
+        for capability in capabilities
+        if capability.visibility == "internal"
+    }
+
+    assert len(ids) == len(set(ids))
+    assert set(explore) == _EXPLORE_CAPABILITY_IDS
+    assert set(internal) == _INTERNAL_CAPABILITY_IDS
+    CAPABILITY_REGISTRY.validate_bridge_methods(CAPABILITIES)
+
+    bridge_owners: dict[str, SemanticCapability] = {}
+    for capability in capabilities:
+        for reference in capability.backing:
+            if reference.kind != "bridge_method":
+                continue
+            assert reference.ref not in bridge_owners
+            bridge_owners[reference.ref] = capability
+
+    # Snapshot this audit without enforcing future protocol additions. LIFEOS-1715 owns
+    # the future-change gate that decides whether a new method needs Explore metadata.
+    assert len(bridge_owners) == 148
+    assert bridge_owners["today.get"].visibility == "explore"
+    assert bridge_owners["capture.enrichment.run"].visibility == "explore"
+    assert bridge_owners["retrieval.index.rebuild"].visibility == "internal"
+    assert bridge_owners["review.artifact.migration.apply"].visibility == "internal"
+
+    for capability in explore.values():
+        assert capability.name.strip()
+        assert capability.description.strip()
+        assert capability.category.strip()
+        assert capability.maturity in {"stable", "beta", "experimental"}
+        assert capability.backing
+
+    graph_requirements = explore["knowledge.graph-views"].requirements
+    export_requirements = explore["sharing.purpose-specific-exports"].requirements
+    home_node_requirements = explore["system.home-node-service"].requirements
+    assert any("features.graphify" in requirement for requirement in graph_requirements)
+    assert any("features.exports" in requirement for requirement in export_requirements)
+    assert any("configuration" in requirement.lower() for requirement in home_node_requirements)
+    assert any("--actor-id" in requirement for requirement in home_node_requirements)
+    assert any(
+        "LIFEOS_SERVICE_TOKEN" in requirement and "LIFEOS_SERVICE_TOKEN_FILE" in requirement
+        for requirement in home_node_requirements
+    )
+
+
 def _bridge(tmp_path: Path) -> BridgeApplication:
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -127,10 +237,16 @@ def test_bridge_lists_and_gets_semantic_capabilities_without_repurposing_handsha
     assert "capability.get" in handshake["capabilities"]
     assert "system.capability-discovery" not in handshake["capabilities"]
     assert listing["semantic_capability_schema"] == 1
-    assert [item["id"] for item in listing["capabilities"]] == ["system.capability-discovery"]
+    capability_items = listing["capabilities"]
+    listed_ids = [item["id"] for item in capability_items]
+    assert listed_ids == sorted(listed_ids)
+    assert _EXPLORE_CAPABILITY_IDS <= set(listed_ids)
+    discovery = next(
+        item for item in capability_items if item["id"] == "system.capability-discovery"
+    )
     assert detail == {
         "semantic_capability_schema": 1,
-        "capability": listing["capabilities"][0],
+        "capability": discovery,
     }
     after = tuple(
         sorted(

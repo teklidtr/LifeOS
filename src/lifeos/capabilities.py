@@ -29,7 +29,7 @@ _ALLOWED_ENTRY_POINT_KINDS = frozenset(
 _CAPABILITY_ID = re.compile(
     r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$"
 )
-_BRIDGE_METHOD = re.compile(r"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$")
+_BRIDGE_METHOD = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$")
 
 
 class CapabilityDefinitionError(ValueError):
@@ -259,21 +259,664 @@ class CapabilityRegistry:
             seen.add(value)
 
 
+def _capability(
+    capability_id: str,
+    name: str,
+    description: str,
+    category: str,
+    *,
+    visibility: CapabilityVisibility = "explore",
+    maturity: CapabilityMaturity = "stable",
+    requirements: tuple[str, ...] = (),
+    bridge_methods: tuple[str, ...] = (),
+    workflows: tuple[str, ...] = (),
+    data_sources: tuple[str, ...] = (),
+    entry_points: tuple[CapabilityEntryPoint, ...] = (),
+    example_prompts: tuple[str, ...] = (),
+) -> SemanticCapability:
+    """Build one static inventory entry without hiding its concrete backing kinds."""
+
+    backing = tuple(
+        CapabilityBackingReference("bridge_method", reference) for reference in bridge_methods
+    )
+    backing += tuple(CapabilityBackingReference("workflow", reference) for reference in workflows)
+    backing += tuple(CapabilityBackingReference("data_source", reference) for reference in data_sources)
+    return SemanticCapability(
+        capability_id=capability_id,
+        name=name,
+        description=description,
+        category=category,
+        visibility=visibility,
+        maturity=maturity,
+        requirements=requirements,
+        backing=backing,
+        entry_points=entry_points,
+        example_prompts=example_prompts,
+    )
+
+
+_CONFIGURED_VAULT = ("A configured LifeOS vault",)
+_CONFIGURED_MCP = ("A configured LifeOS vault and LifeOS MCP connection",)
+
+
 CAPABILITY_REGISTRY = CapabilityRegistry(
     (
-        SemanticCapability(
-            capability_id="system.capability-discovery",
-            name="Capability discovery",
-            description=(
-                "Provides machine-readable semantic capability metadata to first-party "
-                "LifeOS discovery surfaces."
+        _capability(
+            "system.vault-setup",
+            "Set up a LifeOS vault",
+            "Create the supported first-party LifeOS vault scaffold without overwriting existing content.",
+            "Setup & Operations",
+            workflows=("cli.vault-init",),
+            entry_points=(CapabilityEntryPoint("cli", "lifeos.init", "lifeos init"),),
+        ),
+        _capability(
+            "system.health-diagnostics",
+            "Check LifeOS health",
+            "Inspect vault status and installation readiness without turning disposable state into authority.",
+            "Setup & Operations",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=("system.status",),
+            workflows=("cli.doctor", "cli.status"),
+            entry_points=(
+                CapabilityEntryPoint("cli", "lifeos.doctor", "lifeos doctor"),
+                CapabilityEntryPoint("cli", "lifeos.status", "lifeos status"),
             ),
-            category="System",
+        ),
+        _capability(
+            "system.home-node-service",
+            "Run an always-on home node",
+            "Serve the authenticated LifeOS MCP runtime with node-local disposable state and bounded remote access.",
+            "Setup & Operations",
+            requirements=(
+                "A valid LifeOS configuration with vault and runtime directories",
+                "Linux and the optional LifeOS MCP dependency group",
+                "An explicit stable --actor-id",
+                "Exactly one service token source via LIFEOS_SERVICE_TOKEN or LIFEOS_SERVICE_TOKEN_FILE with a token of at least 32 characters",
+            ),
+            workflows=("cli.home-node-service",),
+            entry_points=(CapabilityEntryPoint("cli", "lifeos.serve", "lifeos serve"),),
+        ),
+        _capability(
+            "planning.today",
+            "Plan today",
+            "Build a bounded daily menu from current plans, time, energy, motivation, and work-mode constraints.",
+            "Planning",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=("today.get",),
+            workflows=("cli.plan-today",),
+            entry_points=(
+                CapabilityEntryPoint("obsidian_view", "lifeos-today", "Open LifeOS Today"),
+                CapabilityEntryPoint("obsidian_command", "lifeos-open-today", "Open LifeOS Today"),
+                CapabilityEntryPoint("cli", "lifeos.plan.today", "lifeos plan today"),
+            ),
+            example_prompts=(
+                "Use my LifeOS plans and current constraints to show what I could focus on today.",
+            ),
+        ),
+        _capability(
+            "planning.goal-to-plan",
+            "Turn a goal into a plan",
+            "Inspect a LifeOS goal, clarify missing context, compare options, and draft reviewable planning changes.",
+            "Planning",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "copilot.note.inspect",
+                "copilot.goal.readiness",
+                "copilot.context.preview",
+                "copilot.session.start",
+                "copilot.session.get",
+                "copilot.session.answer",
+                "copilot.session.close",
+                "copilot.options.generate",
+                "copilot.option.decompose",
+                "copilot.capacity.check",
+                "copilot.explain",
+                "copilot.compare",
+                "copilot.counterfactual",
+                "copilot.proposal.create",
+                "copilot.replanning.scan",
+                "copilot.replanning.review",
+                "copilot.replanning.suppress",
+                "copilot.replanning.proposal.create",
+            ),
+            entry_points=(
+                CapabilityEntryPoint("obsidian_view", "lifeos-goal-plan", "Open Goal-to-Plan Copilot"),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-open-goal-plan", "Open Goal-to-Plan Copilot"
+                ),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-plan-active-goal", "Plan from Active Goal Note"
+                ),
+            ),
+            example_prompts=(
+                "Use my active LifeOS goal and nearby context to help me build a realistic plan.",
+            ),
+        ),
+        _capability(
+            "planning.adaptive-feedback",
+            "Adapt planning from feedback",
+            "Record check-ins and outcomes, explain planning signals, and propose bounded preference changes from observed feedback.",
+            "Planning",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "attention.evaluate",
+                "attention.preference",
+                "daily.capture",
+                "daily.checkin",
+                "daily.task_outcome",
+                "daily.review",
+                "feedback.dataset.status",
+                "feedback.duration",
+                "feedback.capacity",
+                "feedback.avoidance",
+                "feedback.plan",
+                "feedback.explain",
+                "feedback.preferences.get",
+                "feedback.preferences.update",
+                "feedback.outcome.correct",
+                "feedback.proposal.create",
+            ),
+            data_sources=("journal.feedback-observations",),
+        ),
+        _capability(
+            "study.review-sessions",
+            "Build study review sessions",
+            "Turn due flashcards into time-bounded review workloads and track the resulting study session.",
+            "Study",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "study.plan",
+                "study.session.start",
+                "study.session.transition",
+                "study.session.open",
+            ),
+            workflows=("cli.study-review",),
+            data_sources=("flashcards.canonical",),
+            entry_points=(CapabilityEntryPoint("cli", "lifeos.study.review", "lifeos study review"),),
+        ),
+        _capability(
+            "reflection.reviews",
+            "Run daily and weekly reviews",
+            "Build, answer, save, revisit, and propose changes from durable LifeOS review artifacts.",
+            "Reflection",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "review.build",
+                "review.progress",
+                "review.save",
+                "review.artifact.open",
+                "review.artifact.load",
+                "review.artifact.refresh",
+                "review.artifact.history",
+                "review.artifact.section",
+                "review.artifact.phase",
+                "review.artifact.answer",
+                "review.artifact.decide",
+                "review.artifact.complete",
+                "review.artifact.skip",
+                "review.artifact.reopen",
+                "review.proposal.create",
+            ),
+            entry_points=(
+                CapabilityEntryPoint("obsidian_view", "lifeos-reviews", "Open LifeOS Reviews"),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-open-daily-review", "Open Today's Review"
+                ),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-open-weekly-review", "Open This Week's Review"
+                ),
+            ),
+        ),
+        _capability(
+            "knowledge.semantic-retrieval",
+            "Build bounded context",
+            "Select inspectable LifeOS evidence with hybrid retrieval when available and deterministic lexical fallback otherwise.",
+            "Knowledge",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=("retrieval.search",),
+            workflows=("context.bounded-pack",),
+            data_sources=("vault.canonical-markdown", "retrieval.disposable-index"),
+            entry_points=(
+                CapabilityEntryPoint("cli", "lifeos.context.build", "lifeos context build"),
+                CapabilityEntryPoint("mcp_tool", "vault_context", "Build a LifeOS context pack"),
+            ),
+            example_prompts=(
+                "Build a LifeOS context pack for this question and keep the evidence bounded.",
+            ),
+        ),
+        _capability(
+            "knowledge.conversations",
+            "Have knowledge conversations",
+            "Ask scoped questions over LifeOS sources, pin or exclude evidence, branch conversations, and draft grounded follow-up changes.",
+            "Knowledge",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "conversation.create",
+                "conversation.list",
+                "conversation.load",
+                "conversation.ask",
+                "conversation.scope.update",
+                "conversation.source.pin",
+                "conversation.source.exclude",
+                "conversation.branch",
+                "conversation.rename",
+                "conversation.archive",
+                "conversation.stale.check",
+                "conversation.proposal.preview",
+                "conversation.proposal.create",
+            ),
+            entry_points=(
+                CapabilityEntryPoint(
+                    "obsidian_view", "lifeos-knowledge-conversation", "Open Knowledge Conversation"
+                ),
+                CapabilityEntryPoint(
+                    "obsidian_command",
+                    "lifeos-open-knowledge-conversation",
+                    "Open Knowledge Conversation",
+                ),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-ask-active-note", "Ask About Active Note"
+                ),
+            ),
+            example_prompts=(
+                "Use my LifeOS notes to answer this question and keep the supporting sources visible.",
+            ),
+        ),
+        _capability(
+            "experiments.personal-experiments",
+            "Run personal experiments",
+            "Design, track, analyze, compare, and conclude reviewable personal experiments without treating observations as automatic causation.",
+            "Experiments",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "experiment.create",
+                "experiment.list",
+                "experiment.load",
+                "experiment.design.evaluate",
+                "experiment.safety.classify",
+                "experiment.transition",
+                "experiment.protocol.update",
+                "experiment.amendment.add",
+                "experiment.observation.record",
+                "experiment.schedule.due",
+                "experiment.analysis.run",
+                "experiment.conclusion.record",
+                "experiment.clone",
+                "experiment.history.load",
+                "experiment.privacy.preview",
+                "experiment.compare",
+                "experiment.proposal.preview",
+                "experiment.proposal.create",
+            ),
+            entry_points=(
+                CapabilityEntryPoint(
+                    "obsidian_view", "lifeos-experiments", "Open Personal Experiments"
+                ),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-create-experiment", "Create Personal Experiment"
+                ),
+            ),
+        ),
+        _capability(
+            "capture.rich-capture",
+            "Capture real-world evidence",
+            "Save meals, exercise, text, and attachments as canonical captures with local extraction, integrity checks, links, and reviewable follow-up changes.",
+            "Capture",
+            maturity="beta",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "capture.create",
+                "capture.read",
+                "capture.update",
+                "capture.transition",
+                "capture.list",
+                "capture.filter",
+                "capture.visualization.build",
+                "capture.attachment.add",
+                "capture.attachment.remove",
+                "capture.attachment.audit",
+                "capture.enrichment.start",
+                "capture.enrichment.run",
+                "capture.enrichment.cancel",
+                "capture.enrichment.retry",
+                "capture.inference.decide",
+                "capture.link",
+                "capture.unlink",
+                "capture.split",
+                "capture.merge.preview",
+                "capture.merge.apply",
+                "capture.privacy.preview",
+                "capture.proposal.preview",
+                "capture.proposal.create",
+            ),
+            entry_points=(
+                CapabilityEntryPoint("obsidian_view", "lifeos-rich-capture", "Open Rich Capture"),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-open-rich-capture", "Open Rich Capture"
+                ),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-quick-capture-meal", "Quick Capture Meal"
+                ),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-quick-capture-exercise", "Quick Capture Exercise"
+                ),
+            ),
+        ),
+        _capability(
+            "personal-model.evidence-backed-reflection",
+            "Build an evidence-backed Personal Model",
+            "Review working hypotheses about recurring patterns with bounded evidence, explicit uncertainty, and proposal-gated semantic changes.",
+            "Reflection",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "personal-model.workspace.get",
+                "personal-model.proposal.preview",
+                "personal-model.proposal.create",
+            ),
+            workflows=("mcp.personal-pattern-proposal",),
+            data_sources=("patterns.canonical-hypotheses",),
+            entry_points=(
+                CapabilityEntryPoint("obsidian_view", "lifeos-personal-model", "Open Personal Model"),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-open-personal-model", "Open Personal Model"
+                ),
+                CapabilityEntryPoint(
+                    "mcp_tool", "personal_pattern_propose", "Propose a personal-pattern seed"
+                ),
+                CapabilityEntryPoint(
+                    "mcp_tool",
+                    "personal_pattern_review_proposal",
+                    "Propose a reviewed pattern revision",
+                ),
+            ),
+            example_prompts=(
+                "Use only the LifeOS evidence I selected to draft a reviewable pattern hypothesis.",
+            ),
+        ),
+        _capability(
+            "change.proposal-review",
+            "Review and apply proposed changes",
+            "Inspect LifeOS proposals, verify immutable review context, and move approved changes through the explicit proposal lifecycle.",
+            "Change Review",
+            requirements=_CONFIGURED_VAULT,
+            bridge_methods=(
+                "proposal.list",
+                "proposal.inspect",
+                "proposal.prepare",
+                "proposal.execute",
+                "ownership.orphans.list",
+                "ownership.release.proposal.create",
+            ),
+            workflows=("mcp.proposal-lifecycle",),
+            entry_points=(
+                CapabilityEntryPoint("obsidian_view", "lifeos-proposals", "Open Proposals"),
+                CapabilityEntryPoint(
+                    "obsidian_command", "lifeos-open-proposals", "Open Proposals"
+                ),
+                CapabilityEntryPoint("mcp_tool", "proposal_submit", "Submit a proposal"),
+                CapabilityEntryPoint("mcp_tool", "proposal_approve", "Approve a proposal"),
+                CapabilityEntryPoint("mcp_tool", "proposal_apply", "Apply an approved proposal"),
+            ),
+        ),
+        _capability(
+            "knowledge.vault-exploration",
+            "Explore the vault with an agent",
+            "Give an MCP-connected agent bounded read-only tools for listing, searching, reading, linking, and identifying canonical LifeOS notes.",
+            "Knowledge",
+            requirements=_CONFIGURED_MCP,
+            workflows=("mcp.vault-exploration",),
+            data_sources=("vault.canonical-markdown",),
+            entry_points=(
+                CapabilityEntryPoint("mcp_tool", "vault_list", "List vault notes"),
+                CapabilityEntryPoint("mcp_tool", "vault_search", "Search vault notes"),
+                CapabilityEntryPoint("mcp_tool", "vault_read_markdown", "Read a Markdown note"),
+                CapabilityEntryPoint("mcp_tool", "vault_read_many", "Read several notes"),
+                CapabilityEntryPoint("mcp_tool", "vault_links", "Inspect note links"),
+                CapabilityEntryPoint("mcp_tool", "vault_note_identity", "Resolve note identity"),
+                CapabilityEntryPoint("mcp_tool", "wiki_search", "Search durable wiki notes"),
+            ),
+            example_prompts=(
+                "Search my LifeOS vault for the evidence relevant to this question before answering.",
+            ),
+        ),
+        _capability(
+            "knowledge.wiki-evolution",
+            "Evolve durable wiki knowledge",
+            "Turn selected canonical evidence into coordinated reviewable wiki creates or exact-section updates while preserving source history.",
+            "Knowledge",
+            requirements=_CONFIGURED_MCP,
+            workflows=("mcp.wiki-evolution",),
+            data_sources=("wiki.generated-provenance",),
+            entry_points=(
+                CapabilityEntryPoint(
+                    "mcp_tool", "ingestion_evolve_wiki_proposal", "Draft a wiki evolution"
+                ),
+                CapabilityEntryPoint(
+                    "mcp_tool",
+                    "ingestion_evolve_wiki_batch_proposal",
+                    "Draft coordinated wiki evolutions",
+                ),
+            ),
+            example_prompts=(
+                "Use this LifeOS source to evolve durable wiki knowledge only where it adds a reusable delta.",
+            ),
+        ),
+        _capability(
+            "study.learning-evolution",
+            "Evolve study material",
+            "Turn a selected study source into reviewable wiki changes plus selective flashcards when retrieval practice serves the learning goal.",
+            "Study",
+            requirements=_CONFIGURED_MCP,
+            workflows=("mcp.study-learning-evolution",),
+            data_sources=("study.canonical-sources",),
+            entry_points=(
+                CapabilityEntryPoint(
+                    "mcp_tool",
+                    "study_evolve_learning_proposal",
+                    "Draft a study-learning evolution",
+                ),
+            ),
+            example_prompts=(
+                "Use this LifeOS study source to improve durable notes and add only flashcards worth retrieving later.",
+            ),
+        ),
+        _capability(
+            "knowledge.evidence-grounded-research",
+            "Capture external research evidence",
+            "Check existing LifeOS context first, then capture selected external evidence as hash-bound raw research only when a material gap remains.",
+            "Knowledge",
+            requirements=_CONFIGURED_MCP,
+            workflows=("mcp.evidence-grounded-research",),
+            data_sources=("raw.research-evidence",),
+            entry_points=(
+                CapabilityEntryPoint(
+                    "mcp_tool", "research_query_context", "Check existing LifeOS research context"
+                ),
+                CapabilityEntryPoint(
+                    "mcp_tool", "research_capture_evidence", "Capture selected research evidence"
+                ),
+            ),
+            example_prompts=(
+                "Check my LifeOS knowledge first, then preserve only the external evidence needed to fill a real gap.",
+            ),
+        ),
+        _capability(
+            "observation.pattern-analysis",
+            "Analyze tentative personal patterns",
+            "Compare journal metrics or activities with explicit sample counts, uncertainty, and noncausal caveats.",
+            "Observation",
+            requirements=_CONFIGURED_VAULT,
+            workflows=("cli.observe-patterns",),
+            data_sources=("journal.metrics-and-activities",),
+            entry_points=(
+                CapabilityEntryPoint("cli", "lifeos.observe.patterns", "lifeos observe patterns"),
+            ),
+        ),
+        _capability(
+            "knowledge.graph-views",
+            "Build derived graph views",
+            "Build and inspect disposable knowledge, provenance, personal-pattern, and system graph projections from canonical state.",
+            "Knowledge",
+            requirements=_CONFIGURED_VAULT + ("features.graphify enabled in lifeos.yml",),
+            workflows=("cli.graph-views",),
+            data_sources=("graph.derived-views",),
+            entry_points=(
+                CapabilityEntryPoint("cli", "lifeos.graph.build", "lifeos graph build"),
+                CapabilityEntryPoint("cli", "lifeos.graph.status", "lifeos graph status"),
+            ),
+        ),
+        _capability(
+            "sharing.purpose-specific-exports",
+            "Build purpose-specific exports",
+            "Create inspectable public-wiki, study, trusted-agent, or personal-review bundles without replacing canonical Markdown.",
+            "Sharing",
+            requirements=_CONFIGURED_VAULT + ("features.exports enabled in lifeos.yml",),
+            workflows=("cli.purpose-specific-exports",),
+            data_sources=("exports.derived-bundles",),
+            entry_points=(
+                CapabilityEntryPoint("cli", "lifeos.export.build", "lifeos export build"),
+                CapabilityEntryPoint("cli", "lifeos.export.status", "lifeos export status"),
+            ),
+        ),
+        _capability(
+            "system.capability-discovery",
+            "Capability discovery",
+            "Provides machine-readable semantic capability metadata to first-party LifeOS discovery surfaces.",
+            "System",
             visibility="internal",
-            maturity="stable",
-            backing=(
-                CapabilityBackingReference("bridge_method", "capability.list"),
-                CapabilityBackingReference("bridge_method", "capability.get"),
+            bridge_methods=("capability.list", "capability.get"),
+        ),
+        _capability(
+            "system.desktop-runtime",
+            "Desktop runtime plumbing",
+            "Low-level desktop process health and cancellation primitives used by first-party workspaces rather than exposed as Explore abilities.",
+            "System",
+            visibility="internal",
+            bridge_methods=("system.health", "request.cancel"),
+        ),
+        _capability(
+            "system.scheduler-runtime",
+            "Scheduler runtime plumbing",
+            "Background scheduler configuration and service installation primitives that support higher-level planning and review workflows.",
+            "System",
+            visibility="internal",
+            bridge_methods=(
+                "scheduler.config.get",
+                "scheduler.config.set",
+                "scheduler.service.status",
+                "scheduler.service.install",
+                "scheduler.service.uninstall",
+            ),
+        ),
+        _capability(
+            "system.registry-maintenance",
+            "Derived-state maintenance",
+            "Explicit registry refresh and MCP activity inspection used to maintain or diagnose disposable runtime state.",
+            "System",
+            visibility="internal",
+            workflows=("cli.registry-refresh", "mcp.runtime-maintenance"),
+            entry_points=(
+                CapabilityEntryPoint("cli", "lifeos.scan", "lifeos scan"),
+                CapabilityEntryPoint("mcp_tool", "registry_refresh", "Refresh registry state"),
+                CapabilityEntryPoint("mcp_tool", "runtime_activity", "Inspect MCP activity"),
+            ),
+        ),
+        _capability(
+            "reflection.review-maintenance",
+            "Review artifact maintenance",
+            "Migration and rebuild primitives for durable review artifacts; they support recovery and compatibility rather than a separate Explore feature.",
+            "Reflection",
+            visibility="internal",
+            bridge_methods=(
+                "review.artifact.migration.preview",
+                "review.artifact.migration.apply",
+                "review.artifact.rebuild",
+            ),
+        ),
+        _capability(
+            "planning.feedback-maintenance",
+            "Feedback maintenance",
+            "Dataset rebuild, preference migration, reset, and replay operations that maintain the adaptive-feedback subsystem.",
+            "Planning",
+            visibility="internal",
+            bridge_methods=(
+                "feedback.dataset.rebuild",
+                "feedback.preferences.migrate",
+                "feedback.reset",
+                "feedback.replay",
+            ),
+        ),
+        _capability(
+            "knowledge.retrieval-maintenance",
+            "Retrieval index maintenance",
+            "Health, rebuild, recovery, and synchronization operations for disposable retrieval indexes.",
+            "Knowledge",
+            visibility="internal",
+            bridge_methods=(
+                "retrieval.index.health",
+                "retrieval.index.rebuild",
+                "retrieval.index.recovery.plan",
+                "retrieval.index.recover",
+                "retrieval.index.sync",
+            ),
+        ),
+        _capability(
+            "experiments.maintenance",
+            "Experiment maintenance",
+            "History rebuild, migration, and recovery-audit operations supporting personal experiments.",
+            "Experiments",
+            visibility="internal",
+            bridge_methods=(
+                "experiment.history.rebuild",
+                "experiment.migration.preview",
+                "experiment.migration.apply",
+                "experiment.recovery.audit",
+            ),
+        ),
+        _capability(
+            "capture.maintenance",
+            "Capture maintenance",
+            "Rebuild and migration operations for capture-derived state and schema compatibility.",
+            "Capture",
+            visibility="internal",
+            bridge_methods=(
+                "capture.rebuild",
+                "capture.migration.preview",
+                "capture.migration.apply",
+            ),
+        ),
+        _capability(
+            "personal-model.maintenance",
+            "Personal Model maintenance",
+            "Explicit rebuild of disposable Personal Model projections from canonical pattern hypotheses.",
+            "Reflection",
+            visibility="internal",
+            bridge_methods=("personal-model.rebuild",),
+        ),
+        _capability(
+            "knowledge.ingestion-compatibility",
+            "Legacy ingestion compatibility",
+            "Older narrow ingestion proposal tools retained for compatibility while wiki and study evolution use the preferred composed workflows.",
+            "Knowledge",
+            visibility="internal",
+            workflows=("mcp.ingestion-compatibility",),
+            entry_points=(
+                CapabilityEntryPoint(
+                    "mcp_tool", "research_create_wiki_proposal", "Legacy research wiki proposal"
+                ),
+                CapabilityEntryPoint(
+                    "mcp_tool", "ingestion_create_wiki_proposal", "Legacy wiki create proposal"
+                ),
+                CapabilityEntryPoint(
+                    "mcp_tool",
+                    "ingestion_create_wiki_and_update_section_proposal",
+                    "Legacy combined wiki proposal",
+                ),
+                CapabilityEntryPoint(
+                    "mcp_tool",
+                    "ingestion_update_wiki_section_proposal",
+                    "Legacy wiki section proposal",
+                ),
             ),
         ),
     )

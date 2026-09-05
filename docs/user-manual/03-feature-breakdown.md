@@ -8,6 +8,61 @@ This chapter explains each core module in two ways:
 - **How it connects:** how it exchanges data or authority with the rest of
   LifeOS.
 
+## Semantic capability catalog
+
+LifeOS now keeps its first-party discovery inventory in the Python-owned semantic
+capability registry in `src/lifeos/capabilities.py`. The desktop bridge exposes
+that same catalog through `capability.list` and `capability.get`; the low-level
+`system.handshake.capabilities` list remains protocol negotiation rather than a
+user-facing feature list. The Obsidian Explore UI is a separate follow-up surface,
+so the current build has the authoritative catalog even when it does not yet have
+an Explore page.
+
+Explore-visible capabilities are grouped by user goal rather than by Python
+package, bridge namespace, or protocol-method count:
+
+| User-facing family | Semantic capability IDs |
+| --- | --- |
+| Setup and operations | `system.vault-setup`, `system.health-diagnostics`, `system.home-node-service` |
+| Daily and adaptive planning | `planning.today`, `planning.goal-to-plan`, `planning.adaptive-feedback` |
+| Study | `study.review-sessions`, `study.learning-evolution` |
+| Reflection | `reflection.reviews`, `personal-model.evidence-backed-reflection` |
+| Knowledge and research | `knowledge.semantic-retrieval`, `knowledge.conversations`, `knowledge.vault-exploration`, `knowledge.wiki-evolution`, `knowledge.evidence-grounded-research`, `knowledge.graph-views` |
+| Personal experiments | `experiments.personal-experiments` |
+| Real-world capture | `capture.rich-capture` |
+| Personal observation | `observation.pattern-analysis` |
+| Change review | `change.proposal-review` |
+| Sharing | `sharing.purpose-specific-exports` |
+
+The catalog deliberately does **not** create a card for every low-level surface.
+The vault/parser/traversal layers are cross-cutting foundations, while
+`system.desktop-runtime`, `system.scheduler-runtime`, and
+`system.registry-maintenance` classify runtime and derived-state plumbing as
+internal. Review, feedback, retrieval, experiment, capture, and Personal Model
+migration/rebuild/recovery operations are likewise grouped into internal
+maintenance capabilities. Older narrow ingestion proposal tools remain under
+`knowledge.ingestion-compatibility` while the composed wiki and study evolution
+workflows are the preferred discoverable abilities.
+
+Some documented behavior is intentionally part of a broader capability rather
+than a second card. Generated Wiki source history belongs to
+`knowledge.wiki-evolution`; note identity and relocation-aware reads belong to
+`knowledge.vault-exploration`; cross-device single-writer coherence is an
+operational safety contract rather than an independent semantic ability. The
+always-on service itself remains discoverable as `system.home-node-service`.
+
+Rich Capture is especially strict about this boundary. The catalog describes the
+currently wired standard workflow: canonical capture, attachment handling, local
+extraction, integrity checks, links, inference decisions when suggestions exist,
+and proposal-backed follow-up. Provider-neutral OCR, transcription, image
+interpretation, or model-estimation contracts do not become Explore promises just
+because typed contracts exist; the standard bridge processing path currently
+runs local extraction only.
+
+Example prompts are optional teaching metadata. Where present, they demonstrate
+LifeOS-specific data or workflows; a generic prompt that any LLM could answer
+without LifeOS is not a capability.
+
 ## 3.1 Markdown vault
 
 ### What it is
@@ -117,7 +172,6 @@ configured vault.
 Context, graph, exports, planning, study, observation, and read-only facade tools
 use the same traversal rules. This keeps cross-component behavior consistent:
 a path rejected as unsafe by one module should not be trusted by another.
-
 ## 3.4 Scanner and SQLite registry
 
 ### What it is
@@ -597,7 +651,6 @@ only allowed fields and cannot claim the approving identity or bypass
 confirmation.
 
 Three instruction layers stay separate:
-
 - the application repository's `AGENTS.md` guides development of LifeOS;
 - MCP server instructions advertise client-independent LifeOS runtime rules;
 - the vault's `system/instructions.yml` supplies vault-specific instructions that
