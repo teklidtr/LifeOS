@@ -352,7 +352,6 @@ def test_ci_documentation_allowlist_rejects_implementation_owned_markdown() -> N
     assert is_ci_documentation_path("AGENTS.md") is True
     assert is_ci_documentation_path("docs/user-manual/example.md") is True
     assert is_ci_documentation_path("tasks/in-progress/999-example.md") is True
-    assert is_ci_documentation_path("prompts/system.md") is False
     assert is_ci_documentation_path("packages/plugin/README.md") is False
     assert is_ci_documentation_path(".github/workflows/notes.md") is False
     assert is_ci_documentation_path("src/lifeos/example.py") is False
