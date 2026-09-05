@@ -1,4 +1,4 @@
-# Rich Capture Testing
+# Rich Capture Testing and Release Validation
 
 Rich capture uses deterministic unit, bridge, plugin, and end-to-end fixtures.
 The suite covers canonical round trips, managed-block preservation, lifecycle and
