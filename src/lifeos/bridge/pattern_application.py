@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lifeos.bridge.application import BridgeApplication as _BaseBridgeApplication
+from lifeos.bridge.capability_application import BridgeApplication as _BaseBridgeApplication
 from lifeos.bridge.personal_model_workspace import PersonalModelWorkspaceBridge
 from lifeos.bridge.protocol import ProtocolError
 from lifeos.reviews.pattern_integration import (
