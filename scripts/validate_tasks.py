@@ -10,6 +10,27 @@ TASK_STATES = ("backlog", "ready", "in-progress", "completed")
 _TASK_ID_PATTERN = re.compile(r"LIFEOS-[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _INLINE_COMMENT_PATTERN = re.compile(r"\s+#")
 
+# Closed baseline captured from master before LIFEOS-1718. These completed task
+# identities predate the dependency contract and have no depends_on field. The
+# expected form is recorded explicitly so editing one into a different legacy
+# shape does not silently broaden the exemption.
+_LEGACY_DEPENDENCY_BASELINE = {
+    "LIFEOS-107.1": "missing",
+    "LIFEOS-107.2": "missing",
+    "LIFEOS-107.3": "missing",
+    "LIFEOS-107.4": "missing",
+    "LIFEOS-107.5": "missing",
+    "LIFEOS-107.6": "missing",
+    "LIFEOS-110": "missing",
+    "LIFEOS-116": "missing",
+    "LIFEOS-300": "missing",
+    "LIFEOS-400": "missing",
+    "LIFEOS-500": "missing",
+    "LIFEOS-600": "missing",
+    "LIFEOS-700": "missing",
+    "LIFEOS-800": "missing",
+}
+
 
 @dataclass(frozen=True)
 class TaskMetadata:
@@ -146,6 +167,29 @@ def parse_task_metadata(path: Path) -> TaskMetadata:
     )
 
 
+def _dependency_contract_error(state: str, metadata: TaskMetadata) -> str | None:
+    if metadata.dependency_error is not None:
+        return metadata.dependency_error
+    if metadata.dependency_form == "list":
+        return None
+
+    if state == "completed":
+        inventoried_form = _LEGACY_DEPENDENCY_BASELINE.get(metadata.task_id)
+        if inventoried_form == metadata.dependency_form:
+            return None
+        if inventoried_form is not None:
+            return (
+                f"completed task dependency form {metadata.dependency_form!r} does not match "
+                f"inventoried legacy form {inventoried_form!r}"
+            )
+        return (
+            "completed task 'depends_on' must be a YAML-style task-ID list; "
+            "non-list historical forms require an explicit legacy inventory entry"
+        )
+
+    return "active task 'depends_on' must be a YAML-style task-ID list"
+
+
 def validate_task_tree(task_root: Path) -> tuple[str, ...]:
     parsed: list[tuple[str, TaskMetadata]] = []
     errors: list[str] = []
@@ -167,12 +211,9 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
                 errors.append(
                     f"{relative}: status {metadata.status!r} does not match directory {state!r}"
                 )
-            if metadata.dependency_error is not None:
-                errors.append(f"{relative}: {metadata.dependency_error}")
-            elif state != "completed" and metadata.dependency_form != "list":
-                errors.append(
-                    f"{relative}: active task 'depends_on' must be a YAML-style task-ID list"
-                )
+            dependency_error = _dependency_contract_error(state, metadata)
+            if dependency_error is not None:
+                errors.append(f"{relative}: {dependency_error}")
 
     by_id: dict[str, list[Path]] = {}
     for _state, metadata in parsed:

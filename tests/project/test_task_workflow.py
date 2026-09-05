@@ -119,7 +119,9 @@ def test_status_must_match_task_state_directory(tmp_path: Path) -> None:
     )
 
 
-def test_completed_legacy_dependency_mapping_is_non_enforceable(tmp_path: Path) -> None:
+def test_completed_uninventoried_legacy_dependency_mapping_is_rejected(
+    tmp_path: Path,
+) -> None:
     task_root = _task_root(tmp_path)
     _write_task(
         task_root,
@@ -133,7 +135,10 @@ def test_completed_legacy_dependency_mapping_is_non_enforceable(tmp_path: Path) 
         ),
     )
 
-    assert validate_task_tree(task_root) == ()
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/001-legacy.md: completed task 'depends_on' must be a YAML-style "
+        "task-ID list; non-list historical forms require an explicit legacy inventory entry",
+    )
 
 
 def test_historical_target_without_dependency_metadata_still_resolves(tmp_path: Path) -> None:
@@ -154,6 +159,41 @@ def test_historical_target_without_dependency_metadata_still_resolves(tmp_path: 
     )
 
     assert validate_task_tree(task_root) == ()
+
+
+def test_historical_exemption_is_form_specific(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "completed",
+        "300-context-packs.md",
+        "LIFEOS-300",
+        dependency_frontmatter=(
+            "depends_on:\n"
+            "  typo: LIFEOS-DOES-NOT-EXIST\n"
+        ),
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/300-context-packs.md: completed task dependency form "
+        "'legacy-opaque' does not match inventoried legacy form 'missing'",
+    )
+
+
+def test_newly_completed_task_cannot_omit_dependency_metadata(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "completed",
+        "999-new.md",
+        "LIFEOS-999",
+        dependency_frontmatter="",
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/999-new.md: completed task 'depends_on' must be a YAML-style task-ID "
+        "list; non-list historical forms require an explicit legacy inventory entry",
+    )
 
 
 def test_indented_empty_list_and_multiline_dependencies_resolve(tmp_path: Path) -> None:
@@ -187,7 +227,7 @@ def test_indented_empty_list_and_multiline_dependencies_resolve(tmp_path: Path) 
     assert validate_task_tree(task_root) == ()
 
 
-def test_completed_scalar_dependency_is_resolved_as_legacy_metadata(tmp_path: Path) -> None:
+def test_completed_scalar_dependency_requires_inventory(tmp_path: Path) -> None:
     task_root = _task_root(tmp_path)
     _write_task(task_root, "completed", "001-base.md", "LIFEOS-001")
     _write_task(
@@ -198,7 +238,10 @@ def test_completed_scalar_dependency_is_resolved_as_legacy_metadata(tmp_path: Pa
         dependency_frontmatter="depends_on: LIFEOS-001\n",
     )
 
-    assert validate_task_tree(task_root) == ()
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/002-legacy.md: completed task 'depends_on' must be a YAML-style task-ID "
+        "list; non-list historical forms require an explicit legacy inventory entry",
+    )
 
 
 def test_dependency_parse_error_does_not_hide_task_identity(tmp_path: Path) -> None:
