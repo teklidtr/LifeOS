@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1719
 title: Remove obsolete repository coding-agent prompts
-status: backlog
+status: ready
 phase: hardening
 depends_on: []
 risk: low
