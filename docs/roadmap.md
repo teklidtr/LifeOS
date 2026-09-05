@@ -256,8 +256,8 @@ that this Personal Model release slice satisfied those gates.
 
 Phase 17 then continued with the capability-discoverability work tracked by
 `LIFEOS-1712` through `LIFEOS-1715`. Those tasks are also completed, so Phase 17 is
-shipped as a whole while the Personal Model release slice and later capability-
-discoverability slice remain distinct delivery checkpoints.
+shipped as a whole while the Personal Model release slice and later
+capability-discoverability slice remain distinct delivery checkpoints.
 
 The accepted Personal Model architecture is documented in
 `docs/personal-model-architecture.md`, and the complete user workflow is in
