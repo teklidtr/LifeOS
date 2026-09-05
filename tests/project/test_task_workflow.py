@@ -201,6 +201,29 @@ def test_completed_scalar_dependency_is_resolved_as_legacy_metadata(tmp_path: Pa
     assert validate_task_tree(task_root) == ()
 
 
+def test_dependency_parse_error_does_not_hide_task_identity(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "completed",
+        "300-context-packs.md",
+        "LIFEOS-300",
+        dependency_frontmatter="depends_on: [not-a-task-id]\n",
+    )
+    _write_task(
+        task_root,
+        "completed",
+        "1200-planning.md",
+        "LIFEOS-1200",
+        dependency_frontmatter="depends_on: [LIFEOS-300]\n",
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/300-context-packs.md: frontmatter field 'depends_on' "
+        "must resolve to LIFEOS-* task-ID syntax",
+    )
+
+
 def test_active_task_requires_yaml_dependency_list(tmp_path: Path) -> None:
     task_root = _task_root(tmp_path)
     _write_task(

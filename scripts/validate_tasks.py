@@ -18,6 +18,7 @@ class TaskMetadata:
     status: str
     depends_on: tuple[str, ...]
     dependency_form: str
+    dependency_error: str | None
 
 
 def _strip_scalar(value: str) -> str:
@@ -81,10 +82,7 @@ def _inline_dependency_list(raw: str) -> tuple[str, ...] | None:
     body = normalized[1:-1].strip()
     if not body:
         return ()
-    values = tuple(_task_id(item, field="depends_on") for item in body.split(","))
-    if any(not item for item in values):
-        raise ValueError("'depends_on' contains an empty dependency")
-    return values
+    return tuple(_task_id(item, field="depends_on") for item in body.split(","))
 
 
 def _dependency_metadata(lines: list[str]) -> tuple[tuple[str, ...], str]:
@@ -129,13 +127,22 @@ def _dependency_metadata(lines: list[str]) -> tuple[tuple[str, ...], str]:
 
 def parse_task_metadata(path: Path) -> TaskMetadata:
     lines = _frontmatter_lines(path)
-    dependencies, dependency_form = _dependency_metadata(lines)
+    task_id = _task_id_value(lines)
+    status = _scalar_value(lines, "status")
+    try:
+        dependencies, dependency_form = _dependency_metadata(lines)
+        dependency_error = None
+    except ValueError as exc:
+        dependencies = ()
+        dependency_form = "invalid"
+        dependency_error = str(exc)
     return TaskMetadata(
         path=path,
-        task_id=_task_id_value(lines),
-        status=_scalar_value(lines, "status"),
+        task_id=task_id,
+        status=status,
         depends_on=dependencies,
         dependency_form=dependency_form,
+        dependency_error=dependency_error,
     )
 
 
@@ -160,7 +167,9 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
                 errors.append(
                     f"{relative}: status {metadata.status!r} does not match directory {state!r}"
                 )
-            if state != "completed" and metadata.dependency_form != "list":
+            if metadata.dependency_error is not None:
+                errors.append(f"{relative}: {metadata.dependency_error}")
+            elif state != "completed" and metadata.dependency_form != "list":
                 errors.append(
                     f"{relative}: active task 'depends_on' must be a YAML-style task-ID list"
                 )
