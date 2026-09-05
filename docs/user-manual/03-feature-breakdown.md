@@ -10,13 +10,14 @@ This chapter explains each core module in two ways:
 
 ## Semantic capability catalog
 
-LifeOS now keeps its first-party discovery inventory in the Python-owned semantic
+LifeOS keeps its first-party discovery inventory in the Python-owned semantic
 capability registry in `src/lifeos/capabilities.py`. The desktop bridge exposes
 that same catalog through `capability.list` and `capability.get`; the low-level
 `system.handshake.capabilities` list remains protocol negotiation rather than a
-user-facing feature list. The Obsidian Explore UI is a separate follow-up surface,
-so the current build has the authoritative catalog even when it does not yet have
-an Explore page.
+user-facing feature list. In Obsidian, run **Open Explore** to browse this live
+registry by category, search it locally, inspect requirements and entry points,
+and copy optional teaching prompts. Explore is a view over the registry rather
+than a second feature catalog; see [Obsidian Desktop Cockpit](06-obsidian-desktop.md#explore).
 
 Explore-visible capabilities are grouped by user goal rather than by Python
 package, bridge namespace, or protocol-method count:
