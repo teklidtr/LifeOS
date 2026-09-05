@@ -27,6 +27,7 @@ import {
   proposalActionsForStatus,
   type ProposalWorkspaceController,
 } from "./index.js";
+import { LifeOSExploreItemView } from "./explore-obsidian-view.js";
 import { LifeOSPersonalModelItemView } from "./personal-model-obsidian-view.js";
 import type { LifeOSSettings } from "./protocol.js";
 import { StdioBridgeClient } from "./stdio-bridge-client.js";
@@ -40,6 +41,7 @@ const VIEW_DETAILS: Record<string, { title: string; icon: string }> = {
   [LifeOSController.RICH_CAPTURE_VIEW_TYPE]: { title: "Rich Capture", icon: "camera" },
   [LifeOSController.PERSONAL_MODEL_VIEW_TYPE]: { title: "Personal Model", icon: "brain-circuit" },
   [LifeOSController.PROPOSAL_VIEW_TYPE]: { title: "LifeOS Proposals", icon: "file-check-2" },
+  [LifeOSController.EXPLORE_VIEW_TYPE]: { title: "LifeOS Explore", icon: "compass" },
 };
 
 const ACTION_LABELS: Record<ProposalAction, string> = {
@@ -495,6 +497,12 @@ class ObsidianHostAdapter implements ObsidianHost {
         const proposalView = model as { controller: ProposalWorkspaceController };
         return new LifeOSProposalItemView(leaf, proposalView.controller);
       }
+      if (type === LifeOSController.EXPLORE_VIEW_TYPE) {
+        const exploreView = model as {
+          controller: import("./explore.js").ExploreWorkspaceController;
+        };
+        return new LifeOSExploreItemView(leaf, exploreView.controller);
+      }
       return new LifeOSItemView(leaf, type, model);
     });
     return () => {
@@ -508,6 +516,14 @@ class ObsidianHostAdapter implements ObsidianHost {
 
   async saveSettings(settings: LifeOSSettings): Promise<void> {
     await this.plugin.saveSettings(settings);
+  }
+
+  executeCommand(id: string): void {
+    this.plugin.app.commands.executeCommandById(id);
+  }
+
+  async copyText(text: string): Promise<void> {
+    await navigator.clipboard.writeText(text);
   }
 
   getActiveFilePath(): string | undefined {
