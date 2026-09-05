@@ -29,7 +29,7 @@ _ALLOWED_ENTRY_POINT_KINDS = frozenset(
 _CAPABILITY_ID = re.compile(
     r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$"
 )
-_BRIDGE_METHOD = re.compile(r"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$")
+_BRIDGE_METHOD = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$")
 
 
 class CapabilityDefinitionError(ValueError):
