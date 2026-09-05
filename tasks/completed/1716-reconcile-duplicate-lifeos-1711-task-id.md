@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1716
 title: Reconcile the duplicate LIFEOS-1711 task ID
-status: in-progress
+status: completed
 phase: hardening
 depends_on: []
 risk: low
@@ -59,6 +59,18 @@ Status: required
 - `python scripts/validate_tasks.py`
 - `pytest -q tests/project`
 - `git diff --check`
+
+# Validation
+
+- Focused local validation after the final scalar/traversal consolidation: `python -m compileall -q scripts tests` and `pytest -q tests/project/test_task_workflow.py` passed with 8 tests.
+- The exact `git diff --check` command passed in a synthetic local git repository containing the branch's changed files. This is stricter than the master diff for whitespace because every reconstructed file line is treated as added.
+- Current implementation-head PR `fast-checks` run `33939984855` passed on `c01c31f2186b3f7f1618c436df10f4e56f99f3f9`, including task workflow validation, documentation impact, Ruff, mypy, compilation, collection, and `pytest -q tests/project`.
+- A full local checkout remained unavailable because the execution environment could not resolve `github.com`; the isolated behavioral suite and GitHub CI were used as the closest deterministic substitutes in accordance with `AGENTS.md`.
+- Normal Codex review found three P2 variants in the new validator: YAML comments could disguise task IDs, nested task files could escape traversal, and YAML comments in `status` could create false failures. All were addressed in the shared scalar/traversal enforcement boundary, covered by regressions, and all review threads are resolved.
+- A third mechanical Codex review was intentionally not requested after two consecutive rounds found variants of the same validator invariant; `AGENTS.md` directs consolidation and invariant audit instead of an open-ended review loop. The final diff was audited for parallel scalar parsing and non-recursive task traversal paths.
+- Security review was intentionally skipped per the user's explicit instruction.
+- Historical `depends_on` incompatibilities discovered by the first validator attempt are independent work and are captured as backlog task `LIFEOS-1718` rather than expanding this PR.
+- This completion move changes task path/status after the implementation validations above. Repository workflow therefore requires fresh current-head `fast-checks` and the final `full-validation` checkpoint before merge.
 
 # Relevant decisions
 
