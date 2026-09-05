@@ -817,3 +817,23 @@ expose the richer versioned registry in deterministic ID order. Example prompts 
 teaching metadata only and cannot establish a capability without concrete LifeOS backing. The
 registry is static application metadata, not canonical Markdown and not disposable vault-derived
 state.
+
+## DD-102: Capability discoverability combines semantic review with protocol coverage
+
+DD-101's Python-owned semantic registry remains the authority for first-party feature discovery.
+Every desktop bridge method advertised by protocol `CAPABILITIES` must be referenced by at least
+one semantic capability. Behavior that is infrastructure, lifecycle, migration, recovery, or
+otherwise not independently user-facing is represented by an `internal` semantic capability;
+its required non-empty description records the reviewable rationale rather than manufacturing an
+Explore card.
+
+Project validation checks both directions that are mechanically knowable: semantic
+`bridge_method` references must resolve to protocol methods, and protocol methods must not become
+orphaned from semantic capability ownership. Explore-visible capabilities still require concrete
+LifeOS backing, so prompt metadata alone cannot satisfy the contract. Clients continue to render
+the Python registry rather than maintaining parallel catalogs.
+
+Protocol coverage is intentionally not treated as a semantic feature classifier. A new
+user-facing capability built entirely from already-covered methods may leave the protocol set
+unchanged. Development rules, user-facing task contracts, and review must therefore evaluate
+registry and Explore impact for semantic changes that deterministic method coverage cannot see.
