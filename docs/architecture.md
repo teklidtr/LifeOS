@@ -177,6 +177,24 @@ or releasing durable ownership. The provenance tables use a separate determinist
 `refresh_provenance_index()` path; `lifeos scan` does not implicitly refresh them. See
 [Registry](registry.md).
 
+## Semantic capability registry
+
+User-facing discoverability uses a separate Python-owned semantic capability registry. It is
+static application metadata, not vault state and not part of the derived SQLite registry. Each
+semantic capability has a stable ID, human-facing name, description and category, visibility,
+maturity, optional setup requirements and entry points, optional teaching prompts, and one or
+more concrete LifeOS backing references such as desktop bridge methods, named workflows, or data
+sources. Registry construction validates the contract centrally and returns entries in stable ID
+order.
+
+Semantic capabilities deliberately compose implementation surfaces rather than mirror them one
+for one. The low-level `system.handshake.capabilities` list continues to answer which bridge
+methods the current desktop protocol can call. `capability.list` and `capability.get` return the
+richer semantic catalog that Explore and future discovery surfaces consume. Example prompts are
+teaching metadata only: without concrete LifeOS backing behavior they cannot establish a
+capability. Reads are side-effect free, and the Obsidian plugin does not own or duplicate this
+catalog.
+
 ## Managed content
 
 ```md
