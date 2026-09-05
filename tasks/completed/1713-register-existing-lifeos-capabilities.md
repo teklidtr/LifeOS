@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1713
 title: Inventory and register existing LifeOS capabilities
-status: in-progress
+status: completed
 phase: 17
 depends_on:
   - LIFEOS-1712
@@ -62,8 +62,8 @@ Build the initial truthful inventory of what LifeOS already provides so Explore 
 
 Status: required
 
-- `docs/user-manual/03-feature-breakdown.md`: reconcile the documented feature inventory with the semantic capability catalog and remove or call out any discrepancy discovered during the audit.
-- `docs/architecture.md`: document how existing implementation surfaces map into semantic capabilities if the inventory reveals mapping rules not already captured by LIFEOS-1712.
+- `docs/user-manual/03-feature-breakdown.md`: reconciled the documented feature inventory with the semantic capability catalog, including Explore-visible families, intentional internal groupings, and the current Rich Capture provider-wiring boundary.
+- `docs/architecture.md`: reviewed; no edit was required because DD-101 and the LIFEOS-1712 architecture changes already define the mapping rule used by this inventory: semantic capabilities compose existing bridge methods, workflows, and data sources while clients render rather than own a parallel catalog.
 
 # Validation commands
 
@@ -75,3 +75,21 @@ Status: required
 # Relevant design decisions
 
 - DD-037
+- DD-101
+
+# Implementation record
+
+- Audited current desktop bridge methods, Obsidian commands/views, CLI workflows, MCP tools, user-manual feature contracts, architecture, tests, and accepted design decisions rather than relying on chat history.
+- Expanded the Python-owned registry to 32 semantic capabilities: 21 Explore-visible user-facing abilities and 11 explicitly internal maintenance/runtime/compatibility groupings.
+- Assigned all 148 bridge methods present in the audited protocol snapshot to exactly one semantic capability owner, while deliberately leaving future-change enforcement to LIFEOS-1715.
+- Added concrete Obsidian, CLI, MCP, workflow, and data-source references and truthful static prerequisites. Graph and export entries require their existing feature flags; the home-node service declares its configuration, Linux/MCP, actor-ID, and bearer-token startup requirements.
+- Kept provider-neutral Rich Capture OCR/transcription/model contracts from being advertised as currently wired provider-backed abilities; the catalog reflects the standard local extraction and existing capture workflow.
+- Corrected the semantic registry bridge-method validator to accept underscores already used by current protocol methods such as `daily.task_outcome`.
+- Added baseline tests for audited feature families, unique semantic ownership of current bridge references, required metadata, valid backing references, deterministic listing, internal classification, and setup prerequisites.
+- Updated `docs/user-manual/03-feature-breakdown.md`; architecture was reviewed and required no duplicate rule beyond the accepted LIFEOS-1712/DD-101 boundary.
+- No newly discovered independent implementation work required a new backlog task. The already-planned Explore UI and future discoverability enforcement remain LIFEOS-1714 and LIFEOS-1715.
+- A fresh local checkout could not be obtained in the tool container because GitHub DNS resolution failed (`Could not resolve host: github.com`). The closest static/import checks were performed before PR creation, and the unavailable repository validation was explicitly delegated to GitHub Actions.
+- PR #53 post-review `fast-checks` run `33946868113` passed on implementation head `f6ffc87684ed2e84ba7f821302a70dca779e7805`, including task workflow, documentation impact, manual-link validation, Ruff, mypy, Python compilation, test collection, and project contract smoke tests.
+- The normal Codex review of commit `f41ab40f7a4fd63ffc01bd921dd0d436e6619467` reported two valid P2 prerequisite omissions. Both were fixed on `f6ffc87684ed2e84ba7f821302a70dca779e7805`, covered by regression assertions, replied to, and the outdated review threads were resolved. The fixes did not materially change architecture or runtime behavior, so AGENTS.md did not require a second Codex review.
+- Full-validation run `33947630859` passed on implementation head `f6ffc87684ed2e84ba7f821302a70dca779e7805`: all four full pytest shards and aggregate `full-test` succeeded, and `docker-setup-e2e` passed the clean-room setup/MCP gate, home-node service container gate, and ARM64 home-node image build.
+- Security review was skipped under the explicit current-user instruction permitting that review class to be omitted.
