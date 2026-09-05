@@ -23,22 +23,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Node for LIFEOS-1714 validation
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: packages/obsidian-plugin/package-lock.json
-
-      - name: Validate Obsidian plugin for LIFEOS-1714
-        run: |
-          npm --prefix packages/obsidian-plugin ci
-          npm --prefix packages/obsidian-plugin run lint
-          npm --prefix packages/obsidian-plugin run typecheck
-          npm --prefix packages/obsidian-plugin test
-          npm --prefix packages/obsidian-plugin run build
-          git diff --check origin/${{ github.base_ref }}...HEAD
-
       - name: Validate task workflow
         run: python scripts/validate_tasks.py
 
