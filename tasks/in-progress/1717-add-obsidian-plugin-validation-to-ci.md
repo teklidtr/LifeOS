@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1717
 title: Add Obsidian plugin validation to CI
-status: ready
+status: in-progress
 phase: 17
 depends_on:
   - LIFEOS-1708
