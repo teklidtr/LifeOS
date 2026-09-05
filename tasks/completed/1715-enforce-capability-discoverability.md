@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1715
 title: Enforce capability discoverability in agent rules and CI
-status: in-progress
+status: completed
 phase: 17
 depends_on:
   - LIFEOS-1712
@@ -95,8 +95,13 @@ adds development/project-validation enforcement for the already documented regis
 - No independent follow-up work was discovered during implementation.
 - Local checkout and the listed local validation commands could not run because this execution
   environment cannot resolve `github.com`. Repository-wide connector searches, exact branch diff
-  review, and changed-file inspection are being used as the closest static substitute; GitHub CI
-  remains the independent executable validation environment.
+  review, changed-file inspection, and syntax compilation were used as the closest local/static
+  substitute.
+- PR #55 `fast-checks` passed task workflow, documentation impact, manual-link validation, Ruff,
+  mypy, source compilation, test collection, and project contract smoke tests.
+- Codex review of implementation head `328789e2d0` reported no major issues.
+- PR #55 full-validation run 226 passed all four full pytest shards, aggregate `full-test`, and
+  `docker-setup-e2e`, including clean-room/MCP, home-node container, and ARM64 image gates.
 
 # Validation commands
 
