@@ -14,7 +14,6 @@ _IMPLEMENTATION_PREFIXES = (
     "packages/",
     "scripts/",
     "system/",
-    "prompts/",
     ".github/workflows/",
     ".lifeos.example/",
 )
