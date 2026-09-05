@@ -85,7 +85,7 @@ def test_registry_requires_concrete_valid_backing_not_only_example_prompts() -> 
         capability,
         backing=(CapabilityBackingReference("bridge_method", "today get"),),
     )
-    with pytest.raises(CapabilityDefinitionError, match="Malformed bridge method"):
+    with pytest.raises(CapabilityDefinitionError, match="malformed backing reference"):
         CapabilityRegistry((malformed,))
 
 
