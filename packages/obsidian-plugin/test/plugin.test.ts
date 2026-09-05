@@ -38,6 +38,40 @@ test("plugin loads, opens views including Explore, invalidates, and unloads clea
   assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 40);
 });
 
+test("Explore dispatches registry command targets through the registered Obsidian namespace", () => {
+  const host = new FakeHost();
+  const plugin = new LifeOSPlugin(host, new FakeBridge(), settings);
+  const entryPoint = {
+    kind: "obsidian_command" as const,
+    target: "lifeos-open-today",
+    label: "Open LifeOS Today",
+  };
+  plugin.explore.state = {
+    stage: "ready",
+    capabilities: [{
+      id: "planning.today",
+      name: "Plan today",
+      description: "Plan today description",
+      category: "Planning",
+      visibility: "explore",
+      maturity: "stable",
+      requirements: [],
+      backing: [{ kind: "bridge_method", ref: "today.get" }],
+      entry_points: [entryPoint],
+      example_prompts: [],
+    }],
+    query: "",
+    category: "all",
+    selectedCapabilityId: "planning.today",
+    detail: "ready",
+    statusAnnouncement: "ready",
+    busy: false,
+  };
+
+  assert.equal(plugin.explore.activateEntryPoint(entryPoint), true);
+  assert.deepEqual(host.executed, ["lifeos:lifeos-open-today"]);
+});
+
 test("missing Python is actionable and non-destructive", async () => {
   const plugin = new LifeOSPlugin(new FakeHost(), new FakeBridge(undefined, new Error("Python executable not found")), settings);
   await plugin.load();
