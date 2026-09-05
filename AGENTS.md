@@ -90,6 +90,29 @@ Treat documentation as part of the implementation, not follow-up polish:
 
 A completed task file is historical evidence; it does not replace updating the documents that describe LifeOS's current behavior.
 
+## Capability discoverability
+
+Capability discoverability is part of completion, not follow-up polish. For every implementation
+that adds or materially changes user-facing LifeOS behavior:
+
+- Add or update the Python-owned semantic capability definition that describes the behavior and
+  its concrete LifeOS backing.
+- Explicitly decide whether the semantic capability belongs in Explore. New low-level desktop
+  bridge behavior that is intentionally infrastructure, lifecycle, migration, recovery, or
+  otherwise not independently user-facing must be owned by an `internal` semantic capability;
+  its non-empty description is the reviewable rationale for keeping that grouping out of Explore.
+- Every desktop bridge method added to protocol `CAPABILITIES` must have semantic capability
+  ownership before the task is complete. Do not silence a coverage failure by inventing an
+  Explore card for internal plumbing.
+- Explore and other first-party discovery surfaces must consume the semantic capability registry.
+  Do not maintain a separately hard-coded feature catalog in TypeScript, docs, or another client.
+- Treat semantic review as complementary to the mechanical protocol-coverage audit. A genuinely
+  new user-facing behavior composed entirely from already-covered methods may not create an
+  orphan method, so the task contract and code review must still resolve its registry/Explore
+  impact explicitly.
+
+A user-facing feature is incomplete until this discoverability impact has been resolved.
+
 ## Local validation before CI
 
 CI is an independent verification layer and safety net, not the primary mechanism for discovering deterministic implementation regressions. Agents must make a serious local attempt to catch test failures before pushing a change and before using CI or Codex review as feedback.
