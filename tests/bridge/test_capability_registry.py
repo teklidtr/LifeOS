@@ -64,6 +64,18 @@ def test_registry_rejects_duplicate_ids_and_invalid_enums() -> None:
         CapabilityRegistry((replace(capability, maturity="preview"),))  # type: ignore[arg-type]
 
 
+def test_registry_rejects_malformed_runtime_shapes_deterministically() -> None:
+    capability = _capability()
+
+    with pytest.raises(CapabilityDefinitionError, match="requirements must be a tuple"):
+        CapabilityRegistry(
+            (replace(capability, requirements=["configured"]),)  # type: ignore[arg-type]
+        )
+
+    with pytest.raises(CapabilityDefinitionError, match="backing must contain backing references"):
+        CapabilityRegistry((replace(capability, backing=("today.get",)),))  # type: ignore[arg-type]
+
+
 def test_registry_requires_concrete_valid_backing_not_only_example_prompts() -> None:
     capability = _capability()
     with pytest.raises(CapabilityDefinitionError, match="must declare implementation backing"):
@@ -100,7 +112,12 @@ def test_bridge_lists_and_gets_semantic_capabilities_without_repurposing_handsha
 ) -> None:
     bridge = _bridge(tmp_path)
     client = ReferenceBridgeClient(bridge)
-    before = tuple(sorted(path.relative_to(bridge.daily.vault_root) for path in bridge.daily.vault_root.rglob("*")))
+    before = tuple(
+        sorted(
+            path.relative_to(bridge.daily.vault_root)
+            for path in bridge.daily.vault_root.rglob("*")
+        )
+    )
 
     handshake = client.call("system.handshake", protocol="1.0")
     listing = client.call("capability.list")
@@ -115,7 +132,12 @@ def test_bridge_lists_and_gets_semantic_capabilities_without_repurposing_handsha
         "semantic_capability_schema": 1,
         "capability": listing["capabilities"][0],
     }
-    after = tuple(sorted(path.relative_to(bridge.daily.vault_root) for path in bridge.daily.vault_root.rglob("*")))
+    after = tuple(
+        sorted(
+            path.relative_to(bridge.daily.vault_root)
+            for path in bridge.daily.vault_root.rglob("*")
+        )
+    )
     assert after == before
 
 
