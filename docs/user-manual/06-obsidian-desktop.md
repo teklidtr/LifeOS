@@ -32,6 +32,34 @@ performs every validated read or write. The CLI remains a recovery and developer
 5. Enable **Start on load**, click **Restart bridge**, and open the LifeOS ribbon
    view. The connection indicator should show **Connected**.
 
+## Explore
+
+Run **Open Explore** from the command palette when you want to answer “What can
+LifeOS actually do?” without guessing from commands or documentation. The view
+loads the authoritative Python-owned semantic capability registry through the
+local desktop bridge. It does not keep a second TypeScript feature list, and it
+shows only capabilities whose registry visibility is `explore`; internal runtime,
+maintenance, migration, recovery, and protocol entries remain hidden.
+
+Use the search box or category selector to narrow the returned catalog locally.
+Select a capability to inspect its description, maturity/status, static setup
+requirements, and declared entry points. Obsidian command or view entry points
+open the existing LifeOS destination, so Explore does not bypass that workflow's
+normal authorization, privacy, proposal, or mutation boundary. CLI, MCP, and
+workflow entry points are displayed as references rather than being simulated by
+the plugin.
+
+Some capabilities include example prompts. **Copy** places the example on the
+clipboard only. Explore never submits or runs a prompt automatically, and a prompt
+is teaching metadata rather than evidence that an arbitrary model behavior is a
+LifeOS feature. Browsing, searching, opening details, and copying prompts do not
+mutate canonical Markdown.
+
+If the local bridge is unavailable, Explore offers **Reconnect**. Malformed or
+unsupported capability metadata is not partially rendered; the view explains the
+problem and offers **Retry**. A valid registry with no Explore-visible entries is
+shown as an explicit empty state rather than a blank catalog.
+
 ## Today
 
 The **Today** view combines check-in state, proposed actions, due study work, active
