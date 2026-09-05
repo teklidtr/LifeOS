@@ -343,10 +343,10 @@ The implementation sequence through the release checkpoint is:
 8. **LIFEOS-1707** added bounded pattern evidence to context and reflection surfaces.
 9. **LIFEOS-1708** built the Obsidian Personal Model workspace.
 10. **LIFEOS-1709** added evidence-bounded agent-assisted pattern proposals.
-11. **LIFEOS-1710** is the release-validation and documentation checkpoint covering representative lifecycle/evidence histories, arbitrary `patterns/` preservation, derived-state rebuild, proposal interruption recovery, bounded large-vault behavior, local STDIO and authenticated home-node capability boundaries, and the evidence-to-Obsidian end-to-end lifecycle.
+11. **LIFEOS-1710** completed the release-validation and documentation checkpoint covering representative lifecycle/evidence histories, arbitrary `patterns/` preservation, derived-state rebuild, proposal interruption recovery, bounded large-vault behavior, local STDIO and authenticated home-node capability boundaries, and the evidence-to-Obsidian end-to-end lifecycle.
 
 The complete user-facing workflow is documented in `docs/user-manual/19-personal-model.md`. Focused Obsidian controls remain in `docs/user-manual/personal-model.md`, and deterministic re-evaluation semantics remain in `docs/user-manual/personal-pattern-review-triggers.md`.
 
-Phase 17 continues beyond this Personal Model release slice with the capability-discoverability tasks `LIFEOS-1712` through `LIFEOS-1715`; completing LIFEOS-1710 does not close the phase as a whole.
+After the Personal Model release slice completed with LIFEOS-1710, Phase 17 continued with the capability-discoverability tasks `LIFEOS-1712` through `LIFEOS-1715`. Those tasks are also completed, so Phase 17 is complete as a whole while the later capability-discoverability work remains a distinct delivery slice rather than part of the Personal Model release contract.
 
 The central rule remains: **evidence may create a reason to review, but only trusted human review can turn a semantic interpretation into durable accepted working context.**
