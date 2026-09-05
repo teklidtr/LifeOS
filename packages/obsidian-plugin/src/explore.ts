@@ -317,8 +317,21 @@ export class ExploreWorkspaceController {
       detail: "Reconnecting to the local LifeOS engine.",
       statusAnnouncement: "Reconnecting to LifeOS.",
     });
-    await this.reconnectBridge();
-    await this.load();
+    try {
+      await this.reconnectBridge();
+      await this.load();
+    } catch (error) {
+      const detail = failureMessage(error);
+      this.setState({
+        ...this.state,
+        stage: "bridge-unavailable",
+        capabilities: [],
+        selectedCapabilityId: undefined,
+        busy: false,
+        detail,
+        statusAnnouncement: detail,
+      });
+    }
   }
 
   setQuery(query: string): void {
