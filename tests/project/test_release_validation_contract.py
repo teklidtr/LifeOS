@@ -36,7 +36,10 @@ SEMANTIC_PROVIDER_NEUTRAL_PATHS = (
     "packages/obsidian-plugin/src/knowledge-conversation-workspace.ts",
 )
 EXPERIMENT_PROVIDER_NEUTRAL_PATHS = (
-    *(path.relative_to(REPO_ROOT).as_posix() for path in (REPO_ROOT / "src/lifeos/experiments").glob("*.py")),
+    *(
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / "src/lifeos/experiments").glob("*.py")
+    ),
     "packages/obsidian-plugin/src/experiment.ts",
     "packages/obsidian-plugin/src/experiment-workspace.ts",
 )
