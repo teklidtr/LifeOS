@@ -342,7 +342,8 @@ export class ExploreWorkspaceController {
 
   activateEntryPoint(entryPoint: CapabilityEntryPoint): boolean {
     const selected = this.selected;
-    const declared = selected?.entry_points.some(
+    if (!selected) return false;
+    const declared = selected.entry_points.some(
       (candidate) => candidate.kind === entryPoint.kind && candidate.target === entryPoint.target,
     );
     if (!declared || !["obsidian_command", "obsidian_view"].includes(entryPoint.kind)) return false;
