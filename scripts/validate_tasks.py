@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TASK_ROOT = REPO_ROOT / "tasks"
 TASK_STATES = ("backlog", "ready", "in-progress", "completed")
 _TASK_ID_PATTERN = re.compile(r"LIFEOS-[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+_INLINE_COMMENT_PATTERN = re.compile(r"\s+#")
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,21 @@ class TaskMetadata:
 
 def _strip_scalar(value: str) -> str:
     value = value.strip()
+    if not value:
+        return value
+
+    if value[0] in {"'", '"'}:
+        quote = value[0]
+        closing = value.rfind(quote)
+        if closing > 0:
+            suffix = value[closing + 1 :].strip()
+            if not suffix or suffix.startswith("#"):
+                value = value[: closing + 1]
+    else:
+        comment = _INLINE_COMMENT_PATTERN.search(value)
+        if comment is not None:
+            value = value[: comment.start()].rstrip()
+
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
@@ -48,7 +64,7 @@ def _scalar_value(lines: list[str], key: str) -> str:
 def _task_id_value(lines: list[str]) -> str:
     task_id = _scalar_value(lines, "id")
     if _TASK_ID_PATTERN.fullmatch(task_id) is None:
-        raise ValueError("frontmatter field 'id' must use plain LIFEOS-* task-ID syntax")
+        raise ValueError("frontmatter field 'id' must resolve to LIFEOS-* task-ID syntax")
     return task_id
 
 
