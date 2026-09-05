@@ -9,6 +9,7 @@ import { ExperimentWorkspaceController, ExperimentWorkspaceOrigin } from "./expe
 import { RichCaptureOrigin, RichCaptureWorkspaceController } from "./rich-capture-workspace.js";
 import { CaptureType } from "./rich-capture.js";
 import { PersonalModelWorkspaceController } from "./personal-model-workspace.js";
+import { CapabilityEntryPoint, ExploreWorkspaceController } from "./explore.js";
 import {
   ConfirmationChallenge,
   ProposalInspection,
@@ -21,6 +22,8 @@ export interface ObsidianHost {
   registerView(type: string, factory: () => unknown): () => void;
   openView(type: string): void;
   saveSettings(settings: LifeOSSettings): Promise<void>;
+  executeCommand?(id: string): void;
+  copyText?(text: string): Promise<void>;
   getActiveFilePath?(): string | undefined;
   getSelectedText?(): string | undefined;
   getActiveFolderPath?(): string | undefined;
@@ -76,6 +79,10 @@ export class ProposalWorkspaceView {
   constructor(readonly controller: ProposalWorkspaceController) {}
 }
 
+export class ExploreWorkspaceView {
+  constructor(readonly controller: ExploreWorkspaceController) {}
+}
+
 export class LifeOSPlugin {
   static readonly VIEW_TYPE = "lifeos-today";
   static readonly COPILOT_VIEW_TYPE = "lifeos-goal-plan";
@@ -85,6 +92,7 @@ export class LifeOSPlugin {
   static readonly RICH_CAPTURE_VIEW_TYPE = "lifeos-rich-capture";
   static readonly PERSONAL_MODEL_VIEW_TYPE = "lifeos-personal-model";
   static readonly PROPOSAL_VIEW_TYPE = "lifeos-proposals";
+  static readonly EXPLORE_VIEW_TYPE = "lifeos-explore";
   readonly view = new LifeOSView();
   readonly copilot: GoalPlanWorkspaceController;
   readonly copilotView: GoalPlanWorkspaceView;
@@ -100,6 +108,8 @@ export class LifeOSPlugin {
   readonly personalModelView: PersonalModelWorkspaceView;
   readonly proposals: ProposalWorkspaceController;
   readonly proposalView: ProposalWorkspaceView;
+  readonly explore: ExploreWorkspaceController;
+  readonly exploreView: ExploreWorkspaceView;
   readonly connection: ConnectionManager;
   private disposers: Array<() => void> = [];
 
@@ -130,6 +140,19 @@ export class LifeOSPlugin {
         ?? Promise.resolve(false),
     );
     this.proposalView = new ProposalWorkspaceView(this.proposals);
+    this.explore = new ExploreWorkspaceController(
+      client,
+      (entryPoint) => this.openExploreEntryPoint(entryPoint),
+      (text) => this.host.copyText?.(text)
+        ?? Promise.reject(new Error("The Obsidian clipboard is unavailable.")),
+      async () => {
+        await this.connection.start(this.settings);
+        if (this.connection.current !== "connected") {
+          throw new Error("The local LifeOS bridge is unavailable.");
+        }
+      },
+    );
+    this.exploreView = new ExploreWorkspaceView(this.explore);
   }
 
   async load(): Promise<void> {
@@ -141,12 +164,14 @@ export class LifeOSPlugin {
     this.disposers.push(this.host.registerView(LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE, () => this.richCaptureView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.PERSONAL_MODEL_VIEW_TYPE, () => this.personalModelView));
     this.disposers.push(this.host.registerView(LifeOSPlugin.PROPOSAL_VIEW_TYPE, () => this.proposalView));
+    this.disposers.push(this.host.registerView(LifeOSPlugin.EXPLORE_VIEW_TYPE, () => this.exploreView));
     this.disposers.push(this.host.addRibbonIcon("layout-dashboard", "Open LifeOS", () => this.openToday()));
     this.disposers.push(this.host.addRibbonIcon("messages-square", "Open Knowledge Conversation", () => this.openKnowledgeConversation("ribbon")));
     this.disposers.push(this.host.addRibbonIcon("flask-conical", "Open Personal Experiments", () => this.openExperiments("ribbon")));
     this.disposers.push(this.host.addRibbonIcon("camera", "Open Rich Capture", () => this.openRichCapture("ribbon")));
     this.disposers.push(this.host.addRibbonIcon("brain-circuit", "Open Personal Model", () => this.openPersonalModel()));
     this.disposers.push(this.host.addCommand("lifeos-open-today", "Open LifeOS Today", () => this.openToday()));
+    this.disposers.push(this.host.addCommand("lifeos-open-explore", "Open Explore", () => this.openExplore()));
     this.disposers.push(this.host.addCommand("lifeos-open-goal-plan", "Open Goal-to-Plan Copilot", () => this.openGoalPlan("command-palette")));
     this.disposers.push(this.host.addCommand("lifeos-plan-active-goal", "Plan from Active Goal Note", () => {
       const path = this.host.getActiveFilePath?.();
@@ -231,6 +256,8 @@ export class LifeOSPlugin {
 
   openToday(): void { this.host.openView(LifeOSPlugin.VIEW_TYPE); }
 
+  openExplore(): void { this.host.openView(LifeOSPlugin.EXPLORE_VIEW_TYPE); }
+
   openGoalPlan(origin: WorkspaceOrigin): void {
     this.copilot.state = { ...this.copilot.state, origin, focusTarget: "workspace-title" };
     this.host.openView(LifeOSPlugin.COPILOT_VIEW_TYPE);
@@ -262,6 +289,18 @@ export class LifeOSPlugin {
 
   openProposals(): void {
     this.host.openView(LifeOSPlugin.PROPOSAL_VIEW_TYPE);
+  }
+
+  private openExploreEntryPoint(entryPoint: CapabilityEntryPoint): void {
+    if (entryPoint.kind === "obsidian_view") {
+      this.host.openView(entryPoint.target);
+      return;
+    }
+    if (entryPoint.kind === "obsidian_command" && this.host.executeCommand) {
+      this.host.executeCommand(entryPoint.target);
+      return;
+    }
+    throw new Error(`Unsupported Explore entry point: ${entryPoint.kind}.`);
   }
 
   private experimentOrigin(path?: string): ExperimentWorkspaceOrigin {
@@ -318,3 +357,4 @@ export * from "./rich-capture.js";
 export * from "./rich-capture-workspace.js";
 export * from "./personal-model.js";
 export * from "./personal-model-workspace.js";
+export * from "./explore.js";
