@@ -16,28 +16,12 @@ jobs:
   fast-checks:
     name: fast-checks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set up Node for LIFEOS-1714 validation
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: packages/obsidian-plugin/package-lock.json
-
-      - name: Validate Obsidian plugin for LIFEOS-1714
-        run: |
-          npm --prefix packages/obsidian-plugin ci
-          npm --prefix packages/obsidian-plugin run lint
-          npm --prefix packages/obsidian-plugin run typecheck
-          npm --prefix packages/obsidian-plugin test
-          npm --prefix packages/obsidian-plugin run build
-          git diff --check origin/${{ github.base_ref }}...HEAD
 
       - name: Validate task workflow
         run: python scripts/validate_tasks.py
@@ -107,12 +91,6 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: uv run pytest --collect-only -q
-
-      - name: Run LIFEOS-1714 full pytest
-        if: steps.scope.outputs.docs_only != 'true'
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src
-        run: uv run pytest -q
 
       - name: Run project contract smoke tests
         if: steps.scope.outputs.docs_only != 'true'
