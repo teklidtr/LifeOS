@@ -248,16 +248,16 @@ The Personal Model implementation through `LIFEOS-1709` includes:
 - local STDIO MCP and authenticated home-node draft boundaries;
 - conservative handling of pre-existing `patterns/` Markdown with no guessed semantic migration.
 
-`LIFEOS-1710` is the Personal Model release-validation and documentation checkpoint. Its
-release contract covers representative histories, proposal interruption/recovery,
+`LIFEOS-1710` completed the Personal Model release-validation and documentation checkpoint. Its
+release contract covered representative histories, proposal interruption/recovery,
 runtime deletion/rebuild, bounded large-vault behavior, MCP boundaries, end-to-end
-Obsidian lifecycle coverage, and the complete user workflow. Task completion is the
-record that this Personal Model release slice satisfied those gates; the roadmap must
-not present that validation as complete while the task remains in progress.
+Obsidian lifecycle coverage, and the complete user workflow. Its completion records
+that this Personal Model release slice satisfied those gates.
 
-Phase 17 also contains the later capability-discoverability work tracked by
-`LIFEOS-1712` through `LIFEOS-1715`. Completing the Personal Model release checkpoint
-therefore does not by itself close Phase 17 as a whole.
+Phase 17 then continued with the capability-discoverability work tracked by
+`LIFEOS-1712` through `LIFEOS-1715`. Those tasks are also completed, so Phase 17 is
+shipped as a whole while the Personal Model release slice and later capability-
+discoverability slice remain distinct delivery checkpoints.
 
 The accepted Personal Model architecture is documented in
 `docs/personal-model-architecture.md`, and the complete user workflow is in
