@@ -15,6 +15,7 @@ Remove the obsolete `prompts/` coding-agent convenience layer now that repositor
 
 - Remove `prompts/bootstrap-repository.md`.
 - Remove `prompts/implement-next-task.md`.
+- Remove direct CI/documentation references that exist only to classify or describe the deleted `prompts/` tree.
 - Verify no runtime or supported development workflow depends on those files.
 - Keep repository task/workflow validation coherent after the removal.
 
@@ -27,14 +28,16 @@ Remove the obsolete `prompts/` coding-agent convenience layer now that repositor
 # Acceptance criteria
 
 - Both obsolete files under `prompts/` are removed.
-- Repository search finds no supported runtime or workflow dependency on those prompt files.
+- Active repository documentation and CI classification no longer special-case the deleted `prompts/` tree.
+- Repository inspection finds no supported runtime or workflow dependency on those prompt files.
 - Development authority remains defined by `AGENTS.md` and repository source-of-truth documents.
 - Task/workflow validation and project contract tests pass.
 
 # Documentation impact
 
-Status: none
-Reason: This removes obsolete repository-maintainer convenience prompts without changing LifeOS user-visible behavior, architecture, runtime contracts, setup, CLI, MCP behavior, or documented development authority.
+Status: required
+
+- `README.md`: remove the obsolete `prompts/` example from the CI scope description while preserving the current development-authority guidance.
 
 # Validation commands
 
