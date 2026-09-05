@@ -121,7 +121,7 @@ test("Explore search and category filters stay local to the returned registry pa
   assert.equal(controller.state.selectedCapabilityId, "knowledge.research");
 
   controller.setQuery("configured");
-  assert.deepEqual(controller.visibleCapabilities, []);
+  assert.equal(controller.visibleCapabilities.length, 0);
   assert.equal(controller.state.selectedCapabilityId, undefined);
 
   controller.setCategory("Planning");
