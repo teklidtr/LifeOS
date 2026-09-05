@@ -16,6 +16,8 @@ import {
   ProposalWorkspaceController,
 } from "./proposals.js";
 
+const OBSIDIAN_PLUGIN_COMMAND_PREFIX = "lifeos:";
+
 export interface ObsidianHost {
   addRibbonIcon(icon: string, title: string, callback: () => void): () => void;
   addCommand(id: string, name: string, callback: () => void): () => void;
@@ -297,7 +299,7 @@ export class LifeOSPlugin {
       return;
     }
     if (entryPoint.kind === "obsidian_command" && this.host.executeCommand) {
-      this.host.executeCommand(entryPoint.target);
+      this.host.executeCommand(`${OBSIDIAN_PLUGIN_COMMAND_PREFIX}${entryPoint.target}`);
       return;
     }
     throw new Error(`Unsupported Explore entry point: ${entryPoint.kind}.`);
