@@ -118,14 +118,15 @@ test("Explore search and category filters stay local to the returned registry pa
 
   controller.setQuery("research");
   assert.deepEqual(controller.visibleCapabilities.map((item) => item.id), ["knowledge.research"]);
-  assert.equal(controller.selected?.id, "knowledge.research");
+  assert.equal(controller.state.selectedCapabilityId, "knowledge.research");
 
   controller.setQuery("configured");
   assert.deepEqual(controller.visibleCapabilities, []);
-  assert.equal(controller.selected, undefined);
+  assert.equal(controller.state.selectedCapabilityId, undefined);
 
   controller.setCategory("Planning");
   assert.deepEqual(controller.visibleCapabilities.map((item) => item.id), ["planning.today"]);
+  assert.equal(controller.state.selectedCapabilityId, "planning.today");
   assert.equal(bridge.calls.length, 1, "filtering must not make new bridge calls");
 });
 
