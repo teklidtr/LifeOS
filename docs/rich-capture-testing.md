@@ -7,6 +7,13 @@ meal and exercise uncertainty, safety messages, retrieval representations,
 knowledge evidence, review sections, experiment mappings, proposals, privacy,
 migration, recovery, visualizations, and workspace accessibility.
 
+`./scripts/validate-rich-capture.sh` is retained as a focused local Rich Capture
+regression helper and is called from this document. It is not a repository release gate
+and does not replace the merge-readiness contract in `AGENTS.md` and `README.md`.
+Repository release readiness is established by the current `fast-checks`,
+`obsidian-plugin`, and explicit `full-validation` CI checkpoints, which cover the
+complete package, plugin, pytest, setup, home-node, and ARM64 surfaces.
+
 ## Focused commands
 
 ```bash
