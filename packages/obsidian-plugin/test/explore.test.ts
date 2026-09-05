@@ -238,3 +238,18 @@ test("Explore reconnects and retries the semantic registry load", async () => {
   assert.equal(controller.state.stage, "ready");
   assert.equal(controller.state.capabilities.length, 1);
 });
+
+test("Explore keeps a failed bridge reconnect recoverable", async () => {
+  const controller = new ExploreWorkspaceController(
+    new FakeBridge(response([])),
+    () => undefined,
+    async () => undefined,
+    async () => { throw new Error("Python process could not be started."); },
+  );
+
+  await controller.reconnect();
+
+  assert.equal(controller.state.stage, "bridge-unavailable");
+  assert.equal(controller.state.busy, false);
+  assert.match(controller.state.detail, /could not be started/i);
+});
