@@ -12,6 +12,8 @@ PROTOCOL_VERSION = DESKTOP_PROTOCOL_VERSION
 ENGINE_VERSION = PYTHON_PACKAGE_VERSION
 CAPABILITIES = (
     "system.health",
+    "capability.list",
+    "capability.get",
     "copilot.note.inspect",
     "copilot.goal.readiness",
     "copilot.context.preview",

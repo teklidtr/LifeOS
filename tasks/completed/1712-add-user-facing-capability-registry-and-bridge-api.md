@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1712
 title: Add user-facing capability registry and bridge API
-status: backlog
+status: completed
 phase: 17
 depends_on: []
 risk: medium
@@ -75,3 +75,15 @@ Status: required
 # Relevant design decisions
 
 - DD-037
+- DD-101
+
+# Implementation record
+
+- Added the Python-owned semantic capability registry contract, stable schema serialization, deterministic ordering, and fail-closed metadata validation.
+- Added read-only `capability.list` and `capability.get` bridge methods while preserving `system.handshake.capabilities` as low-level protocol negotiation.
+- Added registry and bridge tests covering validation, malformed runtime shapes, serialization, unknown IDs, deterministic ordering, and side-effect-free reads.
+- Updated architecture, desktop architecture, and design decisions; user-facing Explore documentation remains intentionally deferred to LIFEOS-1714.
+- The current tool container could not resolve `github.com`, so a repository checkout and the task's local validation commands could not be run there. GitHub Actions was used as the repository validation environment instead.
+- PR #52 fast-checks passed on implementation head `369cd4174c628c2ff743a2b57f77b1bedc1bb126`, including task workflow, documentation impact, manual links, Ruff, Mypy, Python compile, test collection, and project contract smoke tests.
+- Full validation run `33942626974` passed all four pytest shards (`full-test`) and `docker-setup-e2e`, including clean-room setup, home-node service container, and ARM64 image build gates.
+- Codex review on implementation commit `343da1242a539da8af09c0a7e95e0dce84fea8cf` found no major issues. The only later codebase change before validation was a non-material test expectation correction after full pytest exposed a message-match mismatch.
