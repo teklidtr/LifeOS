@@ -13,27 +13,63 @@ class FakeBridge implements BridgeClient {
 }
 
 class FakeHost implements ObsidianHost {
-  opened: string[] = []; disposers = 0; commands = new Map<string, () => void>();
+  opened: string[] = []; executed: string[] = []; copied: string[] = []; disposers = 0; commands = new Map<string, () => void>();
   addRibbonIcon(_i: string, _t: string, cb: () => void): () => void { this.ribbon = cb; return () => { this.disposers++; }; }
   addCommand(id: string, _name: string, cb: () => void): () => void { this.commands.set(id, cb); return () => { this.disposers++; }; }
   registerView(_type: string, _factory: () => unknown): () => void { return () => { this.disposers++; }; }
   openView(type: string): void { this.opened.push(type); }
+  executeCommand(id: string): void { this.executed.push(id); }
+  async copyText(text: string): Promise<void> { this.copied.push(text); }
   async saveSettings(_settings: LifeOSSettings): Promise<void> {}
   ribbon?: () => void;
 }
 
 const settings: LifeOSSettings = { configPath: "lifeos.yml", pythonPath: "python3", actorId: "me", startOnLoad: true, diagnostics: "normal" };
 
-test("plugin loads, opens view, invalidates, and unloads cleanly", async () => {
+test("plugin loads, opens views including Explore, invalidates, and unloads cleanly", async () => {
   const host = new FakeHost(); const bridge = new FakeBridge(); const plugin = new LifeOSPlugin(host, bridge, settings);
   await plugin.load();
   assert.equal(plugin.connection.current, "connected");
-  plugin.openToday(); host.commands.get("lifeos-open-goal-plan")?.(); host.commands.get("lifeos-open-knowledge-conversation")?.(); host.commands.get("lifeos-open-experiments")?.(); host.commands.get("lifeos-open-rich-capture")?.(); host.commands.get("lifeos-open-personal-model")?.(); host.commands.get("lifeos-open-proposals")?.();
-  assert.deepEqual(host.opened, [LifeOSPlugin.VIEW_TYPE, LifeOSPlugin.COPILOT_VIEW_TYPE, LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE, LifeOSPlugin.EXPERIMENT_VIEW_TYPE, LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE, LifeOSPlugin.PERSONAL_MODEL_VIEW_TYPE, LifeOSPlugin.PROPOSAL_VIEW_TYPE]);
+  plugin.openToday(); host.commands.get("lifeos-open-explore")?.(); host.commands.get("lifeos-open-goal-plan")?.(); host.commands.get("lifeos-open-knowledge-conversation")?.(); host.commands.get("lifeos-open-experiments")?.(); host.commands.get("lifeos-open-rich-capture")?.(); host.commands.get("lifeos-open-personal-model")?.(); host.commands.get("lifeos-open-proposals")?.();
+  assert.deepEqual(host.opened, [LifeOSPlugin.VIEW_TYPE, LifeOSPlugin.EXPLORE_VIEW_TYPE, LifeOSPlugin.COPILOT_VIEW_TYPE, LifeOSPlugin.KNOWLEDGE_CONVERSATION_VIEW_TYPE, LifeOSPlugin.EXPERIMENT_VIEW_TYPE, LifeOSPlugin.RICH_CAPTURE_VIEW_TYPE, LifeOSPlugin.PERSONAL_MODEL_VIEW_TYPE, LifeOSPlugin.PROPOSAL_VIEW_TYPE]);
   bridge.notify("vault.changed");
   assert.equal(plugin.view.refreshCount, 1);
   await plugin.unload();
-  assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 38);
+  assert.equal(bridge.stops, 1); assert.equal(bridge.listeners.size, 0); assert.equal(host.disposers, 40);
+});
+
+test("Explore dispatches registry command targets through the registered Obsidian namespace", () => {
+  const host = new FakeHost();
+  const plugin = new LifeOSPlugin(host, new FakeBridge(), settings);
+  const entryPoint = {
+    kind: "obsidian_command" as const,
+    target: "lifeos-open-today",
+    label: "Open LifeOS Today",
+  };
+  plugin.explore.state = {
+    stage: "ready",
+    capabilities: [{
+      id: "planning.today",
+      name: "Plan today",
+      description: "Plan today description",
+      category: "Planning",
+      visibility: "explore",
+      maturity: "stable",
+      requirements: [],
+      backing: [{ kind: "bridge_method", ref: "today.get" }],
+      entry_points: [entryPoint],
+      example_prompts: [],
+    }],
+    query: "",
+    category: "all",
+    selectedCapabilityId: "planning.today",
+    detail: "ready",
+    statusAnnouncement: "ready",
+    busy: false,
+  };
+
+  assert.equal(plugin.explore.activateEntryPoint(entryPoint), true);
+  assert.deepEqual(host.executed, ["lifeos:lifeos-open-today"]);
 });
 
 test("missing Python is actionable and non-destructive", async () => {
