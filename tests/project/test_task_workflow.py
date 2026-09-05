@@ -16,6 +16,7 @@ def _write_task(
     task_id: str,
     *,
     status: str | None = None,
+    dependency_frontmatter: str = "depends_on: []\n",
     extra_frontmatter: str = "",
 ) -> Path:
     path = task_root / state / filename
@@ -25,6 +26,7 @@ def _write_task(
         f"id: {task_id}\n"
         "title: Example task\n"
         f"status: {status or state}\n"
+        f"{dependency_frontmatter}"
         f"{extra_frontmatter}"
         "---\n\n"
         "# Goal\n\n"
@@ -117,21 +119,182 @@ def test_status_must_match_task_state_directory(tmp_path: Path) -> None:
     )
 
 
-def test_legacy_dependency_shapes_do_not_expand_identity_validation(tmp_path: Path) -> None:
+def test_completed_uninventoried_legacy_dependency_mapping_is_rejected(
+    tmp_path: Path,
+) -> None:
     task_root = _task_root(tmp_path)
     _write_task(
         task_root,
         "completed",
         "001-legacy.md",
         "LIFEOS-001",
-        extra_frontmatter=(
+        dependency_frontmatter=(
             "depends_on:\n"
             "  legacy_phase: LIFEOS-DOES-NOT-EXIST\n"
             "  historical_alias: LIFEOS-300\n"
         ),
     )
 
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/001-legacy.md: completed task 'depends_on' must be a YAML-style "
+        "task-ID list; non-list historical forms require an explicit legacy inventory entry",
+    )
+
+
+def test_historical_target_without_dependency_metadata_still_resolves(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "completed",
+        "300-context-packs.md",
+        "LIFEOS-300",
+        dependency_frontmatter="",
+    )
+    _write_task(
+        task_root,
+        "completed",
+        "1200-planning.md",
+        "LIFEOS-1200",
+        dependency_frontmatter="depends_on: [LIFEOS-300]\n",
+    )
+
     assert validate_task_tree(task_root) == ()
+
+
+def test_historical_exemption_is_form_specific(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "completed",
+        "300-context-packs.md",
+        "LIFEOS-300",
+        dependency_frontmatter=(
+            "depends_on:\n"
+            "  typo: LIFEOS-DOES-NOT-EXIST\n"
+        ),
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/300-context-packs.md: completed task dependency form "
+        "'legacy-opaque' does not match inventoried legacy form 'missing'",
+    )
+
+
+def test_newly_completed_task_cannot_omit_dependency_metadata(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "completed",
+        "999-new.md",
+        "LIFEOS-999",
+        dependency_frontmatter="",
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/999-new.md: completed task 'depends_on' must be a YAML-style task-ID "
+        "list; non-list historical forms require an explicit legacy inventory entry",
+    )
+
+
+def test_indented_empty_list_and_multiline_dependencies_resolve(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "completed",
+        "1600-architecture.md",
+        "LIFEOS-1600",
+        dependency_frontmatter="depends_on:\n  []\n",
+    )
+    _write_task(
+        task_root,
+        "completed",
+        "1601-artifacts.md",
+        "LIFEOS-1601",
+        dependency_frontmatter="depends_on:\n  - LIFEOS-1600\n",
+    )
+    _write_task(
+        task_root,
+        "backlog",
+        "1602-follow-up.md",
+        "LIFEOS-1602",
+        dependency_frontmatter=(
+            "depends_on:\n"
+            "  - LIFEOS-1600\n"
+            "  - LIFEOS-1601 # shipped foundation\n"
+        ),
+    )
+
+    assert validate_task_tree(task_root) == ()
+
+
+def test_completed_scalar_dependency_requires_inventory(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(task_root, "completed", "001-base.md", "LIFEOS-001")
+    _write_task(
+        task_root,
+        "completed",
+        "002-legacy.md",
+        "LIFEOS-002",
+        dependency_frontmatter="depends_on: LIFEOS-001\n",
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/002-legacy.md: completed task 'depends_on' must be a YAML-style task-ID "
+        "list; non-list historical forms require an explicit legacy inventory entry",
+    )
+
+
+def test_dependency_parse_error_does_not_hide_task_identity(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "completed",
+        "300-context-packs.md",
+        "LIFEOS-300",
+        dependency_frontmatter="depends_on: [not-a-task-id]\n",
+    )
+    _write_task(
+        task_root,
+        "completed",
+        "1200-planning.md",
+        "LIFEOS-1200",
+        dependency_frontmatter="depends_on: [LIFEOS-300]\n",
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/completed/300-context-packs.md: frontmatter field 'depends_on' "
+        "must resolve to LIFEOS-* task-ID syntax",
+    )
+
+
+def test_active_task_requires_yaml_dependency_list(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "backlog",
+        "001-missing.md",
+        "LIFEOS-001",
+        dependency_frontmatter="",
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/backlog/001-missing.md: active task 'depends_on' must be a YAML-style task-ID list",
+    )
+
+
+def test_unresolved_dependency_id_is_rejected(tmp_path: Path) -> None:
+    task_root = _task_root(tmp_path)
+    _write_task(
+        task_root,
+        "backlog",
+        "002-follow-up.md",
+        "LIFEOS-002",
+        dependency_frontmatter="depends_on: [LIFEOS-404]\n",
+    )
+
+    assert validate_task_tree(task_root) == (
+        "tasks/backlog/002-follow-up.md: dependency 'LIFEOS-404' does not match any task id",
+    )
 
 
 def test_missing_id_is_rejected(tmp_path: Path) -> None:
@@ -141,6 +304,7 @@ def test_missing_id_is_rejected(tmp_path: Path) -> None:
         "---\n"
         "title: Invalid task\n"
         "status: backlog\n"
+        "depends_on: []\n"
         "---\n",
         encoding="utf-8",
     )
