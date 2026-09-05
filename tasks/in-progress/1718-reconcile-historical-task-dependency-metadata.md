@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1718
 title: Reconcile historical task dependency metadata
-status: ready
+status: in-progress
 phase: hardening
 depends_on: []
 risk: low
