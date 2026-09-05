@@ -46,6 +46,7 @@ def test_pr_workflow_has_explicit_obsidian_plugin_checkpoint() -> None:
     plugin_job = workflow.split("\n  obsidian-plugin:\n", 1)[1]
 
     assert "name: obsidian-plugin" in plugin_job
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in plugin_job
     assert "uses: actions/setup-node@v4" in plugin_job
     assert 'node-version: "24"' in plugin_job
     assert "cache: npm" in plugin_job
