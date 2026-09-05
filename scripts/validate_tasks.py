@@ -16,6 +16,8 @@ class TaskMetadata:
     path: Path
     task_id: str
     status: str
+    depends_on: tuple[str, ...]
+    dependency_form: str
 
 
 def _strip_scalar(value: str) -> str:
@@ -61,24 +63,84 @@ def _scalar_value(lines: list[str], key: str) -> str:
     return value
 
 
-def _task_id_value(lines: list[str]) -> str:
-    task_id = _scalar_value(lines, "id")
+def _task_id(value: str, *, field: str) -> str:
+    task_id = _strip_scalar(value)
     if _TASK_ID_PATTERN.fullmatch(task_id) is None:
-        raise ValueError("frontmatter field 'id' must resolve to LIFEOS-* task-ID syntax")
+        raise ValueError(f"frontmatter field {field!r} must resolve to LIFEOS-* task-ID syntax")
     return task_id
+
+
+def _task_id_value(lines: list[str]) -> str:
+    return _task_id(_scalar_value(lines, "id"), field="id")
+
+
+def _inline_dependency_list(raw: str) -> tuple[str, ...] | None:
+    normalized = _strip_scalar(raw)
+    if not (normalized.startswith("[") and normalized.endswith("]")):
+        return None
+    body = normalized[1:-1].strip()
+    if not body:
+        return ()
+    values = tuple(_task_id(item, field="depends_on") for item in body.split(","))
+    if any(not item for item in values):
+        raise ValueError("'depends_on' contains an empty dependency")
+    return values
+
+
+def _dependency_metadata(lines: list[str]) -> tuple[tuple[str, ...], str]:
+    prefix = "depends_on:"
+    indexes = [index for index, line in enumerate(lines) if line.startswith(prefix)]
+    if not indexes:
+        return (), "missing"
+    if len(indexes) != 1:
+        raise ValueError("frontmatter must contain at most one 'depends_on' field")
+
+    index = indexes[0]
+    raw = lines[index][len(prefix) :].strip()
+    if raw:
+        dependencies = _inline_dependency_list(raw)
+        if dependencies is not None:
+            return dependencies, "list"
+
+        scalar = _strip_scalar(raw)
+        if _TASK_ID_PATTERN.fullmatch(scalar) is not None:
+            return (scalar,), "legacy-scalar"
+        return (), "legacy-opaque"
+
+    indented: list[str] = []
+    for line in lines[index + 1 :]:
+        if not line.startswith((" ", "\t")):
+            break
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            indented.append(stripped)
+
+    if not indented:
+        return (), "legacy-opaque"
+    if indented == ["[]"]:
+        return (), "list"
+    if all(line.startswith("- ") for line in indented):
+        dependencies = tuple(
+            _task_id(line[2:], field="depends_on") for line in indented
+        )
+        return dependencies, "list"
+    return (), "legacy-opaque"
 
 
 def parse_task_metadata(path: Path) -> TaskMetadata:
     lines = _frontmatter_lines(path)
+    dependencies, dependency_form = _dependency_metadata(lines)
     return TaskMetadata(
         path=path,
         task_id=_task_id_value(lines),
         status=_scalar_value(lines, "status"),
+        depends_on=dependencies,
+        dependency_form=dependency_form,
     )
 
 
 def validate_task_tree(task_root: Path) -> tuple[str, ...]:
-    parsed: list[TaskMetadata] = []
+    parsed: list[tuple[str, TaskMetadata]] = []
     errors: list[str] = []
 
     for state in TASK_STATES:
@@ -93,14 +155,18 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
             except (OSError, ValueError) as exc:
                 errors.append(f"{relative}: {exc}")
                 continue
-            parsed.append(metadata)
+            parsed.append((state, metadata))
             if metadata.status != state:
                 errors.append(
                     f"{relative}: status {metadata.status!r} does not match directory {state!r}"
                 )
+            if state != "completed" and metadata.dependency_form != "list":
+                errors.append(
+                    f"{relative}: active task 'depends_on' must be a YAML-style task-ID list"
+                )
 
     by_id: dict[str, list[Path]] = {}
-    for metadata in parsed:
+    for _state, metadata in parsed:
         by_id.setdefault(metadata.task_id, []).append(metadata.path)
 
     for task_id, paths in sorted(by_id.items()):
@@ -109,6 +175,15 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
                 str(path.relative_to(task_root.parent)) for path in sorted(paths)
             )
             errors.append(f"duplicate task id {task_id!r}: {rendered}")
+
+    known_ids = set(by_id)
+    for _state, metadata in parsed:
+        relative = metadata.path.relative_to(task_root.parent)
+        for dependency in metadata.depends_on:
+            if dependency not in known_ids:
+                errors.append(
+                    f"{relative}: dependency {dependency!r} does not match any task id"
+                )
 
     return tuple(errors)
 

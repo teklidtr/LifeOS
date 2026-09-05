@@ -13,7 +13,7 @@ A task moves between directories without changing its filename. When a task move
 
 Every task must contain metadata, goal, scope, out-of-scope boundaries, acceptance criteria, documentation impact, validation commands, and relevant decisions.
 
-Task `id` values are globally unique across backlog, ready, in-progress, and completed history. Never reuse a completed task ID for new work. IDs must resolve to `LIFEOS-*` identifiers after normal YAML scalar quoting/comment syntax is normalized. `python scripts/validate_tasks.py` recursively validates global ID uniqueness and directory/status agreement; PR `fast-checks` run this validation even for task-only or documentation-only changes. Historical dependency metadata remains governed by the task records themselves and is not normalized by this identity validator.
+Task `id` values are globally unique across backlog, ready, in-progress, and completed history. Never reuse a completed task ID for new work. IDs must resolve to `LIFEOS-*` identifiers after normal YAML scalar quoting/comment syntax is normalized. `python scripts/validate_tasks.py` recursively validates global ID uniqueness, directory/status agreement, and enforceable dependency references; PR `fast-checks` run this validation even for task-only or documentation-only changes.
 
 Only `ready/` tasks may be selected for implementation. Backlog tasks must never be implemented directly.
 
@@ -26,6 +26,14 @@ If `tasks/ready/` contains no task files, an agent may promote exactly one task 
 When promoting a task, move the file to `tasks/ready/` and change its frontmatter `status` from `backlog` to `ready`. If multiple backlog tasks are eligible, promote exactly one rather than filling the ready queue speculatively. Explicit current-user priority takes precedence when choosing which eligible task to promote.
 
 Newly discovered work becomes a separate backlog task.
+
+## Dependency metadata
+
+Active tasks in `backlog/`, `ready/`, and `in-progress/` must declare `depends_on` as a YAML-style list of repository task IDs. Inline lists such as `depends_on: [LIFEOS-101, LIFEOS-102]`, multiline `- LIFEOS-*` lists, and the empty list `[]` are supported. Every task ID in an enforceable dependency list must resolve to exactly the repository task identity indexed by `scripts/validate_tasks.py`; an unresolved reference fails validation.
+
+Completed task files are historical evidence and may predate the current dependency contract. The validator therefore indexes a completed task's `id` independently from its dependency metadata. Historical records with no `depends_on` field or with an opaque legacy mapping remain valid task identities, but that missing or ambiguous dependency metadata is intentionally non-enforceable rather than guessed. Historical scalar `depends_on: LIFEOS-*` values and YAML-style lists are deterministic, so their references are enforced. A flow-style empty list on the indented line after `depends_on:` is also accepted as an empty YAML list.
+
+This compatibility boundary is deliberate: old task identities such as `LIFEOS-300`, `LIFEOS-500`, and `LIFEOS-116` remain resolvable even though their completed records omit `depends_on`, while modern task work cannot introduce new ambiguous dependency metadata. Do not rewrite completed scope, acceptance criteria, or implementation evidence merely to modernize formatting.
 
 ## Documentation impact
 
