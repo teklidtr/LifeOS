@@ -64,3 +64,38 @@ Rules:
 - A completed task file records history but does not substitute for current documentation.
 
 CI checks this contract for implementation-changing pull requests.
+
+## Capability discoverability impact
+
+Task contracts that add or materially change user-facing LifeOS behavior must explicitly resolve
+capability discoverability. Add a `# Capability discoverability impact` section to that task and
+state the semantic registry and Explore decision rather than leaving discovery work implicit.
+
+For user-facing work, use this form:
+
+```markdown
+# Capability discoverability impact
+
+Status: required
+
+- Registry: add or update `<semantic-capability-id>` with its concrete LifeOS backing.
+- Explore: `explore` because users should discover it directly, or `internal` with the concrete
+  rationale for why the grouped behavior is infrastructure rather than an independent ability.
+```
+
+Rules:
+
+- A new or materially changed user-facing behavior must add or update its Python-owned semantic
+  capability definition even when it composes bridge methods that were already covered.
+- A new desktop bridge method added to protocol `CAPABILITIES` must be referenced by a semantic
+  capability before completion. Infrastructure/lifecycle/migration/recovery methods belong to an
+  explicit `internal` capability with a non-empty description that explains the classification.
+- Explore-visible capabilities require concrete LifeOS backing; prompt text alone is not a
+  capability.
+- Explore and other first-party discovery clients consume the semantic registry and must not own
+  a second hard-coded feature catalog.
+- The deterministic protocol-coverage audit catches orphan bridge methods, but cannot infer every
+  new semantic behavior composed entirely from previously covered methods. Task contract review
+  and agent/code review remain mandatory for that case.
+
+Tasks that do not add or materially change user-facing behavior do not need this section.

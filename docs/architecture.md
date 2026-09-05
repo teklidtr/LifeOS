@@ -195,6 +195,19 @@ teaching metadata only: without concrete LifeOS backing behavior they cannot est
 capability. Reads are side-effect free, and the Obsidian plugin does not own or duplicate this
 catalog.
 
+Protocol discoverability coverage is validated as a project contract. The audit starts from the
+desktop protocol `CAPABILITIES` set rather than a second method list, rejects semantic bridge
+references that do not exist in that protocol, and also rejects protocol methods that have no
+semantic capability owner. An internal semantic capability's required non-empty description is
+the reviewable rationale for keeping its grouped infrastructure, lifecycle, migration, or
+recovery methods out of Explore. Explore-visible entries continue to require concrete LifeOS
+backing, so prompt text alone cannot satisfy the registry contract.
+
+This mechanical audit cannot infer every semantic product change. A new user-facing behavior may
+compose only bridge methods that were already covered, leaving protocol coverage unchanged.
+`AGENTS.md`, user-facing task contracts, and code review therefore remain complementary semantic
+guardrails; protocol coverage is a deterministic backstop, not an automatic feature classifier.
+
 ## Managed content
 
 ```md

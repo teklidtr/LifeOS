@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1715
 title: Enforce capability discoverability in agent rules and CI
-status: backlog
+status: completed
 phase: 17
 depends_on:
   - LIFEOS-1712
@@ -74,6 +74,35 @@ Status: required
 - `docs/architecture.md`: document the coverage relationship between low-level bridge methods, semantic capabilities, internal classifications, and Explore.
 - `docs/design-decisions.md`: record the durable enforcement model and the intentional split between semantic review and mechanically checkable protocol coverage.
 
+User-manual review: `docs/user-manual/03-feature-breakdown.md` and
+`docs/user-manual/06-obsidian-desktop.md` were reviewed. No user-manual edit is required because
+this task does not change Explore's visible catalog, interaction model, or runtime behavior; it
+adds development/project-validation enforcement for the already documented registry contract.
+
+# Implementation record
+
+- Added a deterministic protocol-to-semantic coverage audit that consumes the existing desktop
+  `CAPABILITIES` set and the Python-owned semantic registry rather than introducing another method
+  inventory.
+- Added project-validation regressions for orphan, covered, internal-with-rationale, and
+  Explore-visible prompt-only cases; the existing `tests/project` CI checkpoint therefore owns
+  the future-change gate.
+- Updated development rules, task-contract rules, architecture, and DD-102 to keep semantic review
+  complementary to mechanically checkable protocol coverage.
+- Repository-wide seam review found the existing runtime `validate_bridge_methods` call in the
+  capability bridge adapter and the baseline registry test; runtime startup behavior remains
+  unchanged and the stale baseline-test comment now points at the project gate.
+- No independent follow-up work was discovered during implementation.
+- Local checkout and the listed local validation commands could not run because this execution
+  environment cannot resolve `github.com`. Repository-wide connector searches, exact branch diff
+  review, changed-file inspection, and syntax compilation were used as the closest local/static
+  substitute.
+- PR #55 `fast-checks` passed task workflow, documentation impact, manual-link validation, Ruff,
+  mypy, source compilation, test collection, and project contract smoke tests.
+- Codex review of implementation head `328789e2d0` reported no major issues.
+- PR #55 full-validation run 226 passed all four full pytest shards, aggregate `full-test`, and
+  `docker-setup-e2e`, including clean-room/MCP, home-node container, and ARM64 image gates.
+
 # Validation commands
 
 - `pytest -q tests/project`
@@ -86,3 +115,5 @@ Status: required
 
 - DD-037
 - DD-080
+- DD-101
+- DD-102

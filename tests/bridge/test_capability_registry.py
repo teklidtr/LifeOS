@@ -179,8 +179,8 @@ def test_baseline_inventory_covers_audited_feature_families_and_bridge_methods()
             assert reference.ref not in bridge_owners
             bridge_owners[reference.ref] = capability
 
-    # Snapshot this audit without enforcing future protocol additions. LIFEOS-1715 owns
-    # the future-change gate that decides whether a new method needs Explore metadata.
+    # Keep the audited baseline inventory shape reviewable. Future protocol additions are
+    # enforced by tests/project/test_capability_discoverability.py.
     assert len(bridge_owners) == 148
     assert bridge_owners["today.get"].visibility == "explore"
     assert bridge_owners["capture.enrichment.run"].visibility == "explore"
