@@ -41,6 +41,25 @@ def test_fast_pr_workflow_has_safe_documentation_only_path() -> None:
     assert "if: steps.scope.outputs.docs_only != 'true'" in workflow
 
 
+def test_pr_workflow_has_explicit_obsidian_plugin_checkpoint() -> None:
+    workflow = _read(FAST_WORKFLOW)
+    plugin_job = workflow.split("\n  obsidian-plugin:\n", 1)[1]
+
+    assert "name: obsidian-plugin" in plugin_job
+    assert "uses: actions/setup-node@v4" in plugin_job
+    assert 'node-version: "24"' in plugin_job
+    assert "cache: npm" in plugin_job
+    assert "cache-dependency-path: packages/obsidian-plugin/package-lock.json" in plugin_job
+    assert "npm --prefix packages/obsidian-plugin ci" in plugin_job
+    assert "npm --prefix packages/obsidian-plugin run lint" in plugin_job
+    assert "npm --prefix packages/obsidian-plugin run typecheck" in plugin_job
+    assert "npm --prefix packages/obsidian-plugin test" in plugin_job
+    assert "npm --prefix packages/obsidian-plugin run build" in plugin_job
+    assert "if: steps.scope.outputs.docs_only != 'true'" in plugin_job
+    assert "if: steps.scope.outputs.docs_only == 'true'" in plugin_job
+    assert "Obsidian plugin validation skipped" in plugin_job
+
+
 def test_full_validation_is_explicit_complete_and_statelessly_sharded() -> None:
     workflow = _read(FULL_WORKFLOW)
 
