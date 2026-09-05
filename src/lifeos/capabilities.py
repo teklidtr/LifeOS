@@ -126,21 +126,54 @@ class CapabilityRegistry:
                     )
 
     @classmethod
-    def _validate_capability(cls, capability: SemanticCapability) -> None:
-        if not _CAPABILITY_ID.fullmatch(capability.capability_id):
+    def _validate_capability(cls, capability: object) -> None:
+        if not isinstance(capability, SemanticCapability):
+            raise CapabilityDefinitionError(
+                "Capability registry entries must be SemanticCapability instances"
+            )
+        if (
+            not isinstance(capability.capability_id, str)
+            or not _CAPABILITY_ID.fullmatch(capability.capability_id)
+        ):
             raise CapabilityDefinitionError(
                 f"Invalid capability ID: {capability.capability_id!r}"
             )
         cls._require_text(capability.name, "name", capability.capability_id)
         cls._require_text(capability.description, "description", capability.capability_id)
         cls._require_text(capability.category, "category", capability.capability_id)
-        if capability.visibility not in _ALLOWED_VISIBILITY:
+        if (
+            not isinstance(capability.visibility, str)
+            or capability.visibility not in _ALLOWED_VISIBILITY
+        ):
             raise CapabilityDefinitionError(
                 f"Invalid visibility for {capability.capability_id}: {capability.visibility!r}"
             )
-        if capability.maturity not in _ALLOWED_MATURITY:
+        if (
+            not isinstance(capability.maturity, str)
+            or capability.maturity not in _ALLOWED_MATURITY
+        ):
             raise CapabilityDefinitionError(
                 f"Invalid maturity for {capability.capability_id}: {capability.maturity!r}"
+            )
+        if not isinstance(capability.requirements, tuple):
+            raise CapabilityDefinitionError(
+                f"Capability {capability.capability_id} requirements must be a tuple"
+            )
+        if not isinstance(capability.backing, tuple) or not all(
+            isinstance(item, CapabilityBackingReference) for item in capability.backing
+        ):
+            raise CapabilityDefinitionError(
+                f"Capability {capability.capability_id} backing must contain backing references"
+            )
+        if not isinstance(capability.entry_points, tuple) or not all(
+            isinstance(item, CapabilityEntryPoint) for item in capability.entry_points
+        ):
+            raise CapabilityDefinitionError(
+                f"Capability {capability.capability_id} entry_points must contain entry points"
+            )
+        if not isinstance(capability.example_prompts, tuple):
+            raise CapabilityDefinitionError(
+                f"Capability {capability.capability_id} example_prompts must be a tuple"
             )
         if not capability.backing:
             raise CapabilityDefinitionError(
@@ -156,7 +189,7 @@ class CapabilityRegistry:
 
         backing_seen: set[tuple[str, str]] = set()
         for reference in capability.backing:
-            if reference.kind not in _ALLOWED_BACKING_KINDS:
+            if not isinstance(reference.kind, str) or reference.kind not in _ALLOWED_BACKING_KINDS:
                 raise CapabilityDefinitionError(
                     f"Invalid backing kind for {capability.capability_id}: {reference.kind!r}"
                 )
@@ -174,11 +207,16 @@ class CapabilityRegistry:
 
         entry_seen: set[tuple[str, str]] = set()
         for entry_point in capability.entry_points:
-            if entry_point.kind not in _ALLOWED_ENTRY_POINT_KINDS:
+            if (
+                not isinstance(entry_point.kind, str)
+                or entry_point.kind not in _ALLOWED_ENTRY_POINT_KINDS
+            ):
                 raise CapabilityDefinitionError(
                     f"Invalid entry-point kind for {capability.capability_id}: {entry_point.kind!r}"
                 )
-            cls._require_identifier(entry_point.target, "entry-point target", capability.capability_id)
+            cls._require_identifier(
+                entry_point.target, "entry-point target", capability.capability_id
+            )
             if entry_point.label is not None:
                 cls._require_text(entry_point.label, "entry-point label", capability.capability_id)
             key = (entry_point.kind, entry_point.target)
@@ -189,14 +227,14 @@ class CapabilityRegistry:
             entry_seen.add(key)
 
     @staticmethod
-    def _require_text(value: str, field: str, capability_id: str) -> None:
+    def _require_text(value: object, field: str, capability_id: str) -> None:
         if not isinstance(value, str) or not value.strip():
             raise CapabilityDefinitionError(
                 f"Capability {capability_id} has an empty {field}"
             )
 
     @staticmethod
-    def _require_identifier(value: str, field: str, capability_id: str) -> None:
+    def _require_identifier(value: object, field: str, capability_id: str) -> None:
         if (
             not isinstance(value, str)
             or not value
