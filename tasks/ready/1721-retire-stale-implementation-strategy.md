@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1721
 title: Retire stale implementation strategy document
-status: backlog
+status: ready
 phase: hardening
 depends_on: []
 risk: low
