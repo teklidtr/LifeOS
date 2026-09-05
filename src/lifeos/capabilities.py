@@ -327,7 +327,12 @@ CAPABILITY_REGISTRY = CapabilityRegistry(
             "Run an always-on home node",
             "Serve the authenticated LifeOS MCP runtime with node-local disposable state and bounded remote access.",
             "Setup & Operations",
-            requirements=("Linux and the optional LifeOS MCP dependency group",),
+            requirements=(
+                "A valid LifeOS configuration with vault and runtime directories",
+                "Linux and the optional LifeOS MCP dependency group",
+                "An explicit stable --actor-id",
+                "Exactly one service token source via LIFEOS_SERVICE_TOKEN or LIFEOS_SERVICE_TOKEN_FILE with a token of at least 32 characters",
+            ),
             workflows=("cli.home-node-service",),
             entry_points=(CapabilityEntryPoint("cli", "lifeos.serve", "lifeos serve"),),
         ),
@@ -752,7 +757,7 @@ CAPABILITY_REGISTRY = CapabilityRegistry(
             "Build derived graph views",
             "Build and inspect disposable knowledge, provenance, personal-pattern, and system graph projections from canonical state.",
             "Knowledge",
-            requirements=_CONFIGURED_VAULT,
+            requirements=_CONFIGURED_VAULT + ("features.graphify enabled in lifeos.yml",),
             workflows=("cli.graph-views",),
             data_sources=("graph.derived-views",),
             entry_points=(
@@ -765,7 +770,7 @@ CAPABILITY_REGISTRY = CapabilityRegistry(
             "Build purpose-specific exports",
             "Create inspectable public-wiki, study, trusted-agent, or personal-review bundles without replacing canonical Markdown.",
             "Sharing",
-            requirements=_CONFIGURED_VAULT,
+            requirements=_CONFIGURED_VAULT + ("features.exports enabled in lifeos.yml",),
             workflows=("cli.purpose-specific-exports",),
             data_sources=("exports.derived-bundles",),
             entry_points=(
