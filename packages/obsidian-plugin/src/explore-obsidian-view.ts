@@ -153,7 +153,9 @@ export class LifeOSExploreItemView extends ItemView {
         value: this.controller.state.query,
       },
     });
-    search.addEventListener("input", () => {
+    let composing = false;
+    let ignoreNextInput = false;
+    const applySearch = () => {
       const selectionStart = search.selectionStart ?? search.value.length;
       const selectionEnd = search.selectionEnd ?? selectionStart;
       this.controller.setQuery(search.value);
@@ -162,6 +164,20 @@ export class LifeOSExploreItemView extends ItemView {
       );
       replacement?.focus();
       replacement?.setSelectionRange(selectionStart, selectionEnd);
+    };
+    search.addEventListener("compositionstart", () => { composing = true; });
+    search.addEventListener("compositionend", () => {
+      composing = false;
+      ignoreNextInput = true;
+      applySearch();
+    });
+    search.addEventListener("input", (event) => {
+      if (composing || (event as InputEvent).isComposing) return;
+      if (ignoreNextInput) {
+        ignoreNextInput = false;
+        return;
+      }
+      applySearch();
     });
 
     const categoryLabel = filters.createEl("label", { text: "Category" });
