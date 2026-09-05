@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1720
 title: Remove stale runtime proposals example directory
-status: backlog
+status: completed
 phase: hardening
 depends_on: []
 risk: low
@@ -45,3 +45,13 @@ Reason: Active documentation already states the correct top-level canonical prop
 - DD-031: proposal history is canonical Git-tracked state under top-level `proposals/<proposal-id>/`.
 - DD-034: proposal validation is disposable runtime state under `.lifeos/proposal-validation/`.
 - LIFEOS-1650: the runtime example must not imply canonical proposals live beneath `.lifeos/`.
+
+# Completion evidence
+
+- Removed `.lifeos.example/proposals/.gitkeep`; the stale runtime proposal example directory is no longer tracked.
+- Repository search found no active code, test, CI, or documentation dependency on `.lifeos.example/proposals/` as proposal storage.
+- Existing proposal-path documentation remains aligned with DD-031 and DD-034, so no documentation edit was required.
+- On implementation head `a067c00074`, PR CI `fast-checks` passed, including task workflow validation, documentation gate, Ruff, mypy, compile, pytest collection, and `tests/project`; the `obsidian-plugin` job also passed lint, typecheck, tests, and build.
+- `git diff --check` passed against a local reconstruction of the exact PR diff after direct checkout was unavailable because this execution environment could not resolve `github.com`.
+- Normal `@codex review` reviewed implementation head `a067c00074` and reported no major issues.
+- Security review was skipped per user instruction.
