@@ -1,5 +1,5 @@
 ---
-id: LIFEOS-1711
+id: LIFEOS-1717
 title: Add Obsidian plugin validation to CI
 status: backlog
 phase: 17

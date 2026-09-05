@@ -23,6 +23,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate task workflow
+        run: python scripts/validate_tasks.py
+
       - name: Determine PR change scope
         id: scope
         run: >-
