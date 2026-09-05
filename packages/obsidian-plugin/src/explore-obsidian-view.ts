@@ -153,7 +153,16 @@ export class LifeOSExploreItemView extends ItemView {
         value: this.controller.state.query,
       },
     });
-    search.addEventListener("input", () => this.controller.setQuery(search.value));
+    search.addEventListener("input", () => {
+      const selectionStart = search.selectionStart ?? search.value.length;
+      const selectionEnd = search.selectionEnd ?? selectionStart;
+      this.controller.setQuery(search.value);
+      const replacement = this.contentEl.querySelector<HTMLInputElement>(
+        ".lifeos-explore__filters input[type=\"search\"]",
+      );
+      replacement?.focus();
+      replacement?.setSelectionRange(selectionStart, selectionEnd);
+    });
 
     const categoryLabel = filters.createEl("label", { text: "Category" });
     const category = categoryLabel.createEl("select");
