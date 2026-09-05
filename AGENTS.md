@@ -162,7 +162,7 @@ Codex review is a paid, high-signal checkpoint, not an iterative substitute for 
 
 Before a pull request is considered ready to merge:
 
-1. Complete the implementation, documentation impact, and relevant local validation. Ordinary PR pushes should receive a green `fast-checks` result.
+1. Complete the implementation, documentation impact, and relevant local validation. Ordinary PR pushes should receive a green `fast-checks` result. For non-documentation-only PRs, the separate `obsidian-plugin` checkpoint must also be green; it installs the committed plugin lockfile under supported Node.js 24, then runs plugin lint, typecheck, tests, and build. Documentation-only PRs may satisfy this checkpoint only through its explicit scope-driven skip path.
 2. Before requesting Codex review, stabilize the branch:
    - Resolve all known implementation TODOs, known review findings, and failing deterministic checks first.
    - Run the broadest practical non-Codex validation needed to catch compatibility and regression failures before paying for another review. For changes spanning multiple subsystems, public contracts, or trust boundaries, prefer the full pytest suite and clean-room/Docker validation before another Codex review when practical.
@@ -188,7 +188,7 @@ Before a pull request is considered ready to merge:
 8. For a security-sensitive pull request, request `@codex security review` only after the normal review cycle has stabilized.
 9. Address valid security findings and re-run affected validation. Batch security fixes. Request another security review only if those fixes materially change a security or trust boundary.
 10. After the final material commit and required review cycle are stable, request the GitHub full-validation checkpoint by adding the `full-validation` label to the PR. The checkpoint must produce green `full-test` and `docker-setup-e2e` checks for the current PR head. If material commits land afterward, remove and re-add the label to request a fresh checkpoint without a dummy commit.
-11. Do not merge while `fast-checks`, the latest required full-validation checkpoint, or relevant review findings are unresolved or failing.
+11. Do not merge while `fast-checks`, the applicable `obsidian-plugin` checkpoint, the latest required full-validation checkpoint, or relevant review findings are unresolved or failing.
 
 ### Security-sensitive changes
 

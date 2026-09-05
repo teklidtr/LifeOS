@@ -97,3 +97,62 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: uv run pytest -q tests/project
+
+  obsidian-plugin:
+    name: obsidian-plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Determine PR change scope
+        id: scope
+        run: >-
+          python scripts/check_documentation_impact.py
+          --base-ref "origin/${{ github.base_ref }}"
+          --ci-scope-output "$GITHUB_OUTPUT"
+          --scope-only
+
+      - name: Set up supported Node.js
+        if: steps.scope.outputs.docs_only != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/obsidian-plugin/package-lock.json
+
+      - name: Report Node and npm versions
+        if: steps.scope.outputs.docs_only != 'true'
+        run: |
+          node --version
+          npm --version
+
+      - name: Install Obsidian plugin dependencies from lockfile
+        if: steps.scope.outputs.docs_only != 'true'
+        run: npm --prefix packages/obsidian-plugin ci
+
+      - name: Lint Obsidian plugin
+        if: steps.scope.outputs.docs_only != 'true'
+        run: npm --prefix packages/obsidian-plugin run lint
+
+      - name: Typecheck Obsidian plugin
+        if: steps.scope.outputs.docs_only != 'true'
+        run: npm --prefix packages/obsidian-plugin run typecheck
+
+      - name: Test Obsidian plugin
+        if: steps.scope.outputs.docs_only != 'true'
+        run: npm --prefix packages/obsidian-plugin test
+
+      - name: Build Obsidian plugin
+        if: steps.scope.outputs.docs_only != 'true'
+        run: npm --prefix packages/obsidian-plugin run build
+
+      - name: Report Obsidian plugin validation skipped
+        if: steps.scope.outputs.docs_only == 'true'
+        run: >-
+          echo "::notice title=Obsidian plugin validation skipped::Documentation-only PR;
+          plugin validation is not required for this change scope."
