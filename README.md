@@ -111,6 +111,13 @@ Pull requests targeting `master` use two validation levels:
   such as `prompts/`, `packages/`, workflow files, and either endpoint of a code-to-doc rename
   remains on the full fast-check path. Documentation checks always run with the runner's
   standard Python.
+- The separate `obsidian-plugin` PR job keeps plugin validation visible independently of the
+  Python checks. For every non-documentation-only PR it uses supported Node.js 24 and that
+  Node release's bundled npm, restores npm's dependency cache using
+  `packages/obsidian-plugin/package-lock.json`, installs exactly from that committed lockfile
+  with `npm ci`, then runs plugin lint, typecheck, unit tests, and build. A legitimate
+  documentation-only PR keeps the job visible but emits an explicit scope-driven skip notice
+  instead of pretending plugin validation ran.
 - A full checkpoint is requested by adding the `full-validation` label to the PR. That event
   runs the complete pytest suite across four stateless `full-test-shard-*` runners plus the
   clean-room `docker-setup-e2e` gate. The Docker gate also exercises the authenticated
@@ -163,5 +170,6 @@ numbers are observations for regression context, not a runtime SLA.
 
 `master` currently has no repository-enforced required status checks, so merge readiness is
 also governed by the PR workflow in `AGENTS.md`. If branch protection is enabled later, use
-unique check names and require `fast-checks`, `full-test`, and `docker-setup-e2e`; the latter
-two appear for PRs only after the explicit full-validation checkpoint.
+unique check names and require `fast-checks`, `obsidian-plugin`, `full-test`, and
+`docker-setup-e2e`; the latter two appear for PRs only after the explicit full-validation
+checkpoint.
