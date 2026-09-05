@@ -109,10 +109,20 @@ requirements, concrete backing references, direct entry points, and optional exa
 Entries are returned in stable ID order. These calls read static application metadata only and do
 not touch canonical Markdown or derived vault state.
 
-A future Explore view is therefore a consumer of Python-owned metadata, not another authority.
-TypeScript may render, filter, and navigate the returned records, but it must not maintain a
-parallel hard-coded feature list or treat example prompts as proof that LifeOS implements a
-capability. The registry requires concrete LifeOS backing behavior independently of prompts.
+The `lifeos-explore` Obsidian view is a thin consumer of that Python-owned metadata, not another
+authority. Its controller validates the versioned response shape at runtime, drops entries whose
+visibility is not `explore`, and performs search, category grouping, selection, and detail
+presentation locally over the returned payload. TypeScript does not maintain a parallel hard-coded
+feature list or infer capabilities from commands, prompts, bridge namespaces, or function names.
+Malformed or unsupported semantic payloads fail into an explicit recoverable state instead of being
+partially rendered.
+
+Explore entry points preserve the existing execution boundary. Declared `obsidian_view` targets
+are opened through the plugin's normal view host and declared `obsidian_command` targets are sent
+through Obsidian's existing command dispatcher. CLI, MCP-tool, and workflow entry points are shown
+as references rather than reimplemented. Example prompts are clipboard-only teaching metadata and
+are never auto-submitted. Browsing the catalog, filtering it, opening details, or copying a prompt
+therefore remains read-only with respect to canonical Markdown.
 
 ## State ownership
 
