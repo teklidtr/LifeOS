@@ -110,7 +110,8 @@ def _mcp_output_model(result_type: type[Any]) -> type[BaseModel]:
 
 def _mcp_output_annotation(annotation: Any) -> Any:
     if isinstance(annotation, type) and is_dataclass(annotation):
-        return _mcp_output_model(annotation)
+        dataclass_type = cast(type[Any], annotation)
+        return _mcp_output_model(dataclass_type)
 
     origin = get_origin(annotation)
     arguments = get_args(annotation)
