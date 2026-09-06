@@ -27,7 +27,7 @@ from lifeos.recovery_readiness import (
     recovery_report_to_dict,
 )
 from lifeos.registry import Registry
-from lifeos.status import StatusResult, collect_status, serialize_status_json
+from lifeos.status import StatusResult, collect_status, status_result_to_dict
 
 FindingState = Literal["healthy", "warning", "blocked"]
 
@@ -370,7 +370,7 @@ def serialize_doctor_json(result: DoctorResult) -> str:
         },
         "findings": [asdict(finding) for finding in result.findings],
         "recovery": recovery_report_to_dict(result.recovery),
-        "vault": json.loads(serialize_status_json(result.vault_status)),
+        "vault": status_result_to_dict(result.vault_status),
         "coherence": {
             "topology": result.topology.to_dict(),
             "identity_note_count": result.identity_note_count,
