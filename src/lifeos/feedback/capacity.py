@@ -3,13 +3,29 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Iterable
+from typing import Iterable, Literal
 
-from lifeos.feedback.models import CapacityDimension, CapacityFitSummary, FeedbackObservation
+from lifeos.feedback.models import (
+    CapacityDimension,
+    CapacityFitSummary,
+    Confidence,
+    FeedbackObservation,
+)
 
 CAPACITY_POLICY_VERSION = 1
 _LEVELS = {"low": 1, "medium": 2, "high": 3}
-_DIMENSIONS = ("energy", "motivation", "mode", "duration_band", "time_window", "blocker")
+_CapacityDimensionName = Literal[
+    "energy", "motivation", "mode", "duration_band", "time_window", "blocker"
+]
+_CapacityDirection = Literal["better_fit", "worse_fit", "neutral"]
+_DIMENSIONS: tuple[_CapacityDimensionName, ...] = (
+    "energy",
+    "motivation",
+    "mode",
+    "duration_band",
+    "time_window",
+    "blocker",
+)
 
 
 def _score(item: FeedbackObservation) -> float | None:
@@ -44,7 +60,7 @@ def _time_window(item: FeedbackObservation) -> str | None:
     return "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
 
 
-def _confidence(count: int, effect: float, *, minimum: int) -> str:
+def _confidence(count: int, effect: float, *, minimum: int) -> Confidence:
     if count < minimum:
         return "insufficient"
     if count >= minimum * 2 and abs(effect) >= 0.15:
@@ -56,7 +72,7 @@ def _confidence(count: int, effect: float, *, minimum: int) -> str:
 
 def _dimension(
     *,
-    name: str,
+    name: _CapacityDimensionName,
     observations: tuple[FeedbackObservation, ...],
     baseline: float,
     current_value: object,
@@ -78,7 +94,7 @@ def _dimension(
             "insufficient",
             (),
             f"{name} feedback is disabled.",
-        )  # type: ignore[arg-type]
+        )
     if current_value is None or current_value == "":
         return CapacityDimension(
             name,
@@ -92,7 +108,7 @@ def _dimension(
             "insufficient",
             (),
             f"No current {name} value was supplied.",
-        )  # type: ignore[arg-type]
+        )
     usable: list[tuple[FeedbackObservation, float]] = []
     missing = 0
     for item in observations:
@@ -131,7 +147,7 @@ def _dimension(
             "insufficient",
             tuple(sorted(item.event_id for item, _ in usable)),
             f"Only {len(usable)} comparable {name} observations are available; no adjustment is applied.",
-        )  # type: ignore[arg-type]
+        )
     rate = sum(score for _, score in usable) / len(usable)
     raw_effect = rate - baseline
     contradictory = 0.35 < rate < 0.65 and len(usable) >= minimum * 2
@@ -148,9 +164,9 @@ def _dimension(
             "low",
             tuple(sorted(item.event_id for item, _ in usable)),
             f"Comparable {name} outcomes are mixed; this association is not used.",
-        )  # type: ignore[arg-type]
+        )
     adjustment = max(-0.15, min(0.15, raw_effect * 0.3))
-    direction = (
+    direction: _CapacityDirection = (
         "better_fit" if adjustment >= 0.03 else "worse_fit" if adjustment <= -0.03 else "neutral"
     )
     confidence = _confidence(len(usable), raw_effect, minimum=minimum)
@@ -166,7 +182,7 @@ def _dimension(
         confidence,
         tuple(sorted(item.event_id for item, _ in usable)),
         f"Recorded {name} is associated with a {direction.replace('_', ' ')} in this history; this is tentative and noncausal.",
-    )  # type: ignore[arg-type]
+    )
 
 
 def summarize_capacity_fit(
@@ -217,7 +233,7 @@ def summarize_capacity_fit(
     )
     used = [item for item in dimensions if item.status == "used"]
     total = max(-0.25, min(0.25, sum(item.adjustment for item in used)))
-    confidence = "insufficient"
+    confidence: Confidence = "insufficient"
     if used:
         ranks = {"insufficient": 0, "low": 1, "moderate": 2, "high": 3}
         confidence = min((item.confidence for item in used), key=lambda value: ranks[value])
@@ -225,7 +241,7 @@ def summarize_capacity_fit(
         CAPACITY_POLICY_VERSION,
         task_id,
         round(total, 4),
-        confidence,  # type: ignore[arg-type]
+        confidence,
         dimensions,
         tuple(sorted(disabled)),
         "These are tentative associations from explicit outcomes. They do not establish causation, health effects, discipline, or personal worth.",
