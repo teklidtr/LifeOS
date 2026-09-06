@@ -1,0 +1,116 @@
+name: LIFEOS-1731 safe stat-failure fix
+
+on:
+  push:
+    branches:
+      - lifeos-1731-migrate-proposal-publishers
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'LIFEOS-1731 Prepare safe stat-failure fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: lifeos-1731-migrate-proposal-publishers
+
+      - name: Apply safe ownership-preserving fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, *, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              actual = text.count(old)
+              if actual != count:
+                  raise RuntimeError(f"{path}: expected {count} matches, found {actual}")
+              file.write_text(text.replace(old, new), encoding="utf-8")
+
+          publication = "src/lifeos/proposals/publication.py"
+          old = '''        try:\n            created_info = os.stat(\n                directory_name,\n                dir_fd=proposals_fd,\n                follow_symlinks=False,\n            )\n        except OSError as exc:\n            raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc\n        created_identity = (created_info.st_dev, created_info.st_ino)\n        try:\n            proposal_fd = open_directory_secure(Path(directory_name), dir_fd=proposals_fd)\n        except SecureIOError as exc:\n            _remove_owned_empty_directory(\n                parent_fd=proposals_fd,\n                name=directory_name,\n                identity=created_identity,\n            )\n            raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc\n        if _fd_identity(proposal_fd) != created_identity or not _directory_entry_matches(\n            proposals_fd, directory_name, proposal_fd\n        ):\n            os.close(proposal_fd)\n            raise ProposalPublicationError(\n                "proposal_publish_failed",\n                "Proposal staging directory changed during publication.",\n            )\n        return directory_name, proposal_fd, created_identity'''
+          new = '''        created_identity: FileIdentity | None = None\n        try:\n            created_info = os.stat(\n                directory_name,\n                dir_fd=proposals_fd,\n                follow_symlinks=False,\n            )\n        except OSError:\n            # A transient path-stat failure must not strand a directory that can still\n            # be rebound safely through a no-follow descriptor. Do not delete by name\n            # when the pre-open identity could not be established.\n            pass\n        else:\n            created_identity = (created_info.st_dev, created_info.st_ino)\n        try:\n            proposal_fd = open_directory_secure(Path(directory_name), dir_fd=proposals_fd)\n        except SecureIOError as exc:\n            if created_identity is not None:\n                _remove_owned_empty_directory(\n                    parent_fd=proposals_fd,\n                    name=directory_name,\n                    identity=created_identity,\n                )\n            raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc\n        opened_identity = _fd_identity(proposal_fd)\n        if created_identity is None:\n            created_identity = opened_identity\n        if opened_identity != created_identity or not _directory_entry_matches(\n            proposals_fd, directory_name, proposal_fd\n        ):\n            os.close(proposal_fd)\n            raise ProposalPublicationError(\n                "proposal_publish_failed",\n                "Proposal staging directory changed during publication.",\n            )\n        return directory_name, proposal_fd, created_identity'''
+          replace(publication, old, new)
+
+          test = Path("tests/proposals/test_publication.py")
+          text = test.read_text(encoding="utf-8")
+          if "import errno\n" not in text:
+              text = text.replace("import os\n", "import errno\nimport os\n", 1)
+          marker = '''\n\ndef test_partial_write_cleans_owned_staging_directory(\n'''
+          insertion = '''\n\ndef test_transient_staging_identity_lookup_failure_rebinds_through_secure_fd(\n    tmp_path: Path,\n    monkeypatch: pytest.MonkeyPatch,\n) -> None:\n    vault = _vault(tmp_path)\n    original_stat = publication_module.os.stat\n    injected = False\n\n    def fail_first_staging_stat(path: object, *args: object, **kwargs: object):\n        nonlocal injected\n        if (\n            not injected\n            and isinstance(path, str)\n            and path.startswith(".lifeos-proposal-stage-")\n        ):\n            injected = True\n            raise OSError(errno.EIO, "injected staging identity lookup failure")\n        return original_stat(path, *args, **kwargs)\n\n    monkeypatch.setattr(publication_module.os, "stat", fail_first_staging_stat)\n\n    publish_proposal_documents(\n        vault_root=vault,\n        proposal_id=PROPOSAL_ID,\n        documents=DOCUMENTS,\n    )\n\n    assert injected\n    proposal_dir = vault / "proposals" / PROPOSAL_ID\n    assert (proposal_dir / "proposal.md").read_bytes() == DOCUMENTS.proposal_markdown\n    assert (proposal_dir / "patches.json").read_bytes() == DOCUMENTS.patches_json\n    assert (proposal_dir / "review.json").read_bytes() == DOCUMENTS.review_json\n    assert sorted(path.name for path in (vault / "proposals").iterdir()) == [PROPOSAL_ID]\n'''
+          if marker not in text:
+              raise RuntimeError("publication test insertion marker missing")
+          text = text.replace(marker, insertion + marker, 1)
+          test.write_text(text, encoding="utf-8")
+
+          Path(".github/workflows/lifeos-1731-review2-safe-fix.yml").unlink()
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Format touched Python
+        run: uv run ruff format src/lifeos/proposals/publication.py tests/proposals/test_publication.py
+
+      - name: Validate cleanup invariant
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -euo pipefail
+          uv run pytest -q tests/proposals/test_publication.py tests/proposals/test_remaining_publisher_adoption.py tests/ingestion/test_proposal_root_hardening.py
+          uv run pytest -q tests/copilot tests/planning_feedback tests/reviews tests/ownership tests/ingestion tests/proposals
+          uv run pytest -q tests/captures tests/conversations tests/experiments tests/patterns tests/facade tests/mcp tests/integration
+          uv run pytest -q
+          uv run ruff check .
+          uv run mypy src
+          python scripts/validate_tasks.py
+          git diff --check
+          uv run ruff format --check src/lifeos/proposals/publication.py tests/proposals/test_publication.py
+          set +e
+          uv run ruff format --check . > /tmp/lifeos-format.log 2>&1
+          FORMAT_STATUS=$?
+          set -e
+          cat /tmp/lifeos-format.log
+          if [ "$FORMAT_STATUS" -ne 0 ]; then
+            COUNT=$(grep -Eo '[0-9]+ files would be reformatted' /tmp/lifeos-format.log | head -1 | grep -Eo '^[0-9]+')
+            test -n "$COUNT"
+            if [ "$COUNT" -gt 257 ]; then
+              echo "Repository formatter debt regressed above LIFEOS-1734 branch baseline: $COUNT"
+              exit 1
+            fi
+          fi
+
+      - name: Record second review evidence
+        env:
+          RUN_ID: ${{ github.run_id }}
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+
+          task = Path("tasks/completed/1731-migrate-remaining-proposal-document-publishers.md")
+          text = task.read_text(encoding="utf-8")
+          text += f'''\n\n### Second Codex review cleanup audit\n\nCodex re-review of head `ff331e075b3454de2358b11717ce5f1217203d4c` found one additional P2 variant of the failed-attempt cleanup invariant: the new pre-open staging identity `stat` could fail immediately after `mkdir`. A broader early-exit audit showed that blindly removing the random staging name in this branch would weaken the ownership invariant because a concurrent replacement could be deleted. The final fix therefore treats a path-stat failure as recoverable when the staging directory can still be opened through the secure no-follow primitive: it binds ownership from the opened fd, re-verifies the directory entry, and continues publication. If the pre-open identity is unavailable and secure open also fails, it deliberately does not delete by name because ownership cannot be proven. Existing open-failure cleanup remains identity-gated when the pre-open identity was captured. A regression test injects a one-shot staging identity lookup failure and verifies successful publication with no orphan staging directory.\n\nPost-fix validation run `{os.environ["RUN_ID"]}` reran focused publisher/root-hardening coverage, both task validation groups, the full pytest suite, Ruff, mypy, task validation, diff checks, and touched-file formatting.\n'''
+          task.write_text(text, encoding="utf-8")
+
+      - name: Validate task evidence
+        run: |
+          python scripts/validate_tasks.py
+          git diff --check
+
+      - name: Commit validated fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "LIFEOS-1731 Recover transient staging identity lookup [lifeos-1731-review2-fix]"
+          git push origin HEAD:lifeos-1731-migrate-proposal-publishers
