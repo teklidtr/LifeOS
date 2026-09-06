@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1724
 title: Consolidate equivalent MCP proposal and research output representations
-status: ready
+status: in-progress
 phase: hardening
 depends_on:
   - LIFEOS-1733
