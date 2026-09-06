@@ -79,7 +79,7 @@ No retained family required a new field-by-field translation layer merely to cla
 
 ## Deletion accounting
 
-Against task base `bfe7fc77567aa5ccdea9cb36dc463d5081bea6d2`, the current production `src/` diff is **109 additions and 177 deletions, net -68 lines** before final review fixes. The added lines are primarily the legacy-name option and explicit authoritative type/serialization wiring; the deleted lines remove eight mirror declarations and repeated result projections. Conceptually, the proposal/lifecycle/research-capture field catalogs and their handwritten mappings disappear while the existing LIFEOS-1733 boundary remains the sole authoritative-output mechanism.
+Against task base `bfe7fc77567aa5ccdea9cb36dc463d5081bea6d2`, the current production `src/` diff is **106 additions and 176 deletions, net -70 lines** before final review fixes. The added lines are primarily the legacy-name option and explicit authoritative type/serialization wiring; the deleted lines remove eight mirror declarations and repeated result projections. Conceptually, the proposal/lifecycle/research-capture field catalogs and their handwritten mappings disappear while the existing LIFEOS-1733 boundary remains the sole authoritative-output mechanism.
 
 # Validation
 
