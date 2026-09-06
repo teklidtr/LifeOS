@@ -1,4 +1,4 @@
-"""Structured MCP output models matching facade result contracts."""
+"""Structured MCP output models matching transport-specific result contracts."""
 
 from typing import Literal
 
@@ -82,62 +82,12 @@ class ResearchQueryContextMCPResult(TypedDict):
     decision_authority: Literal["external-agent"]
 
 
-class ResearchCaptureMCPResult(TypedDict):
-    artifact_id: str
-    source_path: str
-    snapshot_hash: str
-    acquisition_id: str
-    created: bool
-    acquisition_added: bool
-
-
 class CreateWikiProposalMCPResult(TypedDict):
+    """Research synthesis transport contract; facade status is intentionally broader."""
+
     proposal_id: str
     proposal_path: str
     target_path: str
-    status: Literal["draft"]
-
-
-class UpdateWikiSectionProposalMCPResult(TypedDict):
-    proposal_id: str
-    proposal_path: str
-    target_path: str
-    heading: str
-    status: Literal["draft"]
-
-
-class CompoundWikiProposalMCPResult(TypedDict):
-    proposal_id: str
-    proposal_path: str
-    create_target_path: str
-    update_target_path: str
-    heading: str
-    status: Literal["draft"]
-
-
-class SubmitProposalMCPResult(TypedDict):
-    proposal_id: str
-    status: Literal["pending"]
-    review_digest: str
-
-
-class ApproveProposalMCPResult(TypedDict):
-    proposal_id: str
-    status: Literal["approved"]
-    review_digest: str
-
-
-class ApplyProposalMCPResult(TypedDict):
-    proposal_id: str
-    status: Literal["applied"]
-    changed_paths: list[str]
-
-
-class EvolveWikiProposalMCPResult(TypedDict):
-    proposal_id: str
-    proposal_path: str
-    target_paths: list[str]
-    operation_count: int
     status: Literal["draft"]
 
 
@@ -178,14 +128,6 @@ class VaultContextMCPResult(TypedDict):
     evidence_gaps: list[str]
     omissions: list[str]
     diagnostics: list[VaultContextDiagnosticMCPResult]
-
-
-class StudyLearningProposalMCPResult(TypedDict):
-    proposal_id: str
-    proposal_path: str
-    target_paths: list[str]
-    operation_count: int
-    status: Literal["draft"]
 
 
 class RuntimeActivityRecordMCPResult(TypedDict):
