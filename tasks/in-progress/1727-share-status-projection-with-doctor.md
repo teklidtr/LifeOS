@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1727
 title: Share the status projection with doctor without an internal JSON round-trip
-status: ready
+status: in-progress
 phase: hardening
 depends_on: []
 risk: low
