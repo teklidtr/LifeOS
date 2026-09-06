@@ -689,9 +689,7 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path)
 
 @patch("lifeos.mcp.server.submit_proposal_tool")
 def test_submit_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
-    mock_facade.return_value = MagicMock(
-        proposal_id="prop1", status="pending", review_digest="dig"
-    )
+    mock_facade.return_value = MagicMock(proposal_id="prop1", status="pending", review_digest="dig")
 
     registry = MagicMock()
     authorizer = MagicMock()
@@ -715,7 +713,9 @@ def test_submit_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
 @patch("lifeos.mcp.server.approve_proposal_tool")
 def test_approve_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
-        proposal_id="prop1", status="approved", review_digest="dig"
+        proposal_id="prop1",
+        status="approved",
+        review_digest="dig",
     )
 
     registry = MagicMock()
@@ -740,7 +740,9 @@ def test_approve_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
 @patch("lifeos.mcp.server.apply_proposal_tool")
 def test_apply_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
-        proposal_id="prop1", status="applied", changed_paths=("a.md",)
+        proposal_id="prop1",
+        status="applied",
+        changed_paths=("a.md",),
     )
 
     registry = MagicMock()
