@@ -1,10 +1,10 @@
 ---
-id: LIFEOS-1722
+id: LIFEOS-1732
 title: Make ingestion composition and provenance explicit
 status: backlog
 phase: hardening
 depends_on:
-  - LIFEOS-1721
+  - LIFEOS-1731
 risk: high
 ---
 
@@ -21,7 +21,7 @@ At planning HEAD `2996540ee16f574503b4226baa417bf55fea380c`, `src/lifeos/ingesti
 - Trace build/persist APIs for wiki creation, section updates, compound/compounding proposals, and study learning through facade, multi-source, research, and MCP callers.
 - Put the effective builder, provenance, identity-binding, and persistence behavior in ordinary definitions and imports. A small explicit public re-export facade is acceptable; dynamic module substitution and mutation of imported implementations are not.
 - Pass source/provenance inputs explicitly through the internal operation-building path; remove `_current_source`, `_with_source`, saved-original wrappers, and import-time core replacement.
-- Retain the shared publisher from LIFEOS-1721 without redesigning it. Remove obsolete bodies and aliases only after a repository-wide compatibility search.
+- Retain the shared publisher from LIFEOS-1731 without redesigning it. Remove obsolete bodies and aliases only after a repository-wide compatibility search.
 
 # Out of scope
 
@@ -70,7 +70,7 @@ Include cumulative provenance, proposal-root hardening, ingestion source/target 
 
 # Implementation size and sequencing
 
-Medium. Depends on LIFEOS-1721 because both tasks touch ingestion persistence; this task owns builder/import/provenance composition, not publication mechanics. Independent of MCP representation consolidation because public facade APIs remain stable.
+Medium. Depends on LIFEOS-1731 because both tasks touch ingestion persistence; this task owns builder/import/provenance composition, not publication mechanics. Independent of MCP representation consolidation because public facade APIs remain stable.
 
 # Recommended Model
 

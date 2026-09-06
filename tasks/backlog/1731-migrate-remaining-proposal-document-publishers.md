@@ -1,10 +1,10 @@
 ---
-id: LIFEOS-1721
+id: LIFEOS-1731
 title: Migrate remaining proposal-document producers to the shared publisher
 status: backlog
 phase: hardening
 depends_on:
-  - LIFEOS-1720
+  - LIFEOS-1730
 risk: high
 ---
 
@@ -14,18 +14,18 @@ Complete adoption of the narrow publisher so equivalent proposal-file publicatio
 
 # Problem evidence
 
-At planning HEAD `2996540ee16f574503b4226baa417bf55fea380c`, repeated three-document writes occur in `copilot.proposals._publish`, `copilot.replanning._publish`, `feedback.proposals.create_feedback_proposal`, `reviews.decisions.create_review_proposal`, `ownership.reconciliation._publish_proposal`, and ingestion's `_persist_proposal_documents`/`_secure_persist_proposal_documents`. The ingestion public module replaces the core persistence function at import time. Revalidate these consumers after LIFEOS-1720.
+At planning HEAD `2996540ee16f574503b4226baa417bf55fea380c`, repeated three-document writes occur in `copilot.proposals._publish`, `copilot.replanning._publish`, `feedback.proposals.create_feedback_proposal`, `reviews.decisions.create_review_proposal`, `ownership.reconciliation._publish_proposal`, and ingestion's `_persist_proposal_documents`/`_secure_persist_proposal_documents`. The ingestion public module replaces the core persistence function at import time. Revalidate these consumers after LIFEOS-1730.
 
 # Scope
 
-- Migrate the six named producer families in `src/lifeos/copilot/`, `feedback/proposals.py`, `reviews/decisions.py`, `ownership/reconciliation.py`, and `ingestion/{proposals,_proposals_core}.py` to the publisher delivered by LIFEOS-1720.
+- Migrate the six named producer families in `src/lifeos/copilot/`, `feedback/proposals.py`, `reviews/decisions.py`, `ownership/reconciliation.py`, and `ingestion/{proposals,_proposals_core}.py` to the publisher delivered by LIFEOS-1730.
 - Preserve thin feature-specific duplicate/error adapters, return values, and the point at which sources, targets, ownership, and review bytes are verified.
 - Remove the old physical write/cleanup implementations, including the superseded ingestion core publication body. Route the currently active ingestion entry point through the publisher without redesigning its builder/import composition in this task.
 - Audit all production writes of the three proposal documents for remaining equivalent creation paths. Route equivalent paths through the primitive; explicitly classify lifecycle edits or other distinct operations rather than incorrectly treating them as new-proposal publication.
 
 # Out of scope
 
-- Ingestion module substitution and ambient provenance removal (LIFEOS-1722), proposal application, feedback/review interpretation, or planning semantics.
+- Ingestion module substitution and ambient provenance removal (LIFEOS-1732), proposal application, feedback/review interpretation, or planning semantics.
 - Broadening the publisher into an extensible persistence framework or changing the already migrated families except for a necessary shared-boundary compatibility fix.
 
 # Required invariants
@@ -71,7 +71,7 @@ Exercise failed publication and duplicate handling in each migrated family, not 
 
 # Implementation size and sequencing
 
-Medium: six bounded consumer migrations onto an established primitive. Depends on LIFEOS-1720. Complete before LIFEOS-1722 so ingestion composition work starts with one publication implementation.
+Medium: six bounded consumer migrations onto an established primitive. Depends on LIFEOS-1730. Complete before LIFEOS-1732 so ingestion composition work starts with one publication implementation.
 
 # Recommended Model
 

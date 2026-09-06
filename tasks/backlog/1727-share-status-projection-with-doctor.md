@@ -63,7 +63,7 @@ Run checks for any directly affected tests as well. Follow root `AGENTS.md` if a
 
 # Implementation size and sequencing
 
-Extra small. Independent of LIFEOS-1719 because it changes projection composition rather than recovery behavior; coordinate any concurrent edits to `doctor.py`. Keep it standalone because task rules favor bounded scope and do not require bundling unrelated cleanup.
+Extra small. Independent of LIFEOS-1729 because it changes projection composition rather than recovery behavior; coordinate any concurrent edits to `doctor.py`. Keep it standalone because task rules favor bounded scope and do not require bundling unrelated cleanup.
 
 # Recommended Model
 

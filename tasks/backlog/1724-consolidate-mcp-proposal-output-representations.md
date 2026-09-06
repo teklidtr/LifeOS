@@ -4,7 +4,7 @@ title: Consolidate equivalent MCP proposal and research output representations
 status: backlog
 phase: hardening
 depends_on:
-  - LIFEOS-1723
+  - LIFEOS-1733
 risk: high
 ---
 
@@ -16,18 +16,18 @@ Extend the verified MCP output boundary to equivalent proposal/lifecycle and res
 
 At planning HEAD `2996540ee16f574503b4226baa417bf55fea380c`, `mcp/models.py` repeats result structures owned by `facade/proposal_tools.py`, `facade/consequential_tools.py`, and `facade/research_tools.py`. The concrete mirrors are `CreateWikiProposalMCPResult`, `UpdateWikiSectionProposalMCPResult`, `CompoundWikiProposalMCPResult`, `EvolveWikiProposalMCPResult`, `StudyLearningProposalMCPResult`, `SubmitProposalMCPResult`, `ApproveProposalMCPResult`, `ApplyProposalMCPResult`, and `ResearchCaptureMCPResult`. Their consumers include registered tools in `mcp/server.py`, `mcp/multi_source_tools.py`, and `mcp/research_tools.py`.
 
-The multi-source evolve tool shares an output mirror with a distinct domain result type. Shape similarity alone does not justify merging domain concepts. Revalidate these paths and the output boundary delivered by LIFEOS-1723.
+The multi-source evolve tool shares an output mirror with a distinct domain result type. Shape similarity alone does not justify merging domain concepts. Revalidate these paths and the output boundary delivered by LIFEOS-1733.
 
 # Scope
 
 - Migrate compatible create/update/compound/evolve/study, submit/approve/apply, multi-source evolve, and research-capture outputs onto the established authoritative-type output boundary.
 - Delete redundant named mirrors and handwritten projections where the full contract matches. Keep authoritative domain result types and feature-specific behavior distinct.
 - Inventory remaining MCP output DTOs/projections and record the concrete contract each retained representation supplies.
-- Recheck current locked SDK behavior with Context7/upstream source where adoption reveals materially different serialization or validation semantics; reuse LIFEOS-1723's boundary rather than designing another mechanism.
+- Recheck current locked SDK behavior with Context7/upstream source where adoption reveals materially different serialization or validation semantics; reuse LIFEOS-1733's boundary rather than designing another mechanism.
 
 # Out of scope
 
-- Input-model consolidation already owned by LIFEOS-1723, facade/domain rewrites, changes to proposal publication/application, or new dependencies.
+- Input-model consolidation already owned by LIFEOS-1733, facade/domain rewrites, changes to proposal publication/application, or new dependencies.
 - Removing research-query aggregation, registry disclosure/optional-field projections, note-identity renaming, context ranking/provenance conversion, or personal-pattern `to_dict()` transport semantics merely because they return dictionaries.
 - Weakening literal draft/lifecycle status constraints where an existing authoritative result is broader than the MCP contract, including any research-create-wiki mismatch.
 
@@ -40,7 +40,7 @@ The multi-source evolve tool shares an output mirror with a distinct domain resu
 
 # Acceptance criteria
 
-- [ ] The named compatible result families use the LIFEOS-1723 boundary and their redundant mirrors/projections are removed.
+- [ ] The named compatible result families use the LIFEOS-1733 boundary and their redundant mirrors/projections are removed.
 - [ ] Each retained representation has an explicit contract reason, with requiredness, privacy selection, status constraints, or direct-call behavior identified; no new parallel schema catalog is added.
 - [ ] The complete MCP suite covers unchanged generated schemas, success payloads, invalid outputs, direct calls, errors, annotations, and transport-specific tool availability.
 - [ ] Existing proposal lifecycle, research capture, multi-source, privacy, and integration tests retain their behavioral assertions.
@@ -71,7 +71,7 @@ Execute real STDIO/lifecycle tests with the optional SDK installed, plus home-no
 
 # Implementation size and sequencing
 
-Medium. Depends on LIFEOS-1723 for the single output boundary. No dependency on publication or ingestion internals because their public facade contracts are preserved; avoid editing those internals in this task.
+Medium. Depends on LIFEOS-1733 for the single output boundary. No dependency on publication or ingestion internals because their public facade contracts are preserved; avoid editing those internals in this task.
 
 # Recommended Model
 

@@ -1,5 +1,5 @@
 ---
-id: LIFEOS-1720
+id: LIFEOS-1730
 title: Centralize proposal-document publication with initial feature consumers
 status: backlog
 phase: hardening
@@ -21,12 +21,12 @@ At planning HEAD `2996540ee16f574503b4226baa417bf55fea380c`, Serena inspection f
 - Route `src/lifeos/captures/proposals.py`, `conversations/proposals.py`, `experiments/proposals.py`, and `patterns/proposals.py` through it in the same task.
 - Keep request validation, preview construction, source/target revalidation, identity binding, serialization, review-snapshot production, and feature result/error mapping with their current owners.
 - Make the boundary explicit about proposal-root preparation, safe proposal IDs, prepublication verification timing, document bytes, duplicate publication, and cleanup ownership. Preserve differing root-creation and error contracts with small adapters where necessary.
-- Inspect the remaining producers covered by LIFEOS-1721 before fixing the API so they can adopt it without a plugin system or a growing set of feature flags.
+- Inspect the remaining producers covered by LIFEOS-1731 before fixing the API so they can adopt it without a plugin system or a growing set of feature flags.
 
 # Out of scope
 
 - Proposal application, review/lifecycle rules, generated ownership policy, registry transactions, or a generic transaction/persistence framework.
-- Migration of the other publication families, which belongs to LIFEOS-1721; ingestion composition belongs to LIFEOS-1722.
+- Migration of the other publication families, which belongs to LIFEOS-1731; ingestion composition belongs to LIFEOS-1732.
 
 # Required invariants
 
@@ -72,7 +72,7 @@ Retain the real feature lifecycle tests as well as publisher failure tests. Foll
 
 # Implementation size and sequencing
 
-Medium: one shared primitive plus four consumers. LIFEOS-1721 depends on this task and completes adoption; this task must already produce a useful, independently reviewable consolidation.
+Medium: one shared primitive plus four consumers. LIFEOS-1731 depends on this task and completes adoption; this task must already produce a useful, independently reviewable consolidation.
 
 # Recommended Model
 
