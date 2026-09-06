@@ -4,7 +4,7 @@ import logging
 import posixpath
 from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import TypeVar
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.tools import Tool
@@ -494,7 +494,7 @@ def create_mcp_server(
             activity.append(tool="wiki_search", source_paths=[hit.path for hit in result.hits])
             return serialize_authoritative_output(result, output_type=WikiSearchResult)
 
-        return cast(dict[str, object], _invoke_mcp_tool(op))
+        return _invoke_mcp_tool(op)
 
     def ingestion_evolve_wiki_proposal_tool(
         source_path: str,
