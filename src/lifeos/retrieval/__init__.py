@@ -1,8 +1,6 @@
 """Semantic retrieval and evidence-grounded knowledge conversation primitives."""
 
-from . import search as _search
 from .chunking import chunk_markdown_file, reidentify_note
-from .coherence_search import HybridRetriever, StableRetrievalEvidence
 from .contracts import (
     AnswerEvidence,
     AnswerProvider,
@@ -36,7 +34,7 @@ from .providers import (
     FailingAnswerProvider,
     UnavailableEmbeddingProvider,
 )
-from .search import RankingComponents, RetrievalEvidence, RetrievalResponse
+from .search import HybridRetriever, RankingComponents, RetrievalEvidence, RetrievalResponse
 from .service import (
     IndexHealth,
     IndexProgress,
@@ -45,8 +43,8 @@ from .service import (
     RetrievalIndexService,
 )
 
-# Keep direct search imports aligned with the search coherence wrapper.
-setattr(_search, "HybridRetriever", HybridRetriever)
+# Preserve the legacy evidence import without a second representation.
+StableRetrievalEvidence = RetrievalEvidence
 
 __all__ = [
     "AnswerEvidence",

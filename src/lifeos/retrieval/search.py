@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
+from lifeos.coherence import CoherenceError
+from lifeos.coherence_scoped import runtime_exclusion_prefix
 from lifeos.context.search import lexical_terms, token_sequence
 from lifeos.retrieval.contracts import (
     AnswerEvidence,
@@ -28,6 +31,7 @@ from lifeos.retrieval.index import RetrievalIndex
 from lifeos.retrieval.models import IndexedChunk, IndexedDocument
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.retrieval.service import IndexHealth, RetrievalIndexService
+from lifeos.vault import VaultAccessError, read_vault_markdown
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +84,7 @@ class RetrievalEvidence:
     matched_terms: tuple[str, ...]
     ranking: RankingComponents
     duplicate_paths: tuple[str, ...] = ()
+    stable_id: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -126,6 +131,17 @@ class RetrievalResponse:
         }
 
 
+@dataclass(slots=True)
+class _QueryAuthorization:
+    """Per-search proofs and read caches; never shared with another query."""
+
+    stale_paths: frozenset[str]
+    preauthorized_paths: frozenset[str]
+    row_authorization: dict[str, bool] = field(default_factory=dict)
+    scoped_chunks: dict[str, tuple[IndexedChunk, IndexedDocument]] = field(default_factory=dict)
+    verified_ids: dict[str, str | None] = field(default_factory=dict)
+
+
 class HybridRetriever:
     def __init__(
         self,
@@ -140,6 +156,10 @@ class HybridRetriever:
         self.index_service = RetrievalIndexService(
             vault_root=vault_root, runtime_dir=runtime_dir, policy=self.policy
         )
+        try:
+            self._runtime_prefix = runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
+        except CoherenceError as exc:
+            raise RetrievalError("invalid_runtime_scope", str(exc)) from exc
 
     def _index_health(
         self,
@@ -153,10 +173,60 @@ class HybridRetriever:
         self,
         candidates: list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]],
         request: RetrievalRequest,
+        *,
+        authorization: _QueryAuthorization,
     ) -> list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]]:
-        """Apply final local authorization before candidate text can reach a provider."""
-        del request
-        return candidates
+        """Recheck candidates and link support after scoring, before provider exposure."""
+        scoped = authorization.scoped_chunks
+        scoped_items = tuple(scoped.values())
+        scoped_chunks = tuple(chunk for chunk, _document in scoped_items)
+        selected = set(request.scope.paths) | set(request.scope.pinned_paths)
+        provisional_links = _link_scores(scoped_chunks, selected)
+        support_paths = selected | set(provisional_links)
+        candidate_paths = {document.path for _chunk, document, _components, _matched in candidates}
+        paths_to_authorize = candidate_paths | support_paths
+        documents_by_path = {document.path: document for _chunk, document in scoped_items}
+
+        authorized_paths: set[str] = set()
+        for path in sorted(paths_to_authorize):
+            document = documents_by_path.get(path)
+            if document is None:
+                continue
+            try:
+                source = read_vault_markdown(self.vault_root, path)
+            except VaultAccessError:
+                continue
+            current_hash = "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
+            if current_hash != document.content_hash:
+                continue
+            authorized_paths.add(path)
+            authorization.verified_ids[path] = _stable_id(document.document_id)
+
+        authorized_support_chunks = tuple(
+            chunk for chunk, document in scoped_items if document.path in authorized_paths
+        )
+        current_links = _link_scores(authorized_support_chunks, selected)
+        authorized: list[
+            tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]
+        ] = []
+        for chunk, document, components, matched in candidates:
+            if document.path not in authorized_paths:
+                continue
+            updated = replace(components, link=current_links.get(chunk.path, 0.0))
+            if updated.total <= 0:
+                continue
+            authorized.append((chunk, document, updated, matched))
+
+        authorized.sort(
+            key=lambda item: (
+                -item[2].total,
+                item[0].path,
+                item[0].heading or "",
+                item[0].start_line,
+                item[0].chunk_id,
+            )
+        )
+        return authorized
 
     def search(
         self,
@@ -187,6 +257,16 @@ class HybridRetriever:
                 health.diagnostics or ("Build or rebuild the retrieval index.",),
                 disclosure,
             )
+        stale_paths = frozenset((*health.orphaned_paths, *health.stale_paths))
+        authorization = _QueryAuthorization(
+            stale_paths=stale_paths,
+            preauthorized_paths=self._preauthorization_paths(
+                request=request,
+                stale_paths=stale_paths,
+                embedding_provider=embedding_provider,
+                graph_hints=graph_hints,
+            ),
+        )
         index = RetrievalIndex(self.index_service.active_path, create=False)
         diagnostics: list[str] = list(health.diagnostics)
         try:
@@ -194,7 +274,7 @@ class HybridRetriever:
             chunks = [
                 item
                 for item in index.chunks()
-                if self._in_scope(item, documents[item.path], request)
+                if self._in_scope(item, documents[item.path], request, authorization=authorization)
             ]
             if not chunks:
                 disclosure = build_provider_disclosure(
@@ -284,7 +364,12 @@ class HybridRetriever:
                     item[0].chunk_id,
                 )
             )
-            candidates = self._authorize_candidates(candidates, request)
+            candidates = self._authorize_candidates(
+                candidates, request, authorization=authorization
+            )
+            if embedding_provider is not None and semantic_state == "available":
+                if not any(components.semantic > 0 for _, _, components, _ in candidates):
+                    semantic_state = "missing-embeddings"
 
             rerank_state = "not-requested"
             disclosure_capabilities = (
@@ -399,6 +484,15 @@ class HybridRetriever:
                         matched_terms=matched,
                         ranking=components,
                         duplicate_paths=duplicate_paths,
+                        stable_id=self._verified_current_stable_id(
+                            request=request,
+                            path=chunk.path,
+                            candidate=(
+                                authorization.verified_ids.get(chunk.path)
+                                if health.state == "healthy"
+                                else None
+                            ),
+                        ),
                     )
                 )
                 used += len(context_text)
@@ -427,7 +521,7 @@ class HybridRetriever:
         finally:
             index.close()
 
-    def _in_scope(
+    def _matches_scope(
         self, chunk: IndexedChunk, document: IndexedDocument, request: RetrievalRequest
     ) -> bool:
         decision = scope_decision(chunk.path, scope=request.scope, policy=self.policy, mode="local")
@@ -445,6 +539,118 @@ class HybridRetriever:
         if scope.date_to and (document.note_date is None or document.note_date > scope.date_to):
             return False
         return True
+
+    def _preauthorization_paths(
+        self,
+        *,
+        request: RetrievalRequest,
+        stale_paths: frozenset[str],
+        embedding_provider: EmbeddingProvider | None,
+        graph_hints: Mapping[str, float] | None,
+    ) -> frozenset[str]:
+        """Find rows that can affect this query before any cross-document scoring.
+
+        Indexed metadata may choose which current canonical paths need verification, but only
+        descriptor-verified rows are later admitted to semantic/link/ranking computation. This
+        keeps the security boundary ahead of cross-document influence without turning every local
+        lexical query into an O(vault-size) canonical file read.
+        """
+        index = RetrievalIndex(self.index_service.active_path, create=False)
+        try:
+            documents = {item.path: item for item in index.documents()}
+            eligible: list[IndexedChunk] = []
+            for chunk in index.chunks():
+                document = documents[chunk.path]
+                if chunk.path in stale_paths:
+                    continue
+                if self._runtime_prefix is not None and chunk.path.startswith(self._runtime_prefix):
+                    continue
+                if not self._matches_scope(chunk, document, request):
+                    continue
+                eligible.append(chunk)
+
+            selected = set(request.scope.paths) | set(request.scope.pinned_paths)
+            provisional_links = _link_scores(eligible, selected)
+            semantic_chunk_ids: set[str] = set()
+            if embedding_provider is not None:
+                semantic_chunk_ids = {
+                    item.chunk_id for item in index.embeddings(embedding_provider.capabilities)
+                }
+
+            terms = lexical_terms(request.query)
+            query_text = request.query.casefold().strip()
+            graph = graph_hints or {}
+            paths = set(selected)
+            paths.update(provisional_links)
+            for chunk in eligible:
+                document = documents[chunk.path]
+                exact, lexical, _matched = _lexical_scores(
+                    query_text, terms, chunk=chunk, document=document
+                )
+                metadata = _metadata_score(terms, chunk, document, request)
+                graph_score = max(0.0, min(1.0, float(graph.get(chunk.path, 0.0))))
+                if (
+                    exact > 0
+                    or lexical > 0
+                    or metadata > 0
+                    or graph_score > 0
+                    or chunk.chunk_id in semantic_chunk_ids
+                ):
+                    paths.add(chunk.path)
+            return frozenset(paths)
+        finally:
+            index.close()
+
+    def _in_scope(
+        self,
+        chunk: IndexedChunk,
+        document: IndexedDocument,
+        request: RetrievalRequest,
+        *,
+        authorization: _QueryAuthorization,
+    ) -> bool:
+        """Admit a row to scoring only after metadata policy and its first canonical check."""
+        if chunk.path in authorization.stale_paths:
+            return False
+        if self._runtime_prefix is not None and chunk.path.startswith(self._runtime_prefix):
+            return False
+        if not self._matches_scope(chunk, document, request):
+            return False
+
+        if document.path not in authorization.preauthorized_paths:
+            return False
+
+        allowed = authorization.row_authorization.get(document.path)
+        if allowed is None:
+            try:
+                source = read_vault_markdown(self.vault_root, document.path)
+            except VaultAccessError:
+                allowed = False
+            else:
+                current_hash = "sha256:" + hashlib.sha256(source.content_bytes).hexdigest()
+                allowed = current_hash == document.content_hash
+            authorization.row_authorization[document.path] = allowed
+        if not allowed:
+            return False
+
+        authorization.scoped_chunks[chunk.chunk_id] = (chunk, document)
+        return True
+
+    def _verified_current_stable_id(
+        self,
+        *,
+        request: RetrievalRequest,
+        path: str,
+        candidate: str | None,
+    ) -> str | None:
+        if candidate is None:
+            return None
+        if path.startswith("conversations/") or path.startswith("proposals/"):
+            return None
+        decision = scope_decision(path, scope=request.scope, policy=self.policy, mode="local")
+        if not decision.allowed:
+            return None
+        return candidate
 
 
 def _lexical_scores(
@@ -641,3 +847,7 @@ def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return numerator / (left_norm * right_norm)
+
+
+def _stable_id(document_id: str) -> str | None:
+    return document_id[3:] if document_id.startswith("id:") else None

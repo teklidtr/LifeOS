@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-import lifeos.retrieval.coherence_search as coherence_search
+import lifeos.retrieval.search as retrieval_search
 from lifeos.retrieval import (
     HybridRetriever,
     RetrievalIndex,
@@ -200,14 +200,14 @@ def test_retrieval_identity_verification_reads_only_query_influencing_candidates
         )
     runtime = vault / ".lifeos"
     RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
-    real_read = coherence_search.read_vault_markdown
+    real_read = retrieval_search.read_vault_markdown
     reads: list[str] = []
 
     def recording_read(root: Path, relative_path: str):
         reads.append(relative_path)
         return real_read(root, relative_path)
 
-    monkeypatch.setattr(coherence_search, "read_vault_markdown", recording_read)
+    monkeypatch.setattr(retrieval_search, "read_vault_markdown", recording_read)
     response = HybridRetriever(vault_root=vault, runtime_dir=runtime).search(
         RetrievalRequest("ultraviolet-marker")
     )
