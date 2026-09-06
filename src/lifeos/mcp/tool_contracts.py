@@ -103,7 +103,7 @@ def _mcp_output_model(result_type: type[Any]) -> type[BaseModel]:
         type[BaseModel],
         create_model(
             f"{name}MCPResult",
-            __config__=ConfigDict(from_attributes=True),
+            __config__=ConfigDict(from_attributes=True, strict=True),
             **model_fields,
         ),
     )
