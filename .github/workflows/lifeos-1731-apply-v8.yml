@@ -100,11 +100,11 @@ jobs:
           set -e
           cat /tmp/lifeos-ruff-format.log
           if [ "$FORMAT_STATUS" -ne 0 ]; then
-            grep -q "267 files would be reformatted" /tmp/lifeos-ruff-format.log || {
-              echo "Repository-wide formatter mismatch differs from LIFEOS-1734 baseline"
+            grep -q "257 files would be reformatted" /tmp/lifeos-ruff-format.log || {
+              echo "Repository-wide formatter mismatch differs from the improved LIFEOS-1734 baseline"
               exit 1
             }
-            echo "Known LIFEOS-1734 baseline reproduced exactly: 267 files would be reformatted."
+            echo "LIFEOS-1734 formatter debt improved from 267 to 257 files; no regression."
           fi
           echo '--- remaining direct canonical proposal-document write references ---'
           git grep -n -E '(atomic_write_file_secure|write_bytes|write_text|os\.write).*proposal\.md|(atomic_write_file_secure|write_bytes|write_text|os\.write).*patches\.json|(atomic_write_file_secure|write_bytes|write_text|os\.write).*review\.json' -- src/lifeos || true
