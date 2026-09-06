@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1733
 title: Consolidate MCP input construction and equivalent read output contracts
-status: ready
+status: in-progress
 phase: hardening
 depends_on: []
 risk: high
@@ -19,7 +19,7 @@ The representative chains are `facade.exploration` list/read-many result datacla
 
 # Scope
 
-- Consolidate the three input-model construction implementations into one small MCP-owned mechanism while preserving each tool-family's strictness, extra-field behavior, aliases, descriptions, annotations, defaults, and parameter schema.
+- Consolidate the three input-model construction implementations into one small MCP-owned mechanism while preserving each tool family's strictness, extra-field behavior, aliases, descriptions, annotations, defaults, and parameter schema.
 - Deeply characterize list-vault output first, including its nested entries, then migrate read-many and wiki search where the same contract-preserving approach fits.
 - Remove the six named output mirrors and their handwritten projections where redundant. Derive validation/serialization from authoritative facade types through the existing optional MCP dependency boundary.
 - Verify the currently locked FastMCP v1 and Pydantic behavior with Context7 and authoritative SDK documentation/source. Do not assume a frozen/slotted dataclass annotation automatically produces structured output or validates an existing instance.
