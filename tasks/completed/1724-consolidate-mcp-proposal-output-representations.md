@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1724
 title: Consolidate equivalent MCP proposal and research output representations
-status: in-progress
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1733
@@ -40,11 +40,11 @@ The multi-source evolve tool shares an output mirror with a distinct domain resu
 
 # Acceptance criteria
 
-- [ ] The named compatible result families use the LIFEOS-1733 boundary and their redundant mirrors/projections are removed.
-- [ ] Each retained representation has an explicit contract reason, with requiredness, privacy selection, status constraints, or direct-call behavior identified; no new parallel schema catalog is added.
-- [ ] The complete MCP suite covers unchanged generated schemas, success payloads, invalid outputs, direct calls, errors, annotations, and transport-specific tool availability.
-- [ ] Existing proposal lifecycle, research capture, multi-source, privacy, and integration tests retain their behavioral assertions.
-- [ ] Record net production/concept deletion including adapters. If a family needs substantial field-by-field translation to preserve its contract, keep its intentional DTO rather than enlarging the shared mechanism.
+- [x] The named compatible result families use the LIFEOS-1733 boundary and their redundant mirrors/projections are removed.
+- [x] Each retained representation has an explicit contract reason, with requiredness, privacy selection, status constraints, or direct-call behavior identified; no new parallel schema catalog is added.
+- [x] The complete MCP suite covers unchanged generated schemas, success payloads, invalid outputs, direct calls, errors, annotations, and transport-specific tool availability.
+- [x] Existing proposal lifecycle, research capture, multi-source, privacy, and integration tests retain their behavioral assertions.
+- [x] Record net production/concept deletion including adapters. If a family needs substantial field-by-field translation to preserve its contract, keep its intentional DTO rather than enlarging the shared mechanism.
 
 # Documentation impact
 
@@ -79,24 +79,23 @@ No retained family required a new field-by-field translation layer merely to cla
 
 ## Deletion accounting
 
-Against task base `bfe7fc77567aa5ccdea9cb36dc463d5081bea6d2`, the current production `src/` diff is **106 additions and 176 deletions, net -70 lines** before final review fixes. The added lines are primarily the legacy-name option and explicit authoritative type/serialization wiring; the deleted lines remove eight mirror declarations and repeated result projections. Conceptually, the proposal/lifecycle/research-capture field catalogs and their handwritten mappings disappear while the existing LIFEOS-1733 boundary remains the sole authoritative-output mechanism.
+Against task base `bfe7fc77567aa5ccdea9cb36dc463d5081bea6d2`, the completed production `src/` diff is **106 additions and 176 deletions, net -70 lines**. The added lines are primarily the legacy-name option and explicit authoritative type/serialization wiring; the deleted lines remove eight mirror declarations and repeated result projections. Conceptually, the proposal/lifecycle/research-capture field catalogs and their handwritten mappings disappear while the existing LIFEOS-1733 boundary remains the sole authoritative-output mechanism.
 
 # Validation
 
-```bash
-uv run pytest -q tests/mcp tests/facade tests/ingestion tests/proposals tests/integration
-uv run pytest -q
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src
-python scripts/validate_tasks.py
-```
+The implementation environment could not clone GitHub directly because DNS resolution was unavailable, so repository validation used independent GitHub-hosted checkouts and the Codex checkout with the locked dependency set and optional MCP SDK installed.
 
-Execute real STDIO/lifecycle tests with the optional SDK installed, plus home-node and runtime-authority regressions. Review schema differences explicitly instead of automatically updating expectations. Follow root `AGENTS.md` for normal/security review and final validation checkpoints.
+The follow-up Codex checkout ran the task's behavioral and static validation successfully: the targeted MCP/facade/ingestion/proposals/integration group passed **944 tests**, `tests/test_runtime_identity_propagation.py` passed **11 tests**, and the full suite passed **2,495 tests**. `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy src`, `python scripts/validate_tasks.py`, and `git diff --check` also passed.
 
-Local execution was attempted twice from this implementation environment, including after the branch reached its current implementation shape. Both `git clone` attempts failed before checkout with `Could not resolve host: github.com`, so local pytest/Ruff/mypy/task validation cannot be truthfully claimed here. The branch therefore requires the repository's GitHub-hosted `fast-checks`, `obsidian-plugin`, focused/full pytest coverage, and final labeled `full-validation` as independent executable evidence. This environment limitation does not relax any completion gate.
+Current-head PR-check run `34043831135` passed task workflow validation, documentation impact, manual links, Ruff formatting, Ruff lint, mypy, Python compilation, pytest collection, project contract smoke tests, and the complete Obsidian plugin lint/typecheck/test/build checkpoint on reviewed head `2e68d7dba7075d5aeda463b4b0e5840fd972d098`.
+
+A fresh `full-validation` run on the final completed-task head is required by root `AGENTS.md` before merge; it must produce green `full-test` and `docker-setup-e2e` checks. No further implementation change is planned after that checkpoint is requested.
 
 Context7 was rechecked for the Pydantic behavior reused from LIFEOS-1733: dynamic `create_model` models support explicit model names, `from_attributes` recursively reads ordinary objects, and JSON-mode serialization normalizes tuple fields to JSON arrays. No materially new FastMCP serialization mechanism is introduced by this adoption pass.
+
+# Codex review
+
+Normal Codex review of head `2e68d7dba7075d5aeda463b4b0e5840fd972d098` reported no major issues. The review was requested only after current-head `fast-checks` and `obsidian-plugin` were green and the proposal/research authoritative-output call sites and retained DTO inventory had been audited. Security review is intentionally skipped per the user's explicit instruction for LIFEOS-1724.
 
 # Relevant design decisions
 
