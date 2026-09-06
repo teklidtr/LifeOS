@@ -64,7 +64,10 @@ def test_public_module_is_static_facade_over_explicit_composition() -> None:
         public_ingestion.build_wiki_section_update_proposal
         is composition.build_wiki_section_update_proposal
     )
-    assert public_ingestion.persist_compounding_wiki_proposal is composition.persist_compounding_wiki_proposal
+    assert (
+        public_ingestion.persist_compounding_wiki_proposal
+        is composition.persist_compounding_wiki_proposal
+    )
     assert public_ingestion._persist_proposal_documents is ingestion_core._persist_proposal_documents
 
 
