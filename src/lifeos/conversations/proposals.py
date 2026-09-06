@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import os
-import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
 from lifeos.daily.service import content_hash
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import (
@@ -19,6 +16,11 @@ from lifeos.proposals.patches import (
     PatchDocumentV2,
     PatchHumanFile,
     serialize_patch_json_bytes,
+)
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
 )
 from lifeos.proposals.schema import (
     ProposalMetadata,
@@ -114,7 +116,13 @@ def _utc(value: datetime | None) -> datetime:
 
 def _proposal_id(moment: datetime, request: ConversationProposalRequest) -> str:
     fingerprint = "\0".join(
-        (request.conversation_path, request.turn_id, request.action, request.target_path, request.content)
+        (
+            request.conversation_path,
+            request.turn_id,
+            request.action,
+            request.target_path,
+            request.content,
+        )
     )
     suffix = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:8]
     return generate_proposal_id(lambda: moment, lambda: suffix)
@@ -124,7 +132,9 @@ def _candidate_content(request: ConversationProposalRequest) -> str:
     heading = _ACTION_HEADINGS[request.action]
     body = request.content.strip()
     if not body:
-        raise ConversationError("empty_proposal", "Conversation proposal content must not be blank.")
+        raise ConversationError(
+            "empty_proposal", "Conversation proposal content must not be blank."
+        )
     title = request.title.strip() if request.title else heading
     if request.action in {"create_capture", "draft_note"}:
         note_type = "capture" if request.action == "create_capture" else "note"
@@ -133,7 +143,9 @@ def _candidate_content(request: ConversationProposalRequest) -> str:
 
 
 class ConversationProposalService:
-    def __init__(self, *, vault_root: Path, runtime_dir: Path, actor_id: str = "local-user") -> None:
+    def __init__(
+        self, *, vault_root: Path, runtime_dir: Path, actor_id: str = "local-user"
+    ) -> None:
         self.vault_root = vault_root
         self.runtime_dir = runtime_dir
         self.actor_id = actor_id
@@ -150,9 +162,13 @@ class ConversationProposalService:
         if turn is None:
             raise ConversationError("turn_not_found", "Proposal source turn was not found.")
         if not turn.evidence:
-            raise ConversationError("missing_evidence", "Conversation proposals require cited source evidence.")
+            raise ConversationError(
+                "missing_evidence", "Conversation proposals require cited source evidence."
+            )
         if request.action not in _ACTION_HEADINGS:
-            raise ConversationError("invalid_action", "Conversation proposal action is unsupported.")
+            raise ConversationError(
+                "invalid_action", "Conversation proposal action is unsupported."
+            )
         moment = _utc(now)
         proposal_id = _proposal_id(moment, request)
         candidate = _candidate_content(request)
@@ -163,14 +179,18 @@ class ConversationProposalService:
         if create:
             if (self.vault_root / request.target_path).exists():
                 raise ConversationError("target_exists", "The proposed target already exists.")
-            operation = CreateFile("op-conversation-create", request.target_path, "absent", candidate)
+            operation = CreateFile(
+                "op-conversation-create", request.target_path, "absent", candidate
+            )
             operation_name = "create_file"
             new_content: str | None = candidate
         else:
             try:
                 source = read_vault_markdown(self.vault_root, request.target_path)
             except VaultAccessError as exc:
-                raise ConversationError(exc.code, str(exc), {"target_path": request.target_path}) from exc
+                raise ConversationError(
+                    exc.code, str(exc), {"target_path": request.target_path}
+                ) from exc
             updated = source.content.rstrip() + candidate
             base_hash = f"sha256:{content_hash(source.content)}"
             lines = tuple(
@@ -221,7 +241,9 @@ class ConversationProposalService:
             applied_at=None,
             applied_by=None,
             related_goals=(),
-            related_sources=tuple(dict.fromkeys((request.conversation_path, *(item.path for item in turn.evidence)))),
+            related_sources=tuple(
+                dict.fromkeys((request.conversation_path, *(item.path for item in turn.evidence)))
+            ),
             extensions={
                 "knowledge_conversation": {
                     "conversation_id": artifact.metadata.conversation_id,
@@ -248,7 +270,9 @@ class ConversationProposalService:
             + (f" · `{item['heading']}`" if item["heading"] else "")
             for item in evidence
         )
-        body_lines.extend(["", "## Candidate content", "", "```markdown", request.content.strip(), "```", ""])
+        body_lines.extend(
+            ["", "## Candidate content", "", "```markdown", request.content.strip(), "```", ""]
+        )
         proposal_markdown = serialize_proposal_markdown(metadata, "\n".join(body_lines))
         preview = ConversationProposalPreview(
             proposal_id,
@@ -266,37 +290,23 @@ class ConversationProposalService:
         self, request: ConversationProposalRequest, *, now: datetime | None = None
     ) -> ConversationProposalResult:
         preview, patch_document, _metadata, proposal_markdown = self.preview(request, now=now)
-        proposals_root = self.vault_root / "proposals"
-        proposal_dir = proposals_root / preview.proposal_id
         patches_json = serialize_patch_json_bytes(patch_document)
         review_json = build_review_snapshot_bytes_from_patches(
             vault_root=self.vault_root,
             patches_json=patches_json,
         )
-        proposals_root.mkdir(parents=True, exist_ok=True)
-        created = False
-        published = False
-        directory_fd = -1
         try:
-            proposal_dir.mkdir(exist_ok=False)
-            created = True
-            directory_fd = os.open(
-                proposal_dir,
-                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+            publish_proposal_documents(
+                vault_root=self.vault_root,
+                proposal_id=preview.proposal_id,
+                documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
             )
-            atomic_write_file_secure(directory_fd, "proposal.md", proposal_markdown)
-            atomic_write_file_secure(directory_fd, "patches.json", patches_json)
-            atomic_write_file_secure(directory_fd, "review.json", review_json)
-            published = True
-        except FileExistsError as exc:
-            raise ConversationError("proposal_exists", "Conversation proposal already exists.") from exc
-        except (OSError, AtomicWriteError) as exc:
+        except ProposalPublicationError as exc:
+            if exc.code == "proposal_exists":
+                raise ConversationError(
+                    "proposal_exists", "Conversation proposal already exists."
+                ) from exc
             raise ConversationError("proposal_publish_failed", str(exc)) from exc
-        finally:
-            if directory_fd >= 0:
-                os.close(directory_fd)
-            if created and not published:
-                shutil.rmtree(proposal_dir, ignore_errors=True)
         return ConversationProposalResult(
             preview.proposal_id, f"proposals/{preview.proposal_id}", preview
         )

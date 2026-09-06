@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import os
-import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
 from lifeos.daily.service import content_hash
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import (
@@ -19,6 +16,11 @@ from lifeos.proposals.patches import (
     PatchHumanFile,
     PatchOperationV2,
     serialize_patch_json_bytes,
+)
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
 )
 from lifeos.proposals.schema import (
     ProposalMetadata,
@@ -197,37 +199,23 @@ class CaptureProposalService:
         self, request: CaptureProposalRequest, *, now: datetime | None = None
     ) -> dict[str, object]:
         preview, patch, markdown = self.preview(request, now=now)
-        target = self.vault_root / "proposals" / preview.proposal_id
         patches_json = serialize_patch_json_bytes(patch)
         review_json = build_review_snapshot_bytes_from_patches(
             vault_root=self.vault_root,
             patches_json=patches_json,
         )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        created = False
-        published = False
-        fd = -1
         try:
-            target.mkdir(exist_ok=False)
-            created = True
-            fd = os.open(
-                target, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            publish_proposal_documents(
+                vault_root=self.vault_root,
+                proposal_id=preview.proposal_id,
+                documents=ProposalDocuments(markdown, patches_json, review_json),
             )
-            atomic_write_file_secure(fd, "proposal.md", markdown)
-            atomic_write_file_secure(fd, "patches.json", patches_json)
-            atomic_write_file_secure(fd, "review.json", review_json)
-            published = True
-        except FileExistsError as exc:
-            raise CaptureError(
-                "proposal_exists", "Equivalent capture proposal already exists."
-            ) from exc
-        except (OSError, AtomicWriteError) as exc:
+        except ProposalPublicationError as exc:
+            if exc.code == "proposal_exists":
+                raise CaptureError(
+                    "proposal_exists", "Equivalent capture proposal already exists."
+                ) from exc
             raise CaptureError("proposal_publish_failed", str(exc)) from exc
-        finally:
-            if fd >= 0:
-                os.close(fd)
-            if created and not published:
-                shutil.rmtree(target, ignore_errors=True)
         return {
             "proposal_id": preview.proposal_id,
             "proposal_path": f"proposals/{preview.proposal_id}",

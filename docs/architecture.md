@@ -162,6 +162,17 @@ without a snapshot remain readable through an explicitly labeled live-preview
 fallback. A deterministic tool applies only explicitly approved items whose
 target hashes still match.
 
+Prepared proposal publication has one shared filesystem boundary. Feature owners remain
+responsible for request validation, stable identity, source/target revalidation, proposal and
+patch serialization, immutable `review.json` construction, and feature-specific result/error
+translation. The shared publisher accepts only the already-prepared bytes plus a safe proposal
+ID; it securely prepares/opens the canonical `proposals/` root, creates one draft directory,
+and writes exactly `proposal.md`, `patches.json`, and `review.json` through descriptor-relative,
+no-follow access. It revalidates directory identity during publication and cleans up only files
+and directories still owned by the failed attempt, never a pre-existing or replaced directory
+or symlink target. This three-document publication boundary is not an application transaction
+and does not grant submit, approval, or apply authority.
+
 ## Registry
 
 The current SQLite registry stores deterministic file observations and source versions,
@@ -217,7 +228,6 @@ Generated content
 ```
 
 Markers must be unique, non-nested, and paired. Creation or deletion requires proposal approval.
-
 ## Adaptive planning
 
 Tasks stay close to plans and are globally indexed by scripts.
