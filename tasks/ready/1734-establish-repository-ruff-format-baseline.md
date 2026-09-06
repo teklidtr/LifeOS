@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1734
 title: Establish a repository-wide Ruff formatter baseline and CI gate
-status: backlog
+status: ready
 phase: hardening
 depends_on: []
 risk: low
