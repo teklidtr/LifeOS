@@ -1,0 +1,265 @@
+name: LIFEOS-1731 bounded implementation
+
+on:
+  push:
+    branches: [lifeos-1731-migrate-proposal-publishers]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[lifeos-1731-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: lifeos-1731-migrate-proposal-publishers
+
+      - name: Apply LIFEOS-1731 migration
+        shell: python
+        run: |
+          from __future__ import annotations
+          import re
+          from pathlib import Path
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace_once(text: str, old: str, new: str, *, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected one match, found {count}")
+              return text.replace(old, new, 1)
+
+          def regex_once(text: str, pattern: str, replacement: str, *, label: str) -> str:
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected one regex match, found {count}")
+              return updated
+
+          publication_import = (
+              "from lifeos.proposals.publication import (\n"
+              "    ProposalDocuments,\n"
+              "    ProposalPublicationError,\n"
+              "    publish_proposal_documents,\n"
+              ")\n"
+          )
+
+          # Goal-to-plan copilot keeps its established _publish seam and feature error mapping.
+          path = "src/lifeos/copilot/proposals.py"
+          text = read(path)
+          text = text.replace("import os\n", "", 1).replace("import shutil\n", "", 1)
+          text = replace_once(
+              text,
+              "from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure\n",
+              publication_import,
+              label="copilot publication import",
+          )
+          text = regex_once(
+              text,
+              r"def _publish\(\*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes\) -> None:\n.*?(?=\n\ndef _diff)",
+              '''def _publish(*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes) -> None:\n    review_json = build_review_snapshot_bytes_from_patches(\n        vault_root=vault_root,\n        patches_json=patches_json,\n    )\n    try:\n        publish_proposal_documents(\n            vault_root=vault_root,\n            proposal_id=proposal_id,\n            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),\n        )\n    except ProposalPublicationError as exc:\n        raise CopilotProposalError(f"could not publish copilot proposal: {exc}") from exc''',
+              label="copilot publish body",
+          )
+          write(path, text)
+
+          # Replanning keeps os for suppression-file replacement but drops local proposal cleanup.
+          path = "src/lifeos/copilot/replanning.py"
+          text = read(path)
+          text = text.replace("import shutil\n", "", 1)
+          text = replace_once(
+              text,
+              "from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure\n",
+              publication_import,
+              label="replanning publication import",
+          )
+          text = regex_once(
+              text,
+              r"def _publish\(\*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes\) -> None:\n.*?(?=\n\ndef _severity_rank)",
+              '''def _publish(*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes) -> None:\n    review_json = build_review_snapshot_bytes_from_patches(\n        vault_root=vault_root,\n        patches_json=patches_json,\n    )\n    try:\n        publish_proposal_documents(\n            vault_root=vault_root,\n            proposal_id=proposal_id,\n            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),\n        )\n    except ProposalPublicationError as exc:\n        raise ReplanningError(f"could not publish replanning proposal: {exc}") from exc''',
+              label="replanning publish body",
+          )
+          write(path, text)
+
+          # Feedback gains a thin, directly testable feature adapter; evidence logic remains untouched.
+          path = "src/lifeos/feedback/proposals.py"
+          text = read(path)
+          text = text.replace("import os\n", "", 1).replace("import shutil\n", "", 1)
+          text = replace_once(
+              text,
+              "from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure\n",
+              publication_import,
+              label="feedback publication import",
+          )
+          helper = '''\n\ndef _publish_feedback_proposal(\n    *, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes\n) -> None:\n    review_json = build_review_snapshot_bytes_from_patches(\n        vault_root=vault_root,\n        patches_json=patches_json,\n    )\n    try:\n        publish_proposal_documents(\n            vault_root=vault_root,\n            proposal_id=proposal_id,\n            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),\n        )\n    except ProposalPublicationError as exc:\n        raise FeedbackProposalError(f"Could not publish feedback proposal: {exc}") from exc\n'''
+          marker = "\n\ndef create_feedback_proposal(\n"
+          if marker not in text:
+              raise RuntimeError("feedback create marker missing")
+          text = text.replace(marker, helper + marker, 1)
+          text = regex_once(
+              text,
+              r"    proposal_markdown = serialize_proposal_markdown\(metadata, _proposal_body\(request\)\)\n    patches_json = serialize_patch_json_bytes\(patch_document\)\n    review_json = build_review_snapshot_bytes_from_patches\(.*?    return FeedbackProposalResult\(proposal_id, f\"proposals/\{proposal_id\}\", request.target_path, base_hash, request.evidence_fingerprint, request.kind\)",
+              '''    proposal_markdown = serialize_proposal_markdown(metadata, _proposal_body(request))\n    patches_json = serialize_patch_json_bytes(patch_document)\n    _publish_feedback_proposal(\n        vault_root=vault_root,\n        proposal_id=proposal_id,\n        proposal_markdown=proposal_markdown,\n        patches_json=patches_json,\n    )\n    return FeedbackProposalResult(\n        proposal_id,\n        f"proposals/{proposal_id}",\n        request.target_path,\n        base_hash,\n        request.evidence_fingerprint,\n        request.kind,\n    )''',
+              label="feedback local publication block",
+          )
+          write(path, text)
+
+          # Review-decision proposal publication follows the same narrow feature adapter pattern.
+          path = "src/lifeos/reviews/decisions.py"
+          text = read(path)
+          text = text.replace("import os\n", "", 1).replace("import shutil\n", "", 1)
+          text = replace_once(
+              text,
+              "from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure\n",
+              publication_import,
+              label="review publication import",
+          )
+          helper = '''\n\ndef _publish_review_proposal(\n    *, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes\n) -> None:\n    review_json = build_review_snapshot_bytes_from_patches(\n        vault_root=vault_root,\n        patches_json=patches_json,\n    )\n    try:\n        publish_proposal_documents(\n            vault_root=vault_root,\n            proposal_id=proposal_id,\n            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),\n        )\n    except ProposalPublicationError as exc:\n        raise ReviewProposalError(f"Could not publish review proposal: {exc}") from exc\n'''
+          marker = "\n\ndef create_review_proposal(\n"
+          if marker not in text:
+              raise RuntimeError("review create marker missing")
+          text = text.replace(marker, helper + marker, 1)
+          text = regex_once(
+              text,
+              r"    proposal_markdown = serialize_proposal_markdown\(metadata, _proposal_body\(request\)\)\n    patches_json = serialize_patch_json_bytes\(patch_document\)\n    review_json = build_review_snapshot_bytes_from_patches\(.*?    return ReviewProposalResult\(",
+              '''    proposal_markdown = serialize_proposal_markdown(metadata, _proposal_body(request))\n    patches_json = serialize_patch_json_bytes(patch_document)\n    _publish_review_proposal(\n        vault_root=vault_root,\n        proposal_id=proposal_id,\n        proposal_markdown=proposal_markdown,\n        patches_json=patches_json,\n    )\n    return ReviewProposalResult(''',
+              label="review local publication block",
+          )
+          write(path, text)
+
+          # Ownership retains its _publish_proposal compatibility seam and Path return.
+          path = "src/lifeos/ownership/reconciliation.py"
+          text = read(path)
+          text = text.replace("import shutil\n", "", 1)
+          text = replace_once(
+              text,
+              "from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure\n",
+              publication_import,
+              label="ownership publication import",
+          )
+          text = regex_once(
+              text,
+              r"def _publish_proposal\(\n    \*,\n    vault_root: Path,\n    proposal_id: str,\n    proposal_markdown: bytes,\n    patches_json: bytes,\n\) -> Path:\n.*\Z",
+              '''def _publish_proposal(\n    *,\n    vault_root: Path,\n    proposal_id: str,\n    proposal_markdown: bytes,\n    patches_json: bytes,\n) -> Path:\n    review_json = build_review_snapshot_bytes_from_patches(\n        vault_root=vault_root,\n        patches_json=patches_json,\n    )\n    try:\n        publish_proposal_documents(\n            vault_root=vault_root,\n            proposal_id=proposal_id,\n            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),\n        )\n    except ProposalPublicationError as error:\n        raise OwnershipReconciliationError(\n            f"Could not publish ownership release proposal: {error}"\n        ) from error\n    return vault_root / "proposals" / proposal_id\n''',
+              label="ownership publish body",
+          )
+          write(path, text)
+
+          # Core ingestion persistence becomes the sole ingestion physical publication adapter.
+          path = "src/lifeos/ingestion/_proposals_core.py"
+          text = read(path)
+          text = text.replace("import os\n", "", 1).replace("import shutil\n", "", 1)
+          text = text.replace("from lifeos._atomic_write import atomic_write_file_secure\n", "", 1)
+          insertion = (
+              "from lifeos.proposals.publication import (\n"
+              "    ProposalDocuments,\n"
+              "    ProposalPublicationError as SharedProposalPublicationError,\n"
+              "    publish_proposal_documents,\n"
+              ")\n"
+          )
+          text = replace_once(
+              text,
+              "from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches\n",
+              "from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches\n" + insertion,
+              label="ingestion core publication import",
+          )
+          text = regex_once(
+              text,
+              r"def _persist_proposal_documents\(\n    \*,\n    proposals_root: Path,\n    documents: \(.*?\n\) -> Path:\n.*?(?=\n\ndef persist_wiki_proposal)",
+              '''def _persist_proposal_documents(\n    *,\n    proposals_root: Path,\n    documents: (\n        WikiProposalDocuments\n        | CompoundWikiProposalDocuments\n        | CompoundingWikiProposalDocuments\n        | StudyLearningProposalDocuments\n    ),\n) -> Path:\n    proposal_id = str(documents.proposal_id)\n    proposal_dir = proposals_root / proposal_id\n    review_json = build_review_snapshot_bytes_from_patches(\n        vault_root=proposals_root.parent,\n        patches_json=documents.patches_json,\n    )\n    try:\n        publish_proposal_documents(\n            vault_root=proposals_root.parent,\n            proposal_id=proposal_id,\n            documents=ProposalDocuments(\n                documents.proposal_markdown, documents.patches_json, review_json\n            ),\n        )\n    except SharedProposalPublicationError as exc:\n        if exc.code == "proposal_exists":\n            raise ProposalAlreadyExistsError(\n                f"Proposal directory already exists: {proposal_dir}"\n            ) from exc\n        if exc.code == "unsafe_proposal_id":\n            raise ProposalPublicationError("Proposal id is not safe for publication") from exc\n        if exc.code == "unsafe_proposals_root":\n            raise ProposalPublicationError("Proposal root is not a safe directory") from exc\n        raise ProposalPublicationError(f"Failed to write proposal files: {exc}") from exc\n    return proposal_dir''',
+              label="ingestion core persistence body",
+          )
+          write(path, text)
+
+          # Public ingestion keeps provenance/identity wrappers but no longer replaces core persistence.
+          path = "src/lifeos/ingestion/proposals.py"
+          text = read(path)
+          text = text.replace("import os\n", "", 1)
+          text = text.replace("from lifeos._secure_io import SecureIOError, open_directory_secure\n", "", 1)
+          text = regex_once(
+              text,
+              r"\n\ndef _secure_persist_proposal_documents\(\*, proposals_root: Path, documents: Any\) -> Path:\n.*?(?=\n\n_core\._build_wiki_section_operation)",
+              "",
+              label="ingestion runtime persistence override",
+          )
+          text = text.replace("_core._persist_proposal_documents = _secure_persist_proposal_documents\n", "", 1)
+          write(path, text)
+
+          # Architecture: extend the established publisher boundary, without changing user behavior.
+          path = "docs/architecture.md"
+          text = read(path)
+          marker = "The shared publisher accepts only the already-prepared bytes plus a safe proposal\nID;"
+          start = text.find(marker)
+          if start < 0:
+              raise RuntimeError("architecture shared publisher paragraph missing")
+          end = text.find("\n\n", start)
+          if end < 0:
+              raise RuntimeError("architecture paragraph terminator missing")
+          addition = (\
+              "\n\nLIFEOS-1731 completes adoption of this boundary for goal-to-plan copilot, replanning, "
+              "feedback, review-decision, ownership-reconciliation, and ingestion proposal producers, "
+              "in addition to capture, conversation, experiment, and personal-pattern producers. "
+              "Each feature still owns evidence, source/target, ownership, identity, and review-snapshot "
+              "verification before publication. Ingestion still uses its existing public-module/core "
+              "builder and provenance composition; LIFEOS-1732 owns making that composition explicit, "
+              "while both ordinary core and runtime persistence now select the same shared publisher."
+          )
+          if "LIFEOS-1731 completes adoption" in text:
+              raise RuntimeError("architecture addition already present")
+          text = text[:end] + addition + text[end:]
+          write(path, text)
+
+          # Focused adoption tests exercise duplicate and failed publication through every migrated family.
+          test_path = Path("tests/proposals/test_remaining_publisher_adoption.py")
+          test_path.write_text('''from __future__ import annotations\n\nfrom pathlib import Path\nfrom types import ModuleType\nfrom typing import Callable\n\nimport pytest\n\nimport lifeos.copilot.proposals as copilot_proposals\nimport lifeos.copilot.replanning as replanning\nimport lifeos.feedback.proposals as feedback_proposals\nimport lifeos.ownership.reconciliation as ownership_reconciliation\nimport lifeos.reviews.decisions as review_decisions\nfrom lifeos.ingestion import _proposals_core as ingestion_core\nfrom lifeos.proposals.publication import ProposalPublicationError\n\n\nPublisherAdapter = Callable[..., object]\n\n\ndef _review_bytes(**_: object) -> bytes:\n    return b"{}\\n"\n\n\ndef _raise_publish_failure(**_: object) -> None:\n    raise ProposalPublicationError("proposal_publish_failed", "injected write failure")\n\n\ndef _feature_adapters() -> tuple[tuple[ModuleType, PublisherAdapter, type[Exception], str], ...]:\n    return (\n        (copilot_proposals, copilot_proposals._publish, copilot_proposals.CopilotProposalError, "could not publish copilot proposal"),\n        (replanning, replanning._publish, replanning.ReplanningError, "could not publish replanning proposal"),\n        (feedback_proposals, feedback_proposals._publish_feedback_proposal, feedback_proposals.FeedbackProposalError, "Could not publish feedback proposal"),\n        (review_decisions, review_decisions._publish_review_proposal, review_decisions.ReviewProposalError, "Could not publish review proposal"),\n        (ownership_reconciliation, ownership_reconciliation._publish_proposal, ownership_reconciliation.OwnershipReconciliationError, "Could not publish ownership release proposal"),\n    )\n\n\n@pytest.mark.parametrize(("module", "adapter", "error_type", "message"), _feature_adapters())\ndef test_migrated_feature_adapter_maps_shared_publication_failure(\n    tmp_path: Path,\n    monkeypatch: pytest.MonkeyPatch,\n    module: ModuleType,\n    adapter: PublisherAdapter,\n    error_type: type[Exception],\n    message: str,\n) -> None:\n    monkeypatch.setattr(module, "build_review_snapshot_bytes_from_patches", _review_bytes)\n    monkeypatch.setattr(module, "publish_proposal_documents", _raise_publish_failure)\n\n    with pytest.raises(error_type, match=message):\n        adapter(\n            vault_root=tmp_path,\n            proposal_id="proposal-test",\n            proposal_markdown=b"proposal",\n            patches_json=b"patches",\n        )\n\n\n@pytest.mark.parametrize(("module", "adapter", "error_type"), [(a, b, c) for a, b, c, _ in _feature_adapters()])\ndef test_migrated_feature_adapter_preserves_duplicate_failure(\n    tmp_path: Path,\n    monkeypatch: pytest.MonkeyPatch,\n    module: ModuleType,\n    adapter: PublisherAdapter,\n    error_type: type[Exception],\n) -> None:\n    vault = tmp_path / module.__name__.replace(".", "-")\n    vault.mkdir()\n    monkeypatch.setattr(module, "build_review_snapshot_bytes_from_patches", _review_bytes)\n    kwargs = {\n        "vault_root": vault,\n        "proposal_id": "proposal-duplicate",\n        "proposal_markdown": b"proposal",\n        "patches_json": b"patches",\n    }\n    adapter(**kwargs)\n    with pytest.raises(error_type):\n        adapter(**kwargs)\n    assert (vault / "proposals" / "proposal-duplicate" / "review.json").read_bytes() == b"{}\\n"\n\n\ndef _ingestion_documents() -> ingestion_core.WikiProposalDocuments:\n    return ingestion_core.WikiProposalDocuments(\n        proposal_id="proposal-ingestion",\n        target_path="wiki/target.md",\n        proposal_markdown=b"proposal",\n        patches_json=b"patches",\n    )\n\n\ndef test_ingestion_core_adapter_maps_shared_publication_failure(\n    tmp_path: Path, monkeypatch: pytest.MonkeyPatch\n) -> None:\n    monkeypatch.setattr(ingestion_core, "build_review_snapshot_bytes_from_patches", _review_bytes)\n    monkeypatch.setattr(ingestion_core, "publish_proposal_documents", _raise_publish_failure)\n    with pytest.raises(ingestion_core.ProposalPublicationError, match="Failed to write proposal files"):\n        ingestion_core._persist_proposal_documents(\n            proposals_root=tmp_path / "proposals", documents=_ingestion_documents()\n        )\n\n\ndef test_ingestion_core_adapter_preserves_duplicate_error(\n    tmp_path: Path, monkeypatch: pytest.MonkeyPatch\n) -> None:\n    monkeypatch.setattr(ingestion_core, "build_review_snapshot_bytes_from_patches", _review_bytes)\n    documents = _ingestion_documents()\n    root = tmp_path / "proposals"\n    ingestion_core._persist_proposal_documents(proposals_root=root, documents=documents)\n    with pytest.raises(ingestion_core.ProposalAlreadyExistsError, match="Proposal directory already exists"):\n        ingestion_core._persist_proposal_documents(proposals_root=root, documents=documents)\n\n\ndef test_public_ingestion_runtime_uses_core_publication_adapter() -> None:\n    import lifeos.ingestion.proposals as public_ingestion\n\n    assert public_ingestion._persist_proposal_documents is ingestion_core._persist_proposal_documents\n''', encoding="utf-8")
+
+          # The temporary workflow is an editing transport only; remove it from the resulting tree.
+          Path(".github/workflows/lifeos-1731-apply.yml").unlink()
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Format touched Python
+        run: >-
+          uv run ruff format
+          src/lifeos/copilot/proposals.py
+          src/lifeos/copilot/replanning.py
+          src/lifeos/feedback/proposals.py
+          src/lifeos/reviews/decisions.py
+          src/lifeos/ownership/reconciliation.py
+          src/lifeos/ingestion/proposals.py
+          src/lifeos/ingestion/_proposals_core.py
+          tests/proposals/test_remaining_publisher_adoption.py
+
+      - name: Focused validation
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          uv run pytest -q tests/proposals/test_remaining_publisher_adoption.py
+          uv run pytest -q tests/copilot tests/planning_feedback tests/reviews tests/ownership tests/ingestion tests/proposals
+          uv run ruff check src/lifeos/copilot/proposals.py src/lifeos/copilot/replanning.py src/lifeos/feedback/proposals.py src/lifeos/reviews/decisions.py src/lifeos/ownership/reconciliation.py src/lifeos/ingestion/proposals.py src/lifeos/ingestion/_proposals_core.py tests/proposals/test_remaining_publisher_adoption.py
+          uv run mypy src
+          python scripts/validate_tasks.py
+          git diff --check
+          echo '--- remaining canonical proposal document write sites ---'
+          git grep -n -E 'atomic_write_file_secure.*(proposal\.md|patches\.json|review\.json)' -- src/lifeos || true
+
+      - name: Commit validated migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "LIFEOS-1731 Migrate remaining proposal publishers [lifeos-1731-applied]"
+          git push origin HEAD:lifeos-1731-migrate-proposal-publishers
