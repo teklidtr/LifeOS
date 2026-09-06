@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1729
 title: Collapse recovery-readiness runtime patching into static implementation
-status: in-progress
+status: completed
 phase: hardening
 depends_on: []
 risk: high
@@ -36,11 +36,11 @@ At planning HEAD `2996540ee16f574503b4226baa417bf55fea380c`, `src/lifeos/recover
 
 # Acceptance criteria
 
-- [ ] A reviewer can follow `collect_recovery_readiness` to every active implementation using ordinary imports/calls; no runtime rebinding or module-class substitution remains in this subsystem.
-- [ ] Public compatibility and all existing security/recovery behavior remain covered, including unsupported-platform and injected failure paths.
-- [ ] Every removed/renamed helper, patch target, return attribute, and changed error string has a repository-wide caller/test audit. Any deliberate private-seam migration is enumerated and preserves equivalent fault coverage.
-- [ ] The task records removed files/symbols and net production change; obsolete layers disappear instead of becoming new wrappers. No arbitrary LOC target overrides invariants.
-- [ ] Existing behavioral/security tests remain; only demonstrably obsolete machinery-only assertions may be replaced with equivalent boundary assertions.
+- [x] A reviewer can follow `collect_recovery_readiness` to every active implementation using ordinary imports/calls; no runtime rebinding or module-class substitution remains in this subsystem.
+- [x] Public compatibility and all existing security/recovery behavior remain covered, including unsupported-platform and injected failure paths.
+- [x] Every removed/renamed helper, patch target, return attribute, and changed error string has a repository-wide caller/test audit. Any deliberate private-seam migration is enumerated and preserves equivalent fault coverage.
+- [x] The task records removed files/symbols and net production change; obsolete layers disappear instead of becoming new wrappers. No arbitrary LOC target overrides invariants.
+- [x] Existing behavioral/security tests remain; only demonstrably obsolete machinery-only assertions may be replaced with equivalent boundary assertions.
 
 # Documentation impact
 
@@ -86,11 +86,20 @@ Large relative to this task set, but confined to one intertwined recovery implem
 - Superseded base-only helpers that the runtime patch layer previously deleted at import time are
   removed physically: `_committed_coverage`, `_head_exists`, `_index_flags`,
   `_visible_worktree_paths`, and `_worktree`.
+- Review consolidation also removed superseded parallel Git metadata/object-store/query helpers,
+  including `_discover_git_directory`, `_copy_regular_metadata`, `_copy_metadata_tree`,
+  `_fingerprint_regular_metadata`, `_fingerprint_metadata_tree`, `_reject_split_index`,
+  `_pinned_fd_path`, `_open_object_store`, `_validate_object_store`, `_tree_root_oid`,
+  `_run_git_presence`, and `_open_object_store_root`. A repo-wide AST/reference sweep found no
+  remaining unreferenced top-level private recovery implementation.
 - Static composition helpers are named for their narrower role: `_load_scope_filter`,
   `_scan_working_tree_snapshot`, `_classify_worktree_snapshot`, `_assemble_report`, and
   `_latest_visible_commit`. Existing public-module fault injection remains intact. The two tests
   that targeted saved-original machinery now target `_scan_working_tree_snapshot` or assert
   ordinary-module reload behavior while preserving equivalent failure/behavior coverage.
+- Final review fixes centralize post-sandbox report finalization through
+  `_finalize_sandbox_report`, preserving the pre-consolidation topology/fingerprint revalidation
+  for success, no-repository, repository-discovery-error, and generic collection-error paths.
 - Production recovery-readiness code changes from 4,398 lines across three modules to 3,345 lines
   in one module after review consolidation, a net reduction of 1,053 production lines.
 - `docs/user-manual/04-setup-and-installation.md`,
@@ -101,15 +110,20 @@ Large relative to this task set, but confined to one intertwined recovery implem
 
 # Validation record
 
-Local validation in the provided execution environment:
-
-- `PYTHONPATH=src python -m pytest -q tests/cli -k 'doctor or recovery'`: **106 passed,
-  43 deselected**.
-- `python scripts/validate_tasks.py`: passed.
-- `python scripts/validate_manual_links.py`: passed for 22 chapters.
-- A full `PYTHONPATH=src python -m pytest -q` attempt reached collection but could not collect the
-  MCP suites because the local environment lacks the optional `mcp` dependency. `uv run --frozen`
-  cannot install the locked Python/dependencies because this sandbox has no external DNS.
-- A broader non-MCP full-suite attempt progressed without failures through 46% before the local
-  execution timeout. Required repository-wide lint/type/full-test and clean-room coverage therefore
-  remain CI checkpoints before completion.
+- Focused recovery/doctor validation after the final review fixes: **107 passed, 43 deselected**.
+- Targeted sandbox/error-ordering and repository-discovery compatibility regressions: **3 passed**.
+- Locked final-tree validation: `ruff format --check .` passed for 538 files; `ruff check .`
+  passed; `mypy src` passed for 235 source files; repo-wide `pytest -q` passed with **2,496 tests**.
+- `python scripts/validate_tasks.py` passed and `python scripts/validate_manual_links.py` validated
+  all 22 user-manual chapters.
+- Repo-wide AST/reference audit passed with no orphan top-level private recovery implementation.
+- Clean-head PR `fast-checks` and `obsidian-plugin` checkpoints passed on `ec6df858`.
+- Final normal Codex review completed on the clean head with no new review thread and a positive PR
+  reaction after all prior P1/P2 findings were resolved. Security review was skipped by explicit
+  current-user instruction overriding the repository-default review step.
+- Final GitHub `full-validation` run `34051244957` passed on `ec6df858`: all four full pytest
+  shards and aggregate `full-test` passed; `docker-setup-e2e` passed clean-room setup/MCP,
+  home-node service-container, QEMU/Buildx, and ARM64 home-node image build gates.
+- Earlier local full-suite attempts were limited because the provided sandbox lacked the optional
+  `mcp` dependency and external DNS; the locked GitHub environment supplied those dependencies
+  and completed the required repository-wide and clean-room coverage before task completion.
