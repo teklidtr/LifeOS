@@ -63,6 +63,7 @@ from lifeos.facade.read_only import (
     VAULT_CONTEXT_DESCRIPTOR,
     ReadMarkdownRequest,
     WikiSearchRequest,
+    WikiSearchResult,
     VaultContextRequest,
     get_vault_context,
     read_markdown,
@@ -83,11 +84,11 @@ from lifeos.mcp.models import (
     RegistryRefreshMCPResult,
     SubmitProposalMCPResult,
     UpdateWikiSectionProposalMCPResult,
-    WikiSearchMCPResult,
     VaultContextMCPResult,
     StudyLearningProposalMCPResult,
     RuntimeActivityMCPResult,
 )
+from lifeos.mcp.tool_contracts import build_mcp_tool, serialize_authoritative_output
 from lifeos.registry import Registry
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
@@ -241,34 +242,15 @@ def _strict_tool(
     name: str,
     description: str,
     annotations: ToolAnnotations,
+    output_type: type[object] | None = None,
 ) -> Tool:
-    tool = Tool.from_function(
+    return build_mcp_tool(
         fn,
         name=name,
         description=description,
         annotations=annotations,
-    )
-    base_model = tool.fn_metadata.arg_model
-    strict_model = cast(
-        type[BaseModel],
-        type(
-            f"Strict{base_model.__name__}",
-            (base_model,),
-            {
-                "model_config": ConfigDict(
-                    arbitrary_types_allowed=True,
-                    extra="forbid",
-                )
-            },
-        ),
-    )
-    strict_model.model_rebuild()
-    strict_metadata = tool.fn_metadata.model_copy(update={"arg_model": strict_model})
-    return tool.model_copy(
-        update={
-            "fn_metadata": strict_metadata,
-            "parameters": strict_model.model_json_schema(by_alias=True),
-        }
+        strict_inputs=False,
+        output_type=output_type,
     )
 
 
@@ -504,27 +486,15 @@ def create_mcp_server(
 
         return _invoke_mcp_tool(op)
 
-    def wiki_search_tool(query: str, limit: int = 8) -> WikiSearchMCPResult:
-        def op() -> WikiSearchMCPResult:
+    def wiki_search_tool(query: str, limit: int = 8) -> dict[str, object]:
+        def op() -> dict[str, object]:
             result = search_wiki(
                 vault_root=vault_root, request=WikiSearchRequest(query=query, limit=limit)
             )
             activity.append(tool="wiki_search", source_paths=[hit.path for hit in result.hits])
-            return {
-                "query": result.query,
-                "hits": [
-                    {
-                        "path": hit.path,
-                        "title": hit.title,
-                        "description": hit.description,
-                        "excerpt": hit.excerpt,
-                        "score": hit.score,
-                    }
-                    for hit in result.hits
-                ],
-            }
+            return serialize_authoritative_output(result, output_type=WikiSearchResult)
 
-        return _invoke_mcp_tool(op)
+        return cast(dict[str, object], _invoke_mcp_tool(op))
 
     def ingestion_evolve_wiki_proposal_tool(
         source_path: str,
@@ -949,6 +919,7 @@ def create_mcp_server(
                     idempotentHint=True,
                     openWorldHint=False,
                 ),
+                output_type=WikiSearchResult,
             ),
             _strict_tool(
                 ingestion_evolve_wiki_proposal_tool,
