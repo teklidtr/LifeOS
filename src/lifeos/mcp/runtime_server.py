@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -15,6 +15,7 @@ from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.facade.errors import ToolExecutionError
 from lifeos.facade.read_only import (
     WikiSearchRequest,
+    WikiSearchResult,
     push_vault_context_providers,
     reset_vault_context_providers,
     search_wiki,
@@ -27,7 +28,6 @@ from lifeos.mcp.exploration_tools import (
     build_exploration_tools,
     build_policy_read_tools,
 )
-from lifeos.mcp.models import WikiSearchMCPResult
 from lifeos.mcp.multi_source_tools import build_multi_source_ingestion_tools
 from lifeos.mcp.personal_pattern_tools import build_personal_pattern_tools
 from lifeos.mcp.research_tools import build_research_tools
@@ -37,6 +37,7 @@ from lifeos.mcp.server import (
     _invoke_mcp_tool,
     create_mcp_server as create_core_mcp_server,
 )
+from lifeos.mcp.tool_contracts import serialize_authoritative_output
 from lifeos.registry import Registry
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.contracts import (
@@ -250,8 +251,8 @@ def create_mcp_server(
         invoke=runtime_scoped_invoke,
     )
 
-    def wiki_search_tool(query: str, limit: int = 8) -> WikiSearchMCPResult:
-        def op() -> WikiSearchMCPResult:
+    def wiki_search_tool(query: str, limit: int = 8) -> dict[str, object]:
+        def op() -> dict[str, object]:
             result = search_wiki(
                 vault_root=vault_root,
                 request=WikiSearchRequest(query=query, limit=limit, mode="external"),
@@ -260,27 +261,18 @@ def create_mcp_server(
                 tool="wiki_search",
                 source_paths=[hit.path for hit in result.hits],
             )
-            return {
-                "query": result.query,
-                "hits": [
-                    {
-                        "path": hit.path,
-                        "title": hit.title,
-                        "description": hit.description,
-                        "excerpt": hit.excerpt,
-                        "score": hit.score,
-                    }
-                    for hit in result.hits
-                ],
-            }
+            return serialize_authoritative_output(result, output_type=WikiSearchResult)
 
-        return cast(WikiSearchMCPResult, runtime_scoped_invoke(op))
+        result = runtime_scoped_invoke(op)
+        assert isinstance(result, dict)
+        return result
 
     wiki_search = _strict_tool(
         wiki_search_tool,
         name="wiki_search",
         description=WIKI_SEARCH_MCP_DESCRIPTION,
         title="Search durable wiki",
+        output_type=WikiSearchResult,
     )
     core_tools = [
         tool
