@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1730
 title: Centralize proposal-document publication with initial feature consumers
-status: ready
+status: in-progress
 phase: hardening
 depends_on: []
 risk: high
