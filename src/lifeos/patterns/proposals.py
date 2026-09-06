@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import os
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypeAlias
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
-from lifeos._secure_io import SecureIOError, open_directory_secure
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import (
     CreateFile,
     PatchDocumentV2,
     PatchHumanFile,
     serialize_patch_json_bytes,
+)
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
 )
 from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.proposals.schema import (
@@ -640,66 +642,25 @@ def _publish_proposal(
     patches_json: bytes,
     review_json: bytes,
 ) -> None:
-    proposals_fd = proposal_fd = -1
-    created = complete = False
     try:
-        proposals_fd = _open_proposals_root(vault_root)
-        try:
-            os.mkdir(proposal_id, mode=0o755, dir_fd=proposals_fd)
-            created = True
-        except FileExistsError as exc:
+        publish_proposal_documents(
+            vault_root=vault_root,
+            proposal_id=proposal_id,
+            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
+        )
+    except ProposalPublicationError as exc:
+        if exc.code == "proposal_exists":
             raise PatternError(
                 "proposal_exists",
                 "An equivalent personal-pattern proposal already exists.",
                 {"proposal_id": proposal_id},
             ) from exc
-        proposal_fd = open_directory_secure(Path(proposal_id), dir_fd=proposals_fd)
-        atomic_write_file_secure(proposal_fd, "proposal.md", proposal_markdown)
-        atomic_write_file_secure(proposal_fd, "patches.json", patches_json)
-        atomic_write_file_secure(proposal_fd, "review.json", review_json)
-        complete = True
-    except PatternError:
-        raise
-    except (OSError, AtomicWriteError, SecureIOError) as exc:
+        if exc.code == "unsafe_proposals_root":
+            raise PatternError(
+                "unsafe_proposals_root",
+                "Proposal root is not a safe directory.",
+            ) from exc
         raise PatternError("proposal_publish_failed", str(exc)) from exc
-    finally:
-        if created and not complete:
-            if proposal_fd >= 0:
-                for filename in ("proposal.md", "patches.json", "review.json"):
-                    try:
-                        os.unlink(filename, dir_fd=proposal_fd)
-                    except OSError:
-                        pass
-            if proposals_fd >= 0:
-                try:
-                    os.rmdir(proposal_id, dir_fd=proposals_fd)
-                except OSError:
-                    pass
-        if proposal_fd >= 0:
-            os.close(proposal_fd)
-        if proposals_fd >= 0:
-            os.close(proposals_fd)
-
-
-def _open_proposals_root(vault_root: Path) -> int:
-    vault_fd = -1
-    try:
-        vault_fd = open_directory_secure(vault_root)
-        try:
-            os.mkdir("proposals", mode=0o755, dir_fd=vault_fd)
-        except FileExistsError:
-            pass
-        return open_directory_secure(Path("proposals"), dir_fd=vault_fd)
-    except SecureIOError as exc:
-        raise PatternError(
-            "unsafe_proposals_root",
-            "Proposal root is not a safe directory.",
-        ) from exc
-    except OSError as exc:
-        raise PatternError("proposal_publish_failed", str(exc)) from exc
-    finally:
-        if vault_fd >= 0:
-            os.close(vault_fd)
 
 
 def _utc_moment(value: datetime | None) -> datetime:
