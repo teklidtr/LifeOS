@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1732
 title: Make ingestion composition and provenance explicit
-status: backlog
+status: ready
 phase: hardening
 depends_on:
   - LIFEOS-1731
