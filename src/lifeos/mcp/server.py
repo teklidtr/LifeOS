@@ -19,9 +19,12 @@ from lifeos.facade.consequential_tools import (
     APPLY_PROPOSAL_DESCRIPTOR,
     APPROVE_PROPOSAL_DESCRIPTOR,
     SUBMIT_PROPOSAL_DESCRIPTOR,
-    SubmitProposalRequest,
-    ApproveProposalRequest,
     ApplyProposalRequest,
+    ApplyProposalResult,
+    ApproveProposalRequest,
+    ApproveProposalResult,
+    SubmitProposalRequest,
+    SubmitProposalResult,
     apply_proposal_tool,
     approve_proposal_tool,
     submit_proposal_tool,
@@ -43,28 +46,33 @@ from lifeos.facade.proposal_tools import (
     STUDY_EVOLVE_LEARNING_PROPOSAL_DESCRIPTOR,
     UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR,
     CompoundWikiProposalRequest,
+    CompoundWikiProposalResult,
     CreateWikiProposalRequest,
+    CreateWikiProposalResult,
+    EvolveStudyLearningProposalRequest,
+    EvolveStudyLearningProposalResult,
     EvolveWikiCreateRequest,
     EvolveWikiProposalRequest,
+    EvolveWikiProposalResult,
     EvolveWikiUpdateRequest,
     StudyFlashcardCreateRequest,
-    EvolveStudyLearningProposalRequest,
     UpdateWikiSectionProposalRequest,
+    UpdateWikiSectionProposalResult,
     create_wiki_and_update_section_proposal,
     create_wiki_proposal,
-    evolve_wiki_proposal,
     evolve_study_learning_proposal,
+    evolve_wiki_proposal,
     resolve_create_wiki_target,
     update_wiki_section_proposal,
 )
 from lifeos.facade.read_only import (
     READ_MARKDOWN_DESCRIPTOR,
-    WIKI_SEARCH_DESCRIPTOR,
     VAULT_CONTEXT_DESCRIPTOR,
+    WIKI_SEARCH_DESCRIPTOR,
     ReadMarkdownRequest,
+    VaultContextRequest,
     WikiSearchRequest,
     WikiSearchResult,
-    VaultContextRequest,
     get_vault_context,
     read_markdown,
     search_wiki,
@@ -75,18 +83,10 @@ from lifeos.facade.registry_tools import (
 )
 from lifeos.facade.authorization import ConsequentialAuthorizer
 from lifeos.mcp.models import (
-    ApplyProposalMCPResult,
-    ApproveProposalMCPResult,
-    CompoundWikiProposalMCPResult,
-    CreateWikiProposalMCPResult,
-    EvolveWikiProposalMCPResult,
     ReadMarkdownMCPResult,
     RegistryRefreshMCPResult,
-    SubmitProposalMCPResult,
-    UpdateWikiSectionProposalMCPResult,
-    VaultContextMCPResult,
-    StudyLearningProposalMCPResult,
     RuntimeActivityMCPResult,
+    VaultContextMCPResult,
 )
 from lifeos.mcp.tool_contracts import build_mcp_tool, serialize_authoritative_output
 from lifeos.registry import Registry
@@ -243,6 +243,7 @@ def _strict_tool(
     description: str,
     annotations: ToolAnnotations,
     output_type: type[object] | None = None,
+    output_model_name: str | None = None,
 ) -> Tool:
     return build_mcp_tool(
         fn,
@@ -251,6 +252,7 @@ def _strict_tool(
         annotations=annotations,
         strict_inputs=False,
         output_type=output_type,
+        output_model_name=output_model_name,
     )
 
 
@@ -500,8 +502,8 @@ def create_mcp_server(
         source_path: str,
         creates: list[EvolveWikiCreateMCPInput] | None = None,
         updates: list[EvolveWikiUpdateMCPInput] | None = None,
-    ) -> EvolveWikiProposalMCPResult:
-        def op() -> EvolveWikiProposalMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             request = EvolveWikiProposalRequest(
                 source_path=source_path,
                 creates=tuple(
@@ -546,13 +548,7 @@ def create_mcp_server(
                 target_paths=list(result.target_paths),
                 operation_count=result.operation_count,
             )
-            return {
-                "proposal_id": result.proposal_id,
-                "proposal_path": result.proposal_path,
-                "target_paths": list(result.target_paths),
-                "operation_count": result.operation_count,
-                "status": "draft",
-            }
+            return serialize_authoritative_output(result, output_type=EvolveWikiProposalResult)
 
         return _invoke_mcp_tool(op)
 
@@ -561,8 +557,8 @@ def create_mcp_server(
         wiki_creates: list[EvolveWikiCreateMCPInput] | None = None,
         wiki_updates: list[EvolveWikiUpdateMCPInput] | None = None,
         flashcards: list[StudyFlashcardCreateMCPInput] | None = None,
-    ) -> StudyLearningProposalMCPResult:
-        def op() -> StudyLearningProposalMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             request = EvolveStudyLearningProposalRequest(
                 source_path=source_path,
                 wiki_creates=tuple(
@@ -623,13 +619,11 @@ def create_mcp_server(
                 target_paths=list(result.target_paths),
                 operation_count=result.operation_count,
             )
-            return {
-                "proposal_id": result.proposal_id,
-                "proposal_path": result.proposal_path,
-                "target_paths": list(result.target_paths),
-                "operation_count": result.operation_count,
-                "status": "draft",
-            }
+            return serialize_authoritative_output(
+                result,
+                output_type=EvolveStudyLearningProposalResult,
+                output_model_name="StudyLearningProposalMCPResult",
+            )
 
         return _invoke_mcp_tool(op)
 
@@ -642,8 +636,8 @@ def create_mcp_server(
         slug: str | None = None,
         tags: list[str] | None = None,
         tag_rationale: str | None = None,
-    ) -> CreateWikiProposalMCPResult:
-        def op() -> CreateWikiProposalMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             request = CreateWikiProposalRequest(
                 source_path=source_path,
                 target_path=target_path,
@@ -673,12 +667,7 @@ def create_mcp_server(
                 target_paths=[res.target_path],
                 operation_count=1,
             )
-            return {
-                "proposal_id": res.proposal_id,
-                "proposal_path": res.proposal_path,
-                "target_path": res.target_path,
-                "status": "draft",
-            }
+            return serialize_authoritative_output(res, output_type=CreateWikiProposalResult)
 
         return _invoke_mcp_tool(op)
 
@@ -689,8 +678,8 @@ def create_mcp_server(
         body: str,
         tags: list[str] | None = None,
         tag_rationale: str | None = None,
-    ) -> UpdateWikiSectionProposalMCPResult:
-        def op() -> UpdateWikiSectionProposalMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             request = UpdateWikiSectionProposalRequest(
                 source_path=source_path,
                 target_path=target_path,
@@ -714,13 +703,9 @@ def create_mcp_server(
                 target_paths=[res.target_path],
                 operation_count=1,
             )
-            return {
-                "proposal_id": res.proposal_id,
-                "proposal_path": res.proposal_path,
-                "target_path": res.target_path,
-                "heading": res.heading,
-                "status": "draft",
-            }
+            return serialize_authoritative_output(
+                res, output_type=UpdateWikiSectionProposalResult
+            )
 
         return _invoke_mcp_tool(op)
 
@@ -736,8 +721,8 @@ def create_mcp_server(
         create_slug: str | None = None,
         create_tags: list[str] | None = None,
         create_tag_rationale: str | None = None,
-    ) -> CompoundWikiProposalMCPResult:
-        def op() -> CompoundWikiProposalMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             request = CompoundWikiProposalRequest(
                 source_path=source_path,
                 create_target_path=create_target_path,
@@ -775,51 +760,36 @@ def create_mcp_server(
                 target_paths=[res.create_target_path, res.update_target_path],
                 operation_count=2,
             )
-            return {
-                "proposal_id": res.proposal_id,
-                "proposal_path": res.proposal_path,
-                "create_target_path": res.create_target_path,
-                "update_target_path": res.update_target_path,
-                "heading": res.heading,
-                "status": "draft",
-            }
+            return serialize_authoritative_output(res, output_type=CompoundWikiProposalResult)
 
         return _invoke_mcp_tool(op)
 
-    def proposal_submit_tool(proposal_id: str) -> SubmitProposalMCPResult:
-        def op() -> SubmitProposalMCPResult:
+    def proposal_submit_tool(proposal_id: str) -> dict[str, object]:
+        def op() -> dict[str, object]:
             res = submit_proposal_tool(
                 vault_root=vault_root,
                 authorizer=authorizer,
                 request=SubmitProposalRequest(proposal_id=proposal_id),
             )
             activity.append(tool="proposal_submit", proposal_id=res.proposal_id)
-            return {
-                "proposal_id": res.proposal_id,
-                "status": "pending",
-                "review_digest": res.review_digest,
-            }
+            return serialize_authoritative_output(res, output_type=SubmitProposalResult)
 
         return _invoke_mcp_tool(op)
 
-    def proposal_approve_tool(proposal_id: str) -> ApproveProposalMCPResult:
-        def op() -> ApproveProposalMCPResult:
+    def proposal_approve_tool(proposal_id: str) -> dict[str, object]:
+        def op() -> dict[str, object]:
             res = approve_proposal_tool(
                 vault_root=vault_root,
                 authorizer=authorizer,
                 request=ApproveProposalRequest(proposal_id=proposal_id),
             )
             activity.append(tool="proposal_approve", proposal_id=res.proposal_id)
-            return {
-                "proposal_id": res.proposal_id,
-                "status": "approved",
-                "review_digest": res.review_digest,
-            }
+            return serialize_authoritative_output(res, output_type=ApproveProposalResult)
 
         return _invoke_mcp_tool(op)
 
-    def proposal_apply_tool(proposal_id: str) -> ApplyProposalMCPResult:
-        def op() -> ApplyProposalMCPResult:
+    def proposal_apply_tool(proposal_id: str) -> dict[str, object]:
+        def op() -> dict[str, object]:
             if runtime_dir is None:
                 res = apply_proposal_tool(
                     vault_root=vault_root,
@@ -838,11 +808,7 @@ def create_mcp_server(
                 proposal_id=res.proposal_id,
                 changed_paths=list(res.changed_paths),
             )
-            return {
-                "proposal_id": res.proposal_id,
-                "status": "applied",
-                "changed_paths": list(res.changed_paths),
-            }
+            return serialize_authoritative_output(res, output_type=ApplyProposalResult)
 
         return _invoke_mcp_tool(op)
 
@@ -932,6 +898,7 @@ def create_mcp_server(
                     idempotentHint=False,
                     openWorldHint=False,
                 ),
+                output_type=EvolveWikiProposalResult,
             ),
             _strict_tool(
                 study_evolve_learning_proposal_tool,
@@ -944,6 +911,8 @@ def create_mcp_server(
                     idempotentHint=False,
                     openWorldHint=False,
                 ),
+                output_type=EvolveStudyLearningProposalResult,
+                output_model_name="StudyLearningProposalMCPResult",
             ),
             _strict_tool(
                 ingestion_create_wiki_proposal_tool,
@@ -956,6 +925,7 @@ def create_mcp_server(
                     idempotentHint=False,
                     openWorldHint=False,
                 ),
+                output_type=CreateWikiProposalResult,
             ),
             _strict_tool(
                 ingestion_update_wiki_section_proposal_tool,
@@ -968,6 +938,7 @@ def create_mcp_server(
                     idempotentHint=False,
                     openWorldHint=False,
                 ),
+                output_type=UpdateWikiSectionProposalResult,
             ),
             _strict_tool(
                 ingestion_create_wiki_and_update_section_proposal_tool,
@@ -980,6 +951,7 @@ def create_mcp_server(
                     idempotentHint=False,
                     openWorldHint=False,
                 ),
+                output_type=CompoundWikiProposalResult,
             ),
             _strict_tool(
                 runtime_activity_tool,
@@ -1004,6 +976,7 @@ def create_mcp_server(
                     idempotentHint=False,
                     openWorldHint=False,
                 ),
+                output_type=SubmitProposalResult,
             ),
             _strict_tool(
                 proposal_approve_tool,
@@ -1016,6 +989,7 @@ def create_mcp_server(
                     idempotentHint=False,
                     openWorldHint=False,
                 ),
+                output_type=ApproveProposalResult,
             ),
             _strict_tool(
                 proposal_apply_tool,
@@ -1028,6 +1002,7 @@ def create_mcp_server(
                     idempotentHint=False,
                     openWorldHint=False,
                 ),
+                output_type=ApplyProposalResult,
             ),
         ],
     )
