@@ -105,3 +105,14 @@ Medium: six bounded consumer migrations onto an established primitive. Depends o
 
 - **Recommended model/configuration:** `gpt-5.6-terra`, reasoning effort `high`.
 - **Reason for the recommendation:** Once the shared boundary is validated, adoption is primarily bounded coding and caller migration. Terra is sufficient; high reasoning remains appropriate for error compatibility, verification ordering, and cleanup ownership across the six consumers.
+
+
+## Codex review fixes
+
+Normal Codex review of head `d899c3bbf0c13528a8a5ba699f864150362310d0` identified three P2 compatibility/cleanup findings. They were batched into one invariant-focused fix:
+
+- ingestion now explicitly rejects a `proposals_root` whose final component is not the canonical `proposals` directory, preventing a successful write to a different path than the returned path;
+- the shared publisher records the identity of a newly created staging directory before opening it and removes that empty directory only when the still-present entry matches the owned identity after an open failure;
+- all five migrated feature adapters preserve their former duplicate-publication `FileExistsError` detail while still translating through their existing feature-specific exception prefixes.
+
+Post-review validation run `{os.environ["RUN_ID"]}` repeated the focused publisher/ingestion coverage, both task validation groups, the full pytest suite, Ruff, mypy, task workflow validation, diff checks, and touched-file formatting before this commit.

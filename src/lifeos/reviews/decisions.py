@@ -339,7 +339,12 @@ def _publish_review_proposal(
             documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
         )
     except ProposalPublicationError as exc:
-        raise ReviewProposalError(f"Could not publish review proposal: {exc}") from exc
+        detail = (
+            str(exc.__cause__)
+            if exc.code == "proposal_exists" and isinstance(exc.__cause__, FileExistsError)
+            else str(exc)
+        )
+        raise ReviewProposalError(f"Could not publish review proposal: {detail}") from exc
 
 
 def create_review_proposal(

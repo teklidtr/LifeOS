@@ -1117,6 +1117,8 @@ def _persist_proposal_documents(
 ) -> Path:
     proposal_id = str(documents.proposal_id)
     proposal_dir = proposals_root / proposal_id
+    if proposals_root.name != "proposals":
+        raise ProposalPublicationError("Proposal root must be the canonical proposals directory")
     try:
         preflight_proposal_publication(vault_root=proposals_root.parent, proposal_id=proposal_id)
     except SharedProposalPublicationError as error:

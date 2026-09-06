@@ -507,7 +507,12 @@ def _publish(
             documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
         )
     except ProposalPublicationError as exc:
-        raise CopilotProposalError(f"could not publish copilot proposal: {exc}") from exc
+        detail = (
+            str(exc.__cause__)
+            if exc.code == "proposal_exists" and isinstance(exc.__cause__, FileExistsError)
+            else str(exc)
+        )
+        raise CopilotProposalError(f"could not publish copilot proposal: {detail}") from exc
 
 
 def _diff(before: str, after: str, path: str) -> str:

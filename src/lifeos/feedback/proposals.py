@@ -254,7 +254,12 @@ def _publish_feedback_proposal(
             documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
         )
     except ProposalPublicationError as exc:
-        raise FeedbackProposalError(f"Could not publish feedback proposal: {exc}") from exc
+        detail = (
+            str(exc.__cause__)
+            if exc.code == "proposal_exists" and isinstance(exc.__cause__, FileExistsError)
+            else str(exc)
+        )
+        raise FeedbackProposalError(f"Could not publish feedback proposal: {detail}") from exc
 
 
 def create_feedback_proposal(

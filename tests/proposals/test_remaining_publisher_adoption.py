@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import os
 from pathlib import Path
 from types import ModuleType
 from typing import Callable
@@ -102,8 +104,17 @@ def test_migrated_feature_adapter_preserves_duplicate_failure(
         "patches_json": b"patches",
     }
     adapter(**kwargs)
-    with pytest.raises(error_type):
+    with pytest.raises(error_type) as duplicate:
         adapter(**kwargs)
+    prefix = next(item[3] for item in _feature_adapters() if item[0] is module)
+    old_detail = str(
+        FileExistsError(
+            errno.EEXIST,
+            os.strerror(errno.EEXIST),
+            str(vault / "proposals" / "proposal-duplicate"),
+        )
+    )
+    assert str(duplicate.value) == f"{prefix}: {old_detail}"
     assert (vault / "proposals" / "proposal-duplicate" / "review.json").read_bytes() == b"{}\n"
 
 
@@ -148,3 +159,19 @@ def test_public_ingestion_runtime_uses_core_publication_adapter() -> None:
     assert (
         public_ingestion._persist_proposal_documents is ingestion_core._persist_proposal_documents
     )
+
+
+def test_ingestion_rejects_noncanonical_proposals_root_without_misplacing_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ingestion_core, "build_review_snapshot_bytes_from_patches", _review_bytes)
+    requested_root = tmp_path / "drafts"
+    with pytest.raises(
+        ingestion_core.ProposalPublicationError,
+        match="canonical proposals directory",
+    ):
+        ingestion_core._persist_proposal_documents(
+            proposals_root=requested_root, documents=_ingestion_documents()
+        )
+    assert not requested_root.exists()
+    assert not (tmp_path / "proposals" / "proposal-ingestion").exists()

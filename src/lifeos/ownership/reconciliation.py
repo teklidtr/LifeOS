@@ -210,7 +210,12 @@ def _publish_proposal(
             documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
         )
     except ProposalPublicationError as error:
+        detail = (
+            str(error.__cause__)
+            if error.code == "proposal_exists" and isinstance(error.__cause__, FileExistsError)
+            else str(error)
+        )
         raise OwnershipReconciliationError(
-            f"Could not publish ownership release proposal: {error}"
+            f"Could not publish ownership release proposal: {detail}"
         ) from error
     return vault_root / "proposals" / proposal_id

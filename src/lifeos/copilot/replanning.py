@@ -808,7 +808,12 @@ def _publish(
             documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
         )
     except ProposalPublicationError as exc:
-        raise ReplanningError(f"could not publish replanning proposal: {exc}") from exc
+        detail = (
+            str(exc.__cause__)
+            if exc.code == "proposal_exists" and isinstance(exc.__cause__, FileExistsError)
+            else str(exc)
+        )
+        raise ReplanningError(f"could not publish replanning proposal: {detail}") from exc
 
 
 def _severity_rank(value: str) -> int:
