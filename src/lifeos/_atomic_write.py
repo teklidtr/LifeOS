@@ -33,7 +33,9 @@ def atomic_write_file_secure(
     try:
         temp_fd = os.open(temp_name, open_flags, 0o644, dir_fd=dir_fd)
     except OSError as e:
-        raise AtomicWriteError(f"Failed to create temporary file: {e.strerror}", write_occurred=False)
+        raise AtomicWriteError(
+            f"Failed to create temporary file: {e.strerror}", write_occurred=False
+        )
 
     try:
         # Write content completely
