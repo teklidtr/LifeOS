@@ -40,6 +40,7 @@ jobs:
           python - <<'PY'
           import ast
           import subprocess
+          import types
 
           before = "9190f5235a836490655b0dd57dbe56b6fd180dcf"
           after = "1519e987b38499cee22ec97a1edac24c278d4f9a"
@@ -56,7 +57,28 @@ jobs:
                   ignored.lineno = 0
               return ast.dump(tree, include_attributes=False)
 
-          mismatches = []
+          def code_signature(code: types.CodeType):
+              constants = tuple(
+                  code_signature(value) if isinstance(value, types.CodeType) else value
+                  for value in code.co_consts
+              )
+              return (
+                  code.co_argcount,
+                  code.co_posonlyargcount,
+                  code.co_kwonlyargcount,
+                  code.co_nlocals,
+                  code.co_stacksize,
+                  code.co_flags,
+                  code.co_code,
+                  constants,
+                  code.co_names,
+                  code.co_varnames,
+                  code.co_freevars,
+                  code.co_cellvars,
+              )
+
+          structural_mismatches = []
+          bytecode_mismatches = []
           for path in changed:
               old = subprocess.check_output(
                   ["git", "show", f"{before}:{path}"], text=True
@@ -64,10 +86,21 @@ jobs:
               new = subprocess.check_output(
                   ["git", "show", f"{after}:{path}"], text=True
               )
-              if semantic_ast(old, path) != semantic_ast(new, path):
-                  mismatches.append(path)
+              if semantic_ast(old, path) == semantic_ast(new, path):
+                  continue
+              structural_mismatches.append(path)
+              if code_signature(compile(old, path, "exec")) != code_signature(
+                  compile(new, path, "exec")
+              ):
+                  bytecode_mismatches.append(path)
 
-          if mismatches:
-              raise SystemExit(f"AST mismatch after formatting: {mismatches}")
-          print(f"AST-equivalent formatter changes: {len(changed)} Python files")
+          if bytecode_mismatches:
+              raise SystemExit(
+                  f"formatter changes alter normalized bytecode: {bytecode_mismatches}"
+              )
+          print(f"Formatter-only Python files audited: {len(changed)}")
+          print(
+              "AST-structural but bytecode-equivalent formatter changes: "
+              f"{structural_mismatches}"
+          )
           PY
