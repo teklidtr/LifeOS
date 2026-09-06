@@ -45,8 +45,8 @@ During LIFEOS-1730 validation on 2026-09-06, the locked Ruff 0.15.21 command `uv
 
 # Documentation impact
 
-Status: none
-Reason: This task aligns source formatting and CI validation only; it must not change LifeOS user behavior, architecture, data contracts, setup, or operational semantics.
+Status: required
+Reason: README maintainer CI documentation must list the new repository-wide Ruff formatter gate; no LifeOS user behavior, architecture, data contracts, setup, or operational semantics change.
 
 # Validation
 
