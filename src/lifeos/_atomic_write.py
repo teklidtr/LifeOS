@@ -1,6 +1,6 @@
 import os
 import uuid
-from typing import Literal, Callable
+from typing import Callable, Literal
 
 
 class AtomicWriteError(Exception):
@@ -15,11 +15,17 @@ def atomic_write_file_secure(
     content: bytes,
     *,
     pre_replace_check: Callable[[], None] | None = None,
+    published_identity: Callable[[tuple[int, int]], None] | None = None,
 ) -> Literal["confirmed", "uncertain"]:
     """
     Atomically writes `content` to `filename` inside `dir_fd`.
     Replaces existing file atomically.
     Throws AtomicWriteError(write_occurred=False) on failure before replacement.
+
+    When ``published_identity`` is provided, it receives the device/inode identity of the
+    temporary regular file that was successfully installed at ``filename``. The identity is
+    captured from the open temporary descriptor before replacement, so callers can later prove
+    whether a path still names the file created by this write.
     """
     temp_name = f"{filename}.{uuid.uuid4().hex}.tmp"
     open_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -39,6 +45,8 @@ def atomic_write_file_secure(
             written += chunk
         # Fsync file
         os.fsync(temp_fd)
+        temp_stat = os.fstat(temp_fd)
+        temp_identity = (temp_stat.st_dev, temp_stat.st_ino)
     except Exception as e:
         os.close(temp_fd)
         try:
@@ -61,6 +69,9 @@ def atomic_write_file_secure(
         if isinstance(e, OSError):
             raise AtomicWriteError(f"Failed to replace file: {e.strerror}", write_occurred=False)
         raise
+
+    if published_identity is not None:
+        published_identity(temp_identity)
 
     durability: Literal["confirmed", "uncertain"] = "confirmed"
     if dir_fd is not None and hasattr(os, "fsync"):
