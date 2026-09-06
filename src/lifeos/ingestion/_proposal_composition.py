@@ -8,8 +8,8 @@ ambient state, module replacement, or rebinding imported implementations.
 
 from __future__ import annotations
 
-from dataclasses import replace
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, cast
 
@@ -39,6 +39,7 @@ from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import (
     PatchDocumentV2,
+    PatchOperationV2,
     ReplaceGeneratedFileV2,
     serialize_patch_json_bytes,
     validate_patch_document,
@@ -91,7 +92,7 @@ def _with_explicit_operation_provenance(*, documents: Any, source: SourceSnapsho
     """Attach one invocation's source only to its generated replacement operations."""
     patch = cast(PatchDocumentV2, validate_patch_document(json.loads(documents.patches_json)))
     changed = False
-    operations = []
+    operations: list[PatchOperationV2] = []
     for operation in patch.operations:
         if isinstance(operation, ReplaceGeneratedFileV2):
             candidate = _accumulate_generated_wiki_provenance(operation.new_content, source)
