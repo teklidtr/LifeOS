@@ -27,7 +27,7 @@ from lifeos.recovery_readiness import (
     recovery_report_to_dict,
 )
 from lifeos.registry import Registry
-from lifeos.status import StatusResult, collect_status, serialize_status_json
+from lifeos.status import StatusResult, collect_status, status_result_to_dict
 
 FindingState = Literal["healthy", "warning", "blocked"]
 
@@ -289,10 +289,7 @@ def collect_doctor(config: LifeOSConfig, *, config_path: Path) -> DoctorResult:
         *coherence_findings,
         *mcp_findings,
     )
-    blocked = (
-        any(finding.state == "blocked" for finding in findings)
-        or vault_status.exit_code != 0
-    )
+    blocked = any(finding.state == "blocked" for finding in findings) or vault_status.exit_code != 0
     return DoctorResult(
         lifeos_version=__version__,
         config_path=str(config_path.resolve()),
@@ -328,25 +325,17 @@ def format_doctor_text(result: DoctorResult) -> str:
         ),
         "  required sync exclusions:",
     ]
-    lines.extend(
-        f"    - {exclusion}"
-        for exclusion in result.topology.required_sync_exclusions
-    )
+    lines.extend(f"    - {exclusion}" for exclusion in result.topology.required_sync_exclusions)
     lines.extend(["", "Readiness checks"])
     for finding in result.findings:
-        lines.append(
-            f"  {finding.subsystem}: {finding.state} "
-            f"[{finding.code}] - {finding.detail}"
-        )
+        lines.append(f"  {finding.subsystem}: {finding.state} [{finding.code}] - {finding.detail}")
         if finding.next_action:
             lines.append(f"    next: {finding.next_action}")
 
     lines.extend(["", *format_recovery_text(result.recovery)])
     lines.extend(["", f"Vault health: {result.vault_status.overall_state}"])
     for check in result.vault_status.checks:
-        lines.append(
-            f"  {check.subsystem}: {check.state} [{check.code}] - {check.detail}"
-        )
+        lines.append(f"  {check.subsystem}: {check.state} [{check.code}] - {check.detail}")
         if check.next_action:
             lines.append(f"    next: {check.next_action}")
 
@@ -370,7 +359,7 @@ def serialize_doctor_json(result: DoctorResult) -> str:
         },
         "findings": [asdict(finding) for finding in result.findings],
         "recovery": recovery_report_to_dict(result.recovery),
-        "vault": json.loads(serialize_status_json(result.vault_status)),
+        "vault": status_result_to_dict(result.vault_status),
         "coherence": {
             "topology": result.topology.to_dict(),
             "identity_note_count": result.identity_note_count,

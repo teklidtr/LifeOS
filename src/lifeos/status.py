@@ -621,7 +621,8 @@ def format_status_text(status: StatusResult) -> str:
     return "\n".join(lines)
 
 
-def serialize_status_json(status: StatusResult) -> str:
+def status_result_to_dict(status: StatusResult) -> dict[str, object]:
+    """Project a status result into the stable public JSON-compatible shape."""
     files_dict = asdict(status.files) if status.files else None
     lint_dict = asdict(status.lint) if status.lint else None
     proposals_dict = (
@@ -629,7 +630,7 @@ def serialize_status_json(status: StatusResult) -> str:
         if status.proposals is not None
         else None
     )
-    data = {
+    return {
         "overall_state": status.overall_state,
         "exit_code": status.exit_code,
         "registry": asdict(status.registry),
@@ -639,7 +640,10 @@ def serialize_status_json(status: StatusResult) -> str:
         "features": asdict(status.features),
         "checks": [asdict(check) for check in status.checks],
     }
-    return json.dumps(data, indent=2)
+
+
+def serialize_status_json(status: StatusResult) -> str:
+    return json.dumps(status_result_to_dict(status), indent=2)
 
 
 def serialize_error_json(code: str, message: str, *, subsystem: str = "configuration") -> str:
