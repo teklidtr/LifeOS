@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-import re
 from typing import Literal, Mapping
 
 from lifeos.captures.artifact import CaptureArtifactService
@@ -130,6 +130,10 @@ class SourceImportRequest:
 class SourceInspectRequest:
     source: SourceReference
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, SourceReference):
+            raise ValueError("source must be a SourceReference")
+
 
 @dataclass(frozen=True, slots=True)
 class SourceExtractRequest:
@@ -139,6 +143,8 @@ class SourceExtractRequest:
     max_text_bytes: int = 24_000
 
     def __post_init__(self) -> None:
+        if not isinstance(self.source, SourceReference):
+            raise ValueError("source must be a SourceReference")
         if self.mode not in {"local", "external"}:
             raise ValueError("mode must be local or external")
         if type(self.allow_protected) is not bool:
@@ -297,8 +303,8 @@ def extract_source(
         _require_local_access(resolved, policy=policy, allow_protected=request.allow_protected)
 
     extractor = LocalExtractionService(vault_root=vault_root, runtime_dir=runtime_dir)
-    existing = extractor.load(resolved.reference.attachment_id)
     try:
+        existing = extractor.load(resolved.reference.attachment_id)
         if existing is None or existing.source_hash != resolved.manifest.metadata.content_hash:
             result = extractor.extract(resolved.manifest.metadata)
             extractor.publish(result)
@@ -479,17 +485,20 @@ def _require_external_access(
 ) -> None:
     from lifeos.captures.privacy import preview_capture_context
 
-    preview = preview_capture_context(
-        vault_root=vault_root,
-        runtime_dir=runtime_dir,
-        capture_path=request.source.capture_path,
-        selected_attachment_ids=(request.source.attachment_id,),
-        requested_operations=("source-extract",),
-        external_processing_intent=True,
-        allow_sensitive_capture=request.allow_protected,
-        max_item_bytes=request.max_text_bytes,
-        max_total_bytes=request.max_text_bytes,
-    )
+    try:
+        preview = preview_capture_context(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            capture_path=request.source.capture_path,
+            selected_attachment_ids=(request.source.attachment_id,),
+            requested_operations=("source-extract",),
+            external_processing_intent=True,
+            allow_sensitive_capture=request.allow_protected,
+            max_item_bytes=request.max_text_bytes,
+            max_total_bytes=request.max_text_bytes,
+        )
+    except CaptureError as exc:
+        raise _facade_error(exc) from exc
     if not any(item.attachment_id == request.source.attachment_id for item in preview.items):
         raise ToolAuthorizationError("Source content is not available for external disclosure")
 
@@ -508,17 +517,20 @@ def _external_text(
         return "", False
     from lifeos.captures.privacy import preview_capture_context
 
-    preview = preview_capture_context(
-        vault_root=vault_root,
-        runtime_dir=runtime_dir,
-        capture_path=capture.path,
-        selected_attachment_ids=(reference.attachment_id,),
-        requested_operations=("source-extract",),
-        external_processing_intent=True,
-        allow_sensitive_capture=allow_protected,
-        max_item_bytes=max_text_bytes,
-        max_total_bytes=max_text_bytes,
-    )
+    try:
+        preview = preview_capture_context(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            capture_path=capture.path,
+            selected_attachment_ids=(reference.attachment_id,),
+            requested_operations=("source-extract",),
+            external_processing_intent=True,
+            allow_sensitive_capture=allow_protected,
+            max_item_bytes=max_text_bytes,
+            max_total_bytes=max_text_bytes,
+        )
+    except CaptureError as exc:
+        raise _facade_error(exc) from exc
     item = next(
         (
             candidate
