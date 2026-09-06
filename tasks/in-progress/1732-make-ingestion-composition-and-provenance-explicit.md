@@ -50,6 +50,19 @@ Status: required
 - `docs/architecture.md`: describe explicit ingestion proposal composition and source/provenance ownership.
 - `docs/mcp-exploration-architecture.md`: align any ingestion implementation references while preserving the documented runtime and multi-source contracts.
 
+# Implementation record
+
+- Replaced import-time `sys.modules` substitution and `_core` attribute rebinding with a static public re-export facade plus ordinary `_proposal_composition` functions.
+- Removed the ambient `_current_source` `ContextVar`, `_with_source`, saved-original builder/persistence aliases, and wrapper dispatch that depended on rebinding imported implementations.
+- Single-source generated replacement operations now receive the verified `SourceSnapshot` explicitly at the composition boundary. The typed patch operations are rebuilt deterministically only when cumulative provenance gains that invocation's source; create and human-owned operations are unchanged.
+- Stable target identity binding, runtime/protected-path filtering, create-target absence checks, `before_publish` ordering, and the LIFEOS-1731 shared publication adapter remain explicit persistence steps with the existing public signatures and error strings.
+- Multi-source ingestion remains target-centric and already carries each target's verified source tuple explicitly. Its builder is unchanged; it enters the same static persistence composition through `persist_compounding_wiki_proposal`.
+- Repository-wide caller/patch-point search found facade and MCP/facade consumers using public names. The only production-adjacent private compatibility seam found in tests is `_persist_proposal_documents`; the public facade deliberately re-exports the exact core adapter object so the LIFEOS-1731 assertion remains valid. No callers of `_current_source`, `_with_source`, `_bind_existing_target_identities`, or the saved-original aliases were found.
+- Added a regression proving the public module is no longer the core module, the effective builder/persist entry points come from static composition, public compatibility signature shape is retained, and interleaved B/C/B generated-wiki updates cannot leak provenance between invocations.
+- Documentation updated in `docs/architecture.md` and `docs/mcp-exploration-architecture.md`. The user-manual ingestion/MCP chapters were reviewed; no user-visible workflow or contract changed, so no user-manual text change is required.
+- Production diff before final task-state bookkeeping: `src/lifeos/ingestion/_proposal_composition.py` +267, `src/lifeos/ingestion/proposals.py` +16/-313, for **net -30 production lines**.
+- Local executable validation is unavailable in this environment because a repository checkout cannot resolve the configured Git mirror (`git-mirror.hub.ace-research.openai.org`). The closest pre-PR substitute is connector-backed repository-wide caller/patch-point search, exact branch/master diff review, signature/invariant regression additions, and documentation diff inspection. Required executable gates must therefore be verified by PR CI and are recorded below rather than claimed as local passes.
+
 # Validation
 
 ```bash
