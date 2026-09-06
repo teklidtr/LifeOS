@@ -7,14 +7,16 @@ imports without replacing its module object or rebinding the core module at impo
 """
 
 from lifeos.ingestion._proposals_core import *  # noqa: F403
-from lifeos.ingestion._proposals_core import _persist_proposal_documents
+from lifeos.ingestion._proposals_core import (
+    _persist_proposal_documents as _persist_proposal_documents,
+)
 from lifeos.ingestion._proposal_composition import (
-    build_compound_wiki_proposal,
-    build_compounding_wiki_proposal,
-    build_study_learning_proposal,
-    build_wiki_section_update_proposal,
-    persist_compound_wiki_proposal,
-    persist_compounding_wiki_proposal,
-    persist_study_learning_proposal,
-    persist_wiki_section_update_proposal,
+    build_compound_wiki_proposal as build_compound_wiki_proposal,
+    build_compounding_wiki_proposal as build_compounding_wiki_proposal,
+    build_study_learning_proposal as build_study_learning_proposal,
+    build_wiki_section_update_proposal as build_wiki_section_update_proposal,
+    persist_compound_wiki_proposal as persist_compound_wiki_proposal,
+    persist_compounding_wiki_proposal as persist_compounding_wiki_proposal,
+    persist_study_learning_proposal as persist_study_learning_proposal,
+    persist_wiki_section_update_proposal as persist_wiki_section_update_proposal,
 )
