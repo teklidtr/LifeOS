@@ -1,0 +1,148 @@
+name: LIFEOS-1731 bounded implementation v2
+
+on:
+  push:
+    branches: [lifeos-1731-migrate-proposal-publishers]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[lifeos-1731-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: lifeos-1731-migrate-proposal-publishers
+
+      - name: Apply migration and ordering fixes
+        shell: python
+        run: |
+          from __future__ import annotations
+          import re
+          import textwrap
+          from pathlib import Path
+
+          old_workflow = Path('.github/workflows/lifeos-1731-apply.yml')
+          workflow_text = old_workflow.read_text(encoding='utf-8')
+          marker = '      - name: Apply LIFEOS-1731 migration\n        shell: python\n        run: |\n'
+          start = workflow_text.index(marker) + len(marker)
+          end = workflow_text.index('\n      - name: Install uv', start)
+          exec(textwrap.dedent(workflow_text[start:end]), {})
+
+          def replace_once(text: str, old: str, new: str, *, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
+
+          # Shared preflight is a narrow compatibility seam: root/id/duplicate checks without writes.
+          path = Path('src/lifeos/proposals/publication.py')
+          text = path.read_text(encoding='utf-8')
+          publish_marker = '\ndef publish_proposal_documents(\n'
+          preflight = '''\ndef preflight_proposal_publication(*, vault_root: Path, proposal_id: str) -> None:\n    """Validate the canonical publication target without creating a proposal draft."""\n    _validate_proposal_id(proposal_id)\n    proposals_fd = -1\n    try:\n        proposals_fd = _open_or_create_proposals_root(vault_root)\n        _raise_if_proposal_exists(proposals_fd, proposal_id)\n    finally:\n        if proposals_fd >= 0:\n            os.close(proposals_fd)\n\n'''
+          if publish_marker not in text:
+              raise RuntimeError('shared publisher marker missing')
+          text = text.replace(publish_marker, preflight + publish_marker, 1)
+          path.write_text(text, encoding='utf-8')
+
+          # Ingestion uses shared preflight before review parsing, preserving root/id/duplicate ordering.
+          path = Path('src/lifeos/ingestion/_proposals_core.py')
+          text = path.read_text(encoding='utf-8')
+          text = replace_once(
+              text,
+              '    ProposalPublicationError as SharedProposalPublicationError,\n    publish_proposal_documents,\n',
+              '    ProposalPublicationError as SharedProposalPublicationError,\n    preflight_proposal_publication,\n    publish_proposal_documents,\n',
+              label='ingestion preflight import',
+          )
+          pattern = r'def _persist_proposal_documents\(\n    \*,\n    proposals_root: Path,\n    documents: \(.*?(?=\n\ndef persist_wiki_proposal)'
+          replacement = '''def _raise_ingestion_publication_error(\n    *, error: SharedProposalPublicationError, proposal_dir: Path\n) -> None:\n    if error.code == "proposal_exists":\n        raise ProposalAlreadyExistsError(\n            f"Proposal directory already exists: {proposal_dir}"\n        ) from error\n    if error.code == "unsafe_proposal_id":\n        raise ProposalPublicationError("Proposal id is not safe for publication") from error\n    if error.code == "unsafe_proposals_root":\n        raise ProposalPublicationError("Proposal root is not a safe directory") from error\n    raise ProposalPublicationError(f"Failed to write proposal files: {error}") from error\n\n\ndef _persist_proposal_documents(\n    *,\n    proposals_root: Path,\n    documents: (\n        WikiProposalDocuments\n        | CompoundWikiProposalDocuments\n        | CompoundingWikiProposalDocuments\n        | StudyLearningProposalDocuments\n    ),\n) -> Path:\n    proposal_id = str(documents.proposal_id)\n    proposal_dir = proposals_root / proposal_id\n    try:\n        preflight_proposal_publication(\n            vault_root=proposals_root.parent, proposal_id=proposal_id\n        )\n    except SharedProposalPublicationError as error:\n        _raise_ingestion_publication_error(error=error, proposal_dir=proposal_dir)\n\n    review_json = build_review_snapshot_bytes_from_patches(\n        vault_root=proposals_root.parent,\n        patches_json=documents.patches_json,\n    )\n    try:\n        publish_proposal_documents(\n            vault_root=proposals_root.parent,\n            proposal_id=proposal_id,\n            documents=ProposalDocuments(\n                documents.proposal_markdown, documents.patches_json, review_json\n            ),\n        )\n    except SharedProposalPublicationError as error:\n        _raise_ingestion_publication_error(error=error, proposal_dir=proposal_dir)\n    return proposal_dir'''
+          text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+              raise RuntimeError(f'ingestion persistence replacement count={count}')
+          path.write_text(text, encoding='utf-8')
+
+          # Migrate write-fault tests to the actual physical writer seam owned by the shared publisher.
+          path = Path('tests/ingestion/test_proposals.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'lifeos.ingestion.proposals.atomic_write_file_secure',
+              'lifeos.proposals.publication.atomic_write_file_secure',
+          )
+          text = text.replace(
+              'lifeos.ingestion.proposals.os.open',
+              'lifeos.proposals.publication.os.open',
+          )
+          # These legacy fault tests used deliberately invalid patch bytes because old writes failed
+          # before review construction. Shared publication requires prepared review bytes, so make only
+          # the write-reaching cases structurally valid while keeping duplicate preflight coverage intact.
+          text = text.replace(
+              'proposal_id="new-id",\n        target_path="wiki/target.md",\n        proposal_markdown=b"body",\n        patches_json=b"{}",',
+              'proposal_id="new-id",\n        target_path="wiki/target.md",\n        proposal_markdown=b"body",\n        patches_json=b\'{"schema_version":2,"proposal_id":"new-id","operations":[]}\',',
+          )
+          text = text.replace(
+              'proposal_id="new-id-2",\n        target_path="wiki/target.md",\n        proposal_markdown=b"body",\n        patches_json=b"{}",',
+              'proposal_id="new-id-2",\n        target_path="wiki/target.md",\n        proposal_markdown=b"body",\n        patches_json=b\'{"schema_version":2,"proposal_id":"new-id-2","operations":[]}\',',
+          )
+          text = text.replace(
+              'proposal_id="new-id-3",\n        target_path="wiki/target.md",\n        proposal_markdown=b"body",\n        patches_json=b"{}",',
+              'proposal_id="new-id-3",\n        target_path="wiki/target.md",\n        proposal_markdown=b"body",\n        patches_json=b\'{"schema_version":2,"proposal_id":"new-id-3","operations":[]}\',',
+          )
+          text = text.replace(
+              'assert isinstance(exc.value.__cause__, OSError)',
+              'assert isinstance(exc.value.__cause__.__cause__, OSError)',
+          )
+          text = text.replace(
+              'assert isinstance(exc.value.__cause__, PermissionError)',
+              'assert isinstance(exc.value.__cause__.__cause__, PermissionError)',
+          )
+          path.write_text(text, encoding='utf-8')
+
+          Path('.github/workflows/lifeos-1731-apply-v2.yml').unlink()
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Format touched Python
+        run: >-
+          uv run ruff format
+          src/lifeos/proposals/publication.py
+          src/lifeos/copilot/proposals.py
+          src/lifeos/copilot/replanning.py
+          src/lifeos/feedback/proposals.py
+          src/lifeos/reviews/decisions.py
+          src/lifeos/ownership/reconciliation.py
+          src/lifeos/ingestion/proposals.py
+          src/lifeos/ingestion/_proposals_core.py
+          tests/ingestion/test_proposals.py
+          tests/proposals/test_remaining_publisher_adoption.py
+
+      - name: Focused validation
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          uv run pytest -q tests/proposals/test_remaining_publisher_adoption.py tests/ingestion/test_proposal_root_hardening.py
+          uv run pytest -q tests/copilot tests/planning_feedback tests/reviews tests/ownership tests/ingestion tests/proposals
+          uv run ruff check src/lifeos/proposals/publication.py src/lifeos/copilot/proposals.py src/lifeos/copilot/replanning.py src/lifeos/feedback/proposals.py src/lifeos/reviews/decisions.py src/lifeos/ownership/reconciliation.py src/lifeos/ingestion/proposals.py src/lifeos/ingestion/_proposals_core.py tests/ingestion/test_proposals.py tests/proposals/test_remaining_publisher_adoption.py
+          uv run mypy src
+          python scripts/validate_tasks.py
+          git diff --check
+          echo '--- remaining canonical proposal document write sites ---'
+          git grep -n -E '(atomic_write_file_secure|write_bytes|write_text).*"(proposal\.md|patches\.json|review\.json)"' -- src/lifeos || true
+
+      - name: Commit validated migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "LIFEOS-1731 Migrate remaining proposal publishers [lifeos-1731-applied]"
+          git push origin HEAD:lifeos-1731-migrate-proposal-publishers
