@@ -24,7 +24,21 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --extra dev --extra mcp
 
-      - name: Check Ruff formatting
-        run: uv run ruff format --check .
-
-# Validation-only workflow. This branch and PR are not merged.
+      - name: Show Ruff formatting diff for LIFEOS-1730 Python files
+        run: |
+          uv run ruff format \
+            src/lifeos/_atomic_write.py \
+            src/lifeos/captures/proposals.py \
+            src/lifeos/conversations/proposals.py \
+            src/lifeos/experiments/proposals.py \
+            src/lifeos/patterns/proposals.py \
+            src/lifeos/proposals/publication.py \
+            tests/proposals/test_publication.py
+          git diff -- \
+            src/lifeos/_atomic_write.py \
+            src/lifeos/captures/proposals.py \
+            src/lifeos/conversations/proposals.py \
+            src/lifeos/experiments/proposals.py \
+            src/lifeos/patterns/proposals.py \
+            src/lifeos/proposals/publication.py \
+            tests/proposals/test_publication.py
