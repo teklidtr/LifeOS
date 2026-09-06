@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Mapping
 
-from lifeos.captures.artifact import CaptureArtifactService
+from lifeos.captures.artifact import CaptureArtifactService, manifest_path
 from lifeos.captures.contracts import (
     AttachmentManifestArtifact,
     AttachmentReference,
@@ -17,6 +17,7 @@ from lifeos.captures.contracts import (
     PrivacyScope,
 )
 from lifeos.captures.extraction import ExtractionResult, LocalExtractionService
+from lifeos.captures.privacy import preview_capture_context
 from lifeos.captures.storage import AttachmentStore
 from lifeos.facade.errors import (
     ToolAuthorizationError,
@@ -57,9 +58,6 @@ SOURCE_EXTRACT_DESCRIPTOR = ToolDescriptor(
 _CAPTURE_ID = re.compile(r"^cap-\d{8}T\d{6}Z-[a-f0-9]{8}$")
 _ATTACHMENT_ID = re.compile(r"^att-[a-f0-9]{16}$")
 _PRIVACY_SCOPES = frozenset({"standard", "private", "protected"})
-_EXTRACTION_STATUSES = frozenset(
-    {"not-requested", "completed", "unavailable", "failed", "cancelled", "stale"}
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +92,7 @@ class SourceReference:
 
 @dataclass(frozen=True, slots=True)
 class SourceImportRequest:
-    """Trusted local ingress. ``source_path`` is invocation-only and is never returned."""
+    """Trusted-local ingress. ``source_path`` is invocation-only and is never returned."""
 
     source_path: str
     title: str | None = None
@@ -168,10 +166,6 @@ class SourceDetails:
     privacy_scope: str
     sensitive: bool
 
-    def __post_init__(self) -> None:
-        if self.extraction_status not in _EXTRACTION_STATUSES:
-            raise ValueError("extraction_status is invalid")
-
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
@@ -224,6 +218,9 @@ def import_source(
     captures = CaptureArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
     store = AttachmentStore(vault_root=vault_root, runtime_dir=runtime_dir)
     try:
+        # Prove and preserve the source before creating its capture record. Invalid ingress
+        # therefore cannot leave an empty canonical capture behind.
+        imported = store.import_file(source_path, capture_source="source.import", now=now)
         capture = captures.create(
             title=request.title.strip() if request.title is not None else source_path.name,
             capture_type="attachment",
@@ -232,18 +229,7 @@ def import_source(
             source_entry_point="source.import",
             privacy_scope=request.privacy_scope,
             sensitive=request.sensitive,
-            now=now,
-        )
-        imported = store.import_file(
-            source_path,
-            capture_source="source.import",
-            parent_capture_id=capture.metadata.capture_id,
-            now=now,
-        )
-        capture = store.attach_to_capture(
-            capture.path,
-            imported.reference,
-            expected_hash=capture.content_hash,
+            attachments=(imported.reference,),
             now=now,
         )
         details = _source_details(
@@ -283,16 +269,17 @@ def extract_source(
     """Run or reuse deterministic extraction under existing retrieval/privacy policy."""
 
     if request.mode == "external":
-        _require_external_access(
-            vault_root=vault_root,
-            runtime_dir=runtime_dir,
-            request=request,
-        )
+        _require_external_access(vault_root=vault_root, runtime_dir=runtime_dir, request=request)
         policy = None
     else:
         policy = _load_policy(vault_root)
         _require_path_allowed(
             request.source.capture_path,
+            policy=policy,
+            allow_protected=request.allow_protected,
+        )
+        _require_path_allowed(
+            manifest_path(request.source.attachment_id),
             policy=policy,
             allow_protected=request.allow_protected,
         )
@@ -312,6 +299,8 @@ def extract_source(
             result = existing
     except CaptureError as exc:
         raise _facade_error(exc) from exc
+    except (OSError, TypeError, ValueError) as exc:
+        raise ToolExecutionError("Source extraction state is unavailable") from exc
 
     if request.mode == "external":
         text, truncated = _external_text(
@@ -319,7 +308,6 @@ def extract_source(
             runtime_dir=runtime_dir,
             capture=resolved.capture,
             reference=resolved.reference,
-            result=result,
             allow_protected=request.allow_protected,
             max_text_bytes=request.max_text_bytes,
         )
@@ -340,7 +328,7 @@ def extract_source(
         quality=result.quality,
         text=text,
         metadata=result.metadata,
-        warning=result.warning,
+        warning=_safe_warning(result),
         truncated=truncated,
     )
 
@@ -367,6 +355,8 @@ def _resolve_source(
         )
         if reference is None:
             raise ToolNotFoundError("Source attachment is not linked to the capture")
+        if reference.manifest_path != manifest_path(reference.attachment_id):
+            raise ToolExecutionError("Source reference does not identify its canonical manifest")
         manifest = store.manifests.load(reference.manifest_path)
         metadata = manifest.metadata
         if (
@@ -398,6 +388,9 @@ def _source_details(
         extraction = extractor.load(reference.attachment_id)
     except CaptureError as exc:
         raise _facade_error(exc) from exc
+    except (OSError, TypeError, ValueError) as exc:
+        raise ToolExecutionError("Source processing state is unavailable") from exc
+
     if extraction is None:
         extraction_status = "not-requested"
         extraction_method = None
@@ -410,6 +403,7 @@ def _source_details(
         extraction_status = extraction.status
         extraction_method = extraction.method
         extraction_quality = extraction.quality
+
     return SourceDetails(
         source=SourceReference(capture.metadata.capture_id, capture.path, reference.attachment_id),
         original_filename=reference.original_filename,
@@ -466,11 +460,6 @@ def _require_local_access(
     ) and not allow_protected:
         raise ToolAuthorizationError("Protected source content requires explicit request scope")
     _require_path_allowed(
-        resolved.reference.manifest_path,
-        policy=policy,
-        allow_protected=allow_protected,
-    )
-    _require_path_allowed(
         resolved.reference.canonical_path,
         policy=policy,
         allow_protected=allow_protected,
@@ -483,8 +472,6 @@ def _require_external_access(
     runtime_dir: Path,
     request: SourceExtractRequest,
 ) -> None:
-    from lifeos.captures.privacy import preview_capture_context
-
     try:
         preview = preview_capture_context(
             vault_root=vault_root,
@@ -509,14 +496,9 @@ def _external_text(
     runtime_dir: Path,
     capture: CaptureArtifact,
     reference: AttachmentReference,
-    result: ExtractionResult,
     allow_protected: bool,
     max_text_bytes: int,
 ) -> tuple[str, bool]:
-    if not result.text:
-        return "", False
-    from lifeos.captures.privacy import preview_capture_context
-
     try:
         preview = preview_capture_context(
             vault_root=vault_root,
@@ -541,7 +523,7 @@ def _external_text(
         None,
     )
     if item is None:
-        raise ToolAuthorizationError("Extracted source text is not available for external disclosure")
+        return "", False
     return item.excerpt, item.truncated
 
 
@@ -556,6 +538,18 @@ def _truncate_utf8(text: str, limit: int) -> tuple[str, bool]:
         except UnicodeDecodeError:
             clipped = clipped[:-1]
     return "", True
+
+
+def _safe_warning(result: ExtractionResult) -> str:
+    if not result.warning:
+        return ""
+    if result.status == "unavailable":
+        return "Local extraction is unavailable for this source."
+    if result.status == "stale":
+        return "Source bytes changed; the derived extraction is stale."
+    if result.status == "cancelled":
+        return "Local extraction was cancelled."
+    return "Local extraction failed."
 
 
 def _facade_error(error: CaptureError) -> Exception:
