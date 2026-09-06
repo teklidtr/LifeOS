@@ -45,6 +45,20 @@ class ProposalPublicationError(RuntimeError):
         self.code = code
 
 
+def preflight_proposal_publication(*, vault_root: Path, proposal_id: str) -> None:
+    """Validate the canonical publication target without creating a proposal draft."""
+    _validate_proposal_id(proposal_id)
+    vault_fd = proposals_fd = -1
+    try:
+        vault_fd, proposals_fd = _open_proposals_root(vault_root)
+        _raise_if_proposal_exists(proposals_fd, proposal_id)
+    finally:
+        if proposals_fd >= 0:
+            os.close(proposals_fd)
+        if vault_fd >= 0:
+            os.close(vault_fd)
+
+
 def publish_proposal_documents(
     *,
     vault_root: Path,

@@ -5,24 +5,35 @@ from __future__ import annotations
 import copy
 import difflib
 import hashlib
-import os
 import re
-import shutil
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
+)
 from lifeos.daily.errors import DailyInteractionError
 from lifeos.daily.service import _frontmatter_document, content_hash
 from lifeos.markdown.parser import FenceState, advance_fenced_code_state, parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.loader import load_proposal_directory
 from lifeos.proposals.patches import PatchDocumentV2, PatchHumanFile, serialize_patch_json_bytes
-from lifeos.proposals.schema import ProposalMetadata, ProposalRisk, ProposalStatus, generate_proposal_id
+from lifeos.proposals.schema import (
+    ProposalMetadata,
+    ProposalRisk,
+    ProposalStatus,
+    generate_proposal_id,
+)
 from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
-from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate, extract_managed_block
+from lifeos.reviews.artifact import (
+    ReviewArtifactService,
+    ReviewArtifactUpdate,
+    extract_managed_block,
+)
 from lifeos.reviews.contracts import DecisionKind, ReviewArtifact, ReviewItemDecision
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
@@ -59,7 +70,7 @@ _RAW_HTML_BLOCK_START = re.compile(
 # Conservative type-7 tag recognition. Quoted attribute values may contain angle
 # brackets; text outside quotes may not consume the tag-closing `>`.
 _RAW_HTML_COMPLETE_TAG = re.compile(
-    r'''^ {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[^<>"']|"[^"]*"|'[^']*')*>[ \t]*$'''
+    r"""^ {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[^<>"']|"[^"]*"|'[^']*')*>[ \t]*$"""
 )
 _ALLOWED_NOTE_STATUS = {"inbox", "active", "paused", "completed", "cancelled", "archived", "seed"}
 _ALLOWED_TASK_STATUS = {"todo", "active", "done", "cancelled", "blocked", "pending"}
@@ -250,7 +261,11 @@ def _existing_review_proposal(proposals_root: Path, fingerprint: str) -> str | N
             continue
         extensions = loaded.proposal.metadata.extensions
         review = extensions.get("review_artifact") if hasattr(extensions, "get") else None
-        if review is not None and hasattr(review, "get") and review.get("evidence_fingerprint") == fingerprint:
+        if (
+            review is not None
+            and hasattr(review, "get")
+            and review.get("evidence_fingerprint") == fingerprint
+        ):
             return loaded.proposal.metadata.id
     return None
 
@@ -283,7 +298,11 @@ def _apply_review_change(frontmatter: dict[str, Any], request: ReviewProposalReq
         tasks = frontmatter.get("tasks")
         if not isinstance(tasks, list):
             raise ReviewProposalError("Target note does not contain a task list.")
-        matches = [item for item in tasks if isinstance(item, dict) and item.get("task_id") == request.task_id]
+        matches = [
+            item
+            for item in tasks
+            if isinstance(item, dict) and item.get("task_id") == request.task_id
+        ]
         if len(matches) != 1:
             raise ReviewProposalError("Task ID must match exactly one task in the target note.")
         matches[0]["status"] = request.value
@@ -304,6 +323,23 @@ def _proposal_body(request: ReviewProposalRequest) -> str:
         "## Safety\n\n"
         "This draft does not change the target until it is submitted, approved, and explicitly applied.\n"
     )
+
+
+def _publish_review_proposal(
+    *, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes
+) -> None:
+    review_json = build_review_snapshot_bytes_from_patches(
+        vault_root=vault_root,
+        patches_json=patches_json,
+    )
+    try:
+        publish_proposal_documents(
+            vault_root=vault_root,
+            proposal_id=proposal_id,
+            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
+        )
+    except ProposalPublicationError as exc:
+        raise ReviewProposalError(f"Could not publish review proposal: {exc}") from exc
 
 
 def create_review_proposal(
@@ -395,31 +431,12 @@ def create_review_proposal(
     )
     proposal_markdown = serialize_proposal_markdown(metadata, _proposal_body(request))
     patches_json = serialize_patch_json_bytes(patch_document)
-    review_json = build_review_snapshot_bytes_from_patches(
+    _publish_review_proposal(
         vault_root=vault_root,
+        proposal_id=proposal_id,
+        proposal_markdown=proposal_markdown,
         patches_json=patches_json,
     )
-    proposals_root = vault_root / "proposals"
-    proposal_dir = proposals_root / proposal_id
-    proposals_root.mkdir(parents=True, exist_ok=True)
-    created = False
-    published = False
-    dir_fd = -1
-    try:
-        proposal_dir.mkdir(exist_ok=False)
-        created = True
-        dir_fd = os.open(proposal_dir, os.O_RDONLY | os.O_DIRECTORY)
-        atomic_write_file_secure(dir_fd, "proposal.md", proposal_markdown)
-        atomic_write_file_secure(dir_fd, "patches.json", patches_json)
-        atomic_write_file_secure(dir_fd, "review.json", review_json)
-        published = True
-    except (OSError, AtomicWriteError) as exc:
-        raise ReviewProposalError(f"Could not publish review proposal: {exc}") from exc
-    finally:
-        if dir_fd >= 0:
-            os.close(dir_fd)
-        if created and not published:
-            shutil.rmtree(proposal_dir, ignore_errors=True)
     return ReviewProposalResult(
         proposal_id,
         f"proposals/{proposal_id}",

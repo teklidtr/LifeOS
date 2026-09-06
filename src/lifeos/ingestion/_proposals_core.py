@@ -1,7 +1,5 @@
 import difflib
-import os
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -25,6 +23,12 @@ from lifeos.proposals.patches import (
     serialize_patch_json_bytes,
 )
 from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError as SharedProposalPublicationError,
+    preflight_proposal_publication,
+    publish_proposal_documents,
+)
 from lifeos.registry.file_tracking import validate_vault_path
 from lifeos.ingestion.provenance import (
     provenance_to_frontmatter_value,
@@ -32,7 +36,6 @@ from lifeos.ingestion.provenance import (
     ProvenanceSource,
     ProvenanceGenerator,
 )
-from lifeos._atomic_write import atomic_write_file_secure
 
 
 class WikiTargetExistsError(Exception):
@@ -159,6 +162,8 @@ class _WikiFrontmatterDumper(yaml.SafeDumper):
 
 
 _ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}(#{1,6})(?:[ \t]+|$)(.*?)(?:\r?\n)?$")
+
+
 def _scan_atx_headings(lines: list[str], *, skip_frontmatter: bool) -> list[tuple[int, int, str]]:
     headings: list[tuple[int, int, str]] = []
     in_frontmatter = False
@@ -1086,6 +1091,20 @@ def build_study_learning_proposal(
     )
 
 
+def _raise_ingestion_publication_error(
+    *, error: SharedProposalPublicationError, proposal_dir: Path
+) -> None:
+    if error.code == "proposal_exists":
+        raise ProposalAlreadyExistsError(
+            f"Proposal directory already exists: {proposal_dir}"
+        ) from error
+    if error.code == "unsafe_proposal_id":
+        raise ProposalPublicationError("Proposal id is not safe for publication") from error
+    if error.code == "unsafe_proposals_root":
+        raise ProposalPublicationError("Proposal root is not a safe directory") from error
+    raise ProposalPublicationError(f"Failed to write proposal files: {error}") from error
+
+
 def _persist_proposal_documents(
     *,
     proposals_root: Path,
@@ -1096,38 +1115,27 @@ def _persist_proposal_documents(
         | StudyLearningProposalDocuments
     ),
 ) -> Path:
-    proposal_dir = proposals_root / documents.proposal_id
-    proposal_created = False
-    publication_complete = False
-    dir_fd = -1
-
+    proposal_id = str(documents.proposal_id)
+    proposal_dir = proposals_root / proposal_id
     try:
-        try:
-            proposal_dir.mkdir(parents=False, exist_ok=False)
-            proposal_created = True
-        except FileExistsError as e:
-            raise ProposalAlreadyExistsError(
-                f"Proposal directory already exists: {proposal_dir}"
-            ) from e
+        preflight_proposal_publication(vault_root=proposals_root.parent, proposal_id=proposal_id)
+    except SharedProposalPublicationError as error:
+        _raise_ingestion_publication_error(error=error, proposal_dir=proposal_dir)
 
-        try:
-            dir_fd = os.open(proposal_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            atomic_write_file_secure(dir_fd, "proposal.md", documents.proposal_markdown)
-            atomic_write_file_secure(dir_fd, "patches.json", documents.patches_json)
-            review_json = build_review_snapshot_bytes_from_patches(
-                vault_root=proposals_root.parent,
-                patches_json=documents.patches_json,
-            )
-            atomic_write_file_secure(dir_fd, "review.json", review_json)
-            publication_complete = True
-        except OSError as e:
-            raise ProposalPublicationError(f"Failed to write proposal files: {e}") from e
-    finally:
-        if dir_fd != -1:
-            os.close(dir_fd)
-        if proposal_created and not publication_complete:
-            shutil.rmtree(proposal_dir, ignore_errors=True)
-
+    review_json = build_review_snapshot_bytes_from_patches(
+        vault_root=proposals_root.parent,
+        patches_json=documents.patches_json,
+    )
+    try:
+        publish_proposal_documents(
+            vault_root=proposals_root.parent,
+            proposal_id=proposal_id,
+            documents=ProposalDocuments(
+                documents.proposal_markdown, documents.patches_json, review_json
+            ),
+        )
+    except SharedProposalPublicationError as error:
+        _raise_ingestion_publication_error(error=error, proposal_dir=proposal_dir)
     return proposal_dir
 
 

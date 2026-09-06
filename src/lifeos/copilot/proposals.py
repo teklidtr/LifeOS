@@ -5,20 +5,32 @@ from __future__ import annotations
 import copy
 import difflib
 import hashlib
-import os
 import re
-import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
+)
 from lifeos.daily.service import _frontmatter_document, content_hash as raw_content_hash
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
-from lifeos.proposals.patches import CreateFile, PatchDocumentV2, PatchHumanFile, serialize_patch_json_bytes
-from lifeos.proposals.schema import ProposalMetadata, ProposalRisk, ProposalStatus, generate_proposal_id
+from lifeos.proposals.patches import (
+    CreateFile,
+    PatchDocumentV2,
+    PatchHumanFile,
+    serialize_patch_json_bytes,
+)
+from lifeos.proposals.schema import (
+    ProposalMetadata,
+    ProposalRisk,
+    ProposalStatus,
+    generate_proposal_id,
+)
 from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
@@ -27,10 +39,18 @@ from .decomposition import DecompositionResult
 from .sessions import PlanningSessionService, SessionConflictError
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,127}$")
-_ALLOWED_GOAL_FIELDS = frozenset({
-    "title", "why", "desired_change", "horizon", "constraints", "non_goals",
-    "review_cadence", "readiness",
-})
+_ALLOWED_GOAL_FIELDS = frozenset(
+    {
+        "title",
+        "why",
+        "desired_change",
+        "horizon",
+        "constraints",
+        "non_goals",
+        "review_cadence",
+        "readiness",
+    }
+)
 
 
 class CopilotProposalError(ValueError):
@@ -87,7 +107,9 @@ def create_copilot_plan_proposal(
     now: datetime | None = None,
 ) -> CopilotProposalResult:
     """Publish a draft proposal. It never mutates canonical goal or plan files."""
-    _validate_request(request, option=option, decomposition=decomposition, index=index, vault_root=vault_root)
+    _validate_request(
+        request, option=option, decomposition=decomposition, index=index, vault_root=vault_root
+    )
     if not actor_id.strip():
         raise CopilotProposalError("actor_id is required")
     if session_service is not None:
@@ -143,14 +165,16 @@ def create_copilot_plan_proposal(
         if request.plan_id not in refs:
             refs.append(request.plan_id)
         updated_goal["active_plans"] = sorted(set(refs))
-    updated_goal_content = _frontmatter_document(
-        updated_goal, goal_parsed.body, preserve_body=True
-    )
+    updated_goal_content = _frontmatter_document(updated_goal, goal_parsed.body, preserve_body=True)
     if updated_goal_content != goal_source.content:
-        operations.append(PatchHumanFile(
-            "op-update-goal", request.goal_path, goal_base,
-            _diff(goal_source.content, updated_goal_content, request.goal_path),
-        ))
+        operations.append(
+            PatchHumanFile(
+                "op-update-goal",
+                request.goal_path,
+                goal_base,
+                _diff(goal_source.content, updated_goal_content, request.goal_path),
+            )
+        )
         base_hashes.append((request.goal_path, goal_base))
     operations.extend(conflict_ops)
     base_hashes.extend(conflict_hashes)
@@ -185,7 +209,15 @@ def create_copilot_plan_proposal(
         applied_at=None,
         applied_by=None,
         related_goals=(goal_id,),
-        related_sources=tuple(dict.fromkeys((request.goal_path, *option.source_refs, *(edit.target_path for edit in request.conflict_edits)))),
+        related_sources=tuple(
+            dict.fromkeys(
+                (
+                    request.goal_path,
+                    *option.source_refs,
+                    *(edit.target_path for edit in request.conflict_edits),
+                )
+            )
+        ),
         extensions={
             "goal_to_plan": {
                 "session_id": request.session_id,
@@ -220,13 +252,24 @@ def create_copilot_plan_proposal(
     )
 
 
-def _validate_request(request: CopilotProposalRequest, *, option: PlanOption, decomposition: DecompositionResult, index: CopilotIndex, vault_root: Path) -> None:
+def _validate_request(
+    request: CopilotProposalRequest,
+    *,
+    option: PlanOption,
+    decomposition: DecompositionResult,
+    index: CopilotIndex,
+    vault_root: Path,
+) -> None:
     if decomposition.option_id != option.option_id:
         raise CopilotProposalError("decomposition does not match the selected option")
     for identifier, label in ((request.plan_id, "plan_id"), (request.session_id, "session_id")):
         if not _ID_RE.match(identifier):
             raise CopilotProposalError(f"{label} is invalid")
-    if not request.plan_path.startswith("plans/") or not request.plan_path.endswith(".md") or ".." in Path(request.plan_path).parts:
+    if (
+        not request.plan_path.startswith("plans/")
+        or not request.plan_path.endswith(".md")
+        or ".." in Path(request.plan_path).parts
+    ):
         raise CopilotProposalError("plan_path must be a safe plans/*.md path")
     if (vault_root / request.plan_path).exists():
         raise CopilotProposalError("target plan already exists")
@@ -257,7 +300,9 @@ def _validate_request(request: CopilotProposalRequest, *, option: PlanOption, de
         raise CopilotProposalError("conflict edit targets must be unique and distinct")
 
 
-def _selected_milestones(option: PlanOption, request: CopilotProposalRequest) -> tuple[dict[str, Any], ...]:
+def _selected_milestones(
+    option: PlanOption, request: CopilotProposalRequest
+) -> tuple[dict[str, Any], ...]:
     result: list[dict[str, Any]] = []
     for milestone in option.milestones:
         if milestone.milestone_id not in request.included_milestone_ids:
@@ -267,13 +312,22 @@ def _selected_milestones(option: PlanOption, request: CopilotProposalRequest) ->
         if not set(edits) <= {"title", "outcome", "target_date", "wave"}:
             raise CopilotProposalError("milestone edit contains unsupported fields")
         data.update(edits)
-        if not isinstance(data.get("title"), str) or not data["title"].strip() or not isinstance(data.get("outcome"), str) or not data["outcome"].strip():
+        if (
+            not isinstance(data.get("title"), str)
+            or not data["title"].strip()
+            or not isinstance(data.get("outcome"), str)
+            or not data["outcome"].strip()
+        ):
             raise CopilotProposalError("edited milestone title and outcome are required")
         result.append(data)
     return tuple(result)
 
 
-def _selected_actions(decomposition: DecompositionResult, request: CopilotProposalRequest, milestones: Sequence[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
+def _selected_actions(
+    decomposition: DecompositionResult,
+    request: CopilotProposalRequest,
+    milestones: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
     milestone_ids = {str(item["milestone_id"]) for item in milestones}
     result: list[dict[str, Any]] = []
     for generated in decomposition.actions:
@@ -281,12 +335,24 @@ def _selected_actions(decomposition: DecompositionResult, request: CopilotPropos
         if action.task_id not in request.included_action_ids:
             continue
         if action.milestone_id not in milestone_ids:
-            raise CopilotProposalError(f"included action {action.task_id} belongs to an excluded milestone")
+            raise CopilotProposalError(
+                f"included action {action.task_id} belongs to an excluded milestone"
+            )
         data = action.to_dict()
         data["verification"] = generated.verification
         data["kind"] = generated.kind
         edits = dict(request.action_edits.get(action.task_id, {}))
-        if not set(edits) <= {"title", "duration", "energy", "motivation", "mode", "due", "blocked_by", "rationale", "verification"}:
+        if not set(edits) <= {
+            "title",
+            "duration",
+            "energy",
+            "motivation",
+            "mode",
+            "due",
+            "blocked_by",
+            "rationale",
+            "verification",
+        }:
             raise CopilotProposalError("action edit contains unsupported fields")
         data.update(edits)
         if not isinstance(data.get("title"), str) or not data["title"].strip():
@@ -298,7 +364,15 @@ def _selected_actions(decomposition: DecompositionResult, request: CopilotPropos
     return tuple(result)
 
 
-def _plan_document(*, request: CopilotProposalRequest, option: PlanOption, goal_id: str, milestones: Sequence[Mapping[str, Any]], actions: Sequence[Mapping[str, Any]], supersedes: str | None) -> str:
+def _plan_document(
+    *,
+    request: CopilotProposalRequest,
+    option: PlanOption,
+    goal_id: str,
+    milestones: Sequence[Mapping[str, Any]],
+    actions: Sequence[Mapping[str, Any]],
+    supersedes: str | None,
+) -> str:
     frontmatter: dict[str, Any] = {
         "copilot_schema_version": 1,
         "id": request.plan_id,
@@ -336,7 +410,9 @@ def decomposition_depth(option: PlanOption) -> int:
 def _apply_goal_updates(frontmatter: dict[str, Any], updates: Mapping[str, Any]) -> None:
     for key, value in updates.items():
         if key in {"constraints", "non_goals"}:
-            if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) and item.strip() for item in value):
+            if not isinstance(value, (list, tuple)) or not all(
+                isinstance(item, str) and item.strip() for item in value
+            ):
                 raise CopilotProposalError(f"{key} must be a list of non-empty strings")
             frontmatter[key] = list(value)
         elif value is None:
@@ -347,11 +423,15 @@ def _apply_goal_updates(frontmatter: dict[str, Any], updates: Mapping[str, Any])
             frontmatter[key] = value.strip()
 
 
-def _conflict_operations(*, vault_root: Path, request: CopilotProposalRequest) -> tuple[list[PatchHumanFile], list[tuple[str, str]], str | None]:
+def _conflict_operations(
+    *, vault_root: Path, request: CopilotProposalRequest
+) -> tuple[list[PatchHumanFile], list[tuple[str, str]], str | None]:
     operations: list[PatchHumanFile] = []
     hashes: list[tuple[str, str]] = []
     supersedes: str | None = None
-    for index, edit in enumerate(sorted(request.conflict_edits, key=lambda item: item.target_path), start=1):
+    for index, edit in enumerate(
+        sorted(request.conflict_edits, key=lambda item: item.target_path), start=1
+    ):
         try:
             source = read_vault_markdown(vault_root, edit.target_path)
         except VaultAccessError as exc:
@@ -364,21 +444,43 @@ def _conflict_operations(*, vault_root: Path, request: CopilotProposalRequest) -
             fm["status"] = "paused"
         else:
             if supersedes is not None:
-                raise CopilotProposalError("only one plan can be explicitly superseded by a new plan")
+                raise CopilotProposalError(
+                    "only one plan can be explicitly superseded by a new plan"
+                )
             supersedes = fm["id"]
             fm["status"] = "superseded"
             fm["superseded_by"] = request.plan_id
         updated = _frontmatter_document(fm, parsed.body, preserve_body=True)
         base = _hash(source.content)
-        operations.append(PatchHumanFile(f"op-conflict-{index}", edit.target_path, base, _diff(source.content, updated, edit.target_path)))
+        operations.append(
+            PatchHumanFile(
+                f"op-conflict-{index}",
+                edit.target_path,
+                base,
+                _diff(source.content, updated, edit.target_path),
+            )
+        )
         hashes.append((edit.target_path, base))
     return operations, hashes, supersedes
 
 
-def _proposal_body(request: CopilotProposalRequest, option: PlanOption, milestones: Sequence[Mapping[str, Any]], actions: Sequence[Mapping[str, Any]]) -> str:
-    milestone_lines = "\n".join(f"- `{item['milestone_id']}`: {item['title']}" for item in milestones)
-    action_lines = "\n".join(f"- `{item['task_id']}`: {item['title']}" for item in actions) or "- No near-term actions selected"
-    conflicts = "\n".join(f"- `{item.action}` `{item.target_path}`" for item in request.conflict_edits) or "- None"
+def _proposal_body(
+    request: CopilotProposalRequest,
+    option: PlanOption,
+    milestones: Sequence[Mapping[str, Any]],
+    actions: Sequence[Mapping[str, Any]],
+) -> str:
+    milestone_lines = "\n".join(
+        f"- `{item['milestone_id']}`: {item['title']}" for item in milestones
+    )
+    action_lines = (
+        "\n".join(f"- `{item['task_id']}`: {item['title']}" for item in actions)
+        or "- No near-term actions selected"
+    )
+    conflicts = (
+        "\n".join(f"- `{item.action}` `{item.target_path}`" for item in request.conflict_edits)
+        or "- None"
+    )
     return (
         "## Visible draft selection\n\n"
         f"**Planning session:** `{request.session_id}`\n\n"
@@ -391,36 +493,32 @@ def _proposal_body(request: CopilotProposalRequest, option: PlanOption, mileston
     )
 
 
-def _publish(*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes) -> None:
+def _publish(
+    *, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes
+) -> None:
     review_json = build_review_snapshot_bytes_from_patches(
         vault_root=vault_root,
         patches_json=patches_json,
     )
-    root = vault_root / "proposals"
-    root.mkdir(parents=True, exist_ok=True)
-    proposal_dir = root / proposal_id
-    created = False
-    published = False
-    fd = -1
     try:
-        proposal_dir.mkdir(exist_ok=False)
-        created = True
-        fd = os.open(proposal_dir, os.O_RDONLY | os.O_DIRECTORY)
-        atomic_write_file_secure(fd, "proposal.md", proposal_markdown)
-        atomic_write_file_secure(fd, "patches.json", patches_json)
-        atomic_write_file_secure(fd, "review.json", review_json)
-        published = True
-    except (OSError, AtomicWriteError) as exc:
+        publish_proposal_documents(
+            vault_root=vault_root,
+            proposal_id=proposal_id,
+            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
+        )
+    except ProposalPublicationError as exc:
         raise CopilotProposalError(f"could not publish copilot proposal: {exc}") from exc
-    finally:
-        if fd >= 0:
-            os.close(fd)
-        if created and not published:
-            shutil.rmtree(proposal_dir, ignore_errors=True)
 
 
 def _diff(before: str, after: str, path: str) -> str:
-    lines = tuple(difflib.unified_diff(before.splitlines(keepends=True), after.splitlines(keepends=True), fromfile=path, tofile=path))
+    lines = tuple(
+        difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=path,
+            tofile=path,
+        )
+    )
     result = "".join(lines[2:])
     if not result:
         raise CopilotProposalError(f"proposed patch has no effect: {path}")
@@ -431,6 +529,20 @@ def _hash(content: str) -> str:
     return f"sha256:{raw_content_hash(content)}"
 
 
-def _fingerprint(request: CopilotProposalRequest, option: PlanOption, plan_content: str, hashes: Sequence[tuple[str, str]]) -> str:
-    payload = repr((request.session_id, option.option_id, request.plan_path, plan_content, tuple(sorted(hashes)), tuple(sorted(request.goal_updates.items()))))
+def _fingerprint(
+    request: CopilotProposalRequest,
+    option: PlanOption,
+    plan_content: str,
+    hashes: Sequence[tuple[str, str]],
+) -> str:
+    payload = repr(
+        (
+            request.session_id,
+            option.option_id,
+            request.plan_path,
+            plan_content,
+            tuple(sorted(hashes)),
+            tuple(sorted(request.goal_updates.items())),
+        )
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
