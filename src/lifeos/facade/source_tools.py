@@ -268,8 +268,16 @@ def extract_source(
 ) -> SourceExtractResult:
     """Run or reuse deterministic extraction under existing retrieval/privacy policy."""
 
+    text_budget = request.max_text_bytes
     if request.mode == "external":
-        _require_external_access(vault_root=vault_root, runtime_dir=runtime_dir, request=request)
+        external_policy = _load_policy(vault_root)
+        text_budget = min(text_budget, external_policy.max_external_characters)
+        _require_external_access(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            request=request,
+            max_text_bytes=text_budget,
+        )
         policy = None
     else:
         policy = _load_policy(vault_root)
@@ -290,6 +298,11 @@ def extract_source(
     if request.mode == "local":
         assert policy is not None
         _require_local_access(resolved, policy=policy, allow_protected=request.allow_protected)
+    _require_source_integrity(
+        vault_root=vault_root,
+        runtime_dir=runtime_dir,
+        attachment_id=resolved.reference.attachment_id,
+    )
 
     extractor = LocalExtractionService(vault_root=vault_root, runtime_dir=runtime_dir)
     try:
@@ -311,10 +324,10 @@ def extract_source(
             capture=resolved.capture,
             reference=resolved.reference,
             allow_protected=request.allow_protected,
-            max_text_bytes=request.max_text_bytes,
+            max_text_bytes=text_budget,
         )
     else:
-        text, truncated = _truncate_utf8(result.text, request.max_text_bytes)
+        text, truncated = _truncate_utf8(result.text, text_budget)
 
     details = _source_details(
         vault_root=vault_root,
@@ -397,7 +410,7 @@ def _source_details(
         extraction_status = "not-requested"
         extraction_method = None
         extraction_quality = None
-    elif extraction.source_hash != reference.content_hash:
+    elif audit.status != "ok" or extraction.source_hash != reference.content_hash:
         extraction_status = "stale"
         extraction_method = extraction.method
         extraction_quality = extraction.quality
@@ -468,11 +481,29 @@ def _require_local_access(
     )
 
 
+def _require_source_integrity(
+    *,
+    vault_root: Path,
+    runtime_dir: Path,
+    attachment_id: str,
+) -> None:
+    store = AttachmentStore(vault_root=vault_root, runtime_dir=runtime_dir)
+    try:
+        audit = store.audit(attachment_id)
+    except CaptureError as exc:
+        raise _facade_error(exc) from exc
+    if audit.status == "missing":
+        raise ToolNotFoundError("Canonical source bytes are missing")
+    if audit.status != "ok":
+        raise ToolConflictError("Canonical source bytes changed after import")
+
+
 def _require_external_access(
     *,
     vault_root: Path,
     runtime_dir: Path,
     request: SourceExtractRequest,
+    max_text_bytes: int,
 ) -> None:
     try:
         preview = preview_capture_context(
@@ -483,8 +514,8 @@ def _require_external_access(
             requested_operations=("source-extract",),
             external_processing_intent=True,
             allow_sensitive_capture=request.allow_protected,
-            max_item_bytes=request.max_text_bytes,
-            max_total_bytes=request.max_text_bytes,
+            max_item_bytes=max_text_bytes,
+            max_total_bytes=max_text_bytes,
         )
     except CaptureError as exc:
         raise _facade_error(exc) from exc
