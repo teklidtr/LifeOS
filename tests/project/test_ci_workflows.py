@@ -24,6 +24,7 @@ def test_fast_pr_workflow_keeps_expensive_gates_out_of_synchronize_path() -> Non
 
     assert "types: [opened, synchronize, reopened]" in workflow
     assert "name: fast-checks" in workflow
+    assert "uv run ruff format --check ." in workflow
     assert "uv run pytest --collect-only -q" in workflow
     assert "uv run pytest -q tests/project" in workflow
     assert "run: uv run pytest -q\n" not in workflow
