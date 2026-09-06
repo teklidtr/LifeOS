@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import os
-import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
 from lifeos.daily.service import content_hash
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import (
@@ -19,6 +16,11 @@ from lifeos.proposals.patches import (
     PatchDocumentV2,
     PatchHumanFile,
     serialize_patch_json_bytes,
+)
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
 )
 from lifeos.proposals.schema import (
     ProposalMetadata,
@@ -266,37 +268,23 @@ class ConversationProposalService:
         self, request: ConversationProposalRequest, *, now: datetime | None = None
     ) -> ConversationProposalResult:
         preview, patch_document, _metadata, proposal_markdown = self.preview(request, now=now)
-        proposals_root = self.vault_root / "proposals"
-        proposal_dir = proposals_root / preview.proposal_id
         patches_json = serialize_patch_json_bytes(patch_document)
         review_json = build_review_snapshot_bytes_from_patches(
             vault_root=self.vault_root,
             patches_json=patches_json,
         )
-        proposals_root.mkdir(parents=True, exist_ok=True)
-        created = False
-        published = False
-        directory_fd = -1
         try:
-            proposal_dir.mkdir(exist_ok=False)
-            created = True
-            directory_fd = os.open(
-                proposal_dir,
-                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+            publish_proposal_documents(
+                vault_root=self.vault_root,
+                proposal_id=preview.proposal_id,
+                documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
             )
-            atomic_write_file_secure(directory_fd, "proposal.md", proposal_markdown)
-            atomic_write_file_secure(directory_fd, "patches.json", patches_json)
-            atomic_write_file_secure(directory_fd, "review.json", review_json)
-            published = True
-        except FileExistsError as exc:
-            raise ConversationError("proposal_exists", "Conversation proposal already exists.") from exc
-        except (OSError, AtomicWriteError) as exc:
+        except ProposalPublicationError as exc:
+            if exc.code == "proposal_exists":
+                raise ConversationError(
+                    "proposal_exists", "Conversation proposal already exists."
+                ) from exc
             raise ConversationError("proposal_publish_failed", str(exc)) from exc
-        finally:
-            if directory_fd >= 0:
-                os.close(directory_fd)
-            if created and not published:
-                shutil.rmtree(proposal_dir, ignore_errors=True)
         return ConversationProposalResult(
             preview.proposal_id, f"proposals/{preview.proposal_id}", preview
         )
