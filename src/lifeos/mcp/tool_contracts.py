@@ -99,10 +99,13 @@ def _mcp_output_model(result_type: type[Any]) -> type[BaseModel]:
     name = result_type.__name__
     if name.endswith("Result"):
         name = name[: -len("Result")]
-    model = create_model(
-        f"{name}MCPResult",
-        __config__=ConfigDict(from_attributes=True),
-        **model_fields,
+    model = cast(
+        type[BaseModel],
+        create_model(
+            f"{name}MCPResult",
+            __config__=ConfigDict(from_attributes=True),
+            **model_fields,
+        ),
     )
     _OUTPUT_MODELS[result_type] = model
     return model
