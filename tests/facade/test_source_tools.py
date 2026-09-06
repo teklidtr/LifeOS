@@ -166,7 +166,9 @@ def test_text_extraction_is_derived_reused_and_bounded(tmp_path: Path) -> None:
     assert len(extracted.text.encode("utf-8")) <= 8
     assert repeated.text == extracted.text
     assert repeated.details.extraction_status == "completed"
-    assert (runtime / "captures" / "extracted" / f"{imported.details.source.attachment_id}.json").exists()
+    assert (
+        runtime / "captures" / "extracted" / f"{imported.details.source.attachment_id}.json"
+    ).exists()
 
 
 def test_unsupported_extraction_remains_explicit_and_preserves_source(tmp_path: Path) -> None:
