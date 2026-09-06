@@ -104,10 +104,21 @@ def test_partial_write_cleans_only_owned_proposal_files(
     vault = _vault(tmp_path)
     original = publication_module.atomic_write_file_secure
 
-    def fail_second_write(dir_fd: int, filename: str, content: bytes):
+    def fail_second_write(
+        dir_fd: int,
+        filename: str,
+        content: bytes,
+        *,
+        published_identity=None,
+    ):
         if filename == "patches.json":
             raise AtomicWriteError("injected patch write failure", write_occurred=False)
-        return original(dir_fd, filename, content)
+        return original(
+            dir_fd,
+            filename,
+            content,
+            published_identity=published_identity,
+        )
 
     monkeypatch.setattr(publication_module, "atomic_write_file_secure", fail_second_write)
 
@@ -122,6 +133,53 @@ def test_partial_write_cleans_only_owned_proposal_files(
     assert not (vault / "proposals" / PROPOSAL_ID).exists()
 
 
+def test_replaced_owned_file_is_not_removed_by_failed_attempt_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = _vault(tmp_path)
+    original = publication_module.atomic_write_file_secure
+    proposal_dir = vault / "proposals" / PROPOSAL_ID
+    proposal_path = proposal_dir / "proposal.md"
+
+    def replace_first_file_then_fail(
+        dir_fd: int,
+        filename: str,
+        content: bytes,
+        *,
+        published_identity=None,
+    ):
+        if filename == "patches.json":
+            raise AtomicWriteError("injected patch write failure", write_occurred=False)
+        result = original(
+            dir_fd,
+            filename,
+            content,
+            published_identity=published_identity,
+        )
+        if filename == "proposal.md":
+            replacement = proposal_dir / "replacement.tmp"
+            replacement.write_text("concurrent replacement", encoding="utf-8")
+            os.replace(replacement, proposal_path)
+        return result
+
+    monkeypatch.setattr(
+        publication_module,
+        "atomic_write_file_secure",
+        replace_first_file_then_fail,
+    )
+
+    with pytest.raises(ProposalPublicationError) as failed:
+        publish_proposal_documents(
+            vault_root=vault,
+            proposal_id=PROPOSAL_ID,
+            documents=DOCUMENTS,
+        )
+
+    assert failed.value.code == "proposal_publish_failed"
+    assert proposal_path.read_text(encoding="utf-8") == "concurrent replacement"
+
+
 def test_replaced_proposal_directory_is_never_removed_by_failed_attempt_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -132,8 +190,19 @@ def test_replaced_proposal_directory_is_never_removed_by_failed_attempt_cleanup(
     detached = proposals_root / f"{PROPOSAL_ID}-detached"
     replacement = proposals_root / PROPOSAL_ID
 
-    def replace_directory_after_first_write(dir_fd: int, filename: str, content: bytes):
-        result = original(dir_fd, filename, content)
+    def replace_directory_after_first_write(
+        dir_fd: int,
+        filename: str,
+        content: bytes,
+        *,
+        published_identity=None,
+    ):
+        result = original(
+            dir_fd,
+            filename,
+            content,
+            published_identity=published_identity,
+        )
         if filename == "proposal.md":
             os.rename(replacement, detached)
             replacement.mkdir()
@@ -172,8 +241,19 @@ def test_replaced_proposal_symlink_and_target_are_not_cleaned(
     detached = proposals_root / f"{PROPOSAL_ID}-detached"
     publication_path = proposals_root / PROPOSAL_ID
 
-    def replace_with_symlink_after_first_write(dir_fd: int, filename: str, content: bytes):
-        result = original(dir_fd, filename, content)
+    def replace_with_symlink_after_first_write(
+        dir_fd: int,
+        filename: str,
+        content: bytes,
+        *,
+        published_identity=None,
+    ):
+        result = original(
+            dir_fd,
+            filename,
+            content,
+            published_identity=published_identity,
+        )
         if filename == "proposal.md":
             os.rename(publication_path, detached)
             try:
