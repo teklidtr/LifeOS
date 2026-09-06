@@ -540,6 +540,18 @@ adapters, experiment mappings, proposals, migration, recovery, and visualization
 models. The Obsidian plugin is a thin UI client over additive `capture.*` bridge
 capabilities.
 
+The provider-independent typed facade also exposes `source.import`, `source.inspect`, and
+`source.extract` as a composition over this same Rich Capture implementation rather than as a
+parallel source subsystem. `source.import` accepts a trusted local absolute path only as invocation
+input, preserves bytes through the existing attachment store, creates the ordinary attachment
+capture, and returns stable capture/attachment references plus bounded metadata without exposing
+host paths or attachment-store layout. `source.inspect` is content-free and reports integrity,
+processing, and privacy state. `source.extract` reuses deterministic local extraction; derived
+text stays rebuildable, unsupported extraction remains explicit, and any disclosed content is
+filtered through the existing retrieval/Rich Capture privacy policy. Transport exposure, including
+local-versus-network path-ingress narrowing, remains an adapter concern rather than a second
+storage contract.
+
 Runtime state under `.lifeos/captures/` is disposable. It includes extraction
 results, processing jobs, indexes, checkpoints, previews, embeddings, galleries,
 timelines, and charts. Deleting it cannot delete canonical Markdown or original
