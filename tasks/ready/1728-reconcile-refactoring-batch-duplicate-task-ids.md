@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1728
 title: Reconcile duplicate task IDs in the refactoring backlog batch
-status: backlog
+status: ready
 phase: hardening
 depends_on: []
 risk: low
