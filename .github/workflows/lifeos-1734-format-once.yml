@@ -1,4 +1,4 @@
-name: LIFEOS-1734 formatter baseline
+name: LIFEOS-1734 formatter baseline audit
 
 on:
   push:
@@ -9,11 +9,10 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  format-once:
-    if: github.actor != 'github-actions[bot]'
+  formatter-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -32,36 +31,42 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --extra dev --extra mcp
 
-      - name: Apply locked Ruff formatter
-        shell: bash
-        run: |
-          uv run ruff format .
-          uv run ruff format --check .
-          git diff --check
-          changed="$(git diff --name-only)"
-          if [[ -z "$changed" ]]; then
-            echo "No formatter changes produced."
-            exit 0
-          fi
-          while IFS= read -r path; do
-            case "$path" in
-              *.py|*.pyi|*.ipynb) ;;
-              *)
-                echo "Unexpected formatter path: $path" >&2
-                exit 1
-                ;;
-            esac
-          done <<< "$changed"
-          git diff --stat
+      - name: Verify current formatter baseline
+        run: uv run ruff format --check .
 
-      - name: Commit formatter baseline
+      - name: Audit isolated formatter commit
         shell: bash
         run: |
-          if git diff --quiet; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add --all
-          git commit -m "LIFEOS-1734 apply Ruff formatter baseline"
-          git push origin HEAD:lifeos-1734-ruff-format-baseline
+          python - <<'PY'
+          import ast
+          import subprocess
+
+          before = "9190f5235a836490655b0dd57dbe56b6fd180dcf"
+          after = "1519e987b38499cee22ec97a1edac24c278d4f9a"
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only", f"{before}..{after}"], text=True
+          ).splitlines()
+          unexpected = [path for path in changed if not path.endswith(".py")]
+          if unexpected:
+              raise SystemExit(f"unexpected non-Python formatter paths: {unexpected}")
+
+          for path in changed:
+              old = subprocess.check_output(
+                  ["git", "show", f"{before}:{path}"], text=True
+              )
+              new = subprocess.check_output(
+                  ["git", "show", f"{after}:{path}"], text=True
+              )
+              old_ast = ast.dump(
+                  ast.parse(old, filename=path, type_comments=True),
+                  include_attributes=False,
+              )
+              new_ast = ast.dump(
+                  ast.parse(new, filename=path, type_comments=True),
+                  include_attributes=False,
+              )
+              if old_ast != new_ast:
+                  raise SystemExit(f"AST mismatch after formatting: {path}")
+
+          print(f"AST-equivalent formatter changes: {len(changed)} Python files")
+          PY
