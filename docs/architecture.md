@@ -651,6 +651,12 @@ authority, not an independent writer. See DD-091 and
 commit, push, restore, scan, repair, or create a backup. Recovery diagnostics operate on path,
 filesystem, and Git metadata and do not need canonical note bodies to determine coverage.
 
+The implementation is statically owned by `src/lifeos/recovery_readiness.py`: the public
+collector, report assembly, recovery-scope helpers, Git metadata sandbox, and filesystem
+inspection helpers resolve through ordinary definitions and calls in that module. Recovery
+readiness does not install runtime replacements into sibling modules or substitute module
+classes; private fault-injection seams used by regression tests are ordinary named helpers.
+
 On supported macOS and Linux hosts, the recovery collector opens the repository metadata root
 with no-follow descriptor operations and builds its Git sandbox from descriptor-relative
 snapshots. Selected metadata and the bounded set of regular object-store files are copied from

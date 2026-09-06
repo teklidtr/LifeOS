@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import subprocess
+import types
 import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
@@ -388,7 +389,7 @@ def test_ambiguous_policy_prefix_fails_before_worktree_scan(
     def fail_scan(_vault: Path, _excluded: object) -> object:
         raise AssertionError("canonical worktree scanning must not start")
 
-    monkeypatch.setattr(recovery_readiness, "_ORIGINAL_WORKING_TREE_SNAPSHOT", fail_scan)
+    monkeypatch.setattr(recovery_readiness, "_scan_working_tree_snapshot", fail_scan)
     report = recovery_readiness.collect_recovery_readiness(load_config(vault / "lifeos.yml"))
     diagnostics = _diagnostics(report)
     rendered = json.dumps(recovery_report_to_dict(report), ensure_ascii=True)
@@ -484,7 +485,7 @@ def test_untracked_symlink_is_structural_recovery_failure(
     assert untracked.remediation is not None and "non-regular" in untracked.remediation
 
 
-def test_recovery_facade_reload_preserves_latest_commit_helper(
+def test_recovery_module_reload_preserves_latest_commit_behavior(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -493,10 +494,9 @@ def test_recovery_facade_reload_preserves_latest_commit_helper(
     capsys.readouterr()
     (vault / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
     _commit_all(vault, "baseline")
-    original = recovery_readiness._ORIGINAL_LATEST_COMMIT
 
     reloaded = importlib.reload(recovery_readiness)
     report = reloaded.collect_recovery_readiness(load_config(vault / "lifeos.yml"))
 
-    assert reloaded._ORIGINAL_LATEST_COMMIT is original
+    assert type(reloaded) is types.ModuleType
     assert report.last_canonical_commit is not None

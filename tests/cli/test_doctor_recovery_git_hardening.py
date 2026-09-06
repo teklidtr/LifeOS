@@ -491,6 +491,42 @@ def test_recovery_returns_unknown_if_head_or_index_changes_during_collection(
     assert "changed during recovery inspection" in diagnostics["recovery.git.repository"].summary
 
 
+def test_recovery_revalidates_sandbox_after_inner_collection_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vault = tmp_path / "vault"
+    assert main(["init", str(vault)]) == 0
+    capsys.readouterr()
+
+    live_git = vault / ".git"
+    original_git = vault / ".git-original"
+    swapped = False
+
+    def failing_repo_context(_git: str, _vault: Path) -> object:
+        nonlocal swapped
+        live_git.rename(original_git)
+        live_git.mkdir()
+        swapped = True
+        raise recovery_readiness.RecoveryGitError("incidental Git query failure")
+
+    monkeypatch.setattr(recovery_readiness, "_repo_context", failing_repo_context)
+    try:
+        report = collect_recovery_readiness(load_config(vault / "lifeos.yml"))
+    finally:
+        if live_git.exists():
+            live_git.rmdir()
+        if original_git.exists():
+            original_git.rename(live_git)
+
+    repository = _diagnostics(report)["recovery.git.repository"]
+    assert swapped is True
+    assert repository.status == "unknown"
+    assert "metadata changed during recovery inspection" in repository.summary
+    assert "incidental Git query failure" not in repository.summary
+
+
 def test_recovery_large_index_size_is_uncertain_not_modified(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
