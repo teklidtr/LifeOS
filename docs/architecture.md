@@ -440,6 +440,14 @@ exposes that stable ID beside the note's current path so agents do not mistake t
 filesystem address for permanent identity. No-provider mode retains all local
 non-vector signals.
 
+`retrieval.search.HybridRetriever` owns this complete flow for every import and
+consumer. Explicit per-query authorization state preserves canonical checks both
+before scoring and before provider/evidence exposure, including revalidation of
+link support. The single `RetrievalEvidence` type carries an optional stable ID
+only when canonical hash verification, a healthy identity proof, and final scope
+policy permit it. Legacy coherence imports are ordinary aliases; no runtime
+replacement selects a different retriever or projects a second evidence type.
+
 The same hybrid/index/provider subsystem supplies Context Pack candidate selection; Context
 Packs add focus-path precedence, final-source instruction routing, bounded gaps/omissions, and
 MCP-facing retrieval provenance rather than creating another semantic index. `wiki_search`

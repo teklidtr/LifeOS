@@ -138,6 +138,29 @@ passages are suppressed by normalized-content fingerprint. Result count and
 context budget are bounded. Equal scores are ordered deterministically by path,
 heading, line, and chunk identity.
 
+`retrieval.search.HybridRetriever` is the single implementation used by package,
+direct-module, Context Pack, and conversation callers. The legacy
+`retrieval.coherence_search` module only re-exports compatibility aliases. Each
+search owns its authorization state explicitly, including its health snapshot,
+potentially influential paths, canonical hash checks, and verified identity
+candidates; nested searches do not share those caches.
+
+Authorization has two distinct timing boundaries. Policy, runtime exclusions,
+scope metadata, and stale-path checks first limit candidate discovery. Only
+potentially influential canonical paths are opened and checked against indexed
+content hashes before their chunks enter scoring or semantic computation.
+After scoring, candidate and link-support paths are checked again before
+reranking or evidence exposure, and link scores are recomputed from the surviving
+support. Provider disclosure still independently enforces local/external policy
+and explicit protected-scope permission. These checks preserve bounded reads and
+prevent a move or edit between phases from supplying stale evidence to a provider.
+
+`RetrievalEvidence` directly owns the optional `stable_id` field. It is populated
+from an authorized canonical hash match only while the index's uniqueness proof
+is healthy and final scope policy permits the path. An indexed ID alone is not
+verified evidence. `StableRetrievalEvidence` remains an alias for import
+compatibility; there is no second evidence object or post-search identity projection.
+
 ## Context Packs over hybrid retrieval
 
 `ContextPack` and the MCP `vault_context` tool are the bounded context-management
