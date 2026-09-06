@@ -50,6 +50,13 @@ jobs:
           if unexpected:
               raise SystemExit(f"unexpected non-Python formatter paths: {unexpected}")
 
+          def semantic_ast(source: str, path: str) -> str:
+              tree = ast.parse(source, filename=path, type_comments=True)
+              for ignored in tree.type_ignores:
+                  ignored.lineno = 0
+              return ast.dump(tree, include_attributes=False)
+
+          mismatches = []
           for path in changed:
               old = subprocess.check_output(
                   ["git", "show", f"{before}:{path}"], text=True
@@ -57,16 +64,10 @@ jobs:
               new = subprocess.check_output(
                   ["git", "show", f"{after}:{path}"], text=True
               )
-              old_ast = ast.dump(
-                  ast.parse(old, filename=path, type_comments=True),
-                  include_attributes=False,
-              )
-              new_ast = ast.dump(
-                  ast.parse(new, filename=path, type_comments=True),
-                  include_attributes=False,
-              )
-              if old_ast != new_ast:
-                  raise SystemExit(f"AST mismatch after formatting: {path}")
+              if semantic_ast(old, path) != semantic_ast(new, path):
+                  mismatches.append(path)
 
+          if mismatches:
+              raise SystemExit(f"AST mismatch after formatting: {mismatches}")
           print(f"AST-equivalent formatter changes: {len(changed)} Python files")
           PY
