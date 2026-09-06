@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1732
 title: Make ingestion composition and provenance explicit
-status: in-progress
+status: completed
 phase: hardening
 depends_on:
   - LIFEOS-1731
@@ -37,12 +37,12 @@ At planning HEAD `2996540ee16f574503b4226baa417bf55fea380c`, `src/lifeos/ingesti
 
 # Acceptance criteria
 
-- [ ] All production ingestion builder/persist call paths use static definitions/imports; no module substitution, cross-module rebinding, or saved-original dispatch remains in this composition.
-- [ ] Provenance inputs are explicit at the operation boundary, with no ambient `ContextVar` or replacement global state used to supply them.
-- [ ] Existing single-source, cumulative, compound, study, and multi-source outputs and error semantics remain covered; meaningful tests demonstrate nested/interleaved invocation isolation where relevant.
-- [ ] All public exports and known patch points are audited, and every unavoidable private-seam migration is recorded.
-- [ ] Obsolete implementations/wrappers disappear; the change does not replace them with a service locator, dependency-injection framework, or generalized builder hierarchy.
-- [ ] Record removed concepts/symbols and net production change. Retain semantic/privacy/security tests; replace only obsolete machinery assertions with equivalent boundary coverage.
+- [x] All production ingestion builder/persist call paths use static definitions/imports; no module substitution, cross-module rebinding, or saved-original dispatch remains in this composition.
+- [x] Provenance inputs are explicit at the operation boundary, with no ambient `ContextVar` or replacement global state used to supply them.
+- [x] Existing single-source, cumulative, compound, study, and multi-source outputs and error semantics remain covered; meaningful tests demonstrate nested/interleaved invocation isolation where relevant.
+- [x] All public exports and known patch points are audited, and every unavoidable private-seam migration is recorded.
+- [x] Obsolete implementations/wrappers disappear; the change does not replace them with a service locator, dependency-injection framework, or generalized builder hierarchy.
+- [x] Record removed concepts/symbols and net production change. Retain semantic/privacy/security tests; replace only obsolete machinery assertions with equivalent boundary coverage.
 
 # Documentation impact
 
@@ -61,9 +61,17 @@ Status: required
 - Added a regression proving the public module is no longer the core module, the effective builder/persist entry points come from static composition, public compatibility signature shape is retained, and interleaved B/C/B generated-wiki updates cannot leak provenance between invocations.
 - Documentation updated in `docs/architecture.md` and `docs/mcp-exploration-architecture.md`. The user-manual ingestion/MCP chapters were reviewed; no user-visible workflow or contract changed, so no user-manual text change is required.
 - Production diff before final task-state bookkeeping: `src/lifeos/ingestion/_proposal_composition.py` +267, `src/lifeos/ingestion/proposals.py` +16/-313, for **net -30 production lines**.
-- Local executable validation is unavailable in this environment because a repository checkout cannot resolve the configured Git mirror (`git-mirror.hub.ace-research.openai.org`). The closest pre-PR substitute is connector-backed repository-wide caller/patch-point search, exact branch/master diff review, signature/invariant regression additions, and documentation diff inspection. Required executable gates must therefore be verified by PR CI and are recorded below rather than claimed as local passes.
+- Local executable validation was unavailable because this environment could not resolve the configured Git mirror (`git-mirror.hub.ace-research.openai.org`). The required executable coverage was therefore verified on the exact implementation head `020f543d197461e0f5f349704e7b3e0d824788bf` by GitHub CI.
+- Normal Codex review on `020f543d19` reported no major issues. Security review was explicitly skipped by current-user instruction.
 
 # Validation
+
+Required commands/contracts were covered by the repository CI gates on implementation head `020f543d197461e0f5f349704e7b3e0d824788bf`:
+
+- `fast-checks`: task workflow, documentation impact, manual links, Ruff, mypy, compilation, test collection, and project contract smoke tests passed.
+- `obsidian-plugin`: lint, typecheck, tests, and build passed.
+- `full-validation`: all four full pytest shards passed; aggregate `full-test` passed.
+- `docker-setup-e2e`: clean-room setup/MCP gate, home-node service container gate, and ARM64 home-node image build passed.
 
 ```bash
 uv run pytest -q tests/ingestion tests/facade tests/proposals
@@ -75,7 +83,7 @@ uv run mypy src
 python scripts/validate_tasks.py
 ```
 
-Include cumulative provenance, proposal-root hardening, ingestion source/target privacy, multi-source ingestion, and real MCP ingestion lifecycle regressions. Follow root `AGENTS.md` for normal/security review and final validation checkpoints.
+Validation includes cumulative provenance, proposal-root hardening, ingestion source/target privacy, multi-source ingestion, and real MCP ingestion lifecycle regressions through the full pytest shards. Root `AGENTS.md` normal review and final validation checkpoints are satisfied for the implementation head; security review was skipped by explicit current-user instruction.
 
 # Relevant design decisions
 
