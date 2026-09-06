@@ -170,7 +170,9 @@ def _hash_file(path: Path, *, capture: _HashCapture | None = None) -> str:
     try:
         root_fd = os.open(absolute.anchor or os.sep, _DIRECTORY_FLAGS)
     except OSError as exc:
-        raise FileTrackingError(f"Could not safely open registry path root for {path}: {exc}") from exc
+        raise FileTrackingError(
+            f"Could not safely open registry path root for {path}: {exc}"
+        ) from exc
 
     current_fd = root_fd
     file_fd: int | None = None
@@ -313,7 +315,8 @@ def _prepare_scan_entries(
             for stable_id, paths in sorted(duplicates.items())
         )
         raise FileTrackingError(
-            "Ambiguous stable note id(s) in canonical Markdown; registry refresh aborted: " + details
+            "Ambiguous stable note id(s) in canonical Markdown; registry refresh aborted: "
+            + details
         )
     return prepared
 
@@ -491,7 +494,11 @@ def register_scan(registry: Registry, vault_root: Path, entries: list[VaultFile]
                         (stable_id,),
                     ).fetchone()
 
-                if stable_id is not None and identity_row is not None and identity_row["vault_path"] != path_str:
+                if (
+                    stable_id is not None
+                    and identity_row is not None
+                    and identity_row["vault_path"] != path_str
+                ):
                     old_path = str(identity_row["vault_path"])
                     if row is not None and row["id"] != identity_row["id"]:
                         displaced_id = int(row["id"])

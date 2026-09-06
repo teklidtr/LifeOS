@@ -302,7 +302,9 @@ def test_application_rechecks_identity_after_another_approved_seed_is_applied(
     assert not (vault / "patterns" / "focus-after-walk-b.md").exists()
 
 
-def test_create_uses_normalized_hypothesis_for_review_and_canonical_candidate(tmp_path: Path) -> None:
+def test_create_uses_normalized_hypothesis_for_review_and_canonical_candidate(
+    tmp_path: Path,
+) -> None:
     vault = tmp_path / "vault"
     source_hash = _write_source(vault, "journal/source.md", "Walked, then focused.\n")
 

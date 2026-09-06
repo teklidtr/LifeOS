@@ -259,9 +259,7 @@ def get_vault_context(
     """Build inspectable, policy-aware context without granting mutation authority."""
     scope = RetrievalScope(allow_protected=request.allow_protected)
     resolved_embedding_provider = (
-        embedding_provider
-        if embedding_provider is not None
-        else _CONTEXT_EMBEDDING_PROVIDER.get()
+        embedding_provider if embedding_provider is not None else _CONTEXT_EMBEDDING_PROVIDER.get()
     )
     resolved_reranker = reranker if reranker is not None else _CONTEXT_RERANKER.get()
     try:

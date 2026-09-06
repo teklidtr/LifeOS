@@ -72,7 +72,9 @@ def _write_plan(vault: Path, events: list[dict[str, object]]) -> Path:
     return path
 
 
-def _prepare_vault(tmp_path: Path, fixture: str = "consistent-underestimation") -> tuple[Path, Path, Path]:
+def _prepare_vault(
+    tmp_path: Path, fixture: str = "consistent-underestimation"
+) -> tuple[Path, Path, Path]:
     vault = tmp_path / "vault"
     runtime = tmp_path / "runtime"
     vault.mkdir()
@@ -101,9 +103,7 @@ def _mode(bridge: BridgeApplication, mode: str, key: str) -> dict[str, object]:
 
 def test_complete_daily_feedback_loop_off_shadow_active_and_restart(tmp_path: Path) -> None:
     vault, runtime, plan_path = _prepare_vault(tmp_path)
-    bridge = BridgeApplication(
-        vault_root=vault, runtime_dir=runtime, actor_id="integration-user"
-    )
+    bridge = BridgeApplication(vault_root=vault, runtime_dir=runtime, actor_id="integration-user")
 
     for index, mode in enumerate(("off", "shadow", "active"), start=1):
         _mode(bridge, mode, f"mode-{index}")
@@ -172,9 +172,7 @@ def test_complete_daily_feedback_loop_off_shadow_active_and_restart(tmp_path: Pa
     preferences = restarted.dispatch("feedback.preferences.get", {})
     assert preferences["mode"] == "active"
     assert preferences["reset_before"] == date(2026, 7, 4)
-    dataset = restarted.dispatch(
-        "feedback.dataset.rebuild", {"as_of": "2026-07-16"}
-    )
+    dataset = restarted.dispatch("feedback.dataset.rebuild", {"as_of": "2026-07-16"})
     observations = dataset["dataset"]["observations"]
     assert any(item["event_id"] == "u1" and item["excluded"] for item in observations)
     assert any(item["event_id"] == "correct-u2" and item["excluded"] for item in observations)
@@ -328,9 +326,7 @@ def test_feedback_proposal_recovers_after_interrupted_application(
     )
 
     assert applied.changed_paths == ("plans/writing.md",)
-    assert "duration: 55" in (vault / "plans" / "writing.md").read_text(
-        encoding="utf-8"
-    )
+    assert "duration: 55" in (vault / "plans" / "writing.md").read_text(encoding="utf-8")
     discovery = discover_recovery_state(recovery_root=vault / ".lifeos" / "recovery")
     assert unresolved_recovery_journals(discovery) == ()
 

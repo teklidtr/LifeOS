@@ -220,9 +220,7 @@ def test_duplicate_stable_ids_abort_refresh_before_registry_mutation(tmp_path: P
         register_scan(registry, vault, scan_vault(vault))
 
     identities = list_registered_stable_identities(registry)
-    assert [(item.stable_id, item.path) for item in identities] == [
-        ("duplicate", "wiki/a.md")
-    ]
+    assert [(item.stable_id, item.path) for item in identities] == [("duplicate", "wiki/a.md")]
     with registry.connect_read_only() as connection:
         assert connection.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 1
 
@@ -239,9 +237,7 @@ def test_proposal_frontmatter_id_does_not_collide_with_note_identity(tmp_path: P
     register_scan(registry, vault, scan_vault(vault))
 
     identities = list_registered_stable_identities(registry)
-    assert [(item.stable_id, item.path) for item in identities] == [
-        ("shared-id", "wiki/note.md")
-    ]
+    assert [(item.stable_id, item.path) for item in identities] == [("shared-id", "wiki/note.md")]
 
 
 def test_registry_derives_id_and_hash_from_same_file_snapshot(

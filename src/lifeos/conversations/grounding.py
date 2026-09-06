@@ -43,7 +43,9 @@ from .contracts import (
 def _moment(value: datetime | None = None) -> datetime:
     moment = value or datetime.now(timezone.utc)
     if moment.tzinfo is None:
-        raise ConversationError("invalid_timestamp", "Conversation timestamps must be timezone-aware.")
+        raise ConversationError(
+            "invalid_timestamp", "Conversation timestamps must be timezone-aware."
+        )
     return moment.astimezone(timezone.utc)
 
 
@@ -61,9 +63,7 @@ def _pattern_annotated_results(
         if pattern is None:
             annotated.append(result)
             continue
-        rendered = render_personal_pattern_evidence(
-            pattern, matched_excerpt=result.context_text
-        )
+        rendered = render_personal_pattern_evidence(pattern, matched_excerpt=result.context_text)
         annotated.append(replace(result, text=rendered, context_text=rendered))
     return tuple(annotated)
 
@@ -86,16 +86,22 @@ def validate_generated_answer(
     answer: GeneratedAnswer, evidence: Sequence[ConversationEvidence]
 ) -> tuple[ConversationParagraph, ...]:
     if answer.schema_version != 1:
-        raise ConversationError("unsupported_answer_schema", "Generated answer schema is unsupported.")
+        raise ConversationError(
+            "unsupported_answer_schema", "Generated answer schema is unsupported."
+        )
     allowed = {item.evidence_id for item in evidence}
     paragraphs: list[ConversationParagraph] = []
     for item in answer.paragraphs:
         if not item.citations:
-            raise ConversationError("ungrounded_answer", "Every generated paragraph requires a citation.")
+            raise ConversationError(
+                "ungrounded_answer", "Every generated paragraph requires a citation."
+            )
         unknown = sorted(set(item.citations) - allowed)
         if unknown:
             raise ConversationError(
-                "invalid_citation", "Generated answer cited nonexistent evidence.", {"citations": unknown}
+                "invalid_citation",
+                "Generated answer cited nonexistent evidence.",
+                {"citations": unknown},
             )
         paragraphs.append(ConversationParagraph(item.text, item.citations, item.support))
     return tuple(paragraphs)
@@ -141,10 +147,14 @@ class KnowledgeConversationService:
         self.vault_root = vault_root
         self.runtime_dir = runtime_dir
         self.artifacts = ConversationArtifactService(vault_root=vault_root, runtime_dir=runtime_dir)
-        self.retriever = HybridRetriever(vault_root=vault_root, runtime_dir=runtime_dir, policy=policy)
+        self.retriever = HybridRetriever(
+            vault_root=vault_root, runtime_dir=runtime_dir, policy=policy
+        )
         self.policy = self.retriever.policy
 
-    def create(self, *, title: str, scope: RetrievalScope | None = None, now: datetime | None = None) -> ConversationArtifact:
+    def create(
+        self, *, title: str, scope: RetrievalScope | None = None, now: datetime | None = None
+    ) -> ConversationArtifact:
         return self.artifacts.create(title=title, scope=scope, now=now)
 
     def ask(
@@ -166,11 +176,21 @@ class KnowledgeConversationService:
         if artifact.content_hash != expected_hash:
             raise ConversationError("stale_artifact", "Conversation changed since it was loaded.")
         if artifact.metadata.status == "archived":
-            raise ConversationError("archived_conversation", "Archived conversations cannot accept new turns.")
+            raise ConversationError(
+                "archived_conversation", "Archived conversations cannot accept new turns."
+            )
         scope = replace(
             artifact.metadata.scope,
-            pinned_paths=tuple(dict.fromkeys((*artifact.metadata.scope.pinned_paths, *artifact.metadata.pinned_sources))),
-            excluded_paths=tuple(dict.fromkeys((*artifact.metadata.scope.excluded_paths, *artifact.metadata.excluded_sources))),
+            pinned_paths=tuple(
+                dict.fromkeys(
+                    (*artifact.metadata.scope.pinned_paths, *artifact.metadata.pinned_sources)
+                )
+            ),
+            excluded_paths=tuple(
+                dict.fromkeys(
+                    (*artifact.metadata.scope.excluded_paths, *artifact.metadata.excluded_sources)
+                )
+            ),
         )
         token = cancellation or CancellationToken()
         archived_patterns = archived_personal_pattern_paths_for_scope(
@@ -181,9 +201,7 @@ class KnowledgeConversationService:
         if archived_patterns:
             scope = replace(
                 scope,
-                excluded_paths=tuple(
-                    dict.fromkeys((*scope.excluded_paths, *archived_patterns))
-                ),
+                excluded_paths=tuple(dict.fromkeys((*scope.excluded_paths, *archived_patterns))),
             )
         response = self.retriever.search(
             RetrievalRequest(
@@ -207,9 +225,7 @@ class KnowledgeConversationService:
                 candidate_paths=(item.path for item in retrieval_results),
                 explicit_paths=scope.pinned_paths,
             )
-            retrieval_results = _pattern_annotated_results(
-                retrieval_results, local_pattern_context
-            )
+            retrieval_results = _pattern_annotated_results(retrieval_results, local_pattern_context)
         except PersonalPatternContextError:
             retrieval_results = tuple(
                 item for item in retrieval_results if not item.path.startswith("patterns/")
@@ -226,7 +242,8 @@ class KnowledgeConversationService:
         elif evidence_only:
             state = "evidence-only"
             paragraphs = tuple(
-                ConversationParagraph(item.excerpt, (item.evidence_id,), "direct") for item in evidence
+                ConversationParagraph(item.excerpt, (item.evidence_id,), "direct")
+                for item in evidence
             )
             explanation = "Evidence-only mode returned source passages without model synthesis."
         elif answer_provider is None:
@@ -244,16 +261,12 @@ class KnowledgeConversationService:
                         runtime_dir=self.runtime_dir,
                         question=query,
                         limit=limit,
-                        mode=(
-                            "local" if answer_provider.capabilities.local_only else "external"
-                        ),
+                        mode=("local" if answer_provider.capabilities.local_only else "external"),
                         retrieval_scope=scope,
                         candidate_paths=local_pattern_paths,
                         explicit_paths=scope.pinned_paths,
                     )
-                    external_paths = {
-                        item.pattern_path for item in external_pattern_context.items
-                    }
+                    external_paths = {item.pattern_path for item in external_pattern_context.items}
                     provider_results = _pattern_annotated_results(
                         tuple(
                             item
@@ -287,9 +300,7 @@ class KnowledgeConversationService:
                         timeout_seconds=timeout_seconds,
                         cancellation=token,
                     )
-                    paragraphs = validate_generated_answer(
-                        generated, provider_saved_evidence
-                    )
+                    paragraphs = validate_generated_answer(generated, provider_saved_evidence)
                     explanation = generated.explanation
                 except ProviderError as exc:
                     state = "timeout" if exc.code == "timeout" else "malformed-response"

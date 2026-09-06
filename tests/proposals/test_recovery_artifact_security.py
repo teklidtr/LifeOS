@@ -25,11 +25,7 @@ from tests.proposals.test_recovery_orchestration import (
     _load_two_target_application,
 )
 
-_DIRECTORY_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_DIRECTORY", 0)
-    | getattr(os, "O_CLOEXEC", 0)
-)
+_DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
 def _parent(path: Path) -> ParentDescriptor:

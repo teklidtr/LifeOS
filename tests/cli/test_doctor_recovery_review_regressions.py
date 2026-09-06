@@ -247,18 +247,24 @@ def test_case_insensitive_nested_prefix_uses_git_casing_without_widening_scope(
     assert context.prefix == ("vault",)
     assert context.pathspec == "vault"
     assert context.case_insensitive_prefix is True
-    assert recovery_readiness._canonical_path(
-        "Vault/wiki/note.md",
-        context.prefix,
-        lambda path: False,
-        case_insensitive_prefix=context.case_insensitive_prefix,
-    ) == "wiki/note.md"
-    assert recovery_readiness._canonical_path(
-        "outside.txt",
-        context.prefix,
-        lambda path: False,
-        case_insensitive_prefix=context.case_insensitive_prefix,
-    ) is None
+    assert (
+        recovery_readiness._canonical_path(
+            "Vault/wiki/note.md",
+            context.prefix,
+            lambda path: False,
+            case_insensitive_prefix=context.case_insensitive_prefix,
+        )
+        == "wiki/note.md"
+    )
+    assert (
+        recovery_readiness._canonical_path(
+            "outside.txt",
+            context.prefix,
+            lambda path: False,
+            case_insensitive_prefix=context.case_insensitive_prefix,
+        )
+        is None
+    )
 
 
 def test_git_path_query_warning_fails_closed_without_leaking_stderr(

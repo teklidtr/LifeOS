@@ -48,9 +48,7 @@ def test_recovery_git_queries_do_not_execute_configured_fsmonitor(tmp_path: Path
     marker = tmp_path / "fsmonitor-called"
     fsmonitor = tmp_path / "fsmonitor.sh"
     fsmonitor.write_text(
-        "#!/bin/sh\n"
-        f"touch {marker!s}\n"
-        "printf '{}\\n'\n",
+        f"#!/bin/sh\ntouch {marker!s}\nprintf '{{}}\\n'\n",
         encoding="utf-8",
     )
     fsmonitor.chmod(0o755)

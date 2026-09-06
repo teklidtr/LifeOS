@@ -34,8 +34,7 @@ class ConsequentialAuthorizer(Protocol):
         self,
         request: ConsequentialAuthorizationRequest,
         /,
-    ) -> AuthorizedPrincipal:
-        ...
+    ) -> AuthorizedPrincipal: ...
 
 
 class ConsequentialAuthorizationError(RuntimeError):

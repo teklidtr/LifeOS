@@ -164,7 +164,9 @@ def test_transport_cancel_reaches_active_work_and_server_remains_healthy(
     server_thread.join(5)
     assert not server_thread.is_alive()
 
-    progress = [frame for frame in writer.frames if frame.get("method") == "retrieval.index.progress"]
+    progress = [
+        frame for frame in writer.frames if frame.get("method") == "retrieval.index.progress"
+    ]
     assert [frame["params"]["phase"] for frame in progress] == ["started", "interrupted"]
 
 
@@ -250,9 +252,7 @@ def test_transport_cancel_reaches_active_capture_processing(
     reader.send("capture-work", "capture.enrichment.run", {"job_id": "job-1"})
     assert started.wait(5)
     reader.send("capture-cancel", "request.cancel", {"request_id": "capture-work"})
-    assert writer.wait_for_id("capture-cancel")["result"]["outcome"] == (
-        "cancellation-requested"
-    )
+    assert writer.wait_for_id("capture-cancel")["result"]["outcome"] == ("cancellation-requested")
     assert writer.wait_for_id("capture-work")["result"]["state"] == "cancelled"
     reader.send("shutdown", "system.shutdown", {})
     assert writer.wait_for_id("shutdown")["result"] == {"accepted": True}

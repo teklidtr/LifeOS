@@ -76,7 +76,9 @@ class ProviderCapabilities:
         if self.vector_dimensions is not None and self.vector_dimensions <= 0:
             raise RetrievalError("invalid_provider", "vector_dimensions must be positive.")
         if self.schema_version != 1:
-            raise RetrievalError("unsupported_provider_schema", "Provider schema version is unsupported.")
+            raise RetrievalError(
+                "unsupported_provider_schema", "Provider schema version is unsupported."
+            )
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -93,10 +95,14 @@ class EmbeddingBatch:
             return
         expected = dimensions or len(self.vectors[0])
         if expected <= 0 or any(len(vector) != expected for vector in self.vectors):
-            raise ProviderError("malformed_provider_output", "Embedding dimensions are inconsistent.")
+            raise ProviderError(
+                "malformed_provider_output", "Embedding dimensions are inconsistent."
+            )
         for vector in self.vectors:
             if any(not isinstance(value, (int, float)) for value in vector):
-                raise ProviderError("malformed_provider_output", "Embedding values must be numeric.")
+                raise ProviderError(
+                    "malformed_provider_output", "Embedding values must be numeric."
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,7 +231,9 @@ class RetrievalPolicy:
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
-            raise RetrievalError("unsupported_policy_schema", "Retrieval policy schema is unsupported.")
+            raise RetrievalError(
+                "unsupported_policy_schema", "Retrieval policy schema is unsupported."
+            )
         for values in (
             self.excluded_prefixes,
             self.protected_prefixes,
@@ -389,7 +397,10 @@ def build_provider_disclosure(
 
 
 def _matches_prefix(path: str, prefixes: Sequence[str]) -> bool:
-    return any(path == prefix.rstrip("/") or path.startswith(prefix.rstrip("/") + "/") for prefix in prefixes)
+    return any(
+        path == prefix.rstrip("/") or path.startswith(prefix.rstrip("/") + "/")
+        for prefix in prefixes
+    )
 
 
 def _safe_relative(value: str, *, allow_folder: bool = False) -> str:

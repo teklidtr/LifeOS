@@ -38,7 +38,9 @@ def _sort_key(finding: LintFinding) -> tuple[Any, ...]:
     return (str(finding.path), line_key, severity_rank, finding.code, finding.message)
 
 
-def _ownership_manifest_finding(manifest_path: Path, vault_root: Path, error: Exception) -> LintFinding:
+def _ownership_manifest_finding(
+    manifest_path: Path, vault_root: Path, error: Exception
+) -> LintFinding:
     rel_manifest = (
         manifest_path.relative_to(vault_root)
         if manifest_path.is_relative_to(vault_root)

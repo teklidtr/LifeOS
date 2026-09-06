@@ -57,11 +57,19 @@ def test_graph_status_becomes_dirty_after_source_change(tmp_path: Path) -> None:
 
     built = build_graph_view(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
     assert built.status == "clean"
-    assert graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge").status == "clean"
+    assert (
+        graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge").status
+        == "clean"
+    )
 
-    (vault / "wiki" / "concept.md").write_text("---\nid: concept\n---\nChanged.\n", encoding="utf-8")
+    (vault / "wiki" / "concept.md").write_text(
+        "---\nid: concept\n---\nChanged.\n", encoding="utf-8"
+    )
 
-    assert graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge").status == "dirty"
+    assert (
+        graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge").status
+        == "dirty"
+    )
 
 
 def test_graph_output_is_deterministic_json(tmp_path: Path) -> None:
@@ -69,9 +77,7 @@ def test_graph_output_is_deterministic_json(tmp_path: Path) -> None:
     runtime = vault / ".lifeos"
     _write_note(vault, "wiki/a.md", "---\nid: a\n---\n")
 
-    first_state = build_graph_view(
-        vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-    )
+    first_state = build_graph_view(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
     assert first_state.active_generation is not None
     first = (
         runtime
@@ -81,9 +87,7 @@ def test_graph_output_is_deterministic_json(tmp_path: Path) -> None:
         / first_state.active_generation
         / "graph.json"
     ).read_bytes()
-    second_state = build_graph_view(
-        vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-    )
+    second_state = build_graph_view(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
     assert second_state.active_generation == first_state.active_generation
     second = (
         runtime
@@ -122,9 +126,7 @@ def test_ambiguous_basename_wikilinks_are_not_resolved_arbitrarily(tmp_path: Pat
 
     document = build_graph_document(vault_root=tmp_path, view_name="knowledge")
 
-    assert [(edge.source, edge.target) for edge in document.edges] == [
-        ("source", "topic-one")
-    ]
+    assert [(edge.source, edge.target) for edge in document.edges] == [("source", "topic-one")]
 
 
 @pytest.mark.parametrize(

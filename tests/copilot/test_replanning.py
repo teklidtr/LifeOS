@@ -116,7 +116,10 @@ The original plan narrative remains visible.
 
 
 def _codes(vault: Path, runtime: Path, day: date = date(2026, 7, 16)) -> set[str]:
-    return {item.code for item in scan_replanning_triggers(vault_root=vault, runtime_dir=runtime, as_of=day)}
+    return {
+        item.code
+        for item in scan_replanning_triggers(vault_root=vault, runtime_dir=runtime, as_of=day)
+    }
 
 
 def test_goal_without_active_plan_and_plan_without_next_action(tmp_path: Path) -> None:
@@ -155,20 +158,52 @@ def test_review_compares_original_current_and_changed_conditions(tmp_path: Path)
         strategy="Study one bounded wave",
         desired_outcome="Explain chapters one and two.",
         boundaries=("No complete textbook backlog",),
-        assumptions=(PlanAssumption("assumption-time", "Four hours remain available", "user", "goal-cell", "medium"),),
+        assumptions=(
+            PlanAssumption(
+                "assumption-time", "Four hours remain available", "user", "goal-cell", "medium"
+            ),
+        ),
         success_evidence=("Two synthesis notes",),
         risks=("Pacing risk",),
         review_date=date(2026, 8, 1),
-        milestones=(Milestone("milestone-original", "Foundation", "Explain chapters one and two", wave="current"),),
+        milestones=(
+            Milestone(
+                "milestone-original", "Foundation", "Explain chapters one and two", wave="current"
+            ),
+        ),
         tradeoffs=("Less breadth",),
         unresolved_questions=(),
         source_refs=("goals/cell.md",),
     )
     evidence = (
-        ReviewEvidence("correction-deadline", "correction", "The deadline moved to September.", "review/weekly.md", date(2026, 7, 16)),
-        ReviewEvidence("answer-capacity", "review-answer", "Available capacity fell to two hours weekly.", "reviews/week.md", date(2026, 7, 16)),
-        ReviewEvidence("answer-scope", "review-answer", "Scope now excludes chapter three.", None, date(2026, 7, 16)),
-        ReviewEvidence("answer-prerequisite", "review-answer", "A prerequisite course now blocks signaling.", None, date(2026, 7, 16)),
+        ReviewEvidence(
+            "correction-deadline",
+            "correction",
+            "The deadline moved to September.",
+            "review/weekly.md",
+            date(2026, 7, 16),
+        ),
+        ReviewEvidence(
+            "answer-capacity",
+            "review-answer",
+            "Available capacity fell to two hours weekly.",
+            "reviews/week.md",
+            date(2026, 7, 16),
+        ),
+        ReviewEvidence(
+            "answer-scope",
+            "review-answer",
+            "Scope now excludes chapter three.",
+            None,
+            date(2026, 7, 16),
+        ),
+        ReviewEvidence(
+            "answer-prerequisite",
+            "review-answer",
+            "A prerequisite course now blocks signaling.",
+            None,
+            date(2026, 7, 16),
+        ),
     )
     review = build_replanning_review(
         vault_root=tmp_path,
@@ -181,7 +216,10 @@ def test_review_compares_original_current_and_changed_conditions(tmp_path: Path)
         expected_hash="sha256:" + content_hash(plan.read_text()),
     )
     assert {item.dimension for item in review.comparisons} >= {
-        "desired outcome", "scope boundaries", "review date", "execution evidence"
+        "desired outcome",
+        "scope boundaries",
+        "review date",
+        "execution evidence",
     }
     changed = next(item for item in review.triggers if item.code == "constraints-changed")
     assert all(word in changed.detail for word in ("deadline", "scope", "capacity", "prerequisite"))
@@ -242,11 +280,14 @@ def test_continue_unchanged_pause_supersede_close_and_reopen_paths(tmp_path: Pat
         rationale="Reality changed, so preserve intent and review the next decision explicitly.",
         evidence_fingerprint=review.triggers[0].evidence_fingerprint,
     )
-    assert create_replanning_proposal(
-        vault_root=tmp_path,
-        request=ReplanningProposalRequest(outcome="continue-unchanged", changes={}, **common),
-        actor_id="tester",
-    ) is None
+    assert (
+        create_replanning_proposal(
+            vault_root=tmp_path,
+            request=ReplanningProposalRequest(outcome="continue-unchanged", changes={}, **common),
+            actor_id="tester",
+        )
+        is None
+    )
 
     pause = create_replanning_proposal(
         vault_root=tmp_path,
@@ -266,11 +307,14 @@ def test_continue_unchanged_pause_supersede_close_and_reopen_paths(tmp_path: Pat
     assert _body_bytes(plan) == original_body
 
     # Each additional outcome is created from fresh canonical state and remains proposal-only.
-    for index, (outcome, changes) in enumerate((
-        ("supersede", {"superseded_by": "plan-cell-v2"}),
-        ("close", {}),
-        ("reopen-clarification", {}),
-    ), start=1):
+    for index, (outcome, changes) in enumerate(
+        (
+            ("supersede", {"superseded_by": "plan-cell-v2"}),
+            ("close", {}),
+            ("reopen-clarification", {}),
+        ),
+        start=1,
+    ):
         current = build_replanning_review(
             vault_root=tmp_path,
             runtime_dir=runtime,
@@ -299,17 +343,22 @@ def test_continue_unchanged_pause_supersede_close_and_reopen_paths(tmp_path: Pat
 def test_rejected_suggestion_is_suppressed_until_evidence_changes(tmp_path: Path) -> None:
     runtime = tmp_path / ".lifeos"
     goal = _goal(tmp_path)
-    trigger = next(iter(scan_replanning_triggers(
-        vault_root=tmp_path, runtime_dir=runtime, as_of=date(2026, 7, 16)
-    )))
+    trigger = next(
+        iter(
+            scan_replanning_triggers(
+                vault_root=tmp_path, runtime_dir=runtime, as_of=date(2026, 7, 16)
+            )
+        )
+    )
     suppress_replanning_suggestion(
         runtime_dir=runtime,
         trigger_id=trigger.trigger_id,
         evidence_fingerprint=trigger.evidence_fingerprint,
     )
-    assert scan_replanning_triggers(
-        vault_root=tmp_path, runtime_dir=runtime, as_of=date(2026, 7, 16)
-    ) == ()
+    assert (
+        scan_replanning_triggers(vault_root=tmp_path, runtime_dir=runtime, as_of=date(2026, 7, 16))
+        == ()
+    )
     goal.write_text(goal.read_text(encoding="utf-8") + "New explicit evidence.\n", encoding="utf-8")
     changed = scan_replanning_triggers(
         vault_root=tmp_path, runtime_dir=runtime, as_of=date(2026, 7, 16)
@@ -335,7 +384,10 @@ def test_stale_source_fails_closed_in_review_and_proposal(tmp_path: Path) -> Non
         )
     assert plan.read_bytes() == concurrent
     current = build_replanning_review(
-        vault_root=tmp_path, runtime_dir=runtime, target_path="plans/cell.md", as_of=date(2026, 7, 16)
+        vault_root=tmp_path,
+        runtime_dir=runtime,
+        target_path="plans/cell.md",
+        as_of=date(2026, 7, 16),
     )
     plan.write_text(plan.read_text() + "Another edit.\n", encoding="utf-8")
     another = plan.read_bytes()
@@ -343,8 +395,13 @@ def test_stale_source_fails_closed_in_review_and_proposal(tmp_path: Path) -> Non
         create_replanning_proposal(
             vault_root=tmp_path,
             request=ReplanningProposalRequest(
-                current.review_id, current.target_path, current.target_hash, "pause",
-                "Pause after review.", "sha256:" + "a" * 64, {},
+                current.review_id,
+                current.target_path,
+                current.target_hash,
+                "pause",
+                "Pause after review.",
+                "sha256:" + "a" * 64,
+                {},
             ),
             actor_id="tester",
         )
@@ -370,22 +427,30 @@ def test_daily_attention_weekly_review_and_bridge_integration(tmp_path: Path) ->
     app = BridgeApplication(vault_root=tmp_path, runtime_dir=runtime, actor_id="tester")
     scanned = app.dispatch("copilot.replanning.scan", {"as_of": "2026-07-16"})
     assert scanned[0]["code"] == "goal-no-active-plan"
-    review = app.dispatch("copilot.replanning.review", {
-        "target_path": "goals/cell.md",
-        "as_of": "2026-07-16",
-        "corrections": [{
-            "evidence_id": "correction-capacity",
-            "kind": "correction",
-            "statement": "Capacity changed.",
-        }],
-    })
-    unchanged = app.dispatch("copilot.replanning.proposal.create", {
-        "review_id": review["review_id"],
-        "target_path": review["target_path"],
-        "expected_hash": review["target_hash"],
-        "outcome": "continue-unchanged",
-        "rationale": "The direction still fits.",
-        "evidence_fingerprint": review["triggers"][0]["evidence_fingerprint"],
-        "changes": {},
-    })
+    review = app.dispatch(
+        "copilot.replanning.review",
+        {
+            "target_path": "goals/cell.md",
+            "as_of": "2026-07-16",
+            "corrections": [
+                {
+                    "evidence_id": "correction-capacity",
+                    "kind": "correction",
+                    "statement": "Capacity changed.",
+                }
+            ],
+        },
+    )
+    unchanged = app.dispatch(
+        "copilot.replanning.proposal.create",
+        {
+            "review_id": review["review_id"],
+            "target_path": review["target_path"],
+            "expected_hash": review["target_hash"],
+            "outcome": "continue-unchanged",
+            "rationale": "The direction still fits.",
+            "evidence_fingerprint": review["triggers"][0]["evidence_fingerprint"],
+            "changes": {},
+        },
+    )
     assert unchanged == {"proposal_created": False, "outcome": "continue-unchanged"}

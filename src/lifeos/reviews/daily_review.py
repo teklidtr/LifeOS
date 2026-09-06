@@ -51,8 +51,12 @@ _PROMPTS: dict[DailyPhase, tuple[DailyReviewPrompt, ...]] = {
     ),
     "evening": (
         DailyReviewPrompt("evening-story", "evening", "What actually happened today?", False),
-        DailyReviewPrompt("evening-friction", "evening", "What created friction or changed the plan?"),
-        DailyReviewPrompt("evening-carry", "evening", "What, if anything, should be revisited later?"),
+        DailyReviewPrompt(
+            "evening-friction", "evening", "What created friction or changed the plan?"
+        ),
+        DailyReviewPrompt(
+            "evening-carry", "evening", "What, if anything, should be revisited later?"
+        ),
     ),
 }
 
@@ -62,20 +66,30 @@ _REQUIRED: dict[DailyPhase, tuple[str, ...]] = {
 }
 
 
-def daily_due_state(artifact: ReviewArtifact, phase: DailyPhase, now: datetime) -> DailyReviewDueState:
+def daily_due_state(
+    artifact: ReviewArtifact, phase: DailyPhase, now: datetime
+) -> DailyReviewDueState:
     progress = next(item for item in artifact.metadata.phases if item.phase_id == phase)
     if progress.state == "completed":
-        return DailyReviewDueState(phase, "completed", "This phase is completed and may be reopened.")
+        return DailyReviewDueState(
+            phase, "completed", "This phase is completed and may be reopened."
+        )
     if progress.state == "skipped":
-        return DailyReviewDueState(phase, "skipped", "This phase was intentionally skipped and may be reopened.")
+        return DailyReviewDueState(
+            phase, "skipped", "This phase was intentionally skipped and may be reopened."
+        )
     local = now.timetz().replace(tzinfo=None)
     threshold = time(11, 0) if phase == "morning" else time(20, 0)
     if local >= threshold:
-        return DailyReviewDueState(phase, "due", f"The {phase} phase is still open after {threshold.strftime('%H:%M')}.")
+        return DailyReviewDueState(
+            phase, "due", f"The {phase} phase is still open after {threshold.strftime('%H:%M')}."
+        )
     return DailyReviewDueState(phase, "available", f"The {phase} phase is available but not due.")
 
 
-def _next_section(snapshot: ReviewSnapshot, phase: DailyPhase, artifact: ReviewArtifact) -> str | None:
+def _next_section(
+    snapshot: ReviewSnapshot, phase: DailyPhase, artifact: ReviewArtifact
+) -> str | None:
     progress = next(item for item in artifact.metadata.phases if item.phase_id == phase)
     accounted = set(progress.completed_sections) | set(progress.skipped_sections)
     for section_id in _REQUIRED[phase]:

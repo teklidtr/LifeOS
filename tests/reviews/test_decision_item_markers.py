@@ -76,9 +76,7 @@ def test_item_scanner_accepts_only_structural_top_level_checkbox_lines(tmp_path:
             f"- [ ] Real item {marker('real', FP_B)}",
         )
     )
-    artifact = replace_items(
-        artifacts, artifact, items, idempotency_key="structural-items"
-    )
+    artifact = replace_items(artifacts, artifact, items, idempotency_key="structural-items")
 
     assert artifact_item_fingerprints(artifact) == {"real": FP_B}
 
@@ -99,9 +97,7 @@ def test_duplicate_structural_item_ids_fail_before_canonical_mutation(
             f"- [ ] Second copy {marker('duplicate', second_fingerprint)}",
         )
     )
-    artifact = replace_items(
-        artifacts, artifact, items, idempotency_key=f"duplicate-items-{case}"
-    )
+    artifact = replace_items(artifacts, artifact, items, idempotency_key=f"duplicate-items-{case}")
     path = vault / artifact.path
     before = path.read_bytes()
     before_decisions = artifact.metadata.item_decisions
@@ -134,9 +130,7 @@ def test_multiple_markers_on_one_item_line_fail_closed(tmp_path: Path) -> None:
             f"- [ ] Ambiguous {marker('first', FP_A)} {marker('second', FP_B)}",
         )
     )
-    artifact = replace_items(
-        artifacts, artifact, items, idempotency_key="ambiguous-item-line"
-    )
+    artifact = replace_items(artifacts, artifact, items, idempotency_key="ambiguous-item-line")
 
     with pytest.raises(DailyInteractionError) as error:
         artifact_item_fingerprints(artifact)
@@ -157,9 +151,7 @@ def test_fenced_fake_marker_cannot_attach_proposal_reference(tmp_path: Path) -> 
             "`````",
         )
     )
-    artifact = replace_items(
-        artifacts, artifact, items, idempotency_key="fake-proposal-items"
-    )
+    artifact = replace_items(artifacts, artifact, items, idempotency_key="fake-proposal-items")
     path = vault / artifact.path
     before = path.read_bytes()
     before_decisions = artifact.metadata.item_decisions

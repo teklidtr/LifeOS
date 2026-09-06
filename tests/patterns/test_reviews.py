@@ -111,7 +111,9 @@ def test_weekly_surfaces_due_contesting_and_new_seeds_but_not_quiet_active_patte
     vault.mkdir()
     _write_pattern(vault, "due", review_due_at="2026-09-03T09:00:00Z")
     _write_pattern(vault, "quiet")
-    contesting_source = "---\nid: contesting-source\ntype: note\ntitle: Counter\n---\nCounter evidence.\n"
+    contesting_source = (
+        "---\nid: contesting-source\ntype: note\ntitle: Counter\n---\nCounter evidence.\n"
+    )
     _write(vault / "raw" / "counter.md", contesting_source)
     contesting = (
         PatternEvidence(

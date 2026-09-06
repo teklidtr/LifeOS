@@ -13,7 +13,12 @@ import yaml
 
 from lifeos.daily.service import _atomic_write, content_hash
 from lifeos.markdown.parser import parse_markdown_note, replace_managed_block, splice_managed_block
-from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown, read_vault_markdown
+from lifeos.vault import (
+    VaultAccessError,
+    VaultMarkdownFile,
+    iter_vault_markdown,
+    read_vault_markdown,
+)
 
 from .contracts import (
     ExperimentArtifact,
@@ -278,7 +283,9 @@ class ExperimentArtifactService:
             )
         except ValueError as error:
             raise ExperimentError("malformed_artifact", str(error)) from error
-        dumped = yaml.safe_dump(metadata.to_frontmatter(), sort_keys=False, allow_unicode=True).rstrip()
+        dumped = yaml.safe_dump(
+            metadata.to_frontmatter(), sort_keys=False, allow_unicode=True
+        ).rstrip()
         document = f"---\n{dumped}\n---\n{body}"
         parse_experiment(self.vault_root / artifact.path, artifact.path, document)
         _atomic_write(

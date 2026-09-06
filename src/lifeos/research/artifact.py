@@ -33,7 +33,9 @@ _EVIDENCE_END = "<!-- lifeos:research-evidence:end -->"
 def _moment(value: datetime | None = None) -> datetime:
     moment = value or datetime.now(timezone.utc)
     if moment.tzinfo is None:
-        raise ResearchError("invalid_timestamp", "Research capture timestamps must be timezone-aware.")
+        raise ResearchError(
+            "invalid_timestamp", "Research capture timestamps must be timezone-aware."
+        )
     return moment.astimezone(timezone.utc)
 
 
@@ -278,8 +280,7 @@ def _parse(relative_path: str, source_path: Path, content: str) -> ResearchSourc
     if not isinstance(raw_acquisitions, list):
         raise ResearchError("malformed_artifact", "Research acquisitions must be a list.")
     acquisitions = tuple(
-        _acquisition_from_dict(_mapping(item, "research acquisition"))
-        for item in raw_acquisitions
+        _acquisition_from_dict(_mapping(item, "research acquisition")) for item in raw_acquisitions
     )
 
     try:
@@ -487,7 +488,10 @@ class ResearchEvidenceService:
 
         if current.metadata.source_identity != source_identity:
             raise ResearchError("identity_mismatch", "Existing research source identity changed.")
-        if current.metadata.snapshot_hash != snapshot_hash or current.evidence_text != evidence_text:
+        if (
+            current.metadata.snapshot_hash != snapshot_hash
+            or current.evidence_text != evidence_text
+        ):
             raise ResearchError(
                 "snapshot_mismatch",
                 "Existing research source does not match the submitted immutable snapshot.",

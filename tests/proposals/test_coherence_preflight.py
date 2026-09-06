@@ -71,9 +71,7 @@ def test_public_preflight_blocks_approved_target_after_pure_relocation(
             ),
         ),
     )
-    metadata = with_target_identity_extension(
-        _metadata(), patch, collect_identity_snapshot(vault)
-    )
+    metadata = with_target_identity_extension(_metadata(), patch, collect_identity_snapshot(vault))
     loaded = LoadedProposal(
         proposal_dir=PROPOSAL_ID,
         proposal_path=f"{PROPOSAL_ID}/proposal.md",
@@ -132,9 +130,7 @@ def test_public_preflight_blocks_changed_content_even_with_same_stable_id(
             ),
         ),
     )
-    metadata = with_target_identity_extension(
-        _metadata(), patch, collect_identity_snapshot(vault)
-    )
+    metadata = with_target_identity_extension(_metadata(), patch, collect_identity_snapshot(vault))
     loaded = LoadedProposal(
         proposal_dir=PROPOSAL_ID,
         proposal_path=f"{PROPOSAL_ID}/proposal.md",

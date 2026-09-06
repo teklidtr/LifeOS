@@ -113,7 +113,11 @@ class BatchWikiCreateRequest:
     tag_rationale: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.title, str) or not self.title.strip() or self.title != self.title.strip():
+        if (
+            not isinstance(self.title, str)
+            or not self.title.strip()
+            or self.title != self.title.strip()
+        ):
             raise ValueError("title must be a trimmed non-empty string")
         if not isinstance(self.body, str) or not self.body.strip():
             raise ValueError("body must be a non-empty string")
@@ -280,9 +284,10 @@ def _read_update_target(
         target_content=target.content_bytes,
         ownership=ownership,
     )
-    if ownership_entry is None and parse_markdown_note(
-        Path(normalized), content=target.content
-    ).managed_blocks:
+    if (
+        ownership_entry is None
+        and parse_markdown_note(Path(normalized), content=target.content).managed_blocks
+    ):
         raise ToolValidationError(
             "Wiki update target contains managed blocks and cannot use a human patch"
         )

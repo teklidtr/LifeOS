@@ -39,11 +39,7 @@ BOOTSTRAP_FILES: dict[str, str] = {
         "canonical LifeOS artifacts when an MCP/proposal workflow exists.\n"
     ),
     "lifeos.yml": (
-        "vault_root: .\n"
-        "runtime_dir: .lifeos\n"
-        "features:\n"
-        "  graphify: false\n"
-        "  exports: false\n"
+        "vault_root: .\nruntime_dir: .lifeos\nfeatures:\n  graphify: false\n  exports: false\n"
     ),
     "system/generated-ownership.json": (
         json.dumps({"owned_files": {}, "schema_version": 1}, indent=2) + "\n"

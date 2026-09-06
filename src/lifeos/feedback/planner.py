@@ -130,21 +130,50 @@ def build_adaptive_menu(
     if adaptive_mode not in {"off", "shadow", "active"}:
         raise ValueError("adaptive_mode must be off, shadow, or active")
     cfg = config or AdaptivePolicyConfig()
-    baseline = build_daily_menu(actions=actions, as_of=as_of, available_minutes=available_minutes, energy=energy, motivation=motivation, mode=mode_filter)
+    baseline = build_daily_menu(
+        actions=actions,
+        as_of=as_of,
+        available_minutes=available_minutes,
+        energy=energy,
+        motivation=motivation,
+        mode=mode_filter,
+    )
     items = tuple(sorted(observations, key=lambda item: (item.day, item.event_id)))
-    diagnoses = diagnose_repeated_avoidance(observations=items, as_of=as_of, dismissed_fingerprints=dismissed_diagnosis_fingerprints)
+    diagnoses = diagnose_repeated_avoidance(
+        observations=items, as_of=as_of, dismissed_fingerprints=dismissed_diagnosis_fingerprints
+    )
     diagnoses_by_task: dict[str, tuple[str, ...]] = {}
     for diagnosis in diagnoses:
         if not diagnosis.dismissed and diagnosis.confidence != "insufficient":
             diagnoses_by_task.setdefault(diagnosis.task_id, tuple())
-            diagnoses_by_task[diagnosis.task_id] = (*diagnoses_by_task[diagnosis.task_id], diagnosis.diagnosis_id)
+            diagnoses_by_task[diagnosis.task_id] = (
+                *diagnoses_by_task[diagnosis.task_id],
+                diagnosis.diagnosis_id,
+            )
     transformed: list[PlanningAction] = []
     adjustments: list[AdaptiveAdjustment] = []
     for action in sorted(actions, key=lambda item: item.task_id):
-        effective, adjustment = _effective_action(action, observations=items, as_of=as_of, energy=energy, motivation=motivation, time_window=time_window, disabled_dimensions=disabled_dimensions, diagnoses_by_task=diagnoses_by_task, config=cfg)
+        effective, adjustment = _effective_action(
+            action,
+            observations=items,
+            as_of=as_of,
+            energy=energy,
+            motivation=motivation,
+            time_window=time_window,
+            disabled_dimensions=disabled_dimensions,
+            diagnoses_by_task=diagnoses_by_task,
+            config=cfg,
+        )
         transformed.append(effective)
         adjustments.append(adjustment)
-    raw_adaptive = build_daily_menu(actions=tuple(transformed), as_of=as_of, available_minutes=available_minutes, energy=energy, motivation=motivation, mode=mode_filter)
+    raw_adaptive = build_daily_menu(
+        actions=tuple(transformed),
+        as_of=as_of,
+        available_minutes=available_minutes,
+        energy=energy,
+        motivation=motivation,
+        mode=mode_filter,
+    )
     adaptive = (
         _decorate_menu(raw_adaptive, {item.task_id: item for item in adjustments})
         if any(item.reason_codes for item in adjustments)
@@ -162,7 +191,9 @@ def build_adaptive_menu(
             item.reason_codes,
         )
         for item in adjustments
-        if item.task_id in baseline_ids or item.task_id in adaptive_ids or item.declared_minutes != item.effective_minutes
+        if item.task_id in baseline_ids
+        or item.task_id in adaptive_ids
+        or item.declared_minutes != item.effective_minutes
     )
     has_diagnostics = False
     has_evidence = any(item.reason_codes for item in adjustments)
@@ -171,7 +202,12 @@ def build_adaptive_menu(
     if adaptive_mode == "off":
         adaptive = baseline
         deltas = tuple(
-            replace(delta, adaptive_selected=delta.baseline_selected, effective_minutes=delta.declared_minutes, reason_codes=())
+            replace(
+                delta,
+                adaptive_selected=delta.baseline_selected,
+                effective_minutes=delta.declared_minutes,
+                reason_codes=(),
+            )
             for delta in deltas
         )
     return AdaptivePlanResult(

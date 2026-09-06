@@ -17,11 +17,14 @@ def test_opened_component_spelling_uses_directory_entry_name(tmp_path: Path) -> 
     root_fd = os.open(vault, flags)
     child_fd = os.open("runtime", flags, dir_fd=root_fd)
     try:
-        assert coherence_scoped._opened_component_spelling(
-            root_fd,
-            child_fd,
-            "Runtime",
-        ) == "runtime"
+        assert (
+            coherence_scoped._opened_component_spelling(
+                root_fd,
+                child_fd,
+                "Runtime",
+            )
+            == "runtime"
+        )
     finally:
         os.close(child_fd)
         os.close(root_fd)
@@ -40,10 +43,13 @@ def test_runtime_prefix_uses_filesystem_selected_spelling(
         lambda _root, _relative: "runtime",
     )
 
-    assert coherence_scoped.runtime_exclusion_prefix(
-        vault,
-        runtime_dir=vault / "Runtime",
-    ) == "runtime/"
+    assert (
+        coherence_scoped.runtime_exclusion_prefix(
+            vault,
+            runtime_dir=vault / "Runtime",
+        )
+        == "runtime/"
+    )
 
 
 def test_runtime_exclusion_preserves_filename_whitespace(tmp_path: Path) -> None:

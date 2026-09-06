@@ -139,9 +139,7 @@ def _dependency_metadata(lines: list[str]) -> tuple[tuple[str, ...], str]:
     if indented == ["[]"]:
         return (), "list"
     if all(line.startswith("- ") for line in indented):
-        dependencies = tuple(
-            _task_id(line[2:], field="depends_on") for line in indented
-        )
+        dependencies = tuple(_task_id(line[2:], field="depends_on") for line in indented)
         return dependencies, "list"
     return (), "legacy-opaque"
 
@@ -221,9 +219,7 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
 
     for task_id, paths in sorted(by_id.items()):
         if len(paths) > 1:
-            rendered = ", ".join(
-                str(path.relative_to(task_root.parent)) for path in sorted(paths)
-            )
+            rendered = ", ".join(str(path.relative_to(task_root.parent)) for path in sorted(paths))
             errors.append(f"duplicate task id {task_id!r}: {rendered}")
 
     known_ids = set(by_id)
@@ -231,9 +227,7 @@ def validate_task_tree(task_root: Path) -> tuple[str, ...]:
         relative = metadata.path.relative_to(task_root.parent)
         for dependency in metadata.depends_on:
             if dependency not in known_ids:
-                errors.append(
-                    f"{relative}: dependency {dependency!r} does not match any task id"
-                )
+                errors.append(f"{relative}: dependency {dependency!r} does not match any task id")
 
     return tuple(errors)
 

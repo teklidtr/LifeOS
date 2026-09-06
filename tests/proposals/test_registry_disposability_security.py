@@ -40,9 +40,7 @@ class AllowingAuthorizer:
     def __init__(self) -> None:
         self.requests: list[ConsequentialAuthorizationRequest] = []
 
-    def authorize(
-        self, request: ConsequentialAuthorizationRequest, /
-    ) -> AuthorizedPrincipal:
+    def authorize(self, request: ConsequentialAuthorizationRequest, /) -> AuthorizedPrincipal:
         self.requests.append(request)
         return AuthorizedPrincipal("lifeos-1646-test")
 
@@ -91,12 +89,8 @@ def _write_approved_proposal(vault_root: Path, patch_document: PatchDocumentV2) 
     body = "# Registry disposability regression\n"
 
     metadata = _metadata(review_digest=ZERO_DIGEST)
-    (proposal_dir / "proposal.md").write_bytes(
-        serialize_proposal_markdown(metadata, body)
-    )
-    (proposal_dir / "patches.json").write_bytes(
-        serialize_patch_json_bytes(patch_document)
-    )
+    (proposal_dir / "proposal.md").write_bytes(serialize_proposal_markdown(metadata, body))
+    (proposal_dir / "patches.json").write_bytes(serialize_patch_json_bytes(patch_document))
 
     loaded = load_proposal_directory(proposal_dir, proposals_root=proposals_root)
     assert loaded.proposal is not None
@@ -109,9 +103,7 @@ def _write_approved_proposal(vault_root: Path, patch_document: PatchDocumentV2) 
     )
 
     metadata = _metadata(review_digest=review_digest)
-    (proposal_dir / "proposal.md").write_bytes(
-        serialize_proposal_markdown(metadata, body)
-    )
+    (proposal_dir / "proposal.md").write_bytes(serialize_proposal_markdown(metadata, body))
     return proposal_dir
 
 
@@ -131,12 +123,8 @@ def _write_ownership(
 
 
 def _initialize_git_and_registry(vault_root: Path) -> tuple[Path, Registry]:
-    subprocess.run(
-        ["git", "init"], cwd=vault_root, check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "add", "-A"], cwd=vault_root, check=True, capture_output=True
-    )
+    subprocess.run(["git", "init"], cwd=vault_root, check=True, capture_output=True)
+    subprocess.run(["git", "add", "-A"], cwd=vault_root, check=True, capture_output=True)
     registry_path = vault_root / ".lifeos" / "registry.db"
     registry = Registry(registry_path)
     refresh_registry(vault_root=vault_root, registry=registry)
@@ -431,9 +419,7 @@ def test_review_digest_tampering_stays_refused_after_registry_deletion_and_rebui
         new_content="tampered after review\n",
     )
     patches_path.write_bytes(
-        serialize_patch_json_bytes(
-            PatchDocumentV2(2, PROPOSAL_ID, (tampered_operation,))
-        )
+        serialize_patch_json_bytes(PatchDocumentV2(2, PROPOSAL_ID, (tampered_operation,)))
     )
 
     ownership_bytes = ownership_path.read_bytes()

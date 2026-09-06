@@ -92,9 +92,7 @@ def test_non_loopback_bind_requires_allowed_host() -> None:
 
 
 def test_loopback_bind_keeps_sdk_safe_default() -> None:
-    assert build_transport_security(
-        host="127.0.0.1", allowed_hosts=(), allowed_origins=()
-    ) is None
+    assert build_transport_security(host="127.0.0.1", allowed_hosts=(), allowed_origins=()) is None
 
 
 def test_headless_authorizer_requires_authenticated_request_context() -> None:
@@ -159,9 +157,7 @@ def test_authenticated_request_rejects_declared_oversize_before_dispatch() -> No
         readiness=FakeReadiness(),
     )
     scope = _http_scope(token=token)
-    scope["headers"].append(
-        (b"content-length", str(MAX_MCP_REQUEST_BYTES + 1).encode("ascii"))
-    )
+    scope["headers"].append((b"content-length", str(MAX_MCP_REQUEST_BYTES + 1).encode("ascii")))
     events: list[dict[str, Any]] = []
 
     async def receive() -> dict[str, Any]:

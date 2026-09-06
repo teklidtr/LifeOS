@@ -62,9 +62,7 @@ def replace_items(
         "<div>\n- [ ] Fake div item {marker}\n</div>\n",
     ),
 )
-def test_raw_html_blocks_do_not_authorize_review_items(
-    tmp_path: Path, raw_block: str
-) -> None:
+def test_raw_html_blocks_do_not_authorize_review_items(tmp_path: Path, raw_block: str) -> None:
     _, artifacts, artifact = setup_artifact(tmp_path)
     items = "\n".join(
         (

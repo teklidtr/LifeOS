@@ -358,14 +358,10 @@ def test_ci_documentation_allowlist_rejects_implementation_owned_markdown() -> N
 
 
 def test_ci_scope_checks_both_rename_endpoints() -> None:
-    docs_rename = parse_name_status_z(
-        b"R100\0docs/old.md\0docs/new.md\0M\0README.md\0"
-    )
+    docs_rename = parse_name_status_z(b"R100\0docs/old.md\0docs/new.md\0M\0README.md\0")
     assert evaluate_ci_scope(docs_rename) == (True, 2)
 
-    implementation_to_docs = parse_name_status_z(
-        b"R100\0src/lifeos/example.py\0docs/example.md\0"
-    )
+    implementation_to_docs = parse_name_status_z(b"R100\0src/lifeos/example.py\0docs/example.md\0")
     assert evaluate_ci_scope(implementation_to_docs) == (False, 1)
 
 

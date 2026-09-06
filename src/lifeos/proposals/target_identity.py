@@ -90,7 +90,9 @@ def with_target_identity_extension(
     # leaves nested mappingproxy values behind and PyYAML cannot serialize them.
     serialized_extensions = serialize_metadata(metadata)["extensions"]
     if not isinstance(serialized_extensions, dict):
-        raise ProposalTargetIdentityError("Proposal metadata extensions did not serialize to a mapping")
+        raise ProposalTargetIdentityError(
+            "Proposal metadata extensions did not serialize to a mapping"
+        )
     extensions = dict(serialized_extensions)
     if TARGET_IDENTITY_EXTENSION in extensions:
         raise ProposalTargetIdentityError(

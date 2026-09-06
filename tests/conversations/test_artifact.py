@@ -70,7 +70,8 @@ def test_create_append_load_and_preserve_human_annotations(tmp_path: Path) -> No
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_update_preserves_exact_body_around_real_managed_block(
-    tmp_path: Path, newline: str,
+    tmp_path: Path,
+    newline: str,
 ) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()

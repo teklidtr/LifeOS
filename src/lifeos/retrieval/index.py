@@ -106,7 +106,9 @@ class RetrievalIndex:
                 self.connection.commit()
             self._validate_schema()
         except sqlite3.DatabaseError as exc:
-            raise RetrievalError("corrupt_index", f"The retrieval index is unreadable: {exc}") from exc
+            raise RetrievalError(
+                "corrupt_index", f"The retrieval index is unreadable: {exc}"
+            ) from exc
 
     @classmethod
     def open_runtime(cls, runtime_dir: Path, *, create: bool = True) -> "RetrievalIndex":
@@ -137,8 +139,12 @@ class RetrievalIndex:
                 "SELECT document_id FROM documents WHERE path = ?", (note.document.path,)
             ).fetchone()
             if prior is not None and prior["document_id"] != note.document.document_id:
-                self.connection.execute("DELETE FROM documents WHERE document_id = ?", (prior["document_id"],))
-            self.connection.execute("DELETE FROM documents WHERE document_id = ?", (note.document.document_id,))
+                self.connection.execute(
+                    "DELETE FROM documents WHERE document_id = ?", (prior["document_id"],)
+                )
+            self.connection.execute(
+                "DELETE FROM documents WHERE document_id = ?", (note.document.document_id,)
+            )
             self._insert_document(note.document)
             for chunk in note.chunks:
                 self._insert_chunk(chunk)
@@ -151,7 +157,9 @@ class RetrievalIndex:
     def rename_path(self, old_path: str, note: ChunkedNote) -> None:
         with self.transaction():
             self.connection.execute("DELETE FROM documents WHERE path = ?", (old_path,))
-            self.connection.execute("DELETE FROM documents WHERE document_id = ?", (note.document.document_id,))
+            self.connection.execute(
+                "DELETE FROM documents WHERE document_id = ?", (note.document.document_id,)
+            )
             self._insert_document(note.document)
             for chunk in note.chunks:
                 self._insert_chunk(chunk)
@@ -184,7 +192,9 @@ class RetrievalIndex:
         return tuple(self._chunk(row) for row in rows)
 
     def chunk(self, chunk_id: str) -> IndexedChunk | None:
-        row = self.connection.execute("SELECT * FROM chunks WHERE chunk_id = ?", (chunk_id,)).fetchone()
+        row = self.connection.execute(
+            "SELECT * FROM chunks WHERE chunk_id = ?", (chunk_id,)
+        ).fetchone()
         return self._chunk(row) if row else None
 
     def write_embeddings(
@@ -195,7 +205,9 @@ class RetrievalIndex:
         created_at: str,
     ) -> None:
         if len(chunks) != len(batch.vectors):
-            raise RetrievalError("malformed_provider_output", "Provider returned the wrong embedding count.")
+            raise RetrievalError(
+                "malformed_provider_output", "Provider returned the wrong embedding count."
+            )
         capability = batch.capabilities
         if capability.kind != "embedding":
             raise RetrievalError("invalid_provider", "Only embedding capabilities can be stored.")
@@ -233,12 +245,19 @@ class RetrievalIndex:
             if stale and not include_stale:
                 continue
             vector = tuple(float(value) for value in json.loads(row["vector_json"]))
-            if len(vector) != row["dimensions"] or any(not math.isfinite(value) for value in vector):
+            if len(vector) != row["dimensions"] or any(
+                not math.isfinite(value) for value in vector
+            ):
                 raise RetrievalError("corrupt_index", "Stored embedding is malformed.")
             values.append(
                 StoredEmbedding(
-                    row["chunk_id"], row["adapter_key"], row["model_key"],
-                    row["chunk_hash"], vector, row["created_at"], stale,
+                    row["chunk_id"],
+                    row["adapter_key"],
+                    row["model_key"],
+                    row["chunk_hash"],
+                    vector,
+                    row["created_at"],
+                    stale,
                 )
             )
         return tuple(values)
@@ -270,7 +289,9 @@ class RetrievalIndex:
 
     def _validate_schema(self) -> None:
         try:
-            row = self.connection.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            row = self.connection.execute(
+                "SELECT value FROM meta WHERE key='schema_version'"
+            ).fetchone()
         except sqlite3.DatabaseError as exc:
             raise RetrievalError("corrupt_index", "The retrieval index schema is missing.") from exc
         if row is None:
@@ -278,7 +299,9 @@ class RetrievalIndex:
         try:
             version = int(row["value"])
         except (TypeError, ValueError) as exc:
-            raise RetrievalError("corrupt_index", "The retrieval index schema version is invalid.") from exc
+            raise RetrievalError(
+                "corrupt_index", "The retrieval index schema version is invalid."
+            ) from exc
         if version != INDEX_SCHEMA_VERSION:
             raise RetrievalError(
                 "incompatible_index",
@@ -291,10 +314,16 @@ class RetrievalIndex:
             """INSERT INTO documents(document_id,path,title,note_type,source,note_date,tags_json,frontmatter_json,content_hash,indexed_at)
                VALUES(?,?,?,?,?,?,?,?,?,?)""",
             (
-                item.document_id, item.path, item.title, item.note_type, item.source,
-                item.note_date, json.dumps(item.tags, ensure_ascii=False),
+                item.document_id,
+                item.path,
+                item.title,
+                item.note_type,
+                item.source,
+                item.note_date,
+                json.dumps(item.tags, ensure_ascii=False),
                 json.dumps(item.frontmatter, ensure_ascii=False, sort_keys=True),
-                item.content_hash, item.indexed_at,
+                item.content_hash,
+                item.indexed_at,
             ),
         )
 
@@ -303,11 +332,20 @@ class RetrievalIndex:
             """INSERT INTO chunks(chunk_id,document_id,path,heading,heading_path_json,start_line,end_line,block_id,text,normalized_hash,chunk_hash,links_json,token_count,metadata_json)
                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                item.chunk_id, item.document_id, item.path, item.heading,
-                json.dumps(item.heading_path, ensure_ascii=False), item.start_line,
-                item.end_line, item.block_id, item.text, item.normalized_hash,
-                item.chunk_hash, json.dumps(item.links, ensure_ascii=False),
-                item.token_count, json.dumps(item.metadata, ensure_ascii=False, sort_keys=True),
+                item.chunk_id,
+                item.document_id,
+                item.path,
+                item.heading,
+                json.dumps(item.heading_path, ensure_ascii=False),
+                item.start_line,
+                item.end_line,
+                item.block_id,
+                item.text,
+                item.normalized_hash,
+                item.chunk_hash,
+                json.dumps(item.links, ensure_ascii=False),
+                item.token_count,
+                json.dumps(item.metadata, ensure_ascii=False, sort_keys=True),
             ),
         )
         for target_path, target_heading in item.links:
@@ -319,17 +357,33 @@ class RetrievalIndex:
     @staticmethod
     def _document(row: sqlite3.Row) -> IndexedDocument:
         return IndexedDocument(
-            row["document_id"], row["path"], row["title"], row["note_type"], row["source"],
-            row["note_date"], tuple(json.loads(row["tags_json"])), json.loads(row["frontmatter_json"]),
-            row["content_hash"], row["indexed_at"],
+            row["document_id"],
+            row["path"],
+            row["title"],
+            row["note_type"],
+            row["source"],
+            row["note_date"],
+            tuple(json.loads(row["tags_json"])),
+            json.loads(row["frontmatter_json"]),
+            row["content_hash"],
+            row["indexed_at"],
         )
 
     @staticmethod
     def _chunk(row: sqlite3.Row) -> IndexedChunk:
         return IndexedChunk(
-            row["chunk_id"], row["document_id"], row["path"], row["heading"],
-            tuple(json.loads(row["heading_path_json"])), row["start_line"], row["end_line"],
-            row["block_id"], row["text"], row["normalized_hash"], row["chunk_hash"],
-            tuple(tuple(item) for item in json.loads(row["links_json"])), row["token_count"],
+            row["chunk_id"],
+            row["document_id"],
+            row["path"],
+            row["heading"],
+            tuple(json.loads(row["heading_path_json"])),
+            row["start_line"],
+            row["end_line"],
+            row["block_id"],
+            row["text"],
+            row["normalized_hash"],
+            row["chunk_hash"],
+            tuple(tuple(item) for item in json.loads(row["links_json"])),
+            row["token_count"],
             json.loads(row["metadata_json"]),
         )

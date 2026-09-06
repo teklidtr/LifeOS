@@ -32,11 +32,7 @@ from lifeos._recovery_readiness_base import (
 from lifeos.coherence import CoherenceError
 from lifeos.retrieval.contracts import RetrievalError, scope_decision
 
-_FILE_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_NOFOLLOW", 0)
-    | getattr(os, "O_CLOEXEC", 0)
-)
+_FILE_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 _DIRECTORY_FLAGS = _FILE_FLAGS | getattr(os, "O_DIRECTORY", 0)
 _ENTRY_FLAGS = _FILE_FLAGS | getattr(os, "O_NONBLOCK", 0)
 _PINNED_DIRECTORY_SUPPORT = (
@@ -96,9 +92,7 @@ _ACTIVE_VISIBLE_IGNORE_CLASSIFICATION: contextvars.ContextVar[
     _VisibleIgnoreClassification | None
 ] = contextvars.ContextVar("lifeos_recovery_visible_ignore_classification", default=None)
 
-_SECTION_RE = re.compile(
-    r'^\s*\[\s*([^\]\s"]+)(?:\s+"((?:\\.|[^"\\])*)")?\s*\]\s*(?:[#;].*)?$'
-)
+_SECTION_RE = re.compile(r'^\s*\[\s*([^\]\s"]+)(?:\s+"((?:\\.|[^"\\])*)")?\s*\]\s*(?:[#;].*)?$')
 _KEY_VALUE_RE = re.compile(r"^\s*([A-Za-z0-9.-]+)\s*(?:=\s*)?(.*?)\s*$")
 _DEAD_HELPERS = (
     "_committed_coverage",
@@ -451,15 +445,12 @@ def _pinned_fd_path(fd: int, observed: os.stat_result) -> str:
             candidate_state = os.stat(candidate)
         except OSError:
             continue
-        if (
-            stat.S_ISDIR(candidate_state.st_mode)
-            and (candidate_state.st_dev, candidate_state.st_ino)
-            == (observed.st_dev, observed.st_ino)
-        ):
+        if stat.S_ISDIR(candidate_state.st_mode) and (
+            candidate_state.st_dev,
+            candidate_state.st_ino,
+        ) == (observed.st_dev, observed.st_ino):
             return candidate
-    raise _base.RecoveryGitError(
-        "Platform cannot expose a pinned Git object directory safely"
-    )
+    raise _base.RecoveryGitError("Platform cannot expose a pinned Git object directory safely")
 
 
 def _open_object_store(

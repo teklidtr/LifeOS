@@ -219,7 +219,9 @@ class AgentPatternReviewPayload:
         if not self.evidence:
             raise ValueError("agent-assisted pattern proposals require selected evidence")
         if len(self.evidence) > 32:
-            raise ValueError("agent-assisted pattern proposals support at most 32 evidence references")
+            raise ValueError(
+                "agent-assisted pattern proposals support at most 32 evidence references"
+            )
 
     def to_dict(self) -> dict[str, object]:
         supporting = [item.to_dict() for item in self.evidence if item.role == "supporting"]
@@ -247,12 +249,10 @@ def _semantic_body(payload: AgentPatternReviewPayload) -> str:
             if isinstance(item, dict)
         ] or ["- None selected."]
 
-    competing = [
-        f"- {item}" for item in payload.suggestion.competing_explanations
-    ] or ["- None recorded."]
-    limitations = [f"- {item}" for item in payload.suggestion.limitations] or [
+    competing = [f"- {item}" for item in payload.suggestion.competing_explanations] or [
         "- None recorded."
     ]
+    limitations = [f"- {item}" for item in payload.suggestion.limitations] or ["- None recorded."]
     return "\n".join(
         [
             "",

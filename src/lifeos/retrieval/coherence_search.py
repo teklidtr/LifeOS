@@ -41,9 +41,9 @@ _STALE_QUERY_PATHS: ContextVar[frozenset[str]] = ContextVar(
 _QUERY_HEALTH: ContextVar[IndexHealth | None] = ContextVar(
     "lifeos_retrieval_query_health", default=None
 )
-_SCOPED_QUERY_CHUNKS: ContextVar[
-    dict[str, tuple[IndexedChunk, IndexedDocument]] | None
-] = ContextVar("lifeos_retrieval_scoped_query_chunks", default=None)
+_SCOPED_QUERY_CHUNKS: ContextVar[dict[str, tuple[IndexedChunk, IndexedDocument]] | None] = (
+    ContextVar("lifeos_retrieval_scoped_query_chunks", default=None)
+)
 _PREAUTHORIZED_PATHS: ContextVar[frozenset[str] | None] = ContextVar(
     "lifeos_retrieval_preauthorized_paths", default=None
 )
@@ -81,9 +81,7 @@ class HybridRetriever(_BaseHybridRetriever):
             vault_root=vault_root, runtime_dir=runtime_dir, policy=self.policy
         )
         try:
-            self._runtime_prefix = runtime_exclusion_prefix(
-                vault_root, runtime_dir=runtime_dir
-            )
+            self._runtime_prefix = runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
         except CoherenceError as exc:
             raise RetrievalError("invalid_runtime_scope", str(exc)) from exc
 
@@ -159,9 +157,7 @@ class HybridRetriever(_BaseHybridRetriever):
         )
         return replace(response, results=enriched)
 
-    def _index_health(
-        self, *, embedding_provider: EmbeddingProvider | None = None
-    ) -> IndexHealth:
+    def _index_health(self, *, embedding_provider: EmbeddingProvider | None = None) -> IndexHealth:
         existing = _QUERY_HEALTH.get()
         if existing is not None:
             return existing
@@ -203,8 +199,7 @@ class HybridRetriever(_BaseHybridRetriever):
             semantic_chunk_ids: set[str] = set()
             if embedding_provider is not None:
                 semantic_chunk_ids = {
-                    item.chunk_id
-                    for item in index.embeddings(embedding_provider.capabilities)
+                    item.chunk_id for item in index.embeddings(embedding_provider.capabilities)
                 }
 
             terms = lexical_terms(request.query)
@@ -270,9 +265,7 @@ class HybridRetriever(_BaseHybridRetriever):
 
     def _authorize_candidates(
         self,
-        candidates: list[
-            tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]
-        ],
+        candidates: list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]],
         request: RetrievalRequest,
     ) -> list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]]:
         scoped = _SCOPED_QUERY_CHUNKS.get() or {}
@@ -281,13 +274,9 @@ class HybridRetriever(_BaseHybridRetriever):
         selected = set(request.scope.paths) | set(request.scope.pinned_paths)
         provisional_links = _base_search._link_scores(scoped_chunks, selected)
         support_paths = selected | set(provisional_links)
-        candidate_paths = {
-            document.path for _chunk, document, _components, _matched in candidates
-        }
+        candidate_paths = {document.path for _chunk, document, _components, _matched in candidates}
         paths_to_authorize = candidate_paths | support_paths
-        documents_by_path = {
-            document.path: document for _chunk, document in scoped_items
-        }
+        documents_by_path = {document.path: document for _chunk, document in scoped_items}
 
         authorized_paths: set[str] = set()
         captured = _IDENTITY_CAPTURE.get()
@@ -346,17 +335,13 @@ class HybridRetriever(_BaseHybridRetriever):
             return None
         if item.path.startswith("conversations/") or item.path.startswith("proposals/"):
             return None
-        decision = scope_decision(
-            item.path, scope=request.scope, policy=self.policy, mode="local"
-        )
+        decision = scope_decision(item.path, scope=request.scope, policy=self.policy, mode="local")
         if not decision.allowed:
             return None
         return candidate
 
 
-def _with_stable_id(
-    item: RetrievalEvidence, stable_id: str | None
-) -> StableRetrievalEvidence:
+def _with_stable_id(item: RetrievalEvidence, stable_id: str | None) -> StableRetrievalEvidence:
     return StableRetrievalEvidence(
         evidence_id=item.evidence_id,
         chunk_id=item.chunk_id,

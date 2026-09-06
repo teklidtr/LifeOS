@@ -281,9 +281,7 @@ async def test_mcp_ingestion_updates_generated_owned_wiki_section_end_to_end(
             }
         },
     }
-    (vault_root / "system" / "generated-ownership.json").write_text(
-        json.dumps(ownership)
-    )
+    (vault_root / "system" / "generated-ownership.json").write_text(json.dumps(ownership))
 
     server_params = StdioServerParameters(
         command=sys.executable,
@@ -332,9 +330,7 @@ async def test_mcp_ingestion_updates_generated_owned_wiki_section_end_to_end(
     assert target_path.read_text() == original.replace(
         "Old incomplete list.", "Verified complete list with reasons."
     )
-    manifest = json.loads(
-        (vault_root / "system" / "generated-ownership.json").read_text()
-    )
+    manifest = json.loads((vault_root / "system" / "generated-ownership.json").read_text())
     assert manifest["owned_files"]["wiki/generated.md"]["content_hash"] == (
         hashlib.sha256(target_path.read_bytes()).hexdigest()
     )
@@ -395,17 +391,11 @@ async def test_mcp_compound_ingestion_applies_two_operations_atomically(
             assert not create_target.exists()
             assert update_target.read_text() == original
 
-            submit = await session.call_tool(
-                "proposal_submit", {"proposal_id": proposal_id}
-            )
+            submit = await session.call_tool("proposal_submit", {"proposal_id": proposal_id})
             assert not submit.isError
-            approve = await session.call_tool(
-                "proposal_approve", {"proposal_id": proposal_id}
-            )
+            approve = await session.call_tool("proposal_approve", {"proposal_id": proposal_id})
             assert not approve.isError
-            apply = await session.call_tool(
-                "proposal_apply", {"proposal_id": proposal_id}
-            )
+            apply = await session.call_tool("proposal_apply", {"proposal_id": proposal_id})
             assert not apply.isError
             apply_data = json.loads(apply.content[0].text)
             assert apply_data["status"] == "applied"

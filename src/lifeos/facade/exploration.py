@@ -368,9 +368,7 @@ def inspect_links(*, vault_root: Path, request: VaultLinksRequest) -> VaultLinks
     links: set[VaultLink] = set()
     diagnostics: list[DomainDiagnostic] = []
     source_paths = (
-        (request.path,)
-        if request.direction == "outgoing"
-        else tuple(sorted(allowed_paths))
+        (request.path,) if request.direction == "outgoing" else tuple(sorted(allowed_paths))
     )
     for source_path in source_paths:
         try:

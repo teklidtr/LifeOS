@@ -203,7 +203,9 @@ def _verified_evidence(
             if exc.code == "not-found":
                 raise ToolNotFoundError("Selected personal-pattern evidence is missing") from exc
             if exc.code in {"invalid-path", "unsafe-symlink"}:
-                raise ToolValidationError("Selected personal-pattern evidence path is unsafe") from exc
+                raise ToolValidationError(
+                    "Selected personal-pattern evidence path is unsafe"
+                ) from exc
             raise ToolExecutionError("Could not read selected personal-pattern evidence") from exc
         current_hash = f"sha256:{hash_file_content(content)}"
         if current_hash != observed.content_hash:
@@ -213,10 +215,14 @@ def _verified_evidence(
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise ToolExecutionError("Selected personal-pattern evidence is not valid UTF-8") from exc
+            raise ToolExecutionError(
+                "Selected personal-pattern evidence is not valid UTF-8"
+            ) from exc
         parsed = parse_markdown_note(vault_root / observed.path, content=text)
         raw_source_id = parsed.frontmatter.get("id")
-        source_id = raw_source_id if isinstance(raw_source_id, str) and raw_source_id.strip() else None
+        source_id = (
+            raw_source_id if isinstance(raw_source_id, str) and raw_source_id.strip() else None
+        )
         verified.append(
             PatternEvidence(
                 path=observed.path,
@@ -381,7 +387,9 @@ def review_agent_pattern(
             role="contextual",
         )
     except PatternError as exc:
-        raise ToolValidationError("observed_pattern_hash must be an exact sha256 content hash") from exc
+        raise ToolValidationError(
+            "observed_pattern_hash must be an exact sha256 content hash"
+        ) from exc
     _require_external_markdown_path(
         vault_root=vault_root,
         path=request.target_path,

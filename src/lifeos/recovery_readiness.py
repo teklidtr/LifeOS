@@ -92,9 +92,7 @@ def _decode_git_config_scalar(value: str, *, key: str) -> str:
             }
             replacement = escapes.get(char)
             if replacement is None:
-                raise _base.RecoveryGitError(
-                    f"Git {key} configuration uses an unsupported escape"
-                )
+                raise _base.RecoveryGitError(f"Git {key} configuration uses an unsupported escape")
             output.append(replacement)
             escaped = False
             index += 1
@@ -117,9 +115,7 @@ def _decode_git_config_scalar(value: str, *, key: str) -> str:
         if char in "#;":
             break
         if char == "\\":
-            raise _base.RecoveryGitError(
-                f"Git {key} configuration uses an unsupported escape"
-            )
+            raise _base.RecoveryGitError(f"Git {key} configuration uses an unsupported escape")
         output.append(char)
         index += 1
 
@@ -159,9 +155,7 @@ def _parse_config_snapshot(raw: bytes) -> tuple[bytes, bool, bool, bool]:
             extensions = extensions or (section == "extensions" and subsection is None)
             continue
         if line.startswith("["):
-            raise _base.RecoveryGitError(
-                "Git config section header is malformed or unsupported"
-            )
+            raise _base.RecoveryGitError("Git config section header is malformed or unsupported")
         if section != "core" or subsection is not None:
             continue
 
@@ -467,14 +461,10 @@ def _snapshot_object_directory(
 
         if not stat.S_ISREG(observed.st_mode):
             os.close(child_fd)
-            raise _base.RecoveryGitError(
-                "Git object store contains an unsupported entry"
-            )
+            raise _base.RecoveryGitError("Git object store contains an unsupported entry")
         if observed.st_nlink != 1:
             os.close(child_fd)
-            raise _base.RecoveryGitError(
-                "Git object store contains an unsupported hard link"
-            )
+            raise _base.RecoveryGitError("Git object store contains an unsupported hard link")
         if len(pinned_fds) >= _pinned_object_file_budget():
             os.close(child_fd)
             raise _base.RecoveryGitError(
@@ -645,9 +635,7 @@ def _build_sandbox(vault: Path) -> _GitMetadataSandbox | None:
             if stat.S_ISLNK(index_state.st_mode) or not stat.S_ISREG(index_state.st_mode):
                 raise _base.RecoveryGitError("Git index metadata uses an unsafe entry")
             if index_state.st_nlink != 1:
-                raise _base.RecoveryGitError(
-                    "Git index metadata uses an unsupported hard link"
-                )
+                raise _base.RecoveryGitError("Git index metadata uses an unsupported hard link")
             index_mtime_ns = index_state.st_mtime_ns
 
         try:
@@ -794,9 +782,7 @@ def _open_stable_directory(path: Path) -> int:
     try:
         observed = os.fstat(fd)
         if (observed.st_dev, observed.st_ino) != (expected.st_dev, expected.st_ino):
-            raise _base.RecoveryGitError(
-                "Git ignore metadata root changed during safe pinning"
-            )
+            raise _base.RecoveryGitError("Git ignore metadata root changed during safe pinning")
         return fd
     except Exception:
         os.close(fd)
@@ -831,13 +817,9 @@ def _copy_relative_ignore_source(
         if expected is None:
             return
         try:
-            source_fd, observed = _impl._open_metadata_child(
-                current_fd, parts[-1], expected
-            )
+            source_fd, observed = _impl._open_metadata_child(current_fd, parts[-1], expected)
         except _base.RecoveryGitError as exc:
-            raise _base.RecoveryGitError(
-                "Git ignore metadata uses an unsupported entry"
-            ) from exc
+            raise _base.RecoveryGitError("Git ignore metadata uses an unsupported entry") from exc
         if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
             os.close(source_fd)
             raise _base.RecoveryGitError(
@@ -899,21 +881,16 @@ def _ignored_paths(
         return ()
     if isinstance(excluded, _base._ScopeFilter):
         unsafe = tuple(
-            path
-            for path in paths
-            if not _impl._ignore_sources_authorized(path, excluded)
+            path for path in paths if not _impl._ignore_sources_authorized(path, excluded)
         )
         if unsafe:
-            raise _base.RecoveryGitError(
-                "Git ignore metadata scope cannot be inspected safely"
-            )
+            raise _base.RecoveryGitError("Git ignore metadata scope cannot be inspected safely")
 
     temporary = _snapshot_ignore_worktree(root, paths, prefix)
     shadow_root = Path(temporary.name)
     repo_paths = tuple(f"./{_base._repo_path(path, prefix)}" for path in paths)
     input_bytes = (
-        b"\0".join(path.encode("utf-8", errors="surrogateescape") for path in repo_paths)
-        + b"\0"
+        b"\0".join(path.encode("utf-8", errors="surrogateescape") for path in repo_paths) + b"\0"
     )
     env = _sandbox_environment()
     env["GIT_WORK_TREE"] = str(shadow_root)

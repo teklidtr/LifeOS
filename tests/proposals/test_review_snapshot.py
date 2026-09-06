@@ -148,11 +148,7 @@ def test_snapshot_tampering_and_operation_mismatch_fail_closed(tmp_path: Path) -
     document = PatchDocumentV2(
         2,
         PROPOSAL_ID,
-        (
-            CreateGeneratedFileV2(
-                "op-create", "wiki/new.md", "absent", "lifeos.test", "1", "new"
-            ),
-        ),
+        (CreateGeneratedFileV2("op-create", "wiki/new.md", "absent", "lifeos.test", "1", "new"),),
     )
     frozen = serialize_review_snapshot_bytes(
         build_review_snapshot(vault_root=tmp_path, patch_document=document)
@@ -189,15 +185,11 @@ def test_human_patch_snapshot_requires_current_reviewed_target(tmp_path: Path) -
     assert error.value.code == "stale_base_hash"
 
 
-@pytest.mark.parametrize("separator", ["\u2028", "\v"], ids=["unicode-line-separator", "vertical-tab"])
-def test_managed_snapshot_replaces_exact_content_span(
-    tmp_path: Path, separator: str
-) -> None:
-    prefix = (
-        "---\ntype: note\n---\n"
-        "Human prefix stays.\n"
-        "<!-- lifeos:managed:start summary -->\n"
-    )
+@pytest.mark.parametrize(
+    "separator", ["\u2028", "\v"], ids=["unicode-line-separator", "vertical-tab"]
+)
+def test_managed_snapshot_replaces_exact_content_span(tmp_path: Path, separator: str) -> None:
+    prefix = "---\ntype: note\n---\nHuman prefix stays.\n<!-- lifeos:managed:start summary -->\n"
     suffix = "<!-- lifeos:managed:end summary -->\nHuman suffix stays.\n"
     original = prefix + f"Old first{separator}Old second\n" + suffix
     replacement = "New summary.\n"

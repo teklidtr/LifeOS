@@ -121,8 +121,7 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             assert advertised["runtime_activity"].annotations.readOnlyHint is True
             assert advertised["ingestion_evolve_wiki_proposal"].annotations.destructiveHint is False
             assert (
-                advertised["ingestion_evolve_wiki_batch_proposal"].annotations.readOnlyHint
-                is False
+                advertised["ingestion_evolve_wiki_batch_proposal"].annotations.readOnlyHint is False
             )
             assert (
                 advertised["ingestion_evolve_wiki_batch_proposal"].annotations.destructiveHint
@@ -197,9 +196,7 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             )
             assert links.isError is False
             assert links.structuredContent is not None
-            assert links.structuredContent["links"][0]["target_path"] == (
-                "wiki/driving-safety.md"
-            )
+            assert links.structuredContent["links"][0]["target_path"] == ("wiki/driving-safety.md")
 
             context_result = await session.call_tool(
                 "vault_context",
@@ -214,17 +211,13 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             assert context_result.structuredContent["sources"][0]["path"] == (
                 "study/driving-licence/intersections.md"
             )
-            assert [
-                item["id"] for item in context_result.structuredContent["instructions"]
-            ] == ["driving-exam"]
+            assert [item["id"] for item in context_result.structuredContent["instructions"]] == [
+                "driving-exam"
+            ]
 
-            activity_result = await session.call_tool(
-                "runtime_activity", arguments={"limit": 10}
-            )
+            activity_result = await session.call_tool("runtime_activity", arguments={"limit": 10})
             assert activity_result.isError is False
             assert activity_result.structuredContent is not None
             records = activity_result.structuredContent["records"]
             assert records[-1]["tool"] == "vault_context"
-            assert records[-1]["focus_paths"] == [
-                "study/driving-licence/intersections.md"
-            ]
+            assert records[-1]["focus_paths"] == ["study/driving-licence/intersections.md"]

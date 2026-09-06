@@ -234,9 +234,12 @@ def test_promote_requires_proposal_review_and_rejection_leaves_seed_unchanged(
     )
     assert _load(vault, rejected_id).metadata.status is ProposalStatus.REJECTED
     assert target.read_bytes() == before
-    assert PatternArtifactService(vault_root=vault).load(
-        "patterns/focus-after-walk.md"
-    ).metadata.status == "seed"
+    assert (
+        PatternArtifactService(vault_root=vault)
+        .load("patterns/focus-after-walk.md")
+        .metadata.status
+        == "seed"
+    )
 
     approved_id = _publish_id(service, request, now=T2)
     approved = _approve(vault, approved_id)
@@ -319,9 +322,7 @@ def test_review_resolution_requires_explicit_seed_or_active_target(tmp_path: Pat
         applied_at="2026-09-04T05:17:00Z",
     )
 
-    needs_review = PatternArtifactService(vault_root=vault).load(
-        "patterns/focus-after-walk.md"
-    )
+    needs_review = PatternArtifactService(vault_root=vault).load("patterns/focus-after-walk.md")
     assert needs_review.metadata.status == "needs-review"
     assert needs_review.metadata.review_reasons == ("evidence-changed",)
 

@@ -11,7 +11,9 @@ from .decomposition import DecompositionResult
 
 FitLabel = Literal["comfortable", "marginal", "overload", "unknown"]
 FindingSeverity = Literal["information", "warning", "high"]
-WorkloadKind = Literal["study", "routine", "exercise", "diet", "rest", "relationship", "hobby", "other"]
+WorkloadKind = Literal[
+    "study", "routine", "exercise", "diet", "rest", "relationship", "hobby", "other"
+]
 
 
 class CapacityError(ValueError):
@@ -32,7 +34,16 @@ class RecurringWorkload:
             raise CapacityError("workload_id and title are required")
         if self.minutes is not None and (type(self.minutes) is not int or self.minutes < 0):
             raise CapacityError("workload minutes must be a non-negative integer or unknown")
-        if self.kind not in {"study", "routine", "exercise", "diet", "rest", "relationship", "hobby", "other"}:
+        if self.kind not in {
+            "study",
+            "routine",
+            "exercise",
+            "diet",
+            "rest",
+            "relationship",
+            "hobby",
+            "other",
+        }:
             raise CapacityError("unsupported recurring workload kind")
 
     def to_dict(self) -> dict[str, object]:
@@ -124,7 +135,12 @@ def check_portfolio_capacity(
         )
     )
     proposed = tuple(item.action for item in decomposition.actions)
-    existing = tuple(action for plan in active for action in plan.tasks if action.status not in {"done", "cancelled"})
+    existing = tuple(
+        action
+        for plan in active
+        for action in plan.tasks
+        if action.status not in {"done", "cancelled"}
+    )
 
     protected, workload_unknown = _sum_known(
         tuple((item.workload_id, item.minutes) for item in workloads if item.protected)
@@ -159,53 +175,107 @@ def check_portfolio_capacity(
     findings: list[CapacityFinding] = []
     effective = adaptive or baseline
     if effective.fit == "overload":
-        findings.append(_finding(
-            "capacity-overload", "high", "The visible commitments exceed stated capacity.",
-            refs=tuple(item.task_id for item in proposed),
-            adjustments=("Reduce the first-wave scope.", "Extend the horizon.", "Pause a selected existing plan.", "Keep this goal unplanned for now."),
-        ))
+        findings.append(
+            _finding(
+                "capacity-overload",
+                "high",
+                "The visible commitments exceed stated capacity.",
+                refs=tuple(item.task_id for item in proposed),
+                adjustments=(
+                    "Reduce the first-wave scope.",
+                    "Extend the horizon.",
+                    "Pause a selected existing plan.",
+                    "Keep this goal unplanned for now.",
+                ),
+            )
+        )
     elif effective.fit == "marginal":
-        findings.append(_finding(
-            "capacity-marginal", "warning", "The draft leaves little visible capacity for variation.",
-            refs=tuple(item.task_id for item in proposed),
-            adjustments=("Run a shorter experiment.", "Reduce the number of near-term actions."),
-        ))
+        findings.append(
+            _finding(
+                "capacity-marginal",
+                "warning",
+                "The draft leaves little visible capacity for variation.",
+                refs=tuple(item.task_id for item in proposed),
+                adjustments=(
+                    "Run a shorter experiment.",
+                    "Reduce the number of near-term actions.",
+                ),
+            )
+        )
     elif effective.fit == "unknown":
-        findings.append(_finding(
-            "capacity-unknown", "information", "Capacity fit cannot be determined from the visible data.",
-            refs=(), missing=effective.unknown_duration_ids or ("available_minutes",),
-            adjustments=("Add a rough capacity range.", "Proceed as a bounded experiment.", "Keep the goal unplanned."),
-        ))
+        findings.append(
+            _finding(
+                "capacity-unknown",
+                "information",
+                "Capacity fit cannot be determined from the visible data.",
+                refs=(),
+                missing=effective.unknown_duration_ids or ("available_minutes",),
+                adjustments=(
+                    "Add a rough capacity range.",
+                    "Proceed as a bounded experiment.",
+                    "Keep the goal unplanned.",
+                ),
+            )
+        )
 
     if len(active) > active_plan_limit:
-        findings.append(_finding(
-            "active-plan-count-high", "warning", f"There are {len(active)} active or review-needed plans.",
-            refs=tuple(plan.path for plan in active),
-            adjustments=("Review active-plan status before adding another plan.", "Link this goal to an existing plan."),
-        ))
+        findings.append(
+            _finding(
+                "active-plan-count-high",
+                "warning",
+                f"There are {len(active)} active or review-needed plans.",
+                refs=tuple(plan.path for plan in active),
+                adjustments=(
+                    "Review active-plan status before adding another plan.",
+                    "Link this goal to an existing plan.",
+                ),
+            )
+        )
     findings.extend(_due_date_findings(proposed, existing, available_minutes))
     findings.extend(_prerequisite_findings(proposed, existing))
     findings.extend(_duplicate_outcome_findings(option, active))
     if proposed and all(action.blocked_by for action in proposed):
-        findings.append(_finding(
-            "no-feasible-next-action", "high", "Every proposed near-term action has a visible blocker.",
-            refs=tuple(action.task_id for action in proposed),
-            adjustments=("Add an unblocked prerequisite action.", "Run a prerequisite experiment.", "Keep the goal unplanned."),
-        ))
+        findings.append(
+            _finding(
+                "no-feasible-next-action",
+                "high",
+                "Every proposed near-term action has a visible blocker.",
+                refs=tuple(action.task_id for action in proposed),
+                adjustments=(
+                    "Add an unblocked prerequisite action.",
+                    "Run a prerequisite experiment.",
+                    "Keep the goal unplanned.",
+                ),
+            )
+        )
     if not workloads:
-        findings.append(_finding(
-            "recurring-workload-data-missing", "information", "No recurring workload data was supplied.",
-            refs=(), missing=("recurring_workloads",),
-            adjustments=("Preview routines and protected commitments before approval.",),
-        ))
+        findings.append(
+            _finding(
+                "recurring-workload-data-missing",
+                "information",
+                "No recurring workload data was supplied.",
+                refs=(),
+                missing=("recurring_workloads",),
+                adjustments=("Preview routines and protected commitments before approval.",),
+            )
+        )
     if adaptive is not None and adaptive.fit != baseline.fit:
-        findings.append(_finding(
-            "baseline-adaptive-difference", "information", "Baseline and adaptive estimates produce different fit labels.",
-            refs=tuple(sorted(adaptive_durations or {})),
-            adjustments=("Inspect both views and choose which evidence to trust.",),
-        ))
+        findings.append(
+            _finding(
+                "baseline-adaptive-difference",
+                "information",
+                "Baseline and adaptive estimates produce different fit labels.",
+                refs=tuple(sorted(adaptive_durations or {})),
+                adjustments=("Inspect both views and choose which evidence to trust.",),
+            )
+        )
 
-    ordered = tuple(sorted(findings, key=lambda item: (_severity_rank(item.severity), item.code, item.evidence_refs)))
+    ordered = tuple(
+        sorted(
+            findings,
+            key=lambda item: (_severity_rank(item.severity), item.code, item.evidence_refs),
+        )
+    )
     alternatives = _alternatives(ordered, effective.fit)
     return PortfolioCapacityReport(
         schema_version=1,
@@ -220,7 +290,15 @@ def check_portfolio_capacity(
     )
 
 
-def _view(*, label: Literal["baseline", "adaptive"], available: int | None, protected: int | None, existing: int | None, proposed: int | None, unknown: tuple[str, ...]) -> CapacityView:
+def _view(
+    *,
+    label: Literal["baseline", "adaptive"],
+    available: int | None,
+    protected: int | None,
+    existing: int | None,
+    proposed: int | None,
+    unknown: tuple[str, ...],
+) -> CapacityView:
     if available is None or protected is None or existing is None or proposed is None:
         remaining = None
         fit: FitLabel = "unknown"
@@ -236,8 +314,16 @@ def _view(*, label: Literal["baseline", "adaptive"], available: int | None, prot
     return CapacityView(label, available, protected, existing, proposed, remaining, fit, unknown)
 
 
-def _sum_actions(actions: Sequence[NearTermAction], overrides: Mapping[str, int | None] | None) -> tuple[int | None, tuple[str, ...]]:
-    values = tuple((item.task_id, overrides.get(item.task_id, item.duration) if overrides is not None else item.duration) for item in actions)
+def _sum_actions(
+    actions: Sequence[NearTermAction], overrides: Mapping[str, int | None] | None
+) -> tuple[int | None, tuple[str, ...]]:
+    values = tuple(
+        (
+            item.task_id,
+            overrides.get(item.task_id, item.duration) if overrides is not None else item.duration,
+        )
+        for item in actions
+    )
     return _sum_known(values)
 
 
@@ -259,7 +345,9 @@ def _normalize_adaptive(values: Mapping[str, int | None]) -> dict[str, int | Non
     return normalized
 
 
-def _due_date_findings(proposed: Sequence[NearTermAction], existing: Sequence[NearTermAction], available: int | None) -> list[CapacityFinding]:
+def _due_date_findings(
+    proposed: Sequence[NearTermAction], existing: Sequence[NearTermAction], available: int | None
+) -> list[CapacityFinding]:
     grouped: dict[date, list[NearTermAction]] = {}
     for action in (*proposed, *existing):
         if action.due is not None:
@@ -269,32 +357,53 @@ def _due_date_findings(proposed: Sequence[NearTermAction], existing: Sequence[Ne
         if len(actions) < 2:
             continue
         known = [item.duration for item in actions if item.duration is not None]
-        severity: FindingSeverity = "high" if available is not None and len(known) == len(actions) and sum(known) > available else "warning"
-        findings.append(_finding(
-            "due-date-contention", severity, f"Multiple visible actions converge on {due.isoformat()}.",
-            refs=tuple(sorted(item.task_id for item in actions)),
-            missing=tuple(sorted(item.task_id for item in actions if item.duration is None)),
-            adjustments=("Move one deadline if it is not externally fixed.", "Reduce the current wave."),
-        ))
+        severity: FindingSeverity = (
+            "high"
+            if available is not None and len(known) == len(actions) and sum(known) > available
+            else "warning"
+        )
+        findings.append(
+            _finding(
+                "due-date-contention",
+                severity,
+                f"Multiple visible actions converge on {due.isoformat()}.",
+                refs=tuple(sorted(item.task_id for item in actions)),
+                missing=tuple(sorted(item.task_id for item in actions if item.duration is None)),
+                adjustments=(
+                    "Move one deadline if it is not externally fixed.",
+                    "Reduce the current wave.",
+                ),
+            )
+        )
     return findings
 
 
-def _prerequisite_findings(proposed: Sequence[NearTermAction], existing: Sequence[NearTermAction]) -> list[CapacityFinding]:
+def _prerequisite_findings(
+    proposed: Sequence[NearTermAction], existing: Sequence[NearTermAction]
+) -> list[CapacityFinding]:
     owners: dict[str, set[str]] = {}
     for action in (*proposed, *existing):
         for blocker in action.blocked_by:
             owners.setdefault(blocker, set()).add(action.task_id)
     return [
         _finding(
-            "competing-prerequisite", "warning", f"Several actions depend on {blocker}.",
+            "competing-prerequisite",
+            "warning",
+            f"Several actions depend on {blocker}.",
             refs=(blocker, *tuple(sorted(dependents))),
-            adjustments=("Complete or validate the shared prerequisite first.", "Sequence the dependent actions."),
+            adjustments=(
+                "Complete or validate the shared prerequisite first.",
+                "Sequence the dependent actions.",
+            ),
         )
-        for blocker, dependents in sorted(owners.items()) if len(dependents) > 1
+        for blocker, dependents in sorted(owners.items())
+        if len(dependents) > 1
     ]
 
 
-def _duplicate_outcome_findings(option: PlanOption, plans: Sequence[PlanRecord]) -> list[CapacityFinding]:
+def _duplicate_outcome_findings(
+    option: PlanOption, plans: Sequence[PlanRecord]
+) -> list[CapacityFinding]:
     option_tokens = _tokens(option.desired_outcome)
     findings: list[CapacityFinding] = []
     for plan in plans:
@@ -304,20 +413,41 @@ def _duplicate_outcome_findings(option: PlanOption, plans: Sequence[PlanRecord])
         union = option_tokens | other
         similarity = len(option_tokens & other) / len(union) if union else 0.0
         if similarity >= 0.55:
-            findings.append(_finding(
-                "duplicate-outcome", "warning", f"The draft overlaps the visible outcome of {plan.plan_id}.",
-                refs=(option.option_id, plan.path),
-                adjustments=("Link the goal to the existing plan.", "Narrow the new plan to a distinct outcome."),
-            ))
+            findings.append(
+                _finding(
+                    "duplicate-outcome",
+                    "warning",
+                    f"The draft overlaps the visible outcome of {plan.plan_id}.",
+                    refs=(option.option_id, plan.path),
+                    adjustments=(
+                        "Link the goal to the existing plan.",
+                        "Narrow the new plan to a distinct outcome.",
+                    ),
+                )
+            )
     return findings
 
 
 def _tokens(value: str) -> set[str]:
-    return {token.strip(".,:;!?()[]{}").casefold() for token in value.split() if len(token.strip(".,:;!?()[]{}")) > 2}
+    return {
+        token.strip(".,:;!?()[]{}").casefold()
+        for token in value.split()
+        if len(token.strip(".,:;!?()[]{}")) > 2
+    }
 
 
-def _finding(code: str, severity: FindingSeverity, title: str, *, refs: tuple[str, ...], missing: tuple[str, ...] = (), adjustments: tuple[str, ...] = ()) -> CapacityFinding:
-    return CapacityFinding(code, severity, title, tuple(sorted(set(refs))), tuple(sorted(set(missing))), adjustments)
+def _finding(
+    code: str,
+    severity: FindingSeverity,
+    title: str,
+    *,
+    refs: tuple[str, ...],
+    missing: tuple[str, ...] = (),
+    adjustments: tuple[str, ...] = (),
+) -> CapacityFinding:
+    return CapacityFinding(
+        code, severity, title, tuple(sorted(set(refs))), tuple(sorted(set(missing))), adjustments
+    )
 
 
 def _severity_rank(value: FindingSeverity) -> int:

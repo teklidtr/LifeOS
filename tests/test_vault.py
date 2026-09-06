@@ -124,7 +124,11 @@ def test_read_closes_descriptors_after_success(
 @pytest.mark.parametrize(
     ("root_name", "consumer", "error_type"),
     [
-        ("wiki", lambda vault, runtime: lexical_search(vault_root=vault, query="secret"), ContextSearchError),
+        (
+            "wiki",
+            lambda vault, runtime: lexical_search(vault_root=vault, query="secret"),
+            ContextSearchError,
+        ),
         ("flashcards", lambda vault, runtime: load_flashcards(vault), StudyError),
         ("plans", lambda vault, runtime: load_plan_actions(vault), PlanningError),
         ("journal", lambda vault, runtime: load_observations(vault), ObservationError),

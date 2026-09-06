@@ -28,8 +28,7 @@ def test_core_source_has_no_embedded_ingestion_agent_or_api_key_path() -> None:
     repository_root = Path(__file__).resolve().parents[2]
     source_root = repository_root / "src" / "lifeos"
     source = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in sorted(source_root.rglob("*.py"))
+        path.read_text(encoding="utf-8") for path in sorted(source_root.rglob("*.py"))
     )
 
     assert "pydantic_ai" not in source

@@ -71,10 +71,7 @@ def _sanitize_message(message: str) -> str:
 
 
 def diagnostic_error_message(diagnostic: DomainDiagnostic) -> str:
-    return (
-        f"{diagnostic.source_path}:{diagnostic.line}: "
-        f"[{diagnostic.code}] {diagnostic.message}"
-    )
+    return f"{diagnostic.source_path}:{diagnostic.line}: [{diagnostic.code}] {diagnostic.message}"
 
 
 def serialize_diagnostic_error(error: DiagnosticError) -> str:

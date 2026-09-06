@@ -80,8 +80,7 @@ def test_case_probe_walks_only_ancestor_tree_levels(
             command,
             0,
             stdout=(
-                f"040000 tree {vault_oid}\tvault\0"
-                f"040000 tree {'3' * 40}\tunrelated\0"
+                f"040000 tree {vault_oid}\tvault\0040000 tree {'3' * 40}\tunrelated\0"
             ).encode(),
             stderr=b"",
         )

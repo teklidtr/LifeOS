@@ -50,9 +50,7 @@ def test_scan_json_exposes_pure_rename(tmp_path: Path, monkeypatch, capsys) -> N
     payload = json.loads(capsys.readouterr().out)
     assert payload["new"] == []
     assert payload["deleted"] == []
-    assert payload["renamed"] == [
-        {"from_path": "wiki/old.md", "to_path": "wiki/new.md"}
-    ]
+    assert payload["renamed"] == [{"from_path": "wiki/old.md", "to_path": "wiki/new.md"}]
 
 
 def test_scan_text_exposes_pure_rename(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -79,9 +77,7 @@ def test_installed_entrypoint_omits_empty_rename_extension(
     )
     monkeypatch.setattr(registry_tools, "refresh_registry", lambda **_kwargs: _empty_result())
 
-    assert entrypoint_module.main(
-        ["scan", "--config", str(tmp_path / "lifeos.yml"), "--json"]
-    ) == 0
+    assert entrypoint_module.main(["scan", "--config", str(tmp_path / "lifeos.yml"), "--json"]) == 0
 
     payload = json.loads(capsys.readouterr().out)
     assert payload == {

@@ -132,9 +132,7 @@ def _read_manifest_bytes(manifest_path: Path) -> bytes | None:
             return None
         if exc.code == "unsafe-symlink":
             unsafe_path = root / exc.relative_path
-            raise PathSafetyError(
-                f"Manifest path or parent is a symlink: {unsafe_path}"
-            ) from exc
+            raise PathSafetyError(f"Manifest path or parent is a symlink: {unsafe_path}") from exc
         if exc.code in {"unsafe-file-type", "invalid-path", "invalid-root"}:
             raise PathSafetyError(f"Manifest path cannot be read safely: {manifest_path}") from exc
         raise ManifestError(f"Failed to read manifest file: {exc}") from exc
@@ -227,9 +225,7 @@ class GeneratedOwnership:
         return cls(manifest_path, vault_root, entries)
 
     @classmethod
-    def load_if_present(
-        cls, manifest_path: Path, vault_root: Path
-    ) -> "GeneratedOwnership | None":
+    def load_if_present(cls, manifest_path: Path, vault_root: Path) -> "GeneratedOwnership | None":
         content_bytes = _read_manifest_bytes(manifest_path)
         if content_bytes is None:
             return None
@@ -283,17 +279,13 @@ class GeneratedOwnership:
             except FileNotFoundError:
                 return None
             except OSError as exc:
-                raise PathSafetyError(
-                    f"Target {rel_path} cannot be inspected safely"
-                ) from exc
+                raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
 
         if parent_relative == ".":
             try:
                 parent_fd = os.open(self.vault_root, _DIRECTORY_FLAGS)
             except OSError as exc:
-                raise PathSafetyError(
-                    f"Target {rel_path} cannot be inspected safely"
-                ) from exc
+                raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
             try:
                 return inspect_at(parent_fd)
             finally:
@@ -309,14 +301,10 @@ class GeneratedOwnership:
         except VaultAccessError as exc:
             if exc.code == "not-found":
                 return None
-            raise PathSafetyError(
-                f"Target {rel_path} cannot be inspected safely"
-            ) from exc
+            raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
 
     @contextmanager
-    def _target_parent(
-        self, rel_path: str, *, create_missing: bool
-    ) -> Iterator[ParentDescriptor]:
+    def _target_parent(self, rel_path: str, *, create_missing: bool) -> Iterator[ParentDescriptor]:
         parent_relative = PurePosixPath(rel_path).parent.as_posix()
         absolute_parent = self.vault_root / Path(parent_relative)
         authority_root, authority_relative = _absolute_descriptor_path(absolute_parent)
@@ -331,9 +319,7 @@ class GeneratedOwnership:
                 try:
                     parent_fd = os.open(self.vault_root, _DIRECTORY_FLAGS)
                 except OSError as exc:
-                    raise PathSafetyError(
-                        f"Target {rel_path} cannot be inspected safely"
-                    ) from exc
+                    raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
                 observed = os.fstat(parent_fd)
                 yield ParentDescriptor(
                     fd=parent_fd,
@@ -358,9 +344,7 @@ class GeneratedOwnership:
                             authority_fd=authority_fd,
                         )
                 except VaultAccessError as exc:
-                    raise PathSafetyError(
-                        f"Target {rel_path} cannot be inspected safely"
-                    ) from exc
+                    raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
         finally:
             if parent_fd >= 0:
                 os.close(parent_fd)
@@ -477,10 +461,7 @@ class GeneratedOwnership:
         if not write_target:
             if expected_target_hash is not None:
                 observation = self._observe_existing_target(rel_path)
-                if (
-                    observation is None
-                    or observation.content_hash != expected_target_hash
-                ):
+                if observation is None or observation.content_hash != expected_target_hash:
                     raise ExternalModificationError(
                         f"Target {rel_path} changed before manifest update"
                     )
@@ -506,9 +487,7 @@ class GeneratedOwnership:
                 try:
                     current_identity = get_target_identity(target_name, parent)
                 except TransactionError as exc:
-                    raise PathSafetyError(
-                        f"Target {rel_path} cannot be inspected safely"
-                    ) from exc
+                    raise PathSafetyError(f"Target {rel_path} cannot be inspected safely") from exc
 
                 if is_new:
                     if current_identity is not None:
@@ -570,9 +549,7 @@ class GeneratedOwnership:
                             raise ExternalModificationError(
                                 f"Target {rel_path} changed before backup"
                             ) from exc
-                        raise PersistenceError(
-                            f"Failed to create target backup: {exc}"
-                        ) from exc
+                        raise PersistenceError(f"Failed to create target backup: {exc}") from exc
 
                     assert backup is not None
                     try:
@@ -621,9 +598,7 @@ class GeneratedOwnership:
 
                     if rollback_error is not None:
                         backup_path = (
-                            resolved_target.parent / backup.name
-                            if backup is not None
-                            else None
+                            resolved_target.parent / backup.name if backup is not None else None
                         )
                         preserved = (
                             f" Backup file preserved at: {backup_path}"

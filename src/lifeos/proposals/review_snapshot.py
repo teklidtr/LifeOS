@@ -299,13 +299,9 @@ def _require_exact_fields(
     unknown = set(data) - expected
     missing = expected - set(data)
     if unknown:
-        raise ReviewSnapshotError(
-            "unknown_field", field_path, f"unknown fields: {sorted(unknown)}"
-        )
+        raise ReviewSnapshotError("unknown_field", field_path, f"unknown fields: {sorted(unknown)}")
     if missing:
-        raise ReviewSnapshotError(
-            "missing_field", field_path, f"missing fields: {sorted(missing)}"
-        )
+        raise ReviewSnapshotError("missing_field", field_path, f"missing fields: {sorted(missing)}")
 
 
 def validate_review_snapshot(
@@ -409,7 +405,5 @@ def parse_review_snapshot_bytes(
         raise ReviewSnapshotError("malformed_json", "$", str(error)) from error
     snapshot = validate_review_snapshot(data, patch_document=patch_document)
     if serialize_review_snapshot_bytes(snapshot) != content:
-        raise ReviewSnapshotError(
-            "noncanonical_json", "$", "snapshot bytes are not canonical"
-        )
+        raise ReviewSnapshotError("noncanonical_json", "$", "snapshot bytes are not canonical")
     return snapshot

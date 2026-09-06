@@ -149,8 +149,7 @@ def test_weaker_current_analysis_is_an_explicit_review_reason() -> None:
     reviewed = _positive_records(10)
     artifact = _artifact(reviewed, evaluation=_numeric_evaluation())
     current = reviewed + tuple(
-        _record(day, float(day), float(12 - ((day - 11) * 2)))
-        for day in range(11, 17)
+        _record(day, float(day), float(12 - ((day - 11) * 2))) for day in range(11, 17)
     )
 
     assessment = assess_pattern_review(
@@ -169,8 +168,7 @@ def test_direction_reversal_is_counter_evidence_not_a_truth_decision() -> None:
     reviewed = _positive_records(10)
     artifact = _artifact(reviewed, evaluation=_numeric_evaluation())
     current = reviewed + tuple(
-        _record(day, float(day), float(12 - ((day - 11) * 2)))
-        for day in range(11, 21)
+        _record(day, float(day), float(12 - ((day - 11) * 2))) for day in range(11, 21)
     )
 
     assessment = assess_pattern_review(

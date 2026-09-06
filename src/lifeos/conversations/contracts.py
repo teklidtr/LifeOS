@@ -45,8 +45,15 @@ class ConversationEvidence:
     stale: bool = False
 
     def __post_init__(self) -> None:
-        if not self.evidence_id or not self.path or self.start_line < 1 or self.end_line < self.start_line:
-            raise ConversationError("invalid_evidence", "Conversation evidence provenance is invalid.")
+        if (
+            not self.evidence_id
+            or not self.path
+            or self.start_line < 1
+            or self.end_line < self.start_line
+        ):
+            raise ConversationError(
+                "invalid_evidence", "Conversation evidence provenance is invalid."
+            )
         if not self.source_hash.startswith("sha256:") or not self.chunk_hash.startswith("sha256:"):
             raise ConversationError("invalid_evidence", "Conversation evidence hashes are invalid.")
 
@@ -82,14 +89,23 @@ class ConversationTurn:
 
     def __post_init__(self) -> None:
         if not self.turn_id or not self.query.strip() or not self.created_at:
-            raise ConversationError("invalid_turn", "Conversation turn identity, query, and timestamp are required.")
+            raise ConversationError(
+                "invalid_turn", "Conversation turn identity, query, and timestamp are required."
+            )
         evidence_ids = {item.evidence_id for item in self.evidence}
         if len(evidence_ids) != len(self.evidence):
-            raise ConversationError("duplicate_evidence", "A turn cannot contain duplicate evidence IDs.")
-        unknown = sorted({citation for paragraph in self.answer for citation in paragraph.citations} - evidence_ids)
+            raise ConversationError(
+                "duplicate_evidence", "A turn cannot contain duplicate evidence IDs."
+            )
+        unknown = sorted(
+            {citation for paragraph in self.answer for citation in paragraph.citations}
+            - evidence_ids
+        )
         if unknown:
             raise ConversationError(
-                "invalid_citation", "Answer cites evidence that is not part of the turn.", {"citations": unknown}
+                "invalid_citation",
+                "Answer cites evidence that is not part of the turn.",
+                {"citations": unknown},
             )
 
     def to_dict(self) -> dict[str, object]:
@@ -122,9 +138,13 @@ class ConversationMetadata:
 
     def __post_init__(self) -> None:
         if self.schema_version != CONVERSATION_SCHEMA_VERSION:
-            raise ConversationError("unsupported_schema", "Knowledge conversation schema is unsupported.")
+            raise ConversationError(
+                "unsupported_schema", "Knowledge conversation schema is unsupported."
+            )
         if not self.conversation_id.startswith("conv-") or not self.title.strip():
-            raise ConversationError("invalid_conversation", "Conversation identity and title are required.")
+            raise ConversationError(
+                "invalid_conversation", "Conversation identity and title are required."
+            )
         if self.status not in {"active", "archived"}:
             raise ConversationError("invalid_status", "Conversation status is invalid.")
 
@@ -170,7 +190,13 @@ class ConversationArtifact:
 def scope_from_dict(value: Mapping[str, Any] | None) -> RetrievalScope:
     data = dict(value or {})
     tuple_fields = {
-        "paths", "folders", "note_types", "tags", "sources", "excluded_paths", "pinned_paths"
+        "paths",
+        "folders",
+        "note_types",
+        "tags",
+        "sources",
+        "excluded_paths",
+        "pinned_paths",
     }
     normalized: dict[str, Any] = {}
     for key in RetrievalScope.__dataclass_fields__:
@@ -200,7 +226,9 @@ def evidence_from_dict(value: Mapping[str, Any]) -> ConversationEvidence:
             stale=bool(value.get("stale", False)),
         )
     except (KeyError, TypeError, ValueError) as exc:
-        raise ConversationError("invalid_evidence", "Saved conversation evidence is malformed.") from exc
+        raise ConversationError(
+            "invalid_evidence", "Saved conversation evidence is malformed."
+        ) from exc
 
 
 def paragraph_from_dict(value: Mapping[str, Any]) -> ConversationParagraph:

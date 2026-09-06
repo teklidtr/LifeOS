@@ -39,7 +39,9 @@ class StudySession:
 
 
 class StudySessionService:
-    def __init__(self, *, vault_root: Path, runtime_dir: Path, actor_id: str = "local-user") -> None:
+    def __init__(
+        self, *, vault_root: Path, runtime_dir: Path, actor_id: str = "local-user"
+    ) -> None:
         self.vault_root = vault_root
         self.runtime_dir = runtime_dir
         self.actor_id = actor_id
@@ -104,7 +106,9 @@ class StudySessionService:
             raw = json.loads(path.read_text(encoding="utf-8"))
             raw["day"] = date.fromisoformat(raw["day"])
             for key in ("card_ids", "card_paths", "source_hashes", "source_changes"):
-                raw[key] = tuple(tuple(item) if key == "source_hashes" else item for item in raw.get(key, []))
+                raw[key] = tuple(
+                    tuple(item) if key == "source_hashes" else item for item in raw.get(key, [])
+                )
             return StudySession(**raw)
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise DailyInteractionError(
@@ -226,7 +230,10 @@ class StudySessionService:
                 "Journal study_sessions must be a list.",
                 "Repair the journal note.",
             )
-        if not any(isinstance(item, dict) and item.get("session_id") == session.session_id for item in events):
+        if not any(
+            isinstance(item, dict) and item.get("session_id") == session.session_id
+            for item in events
+        ):
             events.append(
                 {
                     "session_id": session.session_id,

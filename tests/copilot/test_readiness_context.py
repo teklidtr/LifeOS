@@ -78,7 +78,8 @@ def test_context_is_bounded_traceable_redacted_and_stable(tmp_path: Path) -> Non
     _ready_goal(tmp_path / "goals" / "ready.md")
     _write(
         tmp_path / "wiki" / "support.md",
-        "---\nid: source-support\ntitle: Supporting note\n---\nSecretName " + "useful detail " * 100,
+        "---\nid: source-support\ntitle: Supporting note\n---\nSecretName "
+        + "useful detail " * 100,
     )
     index = build_copilot_index(tmp_path)
     goal = index.goals[0]
@@ -96,15 +97,18 @@ def test_context_is_bounded_traceable_redacted_and_stable(tmp_path: Path) -> Non
     assert "SecretName" not in pack.items[1].excerpt
     assert pack.items[1].redactions[0].occurrences == 1
     assert pack.truncated is True
-    assert pack.to_dict() == build_planning_context(
-        vault_root=tmp_path,
-        goal=goal,
-        index=index,
-        include_paths=("wiki/support.md",),
-        redact_terms=("SecretName",),
-        max_total_bytes=500,
-        max_item_bytes=300,
-    ).to_dict()
+    assert (
+        pack.to_dict()
+        == build_planning_context(
+            vault_root=tmp_path,
+            goal=goal,
+            index=index,
+            include_paths=("wiki/support.md",),
+            redact_terms=("SecretName",),
+            max_total_bytes=500,
+            max_item_bytes=300,
+        ).to_dict()
+    )
 
 
 def test_sensitive_scope_requires_policy_and_explicit_user_action(tmp_path: Path) -> None:

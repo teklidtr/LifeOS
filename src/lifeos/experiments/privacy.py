@@ -58,9 +58,7 @@ class ExperimentContextItem:
             "truncated": self.truncated,
             "redactions": [dict(item) for item in self.redactions],
             "personal_pattern": (
-                self.personal_pattern.to_dict()
-                if self.personal_pattern is not None
-                else None
+                self.personal_pattern.to_dict() if self.personal_pattern is not None else None
             ),
         }
 
@@ -248,9 +246,7 @@ def preview_experiment_context(
             redact_terms=redactions,
             path_filter=provider_filter,
         )
-        explicit_pattern_paths = tuple(
-            path for path in selected if path.startswith("patterns/")
-        )
+        explicit_pattern_paths = tuple(path for path in selected if path.startswith("patterns/"))
         explicit_patterns = build_personal_pattern_context(
             vault_root=vault_root,
             runtime_dir=runtime_dir,
@@ -266,9 +262,7 @@ def preview_experiment_context(
         for item in (*explicit_patterns.items, *automatic.items):
             pattern_by_path.setdefault(item.pattern_path, item)
         auto_pattern_paths = tuple(
-            item.pattern_path
-            for item in automatic.items
-            if item.pattern_path not in selected
+            item.pattern_path for item in automatic.items if item.pattern_path not in selected
         )
     except PersonalPatternContextError:
         pattern_by_path = {}
@@ -319,9 +313,7 @@ def preview_experiment_context(
             )
             truncated = True
             continue
-        excerpt, excerpt_bytes, item_truncated = _truncate(
-            visible, allowance - pattern_bytes
-        )
+        excerpt, excerpt_bytes, item_truncated = _truncate(visible, allowance - pattern_bytes)
         included_bytes = excerpt_bytes + pattern_bytes
         truncated = truncated or item_truncated
         item_redactions = (

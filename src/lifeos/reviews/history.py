@@ -13,7 +13,9 @@ from lifeos.reviews.artifact import ReviewArtifactService, ReviewArtifactUpdate
 from lifeos.reviews.contracts import ReviewArtifact, ReviewSectionSnapshot, ReviewSnapshot
 from lifeos.vault import VaultAccessError, iter_vault_markdown
 
-ContinuityState = Literal["carried", "unresolved", "suppressed", "evidence_changed", "no_longer_present"]
+ContinuityState = Literal[
+    "carried", "unresolved", "suppressed", "evidence_changed", "no_longer_present"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +72,9 @@ def list_review_history(
     try:
         sources = iter_vault_markdown(service.vault_root, roots=("reviews",))
     except VaultAccessError as exc:
-        raise DailyInteractionError("storage_unavailable", str(exc), "Check vault access and retry.") from exc
+        raise DailyInteractionError(
+            "storage_unavailable", str(exc), "Check vault access and retry."
+        ) from exc
     for source in sources:
         if not source.relative_path.startswith(("reviews/daily/", "reviews/weekly/")):
             continue
@@ -105,11 +109,15 @@ def adjacent_reviews(
 ) -> tuple[ReviewArtifact | None, ReviewArtifact | None]:
     entries = list_review_history(service=service, kind=artifact.metadata.review_kind)
     ascending = sorted(entries, key=lambda row: (row.period_start, row.review_id))
-    index = next((i for i, row in enumerate(ascending) if row.review_id == artifact.metadata.review_id), None)
+    index = next(
+        (i for i, row in enumerate(ascending) if row.review_id == artifact.metadata.review_id), None
+    )
     if index is None:
         return None, None
     previous = service.load_id(ascending[index - 1].review_id) if index > 0 else None
-    following = service.load_id(ascending[index + 1].review_id) if index + 1 < len(ascending) else None
+    following = (
+        service.load_id(ascending[index + 1].review_id) if index + 1 < len(ascending) else None
+    )
     return previous, following
 
 
@@ -119,9 +127,7 @@ def build_review_continuity(
     if previous is None:
         return ReviewContinuity(None, None, None, (), ())
     current_items = {
-        item.item_id: item
-        for section in current_snapshot.sections
-        for item in section.items
+        item.item_id: item for section in current_snapshot.sections for item in section.items
     }
     continuity: list[ReviewContinuityItem] = []
     suppressed: set[str] = set()
@@ -137,12 +143,16 @@ def build_review_continuity(
             else:
                 state = "evidence_changed"
         elif decision.decision == "carry":
-            state = "carried" if current_fingerprint == decision.evidence_fingerprint else (
-                "no_longer_present" if current_fingerprint is None else "evidence_changed"
+            state = (
+                "carried"
+                if current_fingerprint == decision.evidence_fingerprint
+                else ("no_longer_present" if current_fingerprint is None else "evidence_changed")
             )
         elif decision.decision in {"defer_review", "clarify", "propose_change"}:
-            state = "unresolved" if current_fingerprint == decision.evidence_fingerprint else (
-                "no_longer_present" if current_fingerprint is None else "evidence_changed"
+            state = (
+                "unresolved"
+                if current_fingerprint == decision.evidence_fingerprint
+                else ("no_longer_present" if current_fingerprint is None else "evidence_changed")
             )
         else:
             continue
@@ -177,7 +187,13 @@ def apply_continuity_to_snapshot(
     sections: list[ReviewSectionSnapshot] = []
     for section in snapshot.sections:
         items = tuple(item for item in section.items if item.item_id not in suppressed)
-        sections.append(replace(section, items=items, state="empty" if not items and section.state == "ready" else section.state))
+        sections.append(
+            replace(
+                section,
+                items=items,
+                state="empty" if not items and section.state == "ready" else section.state,
+            )
+        )
     payload = {
         "generated_at": snapshot.generated_at,
         "sections": [asdict(section) for section in sections],
@@ -220,7 +236,10 @@ def render_review_continuity(continuity: ReviewContinuity) -> str:
             [
                 "",
                 "### Suppressed unchanged items",
-                *[f"- `{item_id}` remains dismissed because its evidence fingerprint is unchanged." for item_id in continuity.suppressed_item_ids],
+                *[
+                    f"- `{item_id}` remains dismissed because its evidence fingerprint is unchanged."
+                    for item_id in continuity.suppressed_item_ids
+                ],
             ]
         )
     return "\n".join(lines).rstrip()
@@ -245,13 +264,18 @@ def link_review_history(
         )
     previous_id = previous.metadata.review_id if previous else None
     following_id = following.metadata.review_id if following else None
-    if current.metadata.previous_review_id != previous_id or current.metadata.next_review_id != following_id:
+    if (
+        current.metadata.previous_review_id != previous_id
+        or current.metadata.next_review_id != following_id
+    ):
         current = service.update(
             review_id=current.metadata.review_id,
             expected_hash=current.content_hash,
             idempotency_key=f"{idempotency_key}-current",
             now=now,
-            update=ReviewArtifactUpdate(previous_review_id=previous_id, next_review_id=following_id),
+            update=ReviewArtifactUpdate(
+                previous_review_id=previous_id, next_review_id=following_id
+            ),
         )
     if following and following.metadata.previous_review_id != artifact.metadata.review_id:
         service.update(

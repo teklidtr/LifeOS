@@ -39,12 +39,8 @@ def _load_two_target_application(tmp_path: Path):
     meta = _make_meta()
     old_hash = f"sha256:{hashlib.sha256(b'old_content').hexdigest()}"
     operations = (
-        ReplaceGeneratedFileV2(
-            "op-1", "test1.txt", old_hash, "gen-1", "v1", "new_content1"
-        ),
-        CreateGeneratedFileV2(
-            "op-2", "test2.txt", "absent", "gen-1", "v1", "new_content2"
-        ),
+        ReplaceGeneratedFileV2("op-1", "test1.txt", old_hash, "gen-1", "v1", "new_content1"),
+        CreateGeneratedFileV2("op-2", "test2.txt", "absent", "gen-1", "v1", "new_content2"),
     )
     document = PatchDocumentV2(2, meta.id, operations)
     vault_root, proposals_root, proposal_dir = _setup_proposal(tmp_path, meta, document)
@@ -61,9 +57,7 @@ def _load_non_generated_application(tmp_path: Path):
         meta.id,
         (CreateFile("op-1", "human.txt", "absent", "human content"),),
     )
-    vault_root, proposals_root, proposal_dir = _setup_proposal(
-        tmp_path, meta, document
-    )
+    vault_root, proposals_root, proposal_dir = _setup_proposal(tmp_path, meta, document)
     loaded = load_proposal_directory(proposal_dir, proposals_root=proposals_root)
     assert loaded.proposal is not None
     return meta, vault_root, loaded.proposal
@@ -88,9 +82,10 @@ def _assert_pre_state(vault_root: Path, proposal_id: str) -> None:
     assert (vault_root / "test1.txt").read_bytes() == b"old_content"
     assert not (vault_root / "test2.txt").exists()
     ownership = json.loads((vault_root / "system/generated-ownership.json").read_text())
-    assert ownership["owned_files"]["test1.txt"]["content_hash"] == hashlib.sha256(
-        b"old_content"
-    ).hexdigest()
+    assert (
+        ownership["owned_files"]["test1.txt"]["content_hash"]
+        == hashlib.sha256(b"old_content").hexdigest()
+    )
     proposal_text = (vault_root / "proposals" / proposal_id / "proposal.md").read_text()
     assert "status: approved" in proposal_text
     assert "status: applied" not in proposal_text
@@ -398,9 +393,7 @@ def test_complete_transaction_cleanup_ignores_later_canonical_changes(
     assert not (vault_root / ".lifeos" / "recovery" / str(journal.transaction_id)).exists()
 
 
-def test_recovery_twice_has_same_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_recovery_twice_has_same_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _, vault_root, proposal = _load_two_target_application(tmp_path)
     _interrupt_at(monkeypatch, "after_target_install:0")
     with pytest.raises(_InjectedInterruption):

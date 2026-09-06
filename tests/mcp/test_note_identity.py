@@ -78,9 +78,7 @@ def test_public_mcp_identity_does_not_read_or_leak_protected_duplicate(
 
     monkeypatch.setattr(coherence_scoped, "parse_markdown_note", reject_protected_read)
     server = _server(vault)
-    result = server._tool_manager.get_tool("vault_note_identity").fn(
-        vault_path="wiki/public.md"
-    )
+    result = server._tool_manager.get_tool("vault_note_identity").fn(vault_path="wiki/public.md")
 
     assert result["stable_id"] == "shared-id"
     assert result["current_path"] == "wiki/public.md"

@@ -67,15 +67,15 @@ def test_descriptor_whitespace_only_name_rejected() -> None:
 
 def test_descriptor_noncanonical_name_rejected() -> None:
     bad_names = [
-        "InvalidName",       # uppercase
-        "1tool",             # starts with digit
-        "notes..read",       # consecutive dots
-        "notes.",            # trailing dot
-        ".notes",            # leading dot
-        "notes-read",        # hyphen
-        "notes._",           # dot then underscore without letter
-        "notes.2read",       # segment starts with digit
-        "notes read",        # space
+        "InvalidName",  # uppercase
+        "1tool",  # starts with digit
+        "notes..read",  # consecutive dots
+        "notes.",  # trailing dot
+        ".notes",  # leading dot
+        "notes-read",  # hyphen
+        "notes._",  # dot then underscore without letter
+        "notes.2read",  # segment starts with digit
+        "notes read",  # space
     ]
     for bad in bad_names:
         with pytest.raises(ToolValidationError, match="name is noncanonical"):
@@ -83,7 +83,9 @@ def test_descriptor_noncanonical_name_rejected() -> None:
 
 
 def test_valid_snake_case_segment_accepted() -> None:
-    descriptor = ToolDescriptor(name="my_valid_tool", description="valid", effect=ToolEffect.READ_ONLY)
+    descriptor = ToolDescriptor(
+        name="my_valid_tool", description="valid", effect=ToolEffect.READ_ONLY
+    )
     assert descriptor.name == "my_valid_tool"
 
 

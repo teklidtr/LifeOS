@@ -66,7 +66,9 @@ def validate_vault_relative_path(relative_path: str) -> str:
     if type(relative_path) is not str or not relative_path:
         raise VaultAccessError("invalid-path", "", "Vault path must be a non-empty string")
     if "\\" in relative_path or "\x00" in relative_path:
-        raise VaultAccessError("invalid-path", relative_path, "Vault path contains an invalid character")
+        raise VaultAccessError(
+            "invalid-path", relative_path, "Vault path contains an invalid character"
+        )
     pure = PurePosixPath(relative_path)
     if (
         pure.is_absolute()
@@ -75,7 +77,9 @@ def validate_vault_relative_path(relative_path: str) -> str:
         or any(part in {"", ".", ".."} for part in pure.parts)
         or pure.as_posix() != relative_path
     ):
-        raise VaultAccessError("invalid-path", relative_path, "Vault path must stay within the vault")
+        raise VaultAccessError(
+            "invalid-path", relative_path, "Vault path must stay within the vault"
+        )
     return relative_path
 
 
@@ -91,8 +95,12 @@ def _classify_open_error(exc: OSError, relative_path: str, *, kind: str) -> Vaul
             f"Unsafe {kind} entry was rejected: {relative_path}",
         )
     if exc.errno == errno.ENOENT:
-        return VaultAccessError("not-found", relative_path, f"Vault entry was not found: {relative_path}")
-    return VaultAccessError("filesystem-unavailable", relative_path, f"Vault entry could not be read: {relative_path}")
+        return VaultAccessError(
+            "not-found", relative_path, f"Vault entry was not found: {relative_path}"
+        )
+    return VaultAccessError(
+        "filesystem-unavailable", relative_path, f"Vault entry could not be read: {relative_path}"
+    )
 
 
 def _open_root(vault_root: Path) -> int:
@@ -106,7 +114,9 @@ def _open_root(vault_root: Path) -> int:
         root_stat = os.fstat(fd)
     except OSError as exc:
         os.close(fd)
-        raise VaultAccessError("filesystem-unavailable", ".", "Vault root could not be inspected") from exc
+        raise VaultAccessError(
+            "filesystem-unavailable", ".", "Vault root could not be inspected"
+        ) from exc
     if not stat.S_ISDIR(root_stat.st_mode):
         os.close(fd)
         raise VaultAccessError("invalid-root", ".", "Vault root is not a directory")
@@ -453,7 +463,9 @@ def read_vault_text(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
 def read_vault_markdown(vault_root: Path, relative_path: str) -> VaultMarkdownFile:
     """Read one Markdown file without following any path-component symlink."""
     if not is_markdown_path(relative_path):
-        raise VaultAccessError("invalid-extension", relative_path, "Vault file must have a .md extension")
+        raise VaultAccessError(
+            "invalid-extension", relative_path, "Vault file must have a .md extension"
+        )
     return read_vault_text(vault_root, relative_path)
 
 
@@ -535,7 +547,9 @@ def iter_vault_markdown(
             for root_name in sorted(set(roots)):
                 parts = _safe_relative_path(root_name)
                 if len(parts) != 1:
-                    raise VaultAccessError("invalid-root", root_name, "Traversal roots must be top-level names")
+                    raise VaultAccessError(
+                        "invalid-root", root_name, "Traversal roots must be top-level names"
+                    )
                 try:
                     sub_fd = os.open(root_name, _DIRECTORY_FLAGS, dir_fd=root_fd)
                 except FileNotFoundError:

@@ -101,9 +101,7 @@ def _response(query: str, scope: RetrievalScope, *items: RetrievalEvidence) -> R
         context_characters=sum(len(item.context_text) for item in items),
         scope=scope.to_dict(),
         diagnostics=(),
-        provider_disclosure=ProviderDisclosure(
-  "local", None, None, 0, False, (), True, "allowed"
-        ),
+        provider_disclosure=ProviderDisclosure("local", None, None, 0, False, (), True, "allowed"),
     )
 
 
@@ -193,8 +191,8 @@ def test_local_only_provider_keeps_locally_authorized_protected_pattern(
     )
     provider = DeterministicAnswerProvider(
         GeneratedAnswer(
-  (GeneratedParagraph("Local claim.", ("e-pattern",), "direct"),),
-  "Grounded locally.",
+            (GeneratedParagraph("Local claim.", ("e-pattern",), "direct"),),
+            "Grounded locally.",
         ),
         local_only=True,
     )
@@ -220,7 +218,11 @@ def test_generated_citations_are_limited_to_provider_evidence_projection(
     pattern_path = _pattern(vault, "patterns/protected.md", status="active")
     public_path = "wiki/public.md"
     _write(vault, public_path, "# Public\n\nProvider-safe evidence.\n")
-    _write(vault, "system/retrieval-policy.yml", "schema_version: 1\nprotected_prefixes: [patterns]\nexternal_allowed_prefixes: []\n")
+    _write(
+        vault,
+        "system/retrieval-policy.yml",
+        "schema_version: 1\nprotected_prefixes: [patterns]\nexternal_allowed_prefixes: []\n",
+    )
     scope = RetrievalScope(paths=(pattern_path, public_path), allow_protected=True)
     service = KnowledgeConversationService(vault_root=vault, runtime_dir=vault / ".lifeos")
     artifact = service.create(title="Citation projection", scope=scope)
@@ -229,18 +231,12 @@ def test_generated_citations_are_limited_to_provider_evidence_projection(
     monkeypatch.setattr(
         service.retriever,
         "search",
-        lambda *_args, **_kwargs: _response(
-  "mixed", scope, pattern_result, public_result
-        ),
+        lambda *_args, **_kwargs: _response("mixed", scope, pattern_result, public_result),
     )
     provider = DeterministicAnswerProvider(
         GeneratedAnswer(
-  (
-      GeneratedParagraph(
-          "Unsupported provider citation.", ("e-pattern",), "direct"
-      ),
-  ),
-  "Should be rejected.",
+            (GeneratedParagraph("Unsupported provider citation.", ("e-pattern",), "direct"),),
+            "Should be rejected.",
         ),
         local_only=False,
     )

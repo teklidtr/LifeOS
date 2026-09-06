@@ -223,15 +223,11 @@ class CaptureProcessingService:
                 "merge_requires_multiple", "At least two captures are required for a merge."
             )
         if len(source_paths) != len(set(source_paths)):
-            raise CaptureError(
-                "invalid_merge", "A merge source may appear only once."
-            )
+            raise CaptureError("invalid_merge", "A merge source may appear only once.")
         artifacts = tuple(self.captures.load(path) for path in source_paths)
         return self._merge_preview_from_artifacts(artifacts)
 
-    def _merge_preview_from_artifacts(
-        self, artifacts: tuple[CaptureArtifact, ...]
-    ) -> MergePreview:
+    def _merge_preview_from_artifacts(self, artifacts: tuple[CaptureArtifact, ...]) -> MergePreview:
         attachments = tuple(
             dict.fromkeys(
                 ref.attachment_id for item in artifacts for ref in item.metadata.attachments
@@ -317,9 +313,7 @@ class CaptureProcessingService:
         source_notes = "\n\n".join(
             f"### {item.metadata.title}\n\n{item.human_body.strip()}" for item in artifacts
         )
-        marker = self._mutation_marker(
-            "merge", key_hash, selected_fingerprint, index=1, total=1
-        )
+        marker = self._mutation_marker("merge", key_hash, selected_fingerprint, index=1, total=1)
         operation_token = f"merge\0{key_hash}\0{selected_fingerprint}"
         merged = self.captures.prepare_create(
             title=preview.title,
@@ -335,9 +329,7 @@ class CaptureProcessingService:
             attachments=tuple(unique_refs.values()),
             links=tuple(unique_links.values()),
             tags=tuple(dict.fromkeys(tag for item in artifacts for tag in item.metadata.tags)),
-            exclude_from_semantic=any(
-                item.metadata.exclude_from_semantic for item in artifacts
-            ),
+            exclude_from_semantic=any(item.metadata.exclude_from_semantic for item in artifacts),
             exclude_from_conversations=any(
                 item.metadata.exclude_from_conversations for item in artifacts
             ),
@@ -348,8 +340,7 @@ class CaptureProcessingService:
             capture_id=_capture_id(moment, operation_token, 1),
             merged_from=tuple(item.metadata.capture_id for item in artifacts),
             human_body=(
-                "## User annotations\n\n\n"
-                f"## Merged source annotations\n\n{source_notes}\n"
+                f"## User annotations\n\n\n## Merged source annotations\n\n{source_notes}\n"
             ),
             now=moment,
         )
@@ -503,7 +494,10 @@ class CaptureProcessingService:
             now=moment,
         )
         writes = (
-            *(CaptureFileWrite(item.artifact.path, item.content.encode("utf-8")) for item in results),
+            *(
+                CaptureFileWrite(item.artifact.path, item.content.encode("utf-8"))
+                for item in results
+            ),
             CaptureFileWrite(
                 archived_source.artifact.path,
                 archived_source.content.encode("utf-8"),
@@ -685,9 +679,7 @@ class CaptureProcessingService:
             or result.metadata.split_from is not None
         ):
             raise self._lineage_error("A prior merge has inconsistent canonical lineage.")
-        for index, (source, source_hash) in enumerate(
-            zip(sources, source_hashes, strict=True), 1
-        ):
+        for index, (source, source_hash) in enumerate(zip(sources, source_hashes, strict=True), 1):
             self._validate_source_archive(
                 source,
                 operation="merge",
@@ -770,24 +762,18 @@ class CaptureProcessingService:
                 ):
                     matching_sources.append((artifact, tuple(source_parts)))
         expected_digest = request_fingerprint.removeprefix("sha256:")
+        if any(len(parts) != 7 for _, parts in matching_sources):
+            raise self._lineage_error("A source capture has malformed mutation provenance.")
         if any(
-            len(parts) != 7 for _, parts in matching_sources
-        ):
-            raise self._lineage_error(
-                "A source capture has malformed mutation provenance."
-            )
-        if any(
-            parts[1] != operation or parts[3] != expected_digest
-            for _, parts in matching_sources
+            parts[1] != operation or parts[3] != expected_digest for _, parts in matching_sources
         ):
             raise CaptureError(
-                "idempotency_conflict", "Idempotency key was reused for a different capture mutation."
+                "idempotency_conflict",
+                "Idempotency key was reused for a different capture mutation.",
             )
         expected_source_count = len(source_artifacts) if operation == "merge" else 1
         if matching_sources and len(matching_sources) != expected_source_count:
-            raise self._lineage_error(
-                "A prior capture mutation has incomplete source provenance."
-            )
+            raise self._lineage_error("A prior capture mutation has incomplete source provenance.")
         if not matching_key:
             if matching_sources:
                 raise self._lineage_error(
@@ -796,7 +782,8 @@ class CaptureProcessingService:
             return None
         if any(parts[1] != operation or parts[3] != expected_digest for _, parts in matching_key):
             raise CaptureError(
-                "idempotency_conflict", "Idempotency key was reused for a different capture mutation."
+                "idempotency_conflict",
+                "Idempotency key was reused for a different capture mutation.",
             )
         try:
             totals = {int(parts[5]) for _, parts in matching_key}

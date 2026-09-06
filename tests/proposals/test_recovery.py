@@ -197,10 +197,10 @@ def test_recovery_journal_rejects_absolute_target_path() -> None:
         expected_pre_state=RecoveryExpectedState.ABSENT,
         expected_pre_hash=None,
         expected_pre_mode=None,
-                staged_path="staged/tmp",
+        staged_path="staged/tmp",
         staged_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111",
         staged_mode=0o644,
-                backup_path=None,
+        backup_path=None,
         backup_hash=None,
     )
     j = make_journal(ops=(op,))
@@ -216,10 +216,10 @@ def test_recovery_journal_rejects_parent_traversal() -> None:
         expected_pre_state=RecoveryExpectedState.ABSENT,
         expected_pre_hash=None,
         expected_pre_mode=None,
-                staged_path="staged/tmp",
+        staged_path="staged/tmp",
         staged_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111",
         staged_mode=0o644,
-                backup_path=None,
+        backup_path=None,
         backup_hash=None,
     )
     j = make_journal(ops=(op,))
@@ -235,10 +235,10 @@ def test_recovery_journal_rejects_backslash_path() -> None:
         expected_pre_state=RecoveryExpectedState.ABSENT,
         expected_pre_hash=None,
         expected_pre_mode=None,
-                staged_path="staged/tmp",
+        staged_path="staged/tmp",
         staged_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111",
         staged_mode=0o644,
-                backup_path=None,
+        backup_path=None,
         backup_hash=None,
     )
     j = make_journal(ops=(op,))
@@ -273,10 +273,10 @@ def test_recovery_journal_rejects_duplicate_operation_ids() -> None:
         expected_pre_state=RecoveryExpectedState.ABSENT,
         expected_pre_hash=None,
         expected_pre_mode=None,
-                staged_path="staged/tmp",
+        staged_path="staged/tmp",
         staged_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111",
         staged_mode=0o644,
-                backup_path=None,
+        backup_path=None,
         backup_hash=None,
     )
     j = make_journal(ops=(op, op))
@@ -286,9 +286,7 @@ def test_recovery_journal_rejects_duplicate_operation_ids() -> None:
 
 def test_recovery_journal_rejects_invalid_ownership_staged_path() -> None:
     j = make_journal()
-    object.__setattr__(
-        j, "ownership_state", replace(j.ownership_state, staged_path="staged/..")
-    )
+    object.__setattr__(j, "ownership_state", replace(j.ownership_state, staged_path="staged/.."))
     with pytest.raises(RecoveryValidationError):
         _serialize_journal(j)
 
@@ -306,9 +304,7 @@ def test_recovery_journal_rejects_invalid_ownership_backup_path() -> None:
 
 def test_recovery_journal_rejects_invalid_proposal_staged_path() -> None:
     j = make_journal()
-    object.__setattr__(
-        j, "proposal_state", replace(j.proposal_state, staged_path="staged/..")
-    )
+    object.__setattr__(j, "proposal_state", replace(j.proposal_state, staged_path="staged/.."))
     with pytest.raises(RecoveryValidationError):
         _serialize_journal(j)
 
@@ -326,9 +322,7 @@ def test_recovery_journal_rejects_invalid_proposal_backup_path() -> None:
 
 def test_journal_rejects_staged_path_outside_staged_directory() -> None:
     j = make_journal()
-    object.__setattr__(
-        j, "proposal_state", replace(j.proposal_state, staged_path="other/file")
-    )
+    object.__setattr__(j, "proposal_state", replace(j.proposal_state, staged_path="other/file"))
     with pytest.raises(RecoveryValidationError):
         _serialize_journal(j)
 
@@ -477,6 +471,8 @@ def test_recovery_lock_releases_after_context_exit(tmp_path: Path) -> None:
         _ = None
     with acquire_recovery_lock(runtime_dir=tmp_path):
         _ = None
+
+
 def test_recovery_lock_releases_after_process_exit(tmp_path: Path) -> None:
     code = f"""
 import sys
@@ -491,12 +487,18 @@ with acquire_recovery_lock(runtime_dir=runtime):
     subprocess.run([sys.executable, "-c", code], check=True)
     with acquire_recovery_lock(runtime_dir=tmp_path):
         _ = None
+
+
 def test_recovery_lock_rejects_same_process_reentrancy(tmp_path: Path) -> None:
     with acquire_recovery_lock(runtime_dir=tmp_path):
         with pytest.raises(RecoveryLockUnavailableError):
             with acquire_recovery_lock(runtime_dir=tmp_path):
                 _ = None
-def test_recovery_lock_cleans_up_process_local_state_on_flock_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+
+def test_recovery_lock_cleans_up_process_local_state_on_flock_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import fcntl
 
     def mock_flock(fd: int, op: int) -> None:
@@ -510,6 +512,8 @@ def test_recovery_lock_cleans_up_process_local_state_on_flock_failure(tmp_path: 
     monkeypatch.undo()
     with acquire_recovery_lock(runtime_dir=tmp_path):
         _ = None
+
+
 def test_write_rejects_symlinked_staged_directory(tmp_path: Path) -> None:
     j = make_journal()
     tx_dir = initialize_recovery_transaction(recovery_root=tmp_path, journal=j)
@@ -683,7 +687,9 @@ def test_recovery_lock_cannot_be_released_early_by_caller(tmp_path: Path) -> Non
         assert not hasattr(lock, "close")
 
 
-def test_recovery_lock_guard_cleans_up_after_open_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recovery_lock_guard_cleans_up_after_open_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import os
 
     original_open = os.open
@@ -701,7 +707,11 @@ def test_recovery_lock_guard_cleans_up_after_open_failure(tmp_path: Path, monkey
     monkeypatch.undo()
     with acquire_recovery_lock(runtime_dir=tmp_path):
         _ = None
-def test_recovery_lock_guard_cleans_up_after_flock_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+
+def test_recovery_lock_guard_cleans_up_after_flock_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import fcntl
 
     def mock_flock(fd: int, op: int) -> None:
@@ -715,6 +725,8 @@ def test_recovery_lock_guard_cleans_up_after_flock_failure(tmp_path: Path, monke
     monkeypatch.undo()
     with acquire_recovery_lock(runtime_dir=tmp_path):
         _ = None
+
+
 def test_recovery_lock_guard_cleans_up_when_context_body_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         with acquire_recovery_lock(runtime_dir=tmp_path):
@@ -722,6 +734,8 @@ def test_recovery_lock_guard_cleans_up_when_context_body_raises(tmp_path: Path) 
 
     with acquire_recovery_lock(runtime_dir=tmp_path):
         _ = None
+
+
 def test_write_rejects_symlinked_temporary_journal(tmp_path: Path) -> None:
     j = make_journal()
     tx_dir = initialize_recovery_transaction(recovery_root=tmp_path, journal=j)
@@ -972,7 +986,8 @@ def test_journal_rejects_non_string_staged_path(base_journal: RecoveryJournal) -
 def test_transaction_id_generator_rejects_non_string_suffix() -> None:
     with pytest.raises(RecoveryValidationError, match="Suffix must be a string"):
         generate_recovery_transaction_id(
-            proposal_id="prop-20231010T120000Z-12345678", suffix_factory=lambda: None  # type: ignore
+            proposal_id="prop-20231010T120000Z-12345678",
+            suffix_factory=lambda: None,  # type: ignore
         )
 
 
@@ -1009,6 +1024,8 @@ def test_recovery_lock_rejects_symlinked_lock_file(tmp_path: Path) -> None:
     with pytest.raises(RecoveryLockUnavailableError, match="Symlinked lock file not permitted"):
         with acquire_recovery_lock(runtime_dir=rt):
             _ = None
+
+
 def test_recovery_lock_does_not_modify_symlink_target(tmp_path: Path) -> None:
     rt = tmp_path / "rt"
     rt.mkdir()
@@ -1308,6 +1325,7 @@ def test_discovery_continues_after_invalid_layout(
     assert result.findings[0].code == RecoveryFindingCode.INVALID_LAYOUT
     assert result.findings[0].transaction_name == str(tx2_id)
 
+
 def test_discovery_rejects_broken_recovery_root_symlink(tmp_path: Path) -> None:
     from lifeos.proposals.recovery import discover_recovery_state, RecoveryCorruptStateError
     import os
@@ -1318,6 +1336,7 @@ def test_discovery_rejects_broken_recovery_root_symlink(tmp_path: Path) -> None:
 
     with pytest.raises(RecoveryCorruptStateError, match="Invalid recovery root"):
         discover_recovery_state(recovery_root=root)
+
 
 def test_journal_rejects_non_zero_padded_created_at(base_journal: RecoveryJournal) -> None:
     from lifeos.proposals.recovery import _serialize_journal, RecoveryValidationError
@@ -1338,12 +1357,15 @@ def test_recovery_schema_two_round_trips() -> None:
     j2 = _deserialize_journal(raw)
     assert j2 == journal
 
+
 def test_recovery_schema_one_is_rejected() -> None:
     from lifeos.proposals.recovery import RecoveryUnknownSchemaError
+
     raw = _serialize_journal(make_journal()).decode("utf-8")
     bad_raw = raw.replace('"schema_version":2', '"schema_version":1')
     with pytest.raises(RecoveryUnknownSchemaError, match="Unknown schema version"):
         _deserialize_journal(bad_raw.encode("utf-8"))
+
 
 def test_recovery_operation_records_expected_pre_mode() -> None:
     op = RecoveryOperation(
@@ -1361,6 +1383,7 @@ def test_recovery_operation_records_expected_pre_mode() -> None:
     )
     assert op.expected_pre_mode == 0o644
 
+
 def test_recovery_operation_records_staged_mode() -> None:
     op = RecoveryOperation(
         operation_id="op-1",
@@ -1377,6 +1400,7 @@ def test_recovery_operation_records_staged_mode() -> None:
     )
     assert op.staged_mode == 0o755
 
+
 def test_recovery_state_files_require_pre_mode_for_present_state() -> None:
     with pytest.raises(RecoveryValidationError, match="expected_pre_mode must be an int"):
         RecoveryStateFiles(
@@ -1389,6 +1413,7 @@ def test_recovery_state_files_require_pre_mode_for_present_state() -> None:
             backup_path="backups/test.bak",
             backup_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000",
         )
+
 
 def test_recovery_state_files_forbid_pre_mode_for_absent_state() -> None:
     with pytest.raises(RecoveryValidationError, match="expected_pre_mode must be None"):
@@ -1403,6 +1428,7 @@ def test_recovery_state_files_forbid_pre_mode_for_absent_state() -> None:
             backup_hash=None,
         )
 
+
 def test_recovery_state_files_require_staged_hash() -> None:
     with pytest.raises(RecoveryValidationError, match="staged_hash"):
         RecoveryStateFiles(
@@ -1410,11 +1436,12 @@ def test_recovery_state_files_require_staged_hash() -> None:
             expected_pre_hash=None,
             expected_pre_mode=None,
             staged_path="staged/test.tmp",
-            staged_hash=None, # type: ignore
+            staged_hash=None,  # type: ignore
             staged_mode=0o644,
             backup_path=None,
             backup_hash=None,
         )
+
 
 def test_recovery_state_files_require_backup_for_present_pre_state() -> None:
     with pytest.raises(RecoveryValidationError, match="backup_hash must be a string for PRESENT"):
@@ -1429,6 +1456,7 @@ def test_recovery_state_files_require_backup_for_present_pre_state() -> None:
             backup_hash=None,
         )
 
+
 def test_recovery_state_files_for_absent_pre_state_forbid_backup() -> None:
     with pytest.raises(RecoveryValidationError, match="backup_hash must be None"):
         RecoveryStateFiles(
@@ -1442,6 +1470,7 @@ def test_recovery_state_files_for_absent_pre_state_forbid_backup() -> None:
             backup_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000",
         )
 
+
 def test_recovery_rejects_boolean_permission_mode() -> None:
     with pytest.raises(RecoveryValidationError, match="Invalid permission mode type"):
         RecoveryStateFiles(
@@ -1450,10 +1479,11 @@ def test_recovery_rejects_boolean_permission_mode() -> None:
             expected_pre_mode=None,
             staged_path="staged/test.tmp",
             staged_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111",
-            staged_mode=True, # type: ignore
+            staged_mode=True,  # type: ignore
             backup_path=None,
             backup_hash=None,
         )
+
 
 def test_recovery_rejects_negative_permission_mode() -> None:
     with pytest.raises(RecoveryValidationError, match="Invalid permission mode value"):
@@ -1468,6 +1498,7 @@ def test_recovery_rejects_negative_permission_mode() -> None:
             backup_hash=None,
         )
 
+
 def test_recovery_rejects_permission_mode_above_0o7777() -> None:
     with pytest.raises(RecoveryValidationError, match="Invalid permission mode value"):
         RecoveryStateFiles(
@@ -1481,13 +1512,19 @@ def test_recovery_rejects_permission_mode_above_0o7777() -> None:
             backup_hash=None,
         )
 
+
 def test_recovery_schema_two_preserves_modes_deterministically() -> None:
     j = make_journal()
     raw = _serialize_journal(j)
     assert b'"staged_mode":420' in raw or b'"staged_mode": 420' in raw
 
+
 def test_remove_rolled_back_transaction_rejects_complete_phase(tmp_path: Path) -> None:
-    from lifeos.proposals.recovery import initialize_recovery_transaction, remove_rolled_back_recovery_transaction
+    from lifeos.proposals.recovery import (
+        initialize_recovery_transaction,
+        remove_rolled_back_recovery_transaction,
+    )
+
     j = make_journal(phase=RecoveryPhase.COMPLETE)
     try:
         initialize_recovery_transaction(recovery_root=tmp_path, journal=j)
@@ -1499,34 +1536,54 @@ def test_remove_rolled_back_transaction_rejects_complete_phase(tmp_path: Path) -
     (tx_dir / "staged").mkdir()
     (tx_dir / "backups").mkdir()
     from lifeos.proposals.recovery import _serialize_journal
+
     (tx_dir / "journal.json").write_bytes(_serialize_journal(j))
     with pytest.raises(RecoveryValidationError, match="Cannot remove complete transaction"):
-        remove_rolled_back_recovery_transaction(transaction_id=j.transaction_id, recovery_root=tmp_path)
+        remove_rolled_back_recovery_transaction(
+            transaction_id=j.transaction_id, recovery_root=tmp_path
+        )
+
 
 def test_remove_rolled_back_transaction_removes_unresolved_transaction(tmp_path: Path) -> None:
-    from lifeos.proposals.recovery import initialize_recovery_transaction, remove_rolled_back_recovery_transaction
+    from lifeos.proposals.recovery import (
+        initialize_recovery_transaction,
+        remove_rolled_back_recovery_transaction,
+    )
+
     j = make_journal(phase=RecoveryPhase.PREPARED)
     tx_dir = initialize_recovery_transaction(recovery_root=tmp_path, journal=j)
     remove_rolled_back_recovery_transaction(transaction_id=j.transaction_id, recovery_root=tmp_path)
     assert not tx_dir.exists()
 
+
 def test_remove_rolled_back_transaction_rejects_symlinked_layout(tmp_path: Path) -> None:
-    from lifeos.proposals.recovery import initialize_recovery_transaction, remove_rolled_back_recovery_transaction
+    from lifeos.proposals.recovery import (
+        initialize_recovery_transaction,
+        remove_rolled_back_recovery_transaction,
+    )
+
     j = make_journal(phase=RecoveryPhase.PREPARED)
     tx_dir = initialize_recovery_transaction(recovery_root=tmp_path, journal=j)
     import shutil
+
     shutil.rmtree(tx_dir / "staged")
     import os
+
     os.symlink(".", tx_dir / "staged")
     with pytest.raises(RecoveryCorruptStateError):
-        remove_rolled_back_recovery_transaction(transaction_id=j.transaction_id, recovery_root=tmp_path)
+        remove_rolled_back_recovery_transaction(
+            transaction_id=j.transaction_id, recovery_root=tmp_path
+        )
+
 
 def test_recovery_unknown_future_schema_is_rejected() -> None:
     from lifeos.proposals.recovery import RecoveryUnknownSchemaError
+
     raw = _serialize_journal(make_journal()).decode("utf-8")
     bad_raw = raw.replace('"schema_version":2', '"schema_version":3')
     with pytest.raises(RecoveryUnknownSchemaError, match="Unknown schema version"):
         _deserialize_journal(bad_raw.encode("utf-8"))
+
 
 def test_deserialize_rejects_float_schema_version(base_journal: RecoveryJournal) -> None:
     data = _serialize_journal(base_journal)
@@ -1534,14 +1591,17 @@ def test_deserialize_rejects_float_schema_version(base_journal: RecoveryJournal)
     with pytest.raises(RecoveryCorruptStateError, match="Invalid schema version type"):
         _deserialize_journal(text.encode("utf-8"))
 
+
 def test_deserialize_rejects_string_schema_version(base_journal: RecoveryJournal) -> None:
     data = _serialize_journal(base_journal)
     text = data.decode("utf-8").replace('"schema_version":2', '"schema_version":"2"')
     with pytest.raises(RecoveryCorruptStateError, match="Invalid schema version type"):
         _deserialize_journal(text.encode("utf-8"))
 
+
 def test_deserialize_rejects_missing_schema_version(base_journal: RecoveryJournal) -> None:
     import json
+
     data = _serialize_journal(base_journal)
     obj = json.loads(data.decode("utf-8"))
     del obj["schema_version"]

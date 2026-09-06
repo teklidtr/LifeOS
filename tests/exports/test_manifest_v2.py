@@ -115,8 +115,7 @@ def test_heading_and_block_fragments_are_normalized_and_uri_encoded(tmp_path: Pa
     _write(
         vault,
         "wiki/source.md",
-        "[[wiki/target#Café & ATP? 50%|Heading]]\n"
-        "[[wiki/target#^block id/ü|Block]].\n",
+        "[[wiki/target#Café & ATP? 50%|Heading]]\n[[wiki/target#^block id/ü|Block]].\n",
     )
     _write(vault, "wiki/target.md", "# Café & ATP? 50%\nBlock ^block id/ü\n")
 

@@ -28,4 +28,7 @@ def test_export_status_rejects_cross_kind_manifest(tmp_path: Path) -> None:
     manifest["kind"] = "study-bundle"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    assert export_status(vault_root=vault_root, runtime_dir=runtime_dir, kind="public-wiki").status == "failed"
+    assert (
+        export_status(vault_root=vault_root, runtime_dir=runtime_dir, kind="public-wiki").status
+        == "failed"
+    )

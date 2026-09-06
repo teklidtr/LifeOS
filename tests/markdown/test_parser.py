@@ -329,27 +329,15 @@ def test_fenced_code_blocks(tmp_path: Path) -> None:
             "<!-- lifeos:managed:end m1 -->\n"
             "```\n"
         ),
-        (
-            "    <!-- lifeos:managed:start m1 -->\n"
-            "    example\n"
-            "    <!-- lifeos:managed:end m1 -->\n"
-        ),
-        (
-            "\t<!-- lifeos:managed:start m1 -->\n"
-            "\texample\n"
-            "\t<!-- lifeos:managed:end m1 -->\n"
-        ),
+        ("    <!-- lifeos:managed:start m1 -->\n    example\n    <!-- lifeos:managed:end m1 -->\n"),
+        ("\t<!-- lifeos:managed:start m1 -->\n\texample\n\t<!-- lifeos:managed:end m1 -->\n"),
         (
             "- example\n"
             "  <!-- lifeos:managed:start m1 -->\n"
             "  nested text\n"
             "  <!-- lifeos:managed:end m1 -->\n"
         ),
-        (
-            "> <!-- lifeos:managed:start m1 -->\n"
-            "> quoted text\n"
-            "> <!-- lifeos:managed:end m1 -->\n"
-        ),
+        ("> <!-- lifeos:managed:start m1 -->\n> quoted text\n> <!-- lifeos:managed:end m1 -->\n"),
     ],
     ids=[
         "backtick-false-closer",

@@ -24,9 +24,7 @@ def empty_vault(tmp_path: Path) -> Path:
     return vault
 
 
-def make_proposal(
-    vault_root: Path, pid: str, status: str = "draft", title: str = "Title"
-) -> Path:
+def make_proposal(vault_root: Path, pid: str, status: str = "draft", title: str = "Title") -> Path:
     pdir = vault_root / "proposals" / pid
     pdir.mkdir(parents=True, exist_ok=True)
 
@@ -245,9 +243,7 @@ def test_malformed_tracked_proposal_preserves_previous_index(
 
     pid_a = "prop-20260101T000000Z-aaaaaaaa"
     make_proposal(empty_vault, pid_a, title="Proposal A")
-    subprocess.run(
-        ["git", "add", f"proposals/{pid_a}/proposal.md"], cwd=empty_vault, check=True
-    )
+    subprocess.run(["git", "add", f"proposals/{pid_a}/proposal.md"], cwd=empty_vault, check=True)
 
     registry = Registry(db_path)
     registry.initialize()

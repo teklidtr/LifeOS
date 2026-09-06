@@ -543,7 +543,7 @@ def test_committed_manifest_loads_successfully(tmp_path: Path) -> None:
 def test_pure_byte_parser(tmp_path: Path) -> None:
     from lifeos.ownership.manifest import GeneratedOwnership
 
-    valid_json = b'''{
+    valid_json = b"""{
       "schema_version": 1,
       "owned_files": {
         "a.md": {
@@ -554,25 +554,32 @@ def test_pure_byte_parser(tmp_path: Path) -> None:
           "updated_at": "2026-07-13T00:00:00+00:00"
         }
       }
-    }'''
-    valid_json = valid_json.replace(b'"a" * 64', b'"' + b'a' * 64 + b'"')
+    }"""
+    valid_json = valid_json.replace(b'"a" * 64', b'"' + b"a" * 64 + b'"')
 
-    ownership = GeneratedOwnership.from_bytes(valid_json, manifest_path=Path("dummy"), vault_root=tmp_path)
+    ownership = GeneratedOwnership.from_bytes(
+        valid_json, manifest_path=Path("dummy"), vault_root=tmp_path
+    )
     assert "a.md" in ownership._entries
     assert ownership._entries["a.md"].generator_id == "gen1"
 
     import pytest
     from lifeos.ownership.manifest import ManifestError
+
     with pytest.raises(ManifestError, match="Malformed JSON"):
-        GeneratedOwnership.from_bytes(b'{ "invalid": }', manifest_path=Path("dummy"), vault_root=tmp_path)
+        GeneratedOwnership.from_bytes(
+            b'{ "invalid": }', manifest_path=Path("dummy"), vault_root=tmp_path
+        )
 
     with pytest.raises(ManifestError, match="Manifest bytes are not valid UTF-8"):
-        GeneratedOwnership.from_bytes(b'\xff\xfe', manifest_path=Path("dummy"), vault_root=tmp_path)
+        GeneratedOwnership.from_bytes(b"\xff\xfe", manifest_path=Path("dummy"), vault_root=tmp_path)
 
-    duplicate_json = b'''{
+    duplicate_json = b"""{
       "schema_version": 1,
       "owned_files": {},
       "owned_files": {}
-    }'''
+    }"""
     with pytest.raises(ManifestError, match="Duplicate JSON key found"):
-        GeneratedOwnership.from_bytes(duplicate_json, manifest_path=Path("dummy"), vault_root=tmp_path)
+        GeneratedOwnership.from_bytes(
+            duplicate_json, manifest_path=Path("dummy"), vault_root=tmp_path
+        )

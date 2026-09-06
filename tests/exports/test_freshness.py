@@ -43,25 +43,23 @@ def test_editing_included_note_marks_export_stale_and_rebuild_restores_ready(
     runtime = tmp_path / "runtime"
     note = _write(vault, "wiki/note.md", "Old.\n")
     _build_public(vault, runtime)
-    assert export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    ).status == "ready"
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status == "ready"
+    )
 
     note.write_text("New.\n", encoding="utf-8")
-    assert export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    ).status == "stale"
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status == "stale"
+    )
 
     _build_public(vault, runtime)
-    assert export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    ).status == "ready"
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status == "ready"
+    )
 
 
 @pytest.mark.parametrize("change", ["add", "delete"])
-def test_included_note_inventory_changes_mark_export_stale(
-    tmp_path: Path, change: str
-) -> None:
+def test_included_note_inventory_changes_mark_export_stale(tmp_path: Path, change: str) -> None:
     vault = tmp_path / "vault"
     runtime = tmp_path / "runtime"
     first = _write(vault, "wiki/first.md", "First.\n")
@@ -72,9 +70,9 @@ def test_included_note_inventory_changes_mark_export_stale(
     else:
         first.unlink()
 
-    assert export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    ).status == "stale"
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status == "stale"
+    )
 
 
 def test_visibility_and_archived_inclusion_changes_mark_export_stale(
@@ -93,9 +91,9 @@ def test_visibility_and_archived_inclusion_changes_mark_export_stale(
         "---\nvisibility: private\nstatus: active\n---\nVisible.\n",
         encoding="utf-8",
     )
-    assert export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    ).status == "stale"
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status == "stale"
+    )
 
     note.write_text(
         "---\nvisibility: public\nstatus: active\n---\nVisible.\n",
@@ -106,9 +104,9 @@ def test_visibility_and_archived_inclusion_changes_mark_export_stale(
         "---\nvisibility: public\nstatus: archived\n---\nVisible.\n",
         encoding="utf-8",
     )
-    assert export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    ).status == "stale"
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status == "stale"
+    )
 
 
 def test_unrelated_journal_change_does_not_stale_public_wiki(tmp_path: Path) -> None:
@@ -120,9 +118,9 @@ def test_unrelated_journal_change_does_not_stale_public_wiki(tmp_path: Path) -> 
 
     journal.write_text("Evening.\n", encoding="utf-8")
 
-    assert export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    ).status == "ready"
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status == "ready"
+    )
 
 
 def test_malformed_selected_source_returns_typed_failed_diagnostic(tmp_path: Path) -> None:

@@ -87,8 +87,7 @@ def test_large_markdown_scan_hashes_full_file_but_parses_only_frontmatter_prefix
     wiki.mkdir(parents=True)
     target = wiki / "large.md"
     content = (
-        "---\nid: large-note\ntype: wiki\ntitle: Large\n---\n"
-        + ("body-data\n" * 200_000)
+        "---\nid: large-note\ntype: wiki\ntitle: Large\n---\n" + ("body-data\n" * 200_000)
     ).encode("utf-8")
     target.write_bytes(content)
     entries = scan_vault(vault)

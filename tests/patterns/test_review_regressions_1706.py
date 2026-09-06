@@ -54,7 +54,9 @@ def _pattern(
 
 
 def _section(snapshot: object, section_id: str):
-    return next(section for section in getattr(snapshot, "sections") if section.section_id == section_id)
+    return next(
+        section for section in getattr(snapshot, "sections") if section.section_id == section_id
+    )
 
 
 def _open_week(
@@ -123,9 +125,7 @@ def test_dismissal_remains_suppressed_across_more_than_one_later_review(tmp_path
     _pattern(vault, "tracked")
     service = ReviewArtifactService(vault_root=vault, runtime_dir=runtime)
 
-    first, first_snapshot = _open_week(
-        service, runtime, day=date(2026, 9, 4), now=NOW, key="week1"
-    )
+    first, first_snapshot = _open_week(service, runtime, day=date(2026, 9, 4), now=NOW, key="week1")
     item = _section(first_snapshot, "personal-patterns-weekly").items[0]
     ReviewDecisionService(service).decide(
         review_id=first.metadata.review_id,
@@ -142,9 +142,7 @@ def test_dismissal_remains_suppressed_across_more_than_one_later_review(tmp_path
     )
     assert _section(second_snapshot, "personal-patterns-weekly").items == ()
 
-    _, third_snapshot = _open_week(
-        service, runtime, day=date(2026, 9, 18), now=WEEK_3, key="week3"
-    )
+    _, third_snapshot = _open_week(service, runtime, day=date(2026, 9, 18), now=WEEK_3, key="week3")
     assert _section(third_snapshot, "personal-patterns-weekly").items == ()
 
 

@@ -9,6 +9,7 @@ from lifeos.proposals.review_snapshot import (
     serialize_review_snapshot_bytes,
 )
 
+
 def test_load_empty_proposals(tmp_path: Path) -> None:
     root = tmp_path / "proposals"
     res = load_proposals(root)
@@ -19,6 +20,7 @@ def test_load_empty_proposals(tmp_path: Path) -> None:
     res2 = load_proposals(root)
     assert not res2.proposals
     assert not res2.findings
+
 
 def test_load_valid_proposal(tmp_path: Path) -> None:
     root = tmp_path / "proposals"
@@ -43,6 +45,7 @@ def test_load_valid_proposal(tmp_path: Path) -> None:
     assert p.metadata.id == pid
     assert p.patch_document.proposal_id == pid
 
+
 def test_symlink_rejection(tmp_path: Path) -> None:
     root = tmp_path / "proposals"
     root.mkdir()
@@ -65,6 +68,7 @@ def test_symlink_rejection(tmp_path: Path) -> None:
     assert len(res.findings) == 1
     assert res.findings[0].code == "symlink_entry"
 
+
 def test_json_duplicate_keys(tmp_path: Path) -> None:
     root = tmp_path / "proposals"
     root.mkdir()
@@ -84,6 +88,7 @@ def test_json_duplicate_keys(tmp_path: Path) -> None:
     assert errs
     assert "duplicate key" in errs[0].message
 
+
 def test_crlf_preservation(tmp_path: Path) -> None:
     root = tmp_path / "proposals"
     root.mkdir()
@@ -101,6 +106,7 @@ def test_crlf_preservation(tmp_path: Path) -> None:
     res = load_proposals(root)
     assert len(res.proposals) == 1
     assert res.proposals[0].body == "Line1\r\nLine2"
+
 
 def test_cross_document_invariants(tmp_path: Path) -> None:
     root = tmp_path / "proposals"
@@ -123,6 +129,7 @@ def test_cross_document_invariants(tmp_path: Path) -> None:
     assert "id_mismatch" in codes
     assert "version_mismatch" in codes
 
+
 def test_v2_loader_integration(tmp_path: Path) -> None:
     root = tmp_path / "proposals"
     root.mkdir()
@@ -142,12 +149,11 @@ def test_v2_loader_integration(tmp_path: Path) -> None:
                 "op": "create_generated_file",
                 "target_path": "gen1.txt",
                 "expected_target_state": "absent",
-
                 "generator_id": "gen-1",
                 "generator_version": "v1.0.0",
-                "new_content": "data"
+                "new_content": "data",
             }
-        ]
+        ],
     }
     json_bytes = (json.dumps(pd, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
 
@@ -167,7 +173,7 @@ def test_v2_loader_integration(tmp_path: Path) -> None:
 
     # 3. noncanonical v2 JSON fails
     (pdir / "proposal.md").write_bytes(md_v2.encode("utf-8"))
-    bad_json = json_bytes.replace(b":", b": ") # add space
+    bad_json = json_bytes.replace(b":", b": ")  # add space
     (pdir / "patches.json").write_bytes(bad_json)
     res = load_proposals(root)
     assert len(res.proposals) == 0
@@ -188,13 +194,9 @@ def test_loader_validates_optional_review_snapshot(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     document = PatchDocument(1, pid, ())
-    proposal_dir.joinpath("patches.json").write_bytes(
-        serialize_patch_json_bytes(document)
-    )
+    proposal_dir.joinpath("patches.json").write_bytes(serialize_patch_json_bytes(document))
     snapshot = build_review_snapshot(vault_root=tmp_path, patch_document=document)
-    proposal_dir.joinpath("review.json").write_bytes(
-        serialize_review_snapshot_bytes(snapshot)
-    )
+    proposal_dir.joinpath("review.json").write_bytes(serialize_review_snapshot_bytes(snapshot))
 
     loaded = load_proposals(root)
 

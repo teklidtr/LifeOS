@@ -27,10 +27,7 @@ def test_legacy_preferences_migrate_safely_to_shadow(tmp_path: Path) -> None:
     controls = service(tmp_path)
     controls.preferences_path.parent.mkdir(parents=True)
     controls.preferences_path.write_text(
-        "schema_version: 0\n"
-        "enabled: true\n"
-        "disabled_signals: [energy]\n"
-        "excluded_events: [e1]\n",
+        "schema_version: 0\nenabled: true\ndisabled_signals: [energy]\nexcluded_events: [e1]\n",
         encoding="utf-8",
     )
     original = controls.preferences_path.read_bytes()
@@ -119,9 +116,7 @@ def test_existing_legacy_file_requires_explicit_migration(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize("schema_version", [True, 1.0, "1"])
-def test_preference_schema_requires_an_integer(
-    tmp_path: Path, schema_version: object
-) -> None:
+def test_preference_schema_requires_an_integer(tmp_path: Path, schema_version: object) -> None:
     controls = service(tmp_path)
     controls.preferences_path.parent.mkdir(parents=True)
     controls.preferences_path.write_text(

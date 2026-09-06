@@ -92,11 +92,7 @@ class ActivityStore:
 
     def _open_log_file(self, *, activity_fd: int | None, write: bool) -> int:
         """Open the activity log without ever blocking on a special-file replacement."""
-        flags = (
-            getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0)
-            | _NONBLOCK
-        )
+        flags = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0) | _NONBLOCK
         if write:
             flags |= os.O_WRONLY | os.O_APPEND | os.O_CREAT
         else:
@@ -157,8 +153,10 @@ class ActivityStore:
     ) -> ActivityRecord:
         if not tool or tool.isspace():
             raise ValueError("tool must be non-empty")
-        timestamp = (now or datetime.now(timezone.utc)).replace(microsecond=0).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
+        timestamp = (
+            (now or datetime.now(timezone.utc))
+            .replace(microsecond=0)
+            .strftime("%Y-%m-%dT%H:%M:%SZ")
         )
         record = ActivityRecord(
             timestamp=timestamp,

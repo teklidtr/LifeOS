@@ -131,9 +131,7 @@ def test_workspace_exposes_mixed_states_statement_and_related_review_links(tmp_p
     assert active["statement"] == "Statement for pattern-active."
     assert active["confidence"] == "medium"
     assert active["evidence_health"] == "none"
-    assert active["related_paths"] == [
-        {"path": "reviews/daily/2026-09-04.md", "kind": "review"}
-    ]
+    assert active["related_paths"] == [{"path": "reviews/daily/2026-09-04.md", "kind": "review"}]
 
 
 def test_read_only_refresh_uses_current_evidence_without_mutating_persisted_registry(

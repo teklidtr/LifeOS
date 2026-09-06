@@ -80,8 +80,7 @@ async def test_remote_http_client_explores_and_submits_without_local_vault(
                 assert not listing.isError
                 listing_data = json.loads(listing.content[0].text)
                 assert any(
-                    entry["path"] == "raw/remote-note.md"
-                    for entry in listing_data["entries"]
+                    entry["path"] == "raw/remote-note.md" for entry in listing_data["entries"]
                 )
 
                 created = await session.call_tool(

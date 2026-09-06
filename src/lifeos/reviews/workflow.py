@@ -74,12 +74,21 @@ def _review_identity(kind: ReviewKind, day: date) -> tuple[str, date, date]:
     return f"{kind}-{day.isoformat()}", day, day
 
 
-def _stable_item(section: str, key: str, title: str, detail: str, path: str | None = None, action: str | None = None) -> ReviewItem:
+def _stable_item(
+    section: str,
+    key: str,
+    title: str,
+    detail: str,
+    path: str | None = None,
+    action: str | None = None,
+) -> ReviewItem:
     digest = hashlib.sha256(f"{section}\0{key}".encode()).hexdigest()[:16]
     return ReviewItem(f"{section}:{digest}", title, detail, path, action)
 
 
-def _scan_frontmatter(vault_root: Path, roots: tuple[str, ...]) -> tuple[tuple[str, dict[str, Any]], ...]:
+def _scan_frontmatter(
+    vault_root: Path, roots: tuple[str, ...]
+) -> tuple[tuple[str, dict[str, Any]], ...]:
     rows: list[tuple[str, dict[str, Any]]] = []
     for source in iter_vault_markdown(vault_root, roots=roots):
         parsed = parse_markdown_note(source.path, content=source.content)
@@ -144,37 +153,74 @@ def build_review_workflow(
         attention = evaluate_attention(
             vault_root=vault_root,
             runtime_dir=runtime_dir,
-            as_of=__import__("datetime").datetime.combine(day, __import__("datetime").time(22, 0)).astimezone(),
+            as_of=__import__("datetime")
+            .datetime.combine(day, __import__("datetime").time(22, 0))
+            .astimezone(),
         )
         items = tuple(
-            _stable_item("attention", item.item_id, item.title, item.explanation, item.evidence[0].path if item.evidence else None, "reconcile")
+            _stable_item(
+                "attention",
+                item.item_id,
+                item.title,
+                item.explanation,
+                item.evidence[0].path if item.evidence else None,
+                "reconcile",
+            )
             for item in attention.items
         )
-        sections.append(ReviewSection("attention", "Unresolved loops", False, "ready" if items else "empty", items))
+        sections.append(
+            ReviewSection(
+                "attention", "Unresolved loops", False, "ready" if items else "empty", items
+            )
+        )
     except Exception as exc:
-        sections.append(ReviewSection("attention", "Unresolved loops", False, "unavailable", (), str(exc)))
+        sections.append(
+            ReviewSection("attention", "Unresolved loops", False, "unavailable", (), str(exc))
+        )
 
     try:
         inbox_rows = _scan_frontmatter(vault_root, ("raw",))
         items = tuple(
-            _stable_item("inbox", path, str(fm.get("title") or Path(path).stem), "Unprocessed capture", path, "process")
+            _stable_item(
+                "inbox",
+                path,
+                str(fm.get("title") or Path(path).stem),
+                "Unprocessed capture",
+                path,
+                "process",
+            )
             for path, fm in inbox_rows
             if str(fm.get("status", "")).casefold() == "inbox"
         )
-        sections.append(ReviewSection("inbox", "Inbox", False, "ready" if items else "empty", items))
+        sections.append(
+            ReviewSection("inbox", "Inbox", False, "ready" if items else "empty", items)
+        )
     except VaultAccessError as exc:
         sections.append(ReviewSection("inbox", "Inbox", False, "unavailable", (), str(exc)))
 
     try:
         actions = load_plan_actions(vault_root)
         active = tuple(
-            _stable_item("plans", action.task_id, action.title, f"{action.plan}; status {action.status}", action.source_path, "open")
+            _stable_item(
+                "plans",
+                action.task_id,
+                action.title,
+                f"{action.plan}; status {action.status}",
+                action.source_path,
+                "open",
+            )
             for action in actions
             if action.status in {"todo", "active", "pending"}
         )
-        sections.append(ReviewSection("plans", "Active plans and actions", False, "ready" if active else "empty", active))
+        sections.append(
+            ReviewSection(
+                "plans", "Active plans and actions", False, "ready" if active else "empty", active
+            )
+        )
     except PlanningError as exc:
-        sections.append(ReviewSection("plans", "Active plans and actions", False, "unavailable", (), str(exc)))
+        sections.append(
+            ReviewSection("plans", "Active plans and actions", False, "unavailable", (), str(exc))
+        )
 
     if kind == "weekly":
         try:
@@ -246,7 +292,11 @@ def build_review_workflow(
             )
 
     try:
-        records = [record for record in load_execution_records(vault_root) if range_start <= record.day <= range_end]
+        records = [
+            record
+            for record in load_execution_records(vault_root)
+            if range_start <= record.day <= range_end
+        ]
         grouped: dict[str, list[Any]] = {}
         for record in records:
             if record.outcome in {"skipped", "deferred", "partial"}:
@@ -263,28 +313,52 @@ def build_review_workflow(
             for task_id, events in sorted(grouped.items())
             if len(events) >= 2
         )
-        sections.append(ReviewSection("avoidance", "Repeated friction", True, "ready" if repeated else "empty", repeated))
+        sections.append(
+            ReviewSection(
+                "avoidance", "Repeated friction", True, "ready" if repeated else "empty", repeated
+            )
+        )
     except DailyInteractionError as exc:
-        sections.append(ReviewSection("avoidance", "Repeated friction", True, "unavailable", (), str(exc)))
+        sections.append(
+            ReviewSection("avoidance", "Repeated friction", True, "unavailable", (), str(exc))
+        )
 
     try:
         plan = build_review_plan(cards=load_flashcards(vault_root), as_of=day, available_minutes=60)
         items = tuple(
-            _stable_item("study", session.topic, session.topic, f"{len(session.card_ids)} cards; {session.estimated_minutes} minutes; {session.overdue_cards} overdue", session.card_paths[0] if session.card_paths else None, "study")
+            _stable_item(
+                "study",
+                session.topic,
+                session.topic,
+                f"{len(session.card_ids)} cards; {session.estimated_minutes} minutes; {session.overdue_cards} overdue",
+                session.card_paths[0] if session.card_paths else None,
+                "study",
+            )
             for session in plan.sessions
         )
-        sections.append(ReviewSection("study", "Study backlog", True, "ready" if items else "empty", items))
+        sections.append(
+            ReviewSection("study", "Study backlog", True, "ready" if items else "empty", items)
+        )
     except StudyError as exc:
         sections.append(ReviewSection("study", "Study backlog", True, "unavailable", (), str(exc)))
 
     try:
         proposals = _scan_frontmatter(vault_root, ("proposals",))
         items = tuple(
-            _stable_item("proposals", path, str(fm.get("title") or Path(path).stem), f"Proposal is {fm.get('status')}", path, "review")
+            _stable_item(
+                "proposals",
+                path,
+                str(fm.get("title") or Path(path).stem),
+                f"Proposal is {fm.get('status')}",
+                path,
+                "review",
+            )
             for path, fm in proposals
             if str(fm.get("status", "")).casefold() in {"draft", "pending", "approved", "stale"}
         )
-        sections.append(ReviewSection("proposals", "Proposals", True, "ready" if items else "empty", items))
+        sections.append(
+            ReviewSection("proposals", "Proposals", True, "ready" if items else "empty", items)
+        )
     except VaultAccessError as exc:
         sections.append(ReviewSection("proposals", "Proposals", True, "unavailable", (), str(exc)))
 
@@ -321,7 +395,9 @@ def save_review_note(
     idempotency_key: str,
     expected_hash: str | None = None,
 ) -> dict[str, Any]:
-    service = DailyInteractionService(vault_root=vault_root, runtime_dir=runtime_dir, actor_id=actor_id)
+    service = DailyInteractionService(
+        vault_root=vault_root, runtime_dir=runtime_dir, actor_id=actor_id
+    )
     result = service.create_review_note(
         ReviewNoteRequest(
             idempotency_key,

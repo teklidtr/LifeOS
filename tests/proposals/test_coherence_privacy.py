@@ -74,9 +74,7 @@ def test_public_proposal_identity_preflight_never_reads_protected_duplicate(
             ),
         ),
     )
-    metadata = with_target_identity_extension(
-        _metadata(), patch, collect_identity_snapshot(vault)
-    )
+    metadata = with_target_identity_extension(_metadata(), patch, collect_identity_snapshot(vault))
     loaded = LoadedProposal(
         proposal_dir=PROPOSAL_ID,
         proposal_path=f"{PROPOSAL_ID}/proposal.md",

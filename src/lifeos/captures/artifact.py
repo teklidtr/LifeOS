@@ -12,7 +12,12 @@ import yaml
 
 from lifeos.daily.service import _atomic_write, content_hash
 from lifeos.markdown.parser import parse_markdown_note, replace_managed_block, splice_managed_block
-from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown, read_vault_markdown
+from lifeos.vault import (
+    VaultAccessError,
+    VaultMarkdownFile,
+    iter_vault_markdown,
+    read_vault_markdown,
+)
 
 from .contracts import (
     ArtifactLink,
@@ -190,7 +195,9 @@ def _updated_document(
     try:
         body = replace_managed_block(parsed.body, parsed.managed_blocks[0], managed)
     except ValueError as error:
-        raise CaptureError("malformed_artifact", str(error), {"path": source.relative_path}) from error
+        raise CaptureError(
+            "malformed_artifact", str(error), {"path": source.relative_path}
+        ) from error
     dumped = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).rstrip()
     return f"---\n{dumped}\n---\n{body}"
 

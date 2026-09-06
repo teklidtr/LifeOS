@@ -219,15 +219,30 @@ def validate_metadata(data: dict[str, Any]) -> ProposalMetadata:
     lsv = data.get("lifecycle_schema_version")
     if lsv is not None:
         if type(lsv) is not int or isinstance(lsv, bool):
-            errors.append(ProposalSchemaError("invalid_type", "lifecycle_schema_version", "must be an integer or null"))
+            errors.append(
+                ProposalSchemaError(
+                    "invalid_type", "lifecycle_schema_version", "must be an integer or null"
+                )
+            )
         elif lsv != 1:
-            errors.append(ProposalSchemaError("unsupported_version", "lifecycle_schema_version", "must be 1 or null"))
+            errors.append(
+                ProposalSchemaError(
+                    "unsupported_version", "lifecycle_schema_version", "must be 1 or null"
+                )
+            )
 
     # strings
     for f in ("title", "description", "created_by"):
         _validate_string(data.get(f), f, errors)
 
-    for f in ("submitted_by", "review_digest", "approved_by", "rejected_by", "rejection_reason", "applied_by"):
+    for f in (
+        "submitted_by",
+        "review_digest",
+        "approved_by",
+        "rejected_by",
+        "rejection_reason",
+        "applied_by",
+    ):
         val = data.get(f)
         if val is not None:
             _validate_string(val, f, errors)
@@ -316,11 +331,19 @@ def validate_metadata(data: dict[str, Any]) -> ProposalMetadata:
     # Helper function to check required/null constraints
     def _require(field: str, val: Any) -> None:
         if val is None:
-            errors.append(ProposalSchemaError("lifecycle_mismatch", field, f"required for {status_enum.value} status"))
+            errors.append(
+                ProposalSchemaError(
+                    "lifecycle_mismatch", field, f"required for {status_enum.value} status"
+                )
+            )
 
     def _forbid(field: str, val: Any) -> None:
         if val is not None:
-            errors.append(ProposalSchemaError("lifecycle_mismatch", field, f"must be null for {status_enum.value} status"))
+            errors.append(
+                ProposalSchemaError(
+                    "lifecycle_mismatch", field, f"must be null for {status_enum.value} status"
+                )
+            )
 
     if lsv is None:
         # Legacy lifecycle rules (pre-LIFEOS-105)
@@ -350,15 +373,33 @@ def validate_metadata(data: dict[str, Any]) -> ProposalMetadata:
                 times[f] = val
 
         if "approved_at" in times and times["created_at"] > times["approved_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "approved_at", "must be >= created_at"))
+            errors.append(
+                ProposalSchemaError("chronology_error", "approved_at", "must be >= created_at")
+            )
         if "rejected_at" in times and times["created_at"] > times["rejected_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "rejected_at", "must be >= created_at"))
+            errors.append(
+                ProposalSchemaError("chronology_error", "rejected_at", "must be >= created_at")
+            )
         if "applied_at" in times and times["created_at"] > times["applied_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "applied_at", "must be >= created_at"))
-        if "approved_at" in times and "applied_at" in times and times["approved_at"] > times["applied_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "applied_at", "must be >= approved_at"))
-        if "approved_at" in times and "rejected_at" in times and times["approved_at"] > times["rejected_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "rejected_at", "must be >= approved_at"))
+            errors.append(
+                ProposalSchemaError("chronology_error", "applied_at", "must be >= created_at")
+            )
+        if (
+            "approved_at" in times
+            and "applied_at" in times
+            and times["approved_at"] > times["applied_at"]
+        ):
+            errors.append(
+                ProposalSchemaError("chronology_error", "applied_at", "must be >= approved_at")
+            )
+        if (
+            "approved_at" in times
+            and "rejected_at" in times
+            and times["approved_at"] > times["rejected_at"]
+        ):
+            errors.append(
+                ProposalSchemaError("chronology_error", "rejected_at", "must be >= approved_at")
+            )
 
     else:
         # Complete lifecycle contract (LIFEOS-105)
@@ -407,7 +448,13 @@ def validate_metadata(data: dict[str, Any]) -> ProposalMetadata:
 
             # Approval actor and timestamp must either both be null or both be present
             if (approved_at is None) != (approved_by is None):
-                errors.append(ProposalSchemaError("lifecycle_mismatch", "approved_at", "approval actor and timestamp must both be absent or both be present"))
+                errors.append(
+                    ProposalSchemaError(
+                        "lifecycle_mismatch",
+                        "approved_at",
+                        "approval actor and timestamp must both be absent or both be present",
+                    )
+                )
         elif status_enum == ProposalStatus.APPLIED:
             _require("submitted_at", submitted_at)
             _require("submitted_by", submitted_by)
@@ -428,15 +475,41 @@ def validate_metadata(data: dict[str, Any]) -> ProposalMetadata:
                 times[f] = val
 
         if "submitted_at" in times and times["created_at"] > times["submitted_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "submitted_at", "must be >= created_at"))
-        if "submitted_at" in times and "approved_at" in times and times["submitted_at"] > times["approved_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "approved_at", "must be >= submitted_at"))
-        if "submitted_at" in times and "rejected_at" in times and times["submitted_at"] > times["rejected_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "rejected_at", "must be >= submitted_at"))
-        if "approved_at" in times and "rejected_at" in times and times["approved_at"] > times["rejected_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "rejected_at", "must be >= approved_at"))
-        if "approved_at" in times and "applied_at" in times and times["approved_at"] > times["applied_at"]:
-            errors.append(ProposalSchemaError("chronology_error", "applied_at", "must be >= approved_at"))
+            errors.append(
+                ProposalSchemaError("chronology_error", "submitted_at", "must be >= created_at")
+            )
+        if (
+            "submitted_at" in times
+            and "approved_at" in times
+            and times["submitted_at"] > times["approved_at"]
+        ):
+            errors.append(
+                ProposalSchemaError("chronology_error", "approved_at", "must be >= submitted_at")
+            )
+        if (
+            "submitted_at" in times
+            and "rejected_at" in times
+            and times["submitted_at"] > times["rejected_at"]
+        ):
+            errors.append(
+                ProposalSchemaError("chronology_error", "rejected_at", "must be >= submitted_at")
+            )
+        if (
+            "approved_at" in times
+            and "rejected_at" in times
+            and times["approved_at"] > times["rejected_at"]
+        ):
+            errors.append(
+                ProposalSchemaError("chronology_error", "rejected_at", "must be >= approved_at")
+            )
+        if (
+            "approved_at" in times
+            and "applied_at" in times
+            and times["approved_at"] > times["applied_at"]
+        ):
+            errors.append(
+                ProposalSchemaError("chronology_error", "applied_at", "must be >= approved_at")
+            )
 
     if errors:
         errors.sort(key=lambda e: (e.field_path, e.code))

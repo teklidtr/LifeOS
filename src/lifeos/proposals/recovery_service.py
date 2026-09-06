@@ -504,7 +504,9 @@ def _restore_pre_from_journal_backup(
     except RecoveryIOCorruptStateError as error:
         raise RecoveryCorruptStateError("Recovery backup is corrupt") from error
     except (RecoveryIOError, TransactionError, OSError) as error:
-        raise RecoveryUnavailableError("Failed to restore interrupted canonical mutation") from error
+        raise RecoveryUnavailableError(
+            "Failed to restore interrupted canonical mutation"
+        ) from error
     if sync_result.state is DirectorySyncState.FAILED:
         raise RecoveryUnavailableError("Failed to sync restored canonical mutation")
 

@@ -83,7 +83,9 @@ class RecoveryStateFiles:
     def __post_init__(self) -> None:
         if self.expected_pre_state == RecoveryExpectedState.PRESENT:
             if type(self.expected_pre_hash) is not str:
-                raise RecoveryValidationError("expected_pre_hash must be a string for PRESENT state")
+                raise RecoveryValidationError(
+                    "expected_pre_hash must be a string for PRESENT state"
+                )
             if type(self.expected_pre_mode) is not int:
                 raise RecoveryValidationError("expected_pre_mode must be an int for PRESENT state")
             if type(self.backup_hash) is not str:
@@ -118,7 +120,6 @@ class RecoveryStateFiles:
         if self.staged_size < 0:
             raise RecoveryValidationError("staged_size cannot be negative")
         _validate_permission_mode(self.staged_mode)
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +233,7 @@ def _validate_permission_mode(mode: object) -> None:
     if not (0o000 <= mode <= 0o7777):
         raise RecoveryValidationError("Invalid permission mode value")
 
+
 def _serialize_journal(journal: RecoveryJournal) -> bytes:
     if type(journal.schema_version) is not int:
         raise RecoveryValidationError("schema_version must be exact int")
@@ -313,7 +315,9 @@ def _serialize_journal(journal: RecoveryJournal) -> bytes:
             if op.backup_size is not None:
                 raise RecoveryValidationError("Invalid backup size")
         else:
-            if type(op.expected_pre_hash) is not str or not _SHA256_REGEX.match(op.expected_pre_hash):
+            if type(op.expected_pre_hash) is not str or not _SHA256_REGEX.match(
+                op.expected_pre_hash
+            ):
                 raise RecoveryValidationError("Invalid pre-hash")
             _validate_permission_mode(op.expected_pre_mode)
 
@@ -363,7 +367,9 @@ def _serialize_journal(journal: RecoveryJournal) -> bytes:
             if state.backup_hash is not None:
                 raise RecoveryValidationError("Invalid backup hash")
         else:
-            if type(state.expected_pre_hash) is not str or not _SHA256_REGEX.match(state.expected_pre_hash):
+            if type(state.expected_pre_hash) is not str or not _SHA256_REGEX.match(
+                state.expected_pre_hash
+            ):
                 raise RecoveryValidationError("Invalid pre-hash")
             _validate_permission_mode(state.expected_pre_mode)
 
@@ -512,7 +518,9 @@ def _deserialize_journal(content: bytes) -> RecoveryJournal:
             created_at=data["created_at"],
             operations=tuple(ops),
             ownership_state=RecoveryStateFiles(
-                expected_pre_state=RecoveryExpectedState(data["ownership_state"]["expected_pre_state"]),
+                expected_pre_state=RecoveryExpectedState(
+                    data["ownership_state"]["expected_pre_state"]
+                ),
                 expected_pre_hash=data["ownership_state"].get("expected_pre_hash"),
                 expected_pre_mode=data["ownership_state"].get("expected_pre_mode"),
                 staged_path=data["ownership_state"]["staged_path"],
@@ -524,7 +532,9 @@ def _deserialize_journal(content: bytes) -> RecoveryJournal:
                 backup_size=data["ownership_state"].get("backup_size"),
             ),
             proposal_state=RecoveryStateFiles(
-                expected_pre_state=RecoveryExpectedState(data["proposal_state"]["expected_pre_state"]),
+                expected_pre_state=RecoveryExpectedState(
+                    data["proposal_state"]["expected_pre_state"]
+                ),
                 expected_pre_hash=data["proposal_state"].get("expected_pre_hash"),
                 expected_pre_mode=data["proposal_state"].get("expected_pre_mode"),
                 staged_path=data["proposal_state"]["staged_path"],
@@ -791,9 +801,7 @@ def remove_completed_recovery_transaction(
     tx_dir = _validate_transaction_layout(
         recovery_root=recovery_root, transaction_id=transaction_id
     )
-    journal = load_recovery_journal(
-        recovery_root=recovery_root, transaction_id=transaction_id
-    )
+    journal = load_recovery_journal(recovery_root=recovery_root, transaction_id=transaction_id)
     if journal.phase != RecoveryPhase.COMPLETE:
         raise RecoveryValidationError("Cannot remove incomplete transaction")
 
@@ -835,7 +843,9 @@ def acquire_recovery_lock(
     try:
         try:
             runtime_dir.mkdir(parents=True, exist_ok=True)
-            flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+            flags = (
+                os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+            )
             fd = os.open(lock_path, flags, 0o600)
         except OSError as e:
             raise RecoveryLockUnavailableError("Failed to open lock file") from e
@@ -859,6 +869,7 @@ def acquire_recovery_lock(
             except OSError:
                 pass
 
+
 def remove_rolled_back_recovery_transaction(
     *,
     recovery_root: Path,
@@ -868,9 +879,7 @@ def remove_rolled_back_recovery_transaction(
     tx_dir = _validate_transaction_layout(
         recovery_root=recovery_root, transaction_id=transaction_id
     )
-    journal = load_recovery_journal(
-        recovery_root=recovery_root, transaction_id=transaction_id
-    )
+    journal = load_recovery_journal(recovery_root=recovery_root, transaction_id=transaction_id)
     if journal.phase == RecoveryPhase.COMPLETE:
         raise RecoveryValidationError("Cannot remove complete transaction")
 

@@ -298,6 +298,7 @@ def test_scan_result_ordering_is_deterministic(registry: Registry, vault_root: P
     # Output is deterministically sorted
     assert result.new == ["a.md", "b.md"]
 
+
 def test_hashing_uses_streamed_reads(registry: Registry, vault_root: Path) -> None:
     file_path = vault_root / "large.md"
     file_path.write_bytes(b"a" * 100000)
@@ -328,8 +329,10 @@ def test_hashing_uses_streamed_reads(registry: Registry, vault_root: Path) -> No
 
     assert 65536 in read_calls
 
+
 def test_hash_file_content_equivalence(registry: Registry, vault_root: Path) -> None:
     from lifeos.registry.file_tracking import _hash_file, hash_file_content
+
     file_path = vault_root / "equivalence.md"
     file_path.write_bytes(b"hello world")
     assert _hash_file(file_path) == hash_file_content(file_path.read_bytes())

@@ -50,8 +50,6 @@ def test_uppercase_markdown_path_matches_scanner_identity_contract(tmp_path: Pat
     assert {entry["path"] for entry in listed["entries"] if entry["kind"] == "file"} == {
         "wiki/Note.MD"
     }
-    exposed = server._tool_manager.get_tool("vault_note_identity").fn(
-        vault_path="wiki/Note.MD"
-    )
+    exposed = server._tool_manager.get_tool("vault_note_identity").fn(vault_path="wiki/Note.MD")
     assert exposed["stable_id"] == "uppercase-id"
     assert exposed["current_path"] == "wiki/Note.MD"

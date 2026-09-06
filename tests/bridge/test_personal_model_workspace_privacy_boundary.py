@@ -52,9 +52,7 @@ def _write_policy(vault: Path) -> None:
     path = vault / "system" / "retrieval-policy.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        "schema_version: 1\n"
-        "protected_prefixes:\n"
-        "  - reviews/private\n",
+        "schema_version: 1\nprotected_prefixes:\n  - reviews/private\n",
         encoding="utf-8",
     )
 

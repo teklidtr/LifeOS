@@ -269,7 +269,8 @@ def get_provenance_for_derived(
             (derived_path,),
         )
         sources = tuple(
-            ProvenanceSourceSummary(path=row[0], content_hash=row[1]) for row in src_cursor.fetchall()
+            ProvenanceSourceSummary(path=row[0], content_hash=row[1])
+            for row in src_cursor.fetchall()
         )
 
         return DerivedProvenanceSummary(

@@ -919,11 +919,7 @@ class BridgeApplication:
                 ).to_dict()
             if method == "capture.enrichment.run":
                 data = strict_object(params, allowed={"job_id", "now"}, required={"job_id"})
-                moment = (
-                    _iso_datetime(data["now"], "now")
-                    if data.get("now") is not None
-                    else None
-                )
+                moment = _iso_datetime(data["now"], "now") if data.get("now") is not None else None
                 request_state = self._active_request_state()
                 return self.capture_processing.run_extraction(
                     str(data["job_id"]),
@@ -1160,7 +1156,9 @@ class BridgeApplication:
                     "redact_terms",
                 ):
                     value = data.get(key, [])
-                    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                    if not isinstance(value, list) or not all(
+                        isinstance(item, str) for item in value
+                    ):
                         raise ProtocolError("invalid_params", f"{key} must be a list of strings.")
                     data[key] = tuple(value)
                 for key in ("external_processing_intent", "allow_sensitive_capture"):
@@ -1524,8 +1522,7 @@ class BridgeApplication:
                     isinstance(key, str) and isinstance(value, str) for key, value in hashes.items()
                 ):
                     raise ProtocolError(
-                        "invalid_params",
-                        "expected_source_hashes must map paths to hashes."
+                        "invalid_params", "expected_source_hashes must map paths to hashes."
                     )
                 return apply_experiment_migration(
                     vault_root=self.daily.vault_root,

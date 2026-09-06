@@ -146,9 +146,8 @@ def _load_rebuild_checkpoint(
             raise ValueError("Unsupported experiment rebuild checkpoint schema.")
         checkpoint_digest = raw.get("checkpoint_digest")
         unsigned = {key: value for key, value in raw.items() if key != "checkpoint_digest"}
-        if (
-            not isinstance(checkpoint_digest, str)
-            or checkpoint_digest != _checkpoint_digest(unsigned)
+        if not isinstance(checkpoint_digest, str) or checkpoint_digest != _checkpoint_digest(
+            unsigned
         ):
             raise ValueError("Experiment rebuild checkpoint integrity is invalid.")
         if raw.get("source_signature") != source_signature or raw.get("source_count") != len(
@@ -275,8 +274,7 @@ def rebuild_experiment_index(
                         artifact.metadata.parent_experiment_id,
                         artifact.metadata.repeated_from_experiment_id,
                         tuple(
-                            item.measure_id
-                            for item in artifact.metadata.protocol.outcome_measures
+                            item.measure_id for item in artifact.metadata.protocol.outcome_measures
                         ),
                     )
                 )

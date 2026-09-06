@@ -109,8 +109,7 @@ def build_research_tools(
             )
             source_paths = list(
                 dict.fromkeys(
-                    [item.path for item in context.sources]
-                    + [item.path for item in wiki.hits]
+                    [item.path for item in context.sources] + [item.path for item in wiki.hits]
                 )
             )
             activity.append(
@@ -182,9 +181,7 @@ def build_research_tools(
                     ),
                 )
                 changed_paths = (
-                    [result.source_path]
-                    if result.created or result.acquisition_added
-                    else []
+                    [result.source_path] if result.created or result.acquisition_added else []
                 )
                 activity.append(
                     tool="research_capture_evidence",

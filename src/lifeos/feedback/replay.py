@@ -91,14 +91,10 @@ def _metrics(
     actual_values = [item.actual_minutes for item in explicit if item.actual_minutes is not None]
     actual_minutes = sum(actual_values) if actual_values else None
     overflow = (
-        max(0, actual_minutes - context.available_minutes)
-        if actual_minutes is not None
-        else None
+        max(0, actual_minutes - context.available_minutes) if actual_minutes is not None else None
     )
     fractions = [
-        item.completion_fraction
-        for item in explicit
-        if item.completion_fraction is not None
+        item.completion_fraction for item in explicit if item.completion_fraction is not None
     ]
     completion = round(sum(fractions) / len(fractions), 4) if fractions else None
     errors = [
@@ -139,9 +135,7 @@ def replay_history(
     """
 
     action_items = tuple(sorted(actions, key=lambda item: item.task_id))
-    observation_items = tuple(
-        sorted(observations, key=lambda item: (item.day, item.event_id))
-    )
+    observation_items = tuple(sorted(observations, key=lambda item: (item.day, item.event_id)))
     results: list[ReplayDayResult] = []
     context_items = tuple(sorted(contexts, key=lambda item: item.day))
     for context in context_items:
@@ -161,9 +155,7 @@ def replay_history(
             dismissed_diagnosis_fingerprints=dismissed_diagnosis_fingerprints,
         )
         reasons = {
-            item.task_id: item.reason_codes
-            for item in plan.adjustments
-            if item.reason_codes
+            item.task_id: item.reason_codes for item in plan.adjustments if item.reason_codes
         }
         baseline = _metrics(
             menu=plan.baseline,
@@ -193,9 +185,7 @@ def replay_history(
         "adaptive_policy_version": ADAPTIVE_POLICY_VERSION,
         "mode": mode,
         "disabled_dimensions": sorted(set(disabled_dimensions)),
-        "dismissed_diagnosis_fingerprints": sorted(
-            set(dismissed_diagnosis_fingerprints)
-        ),
+        "dismissed_diagnosis_fingerprints": sorted(set(dismissed_diagnosis_fingerprints)),
         "actions": [asdict(item) for item in action_items],
         "observations": [item.to_dict() for item in observation_items],
         "contexts": [asdict(item) for item in context_items],

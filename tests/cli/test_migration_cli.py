@@ -123,11 +123,7 @@ def test_migrate_lifecycle_scan_error_returns_nonzero(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     vault_root = _configure_vault(tmp_path, monkeypatch)
-    proposal_dir = (
-        vault_root
-        / "proposals"
-        / "prop-20260701T100000Z-a1b2c3d4"
-    )
+    proposal_dir = vault_root / "proposals" / "prop-20260701T100000Z-a1b2c3d4"
     proposal_dir.mkdir()
     (proposal_dir / "proposal.md").write_text("malformed", encoding="utf-8")
     (proposal_dir / "patches.json").write_bytes(

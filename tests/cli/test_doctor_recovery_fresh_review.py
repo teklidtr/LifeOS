@@ -48,10 +48,7 @@ def _diagnostics(
 def test_config_snapshot_recognizes_bom_prefixed_include(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.write_bytes(
-        b"\xef\xbb\xbf[include]\n"
-        b"\tpath = ../unsafe.conf\n"
-        b"[core]\n"
-        b"\tfilemode = true\n"
+        b"\xef\xbb\xbf[include]\n\tpath = ../unsafe.conf\n[core]\n\tfilemode = true\n"
     )
 
     _raw, includes, filemode, ignorecase = recovery_readiness._config_snapshot(config)
@@ -172,10 +169,7 @@ def test_protected_ignore_source_is_not_read_to_classify_visible_candidate(
     assert main(["init", str(vault)]) == 0
     capsys.readouterr()
     (vault / "system" / "retrieval-policy.yml").write_text(
-        "schema_version: 1\n"
-        "protected_prefixes:\n"
-        "  - .gitignore\n"
-        "  - secrets\n",
+        "schema_version: 1\nprotected_prefixes:\n  - .gitignore\n  - secrets\n",
         encoding="utf-8",
     )
     (vault / ".gitignore").write_text("wiki/ignored.md\n", encoding="utf-8")

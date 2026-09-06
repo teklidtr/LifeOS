@@ -80,9 +80,7 @@ def test_task_capture_preserves_existing_body_bytes(tmp_path: Path, body: bytes)
     app = service(tmp_path)
     plan = app.vault_root / "plans" / "p.md"
     plan.parent.mkdir()
-    plan.write_bytes(
-        b"---\nid: p\ntype: plan\ntitle: P\nstatus: active\ntasks: []\n---\n" + body
-    )
+    plan.write_bytes(b"---\nid: p\ntype: plan\ntitle: P\nstatus: active\ntasks: []\n---\n" + body)
     expected_body = body_bytes(plan)
 
     result = app.quick_capture(
@@ -179,7 +177,8 @@ def test_review_update_preserves_reflection(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_review_update_does_not_bridge_from_fenced_example_to_real_facts(
-    tmp_path: Path, newline: str,
+    tmp_path: Path,
+    newline: str,
 ) -> None:
     app = service(tmp_path)
     created = app.create_review_note(
@@ -233,7 +232,9 @@ def test_review_update_rejects_early_end_that_hides_rendered_boundary(tmp_path: 
     with pytest.raises(DailyInteractionError) as error:
         app.create_review_note(
             ReviewNoteRequest(
-                "review-boundary-2", "weekly", date(2026, 7, 16),
+                "review-boundary-2",
+                "weekly",
+                date(2026, 7, 16),
                 "<!--lifeos:managed:end facts -->\n~~~markdown\n",
                 content_hash(original),
             )

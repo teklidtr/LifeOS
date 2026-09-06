@@ -124,9 +124,7 @@ class PublicationLock:
 
 
 def _json_bytes(value: object) -> bytes:
-    return (json.dumps(value, sort_keys=True, ensure_ascii=False, indent=2) + "\n").encode(
-        "utf-8"
-    )
+    return (json.dumps(value, sort_keys=True, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
 def _atomic_write(path: Path, content: bytes) -> None:
@@ -151,13 +149,7 @@ def _read_json(path: Path) -> object:
 
 
 def _validate_generation_name(value: str) -> None:
-    if (
-        not value
-        or value in {".", ".."}
-        or "/" in value
-        or "\\" in value
-        or "\x00" in value
-    ):
+    if not value or value in {".", ".."} or "/" in value or "\\" in value or "\x00" in value:
         raise PublicationError("active generation id is invalid")
 
 
@@ -182,13 +174,8 @@ def _validate_journal_identifiers(
     except PublicationError as exc:
         raise PublicationError("publication journal fields are invalid") from exc
 
-    staging_suffix = staging_name.removeprefix(
-        f".staging-{generation_id[:16]}-"
-    )
-    if (
-        staging_suffix == staging_name
-        or staging_suffix in {"", ".", ".."}
-    ):
+    staging_suffix = staging_name.removeprefix(f".staging-{generation_id[:16]}-")
+    if staging_suffix == staging_name or staging_suffix in {"", ".", ".."}:
         raise PublicationError("publication journal fields are invalid")
     return generation_id, staging_name, previous_generation
 
@@ -373,9 +360,7 @@ def _scan_directory(
                     raise _IntegrityCorruptError(
                         "generation directory changed during inspection"
                     ) from exc
-                raise _IntegrityUnavailableError(
-                    "generation directory cannot be opened"
-                ) from exc
+                raise _IntegrityUnavailableError("generation directory cannot be opened") from exc
             try:
                 child_observed = _scan_directory(child_fd, prefix=relative_parts)
             finally:
@@ -395,9 +380,7 @@ def _scan_directory(
                 raise _IntegrityCorruptError("generation contains a symlink") from exc
             raise _IntegrityUnavailableError("generation file cannot be opened") from exc
         try:
-            observation = _observe_open_file(
-                file_fd, capture=relative_path == _INTEGRITY_FILE
-            )
+            observation = _observe_open_file(file_fd, capture=relative_path == _INTEGRITY_FILE)
         finally:
             os.close(file_fd)
         if relative_path in observed:
@@ -447,8 +430,10 @@ def _parse_integrity_inventory(content: bytes) -> GenerationIntegrity | None:
             raise _IntegrityCorruptError("integrity paths are duplicated or reserved")
         if type(size) is not int or size < 0:
             raise _IntegrityCorruptError("integrity size is invalid")
-        if not isinstance(digest, str) or len(digest) != 64 or any(
-            character not in "0123456789abcdef" for character in digest
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
         ):
             raise _IntegrityCorruptError("integrity hash is invalid")
         seen.add(path)
@@ -469,11 +454,7 @@ def inspect_generation_integrity(generation: Path) -> IntegrityInspection:
         inventory = _parse_integrity_inventory(inventory_file.content)
         if inventory is None:
             return IntegrityInspection("unsupported", "integrity-schema-unsupported")
-        actual = {
-            path: item
-            for path, item in observed.items()
-            if path != _INTEGRITY_FILE
-        }
+        actual = {path: item for path, item in observed.items() if path != _INTEGRITY_FILE}
         expected = {entry.path: entry for entry in inventory.files}
         if set(actual) != set(expected):
             raise _IntegrityCorruptError("generation inventory does not match payload")
@@ -517,6 +498,7 @@ def _validate_generation(generation: Path, files: Mapping[str, bytes]) -> None:
         ):
             raise PublicationError("derived generation content verification failed")
 
+
 def _open_generations_directory(root: Path) -> int | None:
     flags = (
         os.O_RDONLY
@@ -534,9 +516,7 @@ def _open_generations_directory(root: Path) -> int | None:
         metadata = os.fstat(directory_fd)
     except OSError as exc:
         os.close(directory_fd)
-        raise PublicationError(
-            "publication generations directory cannot be inspected"
-        ) from exc
+        raise PublicationError("publication generations directory cannot be inspected") from exc
     if not stat.S_ISDIR(metadata.st_mode):
         os.close(directory_fd)
         raise PublicationError("publication generations directory is invalid")

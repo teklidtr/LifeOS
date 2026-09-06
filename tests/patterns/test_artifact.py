@@ -87,11 +87,14 @@ def test_canonical_patterns_round_trip_all_lifecycle_states(
     assert parsed.metadata.status == status
     assert parsed.metadata.evidence[1].role == "contesting"
     assert "- Contesting: 1" in content
-    assert serialize_pattern(
-        parsed.metadata,
-        body_prefix=parsed.body_prefix,
-        body_suffix=parsed.body_suffix,
-    ) == content
+    assert (
+        serialize_pattern(
+            parsed.metadata,
+            body_prefix=parsed.body_prefix,
+            body_suffix=parsed.body_suffix,
+        )
+        == content
+    )
 
 
 def test_human_owned_content_is_preserved_around_managed_summary(tmp_path: Path) -> None:
@@ -109,11 +112,14 @@ def test_human_owned_content_is_preserved_around_managed_summary(tmp_path: Path)
     assert parsed.body_prefix.encode() == prefix.encode()
     assert parsed.body_suffix.encode() == suffix.encode()
     assert parsed.human_body.encode() == (prefix + suffix).encode()
-    assert serialize_pattern(
-        parsed.metadata,
-        body_prefix=parsed.body_prefix,
-        body_suffix=parsed.body_suffix,
-    ).encode() == content.encode()
+    assert (
+        serialize_pattern(
+            parsed.metadata,
+            body_prefix=parsed.body_prefix,
+            body_suffix=parsed.body_suffix,
+        ).encode()
+        == content.encode()
+    )
 
 
 def test_unrecognized_markdown_remains_ordinary_user_content(tmp_path: Path) -> None:

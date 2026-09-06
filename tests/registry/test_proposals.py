@@ -17,6 +17,7 @@ from lifeos.registry.proposals import (
 from lifeos.proposals.schema import ProposalStatus
 import sqlite3
 
+
 @pytest.fixture
 def registry(tmp_path: Path) -> Registry:
     db_path = tmp_path / "registry.sqlite"
@@ -33,7 +34,13 @@ def vault_root(tmp_path: Path) -> Path:
     return vr
 
 
-def make_proposal(vault_root: Path, pid: str, status: str = "draft", title: str = "Title", extra_fields: dict[str, str] | None = None) -> Path:
+def make_proposal(
+    vault_root: Path,
+    pid: str,
+    status: str = "draft",
+    title: str = "Title",
+    extra_fields: dict[str, str] | None = None,
+) -> Path:
     pdir = vault_root / "proposals" / pid
     pdir.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +54,7 @@ def make_proposal(vault_root: Path, pid: str, status: str = "draft", title: str 
         f"status: {status}",
         "risk: low",
         'created_at: "2026-01-01T00:00:00Z"',
-        "created_by: author"
+        "created_by: author",
     ]
     if extra_fields:
         for k, v in extra_fields.items():
@@ -59,14 +66,21 @@ def make_proposal(vault_root: Path, pid: str, status: str = "draft", title: str 
     (pdir / "proposal.md").write_text("\n".join(fm))
 
     patches = {"proposal_id": pid, "schema_version": 1, "operations": []}
-    (pdir / "patches.json").write_text(json.dumps(patches, sort_keys=True, separators=(",", ":")) + "\n")
+    (pdir / "patches.json").write_text(
+        json.dumps(patches, sort_keys=True, separators=(",", ":")) + "\n"
+    )
 
     return pdir
 
 
 def _get_rows(registry: Registry) -> list[tuple]:
     with registry.connect() as conn:
-        return [tuple(r) for r in conn.execute("SELECT id, status, title, created_at, updated_at FROM proposals ORDER BY id").fetchall()]
+        return [
+            tuple(r)
+            for r in conn.execute(
+                "SELECT id, status, title, created_at, updated_at FROM proposals ORDER BY id"
+            ).fetchall()
+        ]
 
 
 def test_tracked_proposal_indexed(registry: Registry, vault_root: Path) -> None:
@@ -103,7 +117,9 @@ def test_removed_tracked_proposal_reconciled(registry: Registry, vault_root: Pat
     assert len(_get_rows(registry)) == 2
 
     # Remove pid1 from git
-    subprocess.run(["git", "rm", "--cached", f"proposals/{pid1}/proposal.md"], cwd=vault_root, check=True)
+    subprocess.run(
+        ["git", "rm", "--cached", f"proposals/{pid1}/proposal.md"], cwd=vault_root, check=True
+    )
 
     register_proposals_scan(registry, vault_root=vault_root)
     rows = _get_rows(registry)
@@ -120,7 +136,9 @@ def test_metadata_status_and_title_changes_reflected(registry: Registry, vault_r
     assert _get_rows(registry)[0][2] == "Old Title"
 
     # Update title
-    make_proposal(vault_root, pid, title="New Title", status="draft") # status changes covered if we change it but let's stick to title change and keep valid state
+    make_proposal(
+        vault_root, pid, title="New Title", status="draft"
+    )  # status changes covered if we change it but let's stick to title change and keep valid state
     # Need to keep git index updated for modified file? git ls-files still tracks it!
     register_proposals_scan(registry, vault_root=vault_root)
 
@@ -130,13 +148,18 @@ def test_metadata_status_and_title_changes_reflected(registry: Registry, vault_r
 def test_updated_at_derived_deterministically(registry: Registry, vault_root: Path) -> None:
     pid = "prop-20260101T000000Z-aaaaaaaa"
     # Provide submitted_at and approved_at but NOT applied_at to keep it valid (APPROVED status)
-    make_proposal(vault_root, pid, status="approved", extra_fields={
-        "submitted_at": '"2026-01-02T00:00:00Z"',
-        "submitted_by": "user",
-        "review_digest": "sha256:...",
-        "approved_at": '"2026-01-03T00:00:00Z"',
-        "approved_by": "admin"
-    })
+    make_proposal(
+        vault_root,
+        pid,
+        status="approved",
+        extra_fields={
+            "submitted_at": '"2026-01-02T00:00:00Z"',
+            "submitted_by": "user",
+            "review_digest": "sha256:...",
+            "approved_at": '"2026-01-03T00:00:00Z"',
+            "approved_by": "admin",
+        },
+    )
     subprocess.run(["git", "add", "proposals/"], cwd=vault_root, check=True)
 
     register_proposals_scan(registry, vault_root=vault_root)
@@ -170,7 +193,9 @@ def test_empty_tracked_set_clears_proposal_rows(registry: Registry, vault_root: 
     assert len(_get_rows(registry)) == 0
 
 
-def test_malformed_tracked_proposal_preserves_previous_rows(registry: Registry, vault_root: Path) -> None:
+def test_malformed_tracked_proposal_preserves_previous_rows(
+    registry: Registry, vault_root: Path
+) -> None:
     pid = "prop-20260101T000000Z-aaaaaaaa"
     make_proposal(vault_root, pid)
     subprocess.run(["git", "add", "proposals/"], cwd=vault_root, check=True)
@@ -187,7 +212,9 @@ def test_malformed_tracked_proposal_preserves_previous_rows(registry: Registry, 
     assert _get_rows(registry) == rows_before
 
 
-def test_tracked_but_missing_working_tree_proposal_preserves_previous_rows(registry: Registry, vault_root: Path) -> None:
+def test_tracked_but_missing_working_tree_proposal_preserves_previous_rows(
+    registry: Registry, vault_root: Path
+) -> None:
     pid = "prop-20260101T000000Z-aaaaaaaa"
     make_proposal(vault_root, pid)
     subprocess.run(["git", "add", "proposals/"], cwd=vault_root, check=True)
@@ -204,7 +231,9 @@ def test_tracked_but_missing_working_tree_proposal_preserves_previous_rows(regis
     assert _get_rows(registry) == rows_before
 
 
-def test_database_insertion_failure_preserves_previous_rows(registry: Registry, vault_root: Path) -> None:
+def test_database_insertion_failure_preserves_previous_rows(
+    registry: Registry, vault_root: Path
+) -> None:
     pid1 = "prop-20260101T000000Z-aaaaaaaa"
     make_proposal(vault_root, pid1)
     subprocess.run(["git", "add", "proposals/"], cwd=vault_root, check=True)
@@ -237,22 +266,29 @@ def test_scan_writes_no_canonical_files(registry: Registry, vault_root: Path) ->
     assert (pdir / "proposal.md").stat().st_mtime_ns == mtime_md
     assert (pdir / "patches.json").stat().st_mtime_ns == mtime_json
 
-def test_list_proposals_converts_to_immutable_summaries_and_orders_deterministically(registry: Registry, vault_root: Path) -> None:
+
+def test_list_proposals_converts_to_immutable_summaries_and_orders_deterministically(
+    registry: Registry, vault_root: Path
+) -> None:
     pid1 = "prop-20260101T000000Z-aaaaaaaa"
-    make_proposal(vault_root, pid1, status="draft") # updated 2026-01-01
+    make_proposal(vault_root, pid1, status="draft")  # updated 2026-01-01
 
     pid2 = "prop-20260102T000000Z-bbbbbbbb"
-    make_proposal(vault_root, pid2, status="draft", extra_fields={
-        "submitted_at": '"2026-01-02T00:00:00Z"',
-        "submitted_by": "user"
-    })
+    make_proposal(
+        vault_root,
+        pid2,
+        status="draft",
+        extra_fields={"submitted_at": '"2026-01-02T00:00:00Z"', "submitted_by": "user"},
+    )
 
     # same updated_at as pid2, different ID
     pid3 = "prop-20260102T000000Z-aaaaaaaa"
-    make_proposal(vault_root, pid3, status="draft", extra_fields={
-        "submitted_at": '"2026-01-02T00:00:00Z"',
-        "submitted_by": "user"
-    })
+    make_proposal(
+        vault_root,
+        pid3,
+        status="draft",
+        extra_fields={"submitted_at": '"2026-01-02T00:00:00Z"', "submitted_by": "user"},
+    )
 
     subprocess.run(["git", "add", "proposals/"], cwd=vault_root, check=True)
     register_proposals_scan(registry, vault_root=vault_root)
@@ -271,15 +307,20 @@ def test_list_proposals_converts_to_immutable_summaries_and_orders_deterministic
     assert isinstance(summaries[0], ProposalSummary)
     assert summaries[0].status == ProposalStatus.DRAFT
 
-def test_list_proposals_typed_status_filtering_and_empty_list(registry: Registry, vault_root: Path) -> None:
+
+def test_list_proposals_typed_status_filtering_and_empty_list(
+    registry: Registry, vault_root: Path
+) -> None:
     pid1 = "prop-20260101T000000Z-aaaaaaaa"
     make_proposal(vault_root, pid1, status="draft")
 
     pid2 = "prop-20260102T000000Z-bbbbbbbb"
-    make_proposal(vault_root, pid2, status="approved", extra_fields={
-        "approved_at": '"2026-01-02T00:00:00Z"',
-        "approved_by": "admin"
-    })
+    make_proposal(
+        vault_root,
+        pid2,
+        status="approved",
+        extra_fields={"approved_at": '"2026-01-02T00:00:00Z"', "approved_by": "admin"},
+    )
 
     subprocess.run(["git", "add", "proposals/"], cwd=vault_root, check=True)
     register_proposals_scan(registry, vault_root=vault_root)
@@ -293,16 +334,19 @@ def test_list_proposals_typed_status_filtering_and_empty_list(registry: Registry
         rejected_summaries = list_proposals(conn, status=ProposalStatus.REJECTED)
         assert rejected_summaries == ()
 
+
 def test_count_proposals_by_status(registry: Registry, vault_root: Path) -> None:
     pid1 = "prop-20260101T000000Z-aaaaaaaa"
     make_proposal(vault_root, pid1, status="draft")
     pid2 = "prop-20260101T000000Z-bbbbbbbb"
     make_proposal(vault_root, pid2, status="draft")
     pid3 = "prop-20260101T000000Z-cccccccc"
-    make_proposal(vault_root, pid3, status="approved", extra_fields={
-        "approved_at": '"2026-01-02T00:00:00Z"',
-        "approved_by": "admin"
-    })
+    make_proposal(
+        vault_root,
+        pid3,
+        status="approved",
+        extra_fields={"approved_at": '"2026-01-02T00:00:00Z"', "approved_by": "admin"},
+    )
 
     subprocess.run(["git", "add", "proposals/"], cwd=vault_root, check=True)
     register_proposals_scan(registry, vault_root=vault_root)
@@ -320,6 +364,7 @@ def test_count_proposals_by_status(registry: Registry, vault_root: Path) -> None
     keys = list(counts.keys())
     assert keys == [ProposalStatus.DRAFT, ProposalStatus.APPROVED]
 
+
 def test_query_functions_handle_unknown_status(registry: Registry, vault_root: Path) -> None:
     pid = "prop-20260101T000000Z-aaaaaaaa"
     make_proposal(vault_root, pid, status="draft")
@@ -329,38 +374,57 @@ def test_query_functions_handle_unknown_status(registry: Registry, vault_root: P
     with registry.connect() as conn:
         conn.execute("UPDATE proposals SET status = 'corrupted'")
 
-        with pytest.raises(ProposalQueryError, match="Invalid status value in database") as exc_info:
+        with pytest.raises(
+            ProposalQueryError, match="Invalid status value in database"
+        ) as exc_info:
             list_proposals(conn)
         assert isinstance(exc_info.value.__cause__, ValueError)
 
-        with pytest.raises(ProposalQueryError, match="Invalid status value in database") as exc_info:
+        with pytest.raises(
+            ProposalQueryError, match="Invalid status value in database"
+        ) as exc_info:
             count_proposals_by_status(conn)
         assert isinstance(exc_info.value.__cause__, ValueError)
+
 
 def test_query_functions_handle_sqlite_error(tmp_path: Path) -> None:
     db_path = tmp_path / "uninitialized.sqlite"
     registry = Registry(db_path)
 
-    with pytest.raises(ProposalQueryError, match="Failed to execute proposal list query") as exc_info:
+    with pytest.raises(
+        ProposalQueryError, match="Failed to execute proposal list query"
+    ) as exc_info:
         with registry._connection(create=True, read_only=False) as conn:
             list_proposals(conn)
     assert isinstance(exc_info.value.__cause__, sqlite3.Error)
 
-    with pytest.raises(ProposalQueryError, match="Failed to execute proposal counts query") as exc_info:
+    with pytest.raises(
+        ProposalQueryError, match="Failed to execute proposal counts query"
+    ) as exc_info:
         with registry._connection(create=True, read_only=False) as conn:
             count_proposals_by_status(conn)
     assert isinstance(exc_info.value.__cause__, sqlite3.Error)
 
-def test_query_functions_perform_no_filesystem_or_git_access(registry: Registry, vault_root: Path) -> None:
+
+def test_query_functions_perform_no_filesystem_or_git_access(
+    registry: Registry, vault_root: Path
+) -> None:
     pid = "prop-20260101T000000Z-aaaaaaaa"
     make_proposal(vault_root, pid, status="draft")
     subprocess.run(["git", "add", "proposals/"], cwd=vault_root, check=True)
     register_proposals_scan(registry, vault_root=vault_root)
 
     with registry.connect() as conn:
-        with patch("lifeos.registry.proposals.git_tracked_proposal_paths", side_effect=Exception("Git accessed!")), \
-             patch("lifeos.registry.proposals.load_proposal_directory", side_effect=Exception("Filesystem accessed!")):
-
+        with (
+            patch(
+                "lifeos.registry.proposals.git_tracked_proposal_paths",
+                side_effect=Exception("Git accessed!"),
+            ),
+            patch(
+                "lifeos.registry.proposals.load_proposal_directory",
+                side_effect=Exception("Filesystem accessed!"),
+            ),
+        ):
             summaries = list_proposals(conn)
             assert len(summaries) == 1
 

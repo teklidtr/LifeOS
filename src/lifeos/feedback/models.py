@@ -88,6 +88,7 @@ class EvidenceDatasetStatus:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+
 @dataclass(frozen=True, slots=True)
 class DurationForecast:
     schema_version: int
@@ -109,6 +110,7 @@ class DurationForecast:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
 
 @dataclass(frozen=True, slots=True)
 class CapacityDimension:
@@ -137,6 +139,7 @@ class CapacityFitSummary:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
 
 @dataclass(frozen=True, slots=True)
 class AvoidanceDiagnosis:
@@ -167,6 +170,7 @@ class AvoidanceDiagnosis:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
 
 @dataclass(frozen=True, slots=True)
 class AdaptiveAdjustment:
@@ -204,6 +208,7 @@ class AdaptivePlanResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
 
 @dataclass(frozen=True, slots=True)
 class PlannerCounterfactual:

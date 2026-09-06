@@ -21,9 +21,7 @@ _IMPLEMENTATION_FILES = {"pyproject.toml", "Dockerfile", "docker-compose.yml"}
 _DOCUMENTATION_PREFIXES = ("docs/",)
 _DOCUMENTATION_FILES = {"AGENTS.md", "README.md", "tasks/README.md"}
 _TASK_PATTERN = re.compile(r"^tasks/(?:ready|in-progress|completed)/[^/]+\.md$")
-_SECTION_PATTERN = re.compile(
-    r"(?ms)^# Documentation impact\s*\n(?P<body>.*?)(?=^#\s|\Z)"
-)
+_SECTION_PATTERN = re.compile(r"(?ms)^# Documentation impact\s*\n(?P<body>.*?)(?=^#\s|\Z)")
 _STATUS_PATTERN = re.compile(r"(?mi)^Status:\s*(required|none)\s*$")
 _REASON_PATTERN = re.compile(r"(?mi)^Reason:\s*(\S.*)$")
 _LEGACY_COMPLETED_PREFIX = "tasks/completed/"
@@ -175,10 +173,7 @@ def is_legacy_completed_status_only_change(before: bytes, after: bytes) -> bool:
 
     before_core = before_line[: -len(before_ending)] if before_ending else before_line
     after_core = after_line[: -len(after_ending)] if after_ending else after_line
-    return (
-        before_core in _LEGACY_SOURCE_STATUS_LINES
-        and after_core == _LEGACY_TARGET_STATUS_LINE
-    )
+    return before_core in _LEGACY_SOURCE_STATUS_LINES and after_core == _LEGACY_TARGET_STATUS_LINE
 
 
 def is_legacy_completed_status_only_snapshot_change(

@@ -28,8 +28,11 @@ def test_graph_status_rejects_cross_view_state(tmp_path: Path) -> None:
     state["view_name"] = "system"
     state_path.write_text(json.dumps(state), encoding="utf-8")
 
-    assert graph_view_status(
-        vault_root=vault_root,
-        runtime_dir=runtime_dir,
-        view_name="knowledge",
-    ).status == "failed"
+    assert (
+        graph_view_status(
+            vault_root=vault_root,
+            runtime_dir=runtime_dir,
+            view_name="knowledge",
+        ).status
+        == "failed"
+    )

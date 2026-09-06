@@ -203,7 +203,9 @@ def _validate_capture_path(value: object, field: str = "path") -> str:
     try:
         validate_vault_relative_path(value)
     except VaultAccessError as error:
-        raise CaptureTransactionError("invalid_transaction", f"{field} is not vault-relative.") from error
+        raise CaptureTransactionError(
+            "invalid_transaction", f"{field} is not vault-relative."
+        ) from error
     parts = PurePosixPath(value).parts
     if len(parts) != 3 or parts[0] != "captures" or not value.casefold().endswith(".md"):
         raise CaptureTransactionError(
@@ -456,7 +458,9 @@ def _open_or_create_directory_at(parent_fd: int, name: str) -> int:
 
 def _identity_from_dict(value: object) -> _JournalIdentity:
     if type(value) is not dict or set(value) != {"dev", "ino", "mode", "content_hash"}:
-        raise CaptureTransactionError("recovery_required", "Capture transaction identity is invalid.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction identity is invalid."
+        )
     dev = value["dev"]
     ino = value["ino"]
     mode = value["mode"]
@@ -471,7 +475,9 @@ def _identity_from_dict(value: object) -> _JournalIdentity:
         or type(digest) is not str
         or _HEX_64_RE.fullmatch(digest) is None
     ):
-        raise CaptureTransactionError("recovery_required", "Capture transaction identity is invalid.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction identity is invalid."
+        )
     return _JournalIdentity(dev, ino, mode, digest)
 
 
@@ -488,7 +494,9 @@ def _operation_from_dict(value: object) -> _JournalOperation:
         "original",
     }
     if type(value) is not dict or set(value) != expected_keys:
-        raise CaptureTransactionError("recovery_required", "Capture transaction operation is invalid.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction operation is invalid."
+        )
     path = _validate_capture_path(value["path"])
     kind = value["kind"]
     candidate_hash = value["candidate_hash"]
@@ -506,13 +514,20 @@ def _operation_from_dict(value: object) -> _JournalOperation:
         raise CaptureTransactionError("recovery_required", "Capture candidate size is invalid.")
     if type(intended_mode) is not int or intended_mode < 0:
         raise CaptureTransactionError("recovery_required", "Capture candidate mode is invalid.")
-    if type(parent_dev) is not int or parent_dev < 0 or type(parent_ino) is not int or parent_ino < 1:
+    if (
+        type(parent_dev) is not int
+        or parent_dev < 0
+        or type(parent_ino) is not int
+        or parent_ino < 1
+    ):
         raise CaptureTransactionError("recovery_required", "Capture parent identity is invalid.")
     if type(token) is not str or _HEX_32_RE.fullmatch(token) is None:
         raise CaptureTransactionError("recovery_required", "Capture artifact token is invalid.")
     original = None if value["original"] is None else _identity_from_dict(value["original"])
     if (kind == "create") != (original is None):
-        raise CaptureTransactionError("recovery_required", "Capture transaction pre-state is invalid.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction pre-state is invalid."
+        )
     return _JournalOperation(
         path,
         selected_kind,
@@ -530,7 +545,9 @@ def _journal_from_bytes(content: bytes) -> _CaptureTransactionJournal:
     try:
         value = json.loads(content.decode("utf-8"))
     except (UnicodeError, ValueError, RecursionError) as error:
-        raise CaptureTransactionError("recovery_required", "Capture transaction journal is corrupt.") from error
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction journal is corrupt."
+        ) from error
     expected_keys = {
         "schema_version",
         "transaction_id",
@@ -545,9 +562,13 @@ def _journal_from_bytes(content: bytes) -> _CaptureTransactionJournal:
         "operations",
     }
     if type(value) is not dict or set(value) != expected_keys:
-        raise CaptureTransactionError("recovery_required", "Capture transaction journal is invalid.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction journal is invalid."
+        )
     if value["schema_version"] != _SCHEMA_VERSION or type(value["schema_version"]) is not int:
-        raise CaptureTransactionError("recovery_required", "Capture transaction schema is unsupported.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction schema is unsupported."
+        )
     tx_id = value["transaction_id"]
     intent_hash = value["intent_hash"]
     phase = value["phase"]
@@ -570,22 +591,32 @@ def _journal_from_bytes(content: bytes) -> _CaptureTransactionJournal:
     if type(key_hash) is not str or _HEX_64_RE.fullmatch(key_hash) is None:
         raise CaptureTransactionError("recovery_required", "Capture idempotency digest is invalid.")
     if type(result_paths) is not list or not result_paths:
-        raise CaptureTransactionError("recovery_required", "Capture transaction results are invalid.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction results are invalid."
+        )
     normalized_results = tuple(_validate_capture_path(item, "result_path") for item in result_paths)
     if len(normalized_results) != len(set(normalized_results)):
-        raise CaptureTransactionError("recovery_required", "Capture transaction results are duplicated.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction results are duplicated."
+        )
     if type(vault_dev) is not int or vault_dev < 0 or type(vault_ino) is not int or vault_ino < 1:
         raise CaptureTransactionError("recovery_required", "Capture vault identity is invalid.")
     if type(raw_operations) is not list or not raw_operations:
-        raise CaptureTransactionError("recovery_required", "Capture transaction operations are invalid.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction operations are invalid."
+        )
     operations = tuple(_operation_from_dict(item) for item in raw_operations)
     paths = tuple(item.path for item in operations)
     if len(paths) != len(set(paths)):
-        raise CaptureTransactionError("recovery_required", "Capture transaction paths are duplicated.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction paths are duplicated."
+        )
     created = {item.path for item in operations if item.kind == "create"}
     replaced = tuple(item.path for item in operations if item.kind == "replace")
     if set(normalized_results) != created:
-        raise CaptureTransactionError("recovery_required", "Capture results are not created targets.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture results are not created targets."
+        )
     if operation == "merge" and (len(normalized_results) != 1 or len(replaced) < 2):
         raise CaptureTransactionError("recovery_required", "Capture merge plan is incomplete.")
     if operation == "split" and (len(normalized_results) < 2 or len(replaced) != 1):
@@ -630,7 +661,9 @@ def _receipt_from_bytes(content: bytes) -> CaptureTransactionReceipt:
     try:
         value = json.loads(content.decode("utf-8"))
     except (UnicodeError, ValueError, RecursionError) as error:
-        raise CaptureTransactionError("recovery_required", "Capture idempotency state is corrupt.") from error
+        raise CaptureTransactionError(
+            "recovery_required", "Capture idempotency state is corrupt."
+        ) from error
     if type(value) is not dict or set(value) != {
         "schema_version",
         "operation",
@@ -640,7 +673,9 @@ def _receipt_from_bytes(content: bytes) -> CaptureTransactionReceipt:
     }:
         raise CaptureTransactionError("recovery_required", "Capture idempotency state is invalid.")
     if value["schema_version"] != _SCHEMA_VERSION or type(value["schema_version"]) is not int:
-        raise CaptureTransactionError("recovery_required", "Capture idempotency schema is unsupported.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture idempotency schema is unsupported."
+        )
     operation = _validate_operation(value["operation"])
     key_hash = value["idempotency_key_hash"]
     fingerprint = _validate_prefixed_hash(value["request_fingerprint"], "request_fingerprint")
@@ -648,10 +683,14 @@ def _receipt_from_bytes(content: bytes) -> CaptureTransactionReceipt:
     if type(key_hash) is not str or _HEX_64_RE.fullmatch(key_hash) is None:
         raise CaptureTransactionError("recovery_required", "Capture idempotency digest is invalid.")
     if type(paths) is not list or not paths:
-        raise CaptureTransactionError("recovery_required", "Capture idempotency results are invalid.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture idempotency results are invalid."
+        )
     result_paths = tuple(_validate_capture_path(item, "result_path") for item in paths)
     if len(result_paths) != len(set(result_paths)):
-        raise CaptureTransactionError("recovery_required", "Capture idempotency results are duplicated.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture idempotency results are duplicated."
+        )
     return CaptureTransactionReceipt(operation, key_hash, fingerprint, result_paths)
 
 
@@ -737,9 +776,7 @@ def _write_journal(tx_fd: int, journal: _CaptureTransactionJournal, *, create: b
         _replace_file_at(tx_fd, "journal.json", content)
 
 
-def _initialize_journal(
-    store: PinnedRecoveryStore, journal: _CaptureTransactionJournal
-) -> int:
+def _initialize_journal(store: PinnedRecoveryStore, journal: _CaptureTransactionJournal) -> int:
     try:
         os.mkdir(journal.transaction_id, 0o700, dir_fd=store.recovery_fd)
         os.fsync(store.recovery_fd)
@@ -800,7 +837,9 @@ def _load_journal(tx_fd: int, expected_name: str) -> _CaptureTransactionJournal:
         _read_regular_at(tx_fd, "journal.json", max_bytes=_MAX_JOURNAL_BYTES)
     )
     if journal.transaction_id != expected_name:
-        raise CaptureTransactionError("recovery_required", "Capture transaction ID does not match its directory.")
+        raise CaptureTransactionError(
+            "recovery_required", "Capture transaction ID does not match its directory."
+        )
     return journal
 
 
@@ -845,7 +884,8 @@ def _open_parent(root_fd: int, relative_path: str, *, create: bool) -> ParentDes
                     sync = fsync_directory(current_fd)
                     if sync.state == DirectorySyncState.FAILED:
                         raise CaptureTransactionError(
-                            "storage_write_failure", "A capture parent directory could not be synced."
+                            "storage_write_failure",
+                            "A capture parent directory could not be synced.",
                         )
                 except FileExistsError:
                     pass
@@ -945,10 +985,9 @@ def _candidate_proof(
     identity = get_target_identity(operation.staging_name, parent)
     if identity is None:
         return None
-    if (
-        identity.content_hash != operation.candidate_hash
-        or stat.S_IMODE(identity.mode) != stat.S_IMODE(operation.intended_mode)
-    ):
+    if identity.content_hash != operation.candidate_hash or stat.S_IMODE(
+        identity.mode
+    ) != stat.S_IMODE(operation.intended_mode):
         raise CaptureTransactionError(
             "recovery_required", "A capture transaction staging artifact changed."
         )
@@ -969,16 +1008,16 @@ def _verify_backup(operation: _JournalOperation, parent: ParentDescriptor) -> No
         )
 
 
-def _verify_artifact_layout(
-    operation: _JournalOperation, parent: ParentDescriptor
-) -> None:
+def _verify_artifact_layout(operation: _JournalOperation, parent: ParentDescriptor) -> None:
     allowed = {operation.staging_name}
     if operation.original is not None:
         allowed.add(operation.backup_name)
     prefix = f".{operation.target_name}."
     try:
         unexpected = sorted(
-            name for name in os.listdir(parent.fd) if name.startswith(prefix) and name not in allowed
+            name
+            for name in os.listdir(parent.fd)
+            if name.startswith(prefix) and name not in allowed
         )
     except OSError as error:
         raise CaptureTransactionError(
@@ -992,9 +1031,7 @@ def _verify_artifact_layout(
         )
 
 
-def _verify_artifacts_removed(
-    operation: _JournalOperation, parent: ParentDescriptor
-) -> None:
+def _verify_artifacts_removed(operation: _JournalOperation, parent: ParentDescriptor) -> None:
     prefix = f".{operation.target_name}."
     try:
         remaining = sorted(name for name in os.listdir(parent.fd) if name.startswith(prefix))
@@ -1059,9 +1096,7 @@ def _cleanup_artifacts(operation: _JournalOperation, parent: ParentDescriptor) -
         )
 
 
-def _verify_committed_backup(
-    operation: _JournalOperation, parent: ParentDescriptor
-) -> None:
+def _verify_committed_backup(operation: _JournalOperation, parent: ParentDescriptor) -> None:
     observed = get_target_identity(operation.backup_name, parent)
     if operation.original is None:
         if observed is not None:
@@ -1069,9 +1104,7 @@ def _verify_committed_backup(
                 "recovery_required", "An unexpected capture transaction backup exists."
             )
         return
-    if observed is not None and not _same_identity(
-        observed, _target_identity(operation.original)
-    ):
+    if observed is not None and not _same_identity(observed, _target_identity(operation.original)):
         raise CaptureTransactionError(
             "recovery_required", "A capture transaction backup changed during cleanup."
         )
@@ -1231,7 +1264,9 @@ def _build_prepared_operations(
         raise CaptureTransactionError("invalid_transaction", "Capture transaction has no writes.")
     paths = tuple(_validate_capture_path(item.path) for item in writes)
     if len(paths) != len(set(paths)):
-        raise CaptureTransactionError("invalid_transaction", "Capture transaction paths are duplicated.")
+        raise CaptureTransactionError(
+            "invalid_transaction", "Capture transaction paths are duplicated."
+        )
     parents: dict[str, ParentDescriptor] = {}
     prepared: list[_PreparedOperation] = []
     try:
@@ -1254,16 +1289,22 @@ def _build_prepared_operations(
             if write.expected_hash is None:
                 if original is not None:
                     raise CaptureTransactionError(
-                        "target_conflict", "A capture transaction creation target already exists.", {"path": path}
+                        "target_conflict",
+                        "A capture transaction creation target already exists.",
+                        {"path": path},
                     )
                 intended_mode = 0o644
                 journal_original = None
                 kind: Literal["create", "replace"] = "create"
             else:
                 expected_hash = _validate_prefixed_hash(write.expected_hash, "expected_hash")
-                if original is None or original.content_hash != expected_hash.removeprefix("sha256:"):
+                if original is None or original.content_hash != expected_hash.removeprefix(
+                    "sha256:"
+                ):
                     raise CaptureTransactionError(
-                        "stale_capture", "A source capture changed before transaction preparation.", {"path": path}
+                        "stale_capture",
+                        "A source capture changed before transaction preparation.",
+                        {"path": path},
                     )
                 intended_mode = stat.S_IMODE(original.mode)
                 journal_original = _JournalIdentity(
@@ -1276,7 +1317,9 @@ def _build_prepared_operations(
             candidate_hash = hashlib.sha256(write.content).hexdigest()
             if original is not None and candidate_hash == original.content_hash:
                 raise CaptureTransactionError(
-                    "invalid_transaction", "A capture replacement does not change its target.", {"path": path}
+                    "invalid_transaction",
+                    "A capture replacement does not change its target.",
+                    {"path": path},
                 )
             journal_operation = _JournalOperation(
                 path,
@@ -1323,16 +1366,21 @@ def _verify_unpublished(prepared: list[_PreparedOperation]) -> None:
         if operation.original is None:
             if current is not None:
                 raise CaptureTransactionError(
-                    "target_conflict", "A capture creation target appeared before publication.", {"path": operation.path}
+                    "target_conflict",
+                    "A capture creation target appeared before publication.",
+                    {"path": operation.path},
                 )
         elif not _same_identity(current, _target_identity(operation.original)):
             raise CaptureTransactionError(
-                "stale_capture", "A source capture changed before publication.", {"path": operation.path}
+                "stale_capture",
+                "A source capture changed before publication.",
+                {"path": operation.path},
             )
         proof = _candidate_proof(operation, item.parent)
         if proof is None:
             raise CaptureTransactionError(
-                "storage_write_failure", "A capture staging artifact disappeared before publication."
+                "storage_write_failure",
+                "A capture staging artifact disappeared before publication.",
             )
         _verify_backup(operation, item.parent)
 
@@ -1459,9 +1507,7 @@ def execute_capture_transaction(
                     created_paths = {
                         item.journal.path for item in prepared if item.journal.kind == "create"
                     }
-                    replacement_count = sum(
-                        item.journal.kind == "replace" for item in prepared
-                    )
+                    replacement_count = sum(item.journal.kind == "replace" for item in prepared)
                     if set(normalized_results) != created_paths:
                         raise CaptureTransactionError(
                             "invalid_transaction", "Capture results are not transaction creations."

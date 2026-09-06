@@ -75,7 +75,8 @@ def test_create_round_trip_and_preserve_human_annotations(tmp_path: Path) -> Non
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_transition_preserves_exact_body_around_real_managed_block(
-    tmp_path: Path, newline: str,
+    tmp_path: Path,
+    newline: str,
 ) -> None:
     api = service(tmp_path)
     created = api.create(

@@ -63,9 +63,7 @@ def _capability(capability_id: str = "planning.today") -> SemanticCapability:
         maturity="stable",
         requirements=("A configured LifeOS vault",),
         backing=(CapabilityBackingReference("bridge_method", "today.get"),),
-        entry_points=(
-            CapabilityEntryPoint("obsidian_view", "lifeos-today", "Open Today"),
-        ),
+        entry_points=(CapabilityEntryPoint("obsidian_view", "lifeos-today", "Open Today"),),
         example_prompts=("What should I focus on today in LifeOS?",),
     )
 
@@ -224,8 +222,7 @@ def test_bridge_lists_and_gets_semantic_capabilities_without_repurposing_handsha
     client = ReferenceBridgeClient(bridge)
     before = tuple(
         sorted(
-            path.relative_to(bridge.daily.vault_root)
-            for path in bridge.daily.vault_root.rglob("*")
+            path.relative_to(bridge.daily.vault_root) for path in bridge.daily.vault_root.rglob("*")
         )
     )
 
@@ -250,8 +247,7 @@ def test_bridge_lists_and_gets_semantic_capabilities_without_repurposing_handsha
     }
     after = tuple(
         sorted(
-            path.relative_to(bridge.daily.vault_root)
-            for path in bridge.daily.vault_root.rglob("*")
+            path.relative_to(bridge.daily.vault_root) for path in bridge.daily.vault_root.rglob("*")
         )
     )
     assert after == before

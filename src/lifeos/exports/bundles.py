@@ -30,9 +30,7 @@ from lifeos.publication import (
 from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown
 
 ExportKind = Literal["public-wiki", "study-bundle", "trusted-agent", "personal-review"]
-ExportStatus = Literal[
-    "missing", "ready", "stale", "failed", "unavailable", "unsupported"
-]
+ExportStatus = Literal["missing", "ready", "stale", "failed", "unavailable", "unsupported"]
 _ALLOWED_KINDS = frozenset({"public-wiki", "study-bundle", "trusted-agent", "personal-review"})
 _EXPORT_ROOTS: dict[str, frozenset[str]] = {
     "public-wiki": frozenset({"wiki"}),
@@ -195,10 +193,7 @@ def _build_link_index(selection: _Selection) -> _LinkIndex:
     alias_sets: dict[str, set[str]] = {}
     for key in selection.all_paths:
         alias_sets.setdefault(_basename(key), set()).add(key)
-    aliases = {
-        alias: tuple(sorted(paths))
-        for alias, paths in sorted(alias_sets.items())
-    }
+    aliases = {alias: tuple(sorted(paths)) for alias, paths in sorted(alias_sets.items())}
     return _LinkIndex(
         outputs=outputs,
         aliases=aliases,
@@ -266,9 +261,7 @@ def _heading_anchor(fragment: str) -> str:
     if normalized.startswith("^"):
         return quote(normalized, safe="-._~")
     characters = [
-        character
-        for character in normalized
-        if character.isalnum() or character in {" ", "-", "_"}
+        character for character in normalized if character.isalnum() or character in {" ", "-", "_"}
     ]
     slug = re.sub(r"[\s_-]+", "-", "".join(characters)).strip("-")
     return quote(slug, safe="-._~")
@@ -446,6 +439,7 @@ def build_export(
         diagnostics=manifest.diagnostics,
     )
 
+
 def _require_str(raw: dict[str, object], key: str) -> str:
     value = raw.get(key)
     if not isinstance(value, str):
@@ -467,9 +461,7 @@ def _require_sha256(raw: dict[str, object], key: str) -> str:
     return value
 
 
-def _load_export_manifest(
-    path: Path, *, enforce_current_policy: bool
-) -> ExportManifest:
+def _load_export_manifest(path: Path, *, enforce_current_policy: bool) -> ExportManifest:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -607,9 +599,7 @@ def export_status(
             integrity.code,
         )
     try:
-        manifest = _load_export_manifest(
-            active / "manifest.json", enforce_current_policy=False
-        )
+        manifest = _load_export_manifest(active / "manifest.json", enforce_current_policy=False)
     except ExportError:
         return ExportPublicationState(
             export_kind,
@@ -656,6 +646,7 @@ def export_status(
         integrity.state,
         integrity.code,
     )
+
 
 def serialize_export_result(result: ExportResult) -> str:
     return json.dumps(asdict(result), sort_keys=True, indent=2)

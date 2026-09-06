@@ -87,10 +87,7 @@ def test_object_store_snapshot_is_read_only_with_bounded_descriptors(
         path.write_bytes(f"object-{index}".encode())
         object_paths.append(path)
 
-    before = {
-        path: (path.stat().st_nlink, path.stat().st_ctime_ns)
-        for path in object_paths
-    }
+    before = {path: (path.stat().st_nlink, path.stat().st_ctime_ns) for path in object_paths}
 
     sandbox = recovery_readiness._build_sandbox(repository)
     assert sandbox is not None
@@ -106,10 +103,7 @@ def test_object_store_snapshot_is_read_only_with_bounded_descriptors(
         recovery_readiness._ACTIVE_SANDBOX.reset(token)
         sandbox.close()
 
-    after = {
-        path: (path.stat().st_nlink, path.stat().st_ctime_ns)
-        for path in object_paths
-    }
+    after = {path: (path.stat().st_nlink, path.stat().st_ctime_ns) for path in object_paths}
     assert after == before
 
 

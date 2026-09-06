@@ -52,7 +52,8 @@ def test_create_load_and_human_annotations_survive_managed_update(tmp_path: Path
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_capture_update_preserves_exact_body_around_real_block(
-    tmp_path: Path, newline: str,
+    tmp_path: Path,
+    newline: str,
 ) -> None:
     service = CaptureArtifactService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
     capture = service.create(title="Lunch", capture_type="meal", now=NOW)
@@ -259,7 +260,8 @@ def test_manifest_round_trip_and_human_annotations(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_manifest_update_preserves_exact_body_around_real_block(
-    tmp_path: Path, newline: str,
+    tmp_path: Path,
+    newline: str,
 ) -> None:
     service = AttachmentManifestService(vault_root=tmp_path)
     metadata = AttachmentManifest(

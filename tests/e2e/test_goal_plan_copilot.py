@@ -61,11 +61,14 @@ def test_full_goal_to_applied_plan_and_later_replanning(tmp_path: Path) -> None:
     runtime = tmp_path / ".lifeos"
     app = BridgeApplication(vault_root=tmp_path, runtime_dir=runtime, actor_id="tester")
 
-    preview = app.dispatch("copilot.context.preview", {
-        "goal_path": "goals/cell.md",
-        "include_paths": ["wiki/cell-reading.md", "journal/private.md"],
-        "redact_terms": ["completion theater"],
-    })
+    preview = app.dispatch(
+        "copilot.context.preview",
+        {
+            "goal_path": "goals/cell.md",
+            "include_paths": ["wiki/cell-reading.md", "journal/private.md"],
+            "redact_terms": ["completion theater"],
+        },
+    )
     assert preview["items"]
     assert any(item["redactions"] for item in preview["items"])
     assert any(
@@ -73,66 +76,111 @@ def test_full_goal_to_applied_plan_and_later_replanning(tmp_path: Path) -> None:
         for item in preview["omissions"]
     )
 
-    session = app.dispatch("copilot.session.start", {
-        "goal_path": "goals/cell.md",
-        "session_id": "session-cell-e2e",
-        "selected_context_refs": ["wiki/cell-reading.md"],
-    })
-    options = app.dispatch("copilot.options.generate", {
-        "session_id": "session-cell-e2e",
-        "as_of": "2026-07-16",
-    })
+    session = app.dispatch(
+        "copilot.session.start",
+        {
+            "goal_path": "goals/cell.md",
+            "session_id": "session-cell-e2e",
+            "selected_context_refs": ["wiki/cell-reading.md"],
+        },
+    )
+    options = app.dispatch(
+        "copilot.options.generate",
+        {
+            "session_id": "session-cell-e2e",
+            "as_of": "2026-07-16",
+        },
+    )
     option = options["options"][0]
-    decomposition = app.dispatch("copilot.option.decompose", {
-        "session_id": "session-cell-e2e",
-        "option_id": option["option_id"],
-        "as_of": "2026-07-16",
-    })
-    capacity = app.dispatch("copilot.capacity.check", {
-        "session_id": "session-cell-e2e",
-        "option_id": option["option_id"],
-        "as_of": "2026-07-16",
-        "available_minutes": 240,
-        "recurring_workloads": [
-            {"workload_id": "running", "title": "Running", "minutes": 60, "kind": "exercise", "protected": True},
-            {"workload_id": "rest", "title": "Unstructured rest", "minutes": 60, "kind": "rest", "protected": True},
-        ],
-        "adaptive_durations": {item["task_id"]: 75 for item in decomposition["actions"]},
-    })
+    decomposition = app.dispatch(
+        "copilot.option.decompose",
+        {
+            "session_id": "session-cell-e2e",
+            "option_id": option["option_id"],
+            "as_of": "2026-07-16",
+        },
+    )
+    capacity = app.dispatch(
+        "copilot.capacity.check",
+        {
+            "session_id": "session-cell-e2e",
+            "option_id": option["option_id"],
+            "as_of": "2026-07-16",
+            "available_minutes": 240,
+            "recurring_workloads": [
+                {
+                    "workload_id": "running",
+                    "title": "Running",
+                    "minutes": 60,
+                    "kind": "exercise",
+                    "protected": True,
+                },
+                {
+                    "workload_id": "rest",
+                    "title": "Unstructured rest",
+                    "minutes": 60,
+                    "kind": "rest",
+                    "protected": True,
+                },
+            ],
+            "adaptive_durations": {item["task_id"]: 75 for item in decomposition["actions"]},
+        },
+    )
     assert capacity["baseline"]["label"] == "baseline"
     assert capacity["adaptive"]["label"] == "adaptive"
-    overloaded = app.dispatch("copilot.capacity.check", {
-        "session_id": "session-cell-e2e",
-        "option_id": option["option_id"],
-        "as_of": "2026-07-16",
-        "available_minutes": 90,
-        "recurring_workloads": [
-            {"workload_id": "running", "title": "Running", "minutes": 60, "kind": "exercise", "protected": True},
-            {"workload_id": "rest", "title": "Unstructured rest", "minutes": 60, "kind": "rest", "protected": True},
-        ],
-    })
+    overloaded = app.dispatch(
+        "copilot.capacity.check",
+        {
+            "session_id": "session-cell-e2e",
+            "option_id": option["option_id"],
+            "as_of": "2026-07-16",
+            "available_minutes": 90,
+            "recurring_workloads": [
+                {
+                    "workload_id": "running",
+                    "title": "Running",
+                    "minutes": 60,
+                    "kind": "exercise",
+                    "protected": True,
+                },
+                {
+                    "workload_id": "rest",
+                    "title": "Unstructured rest",
+                    "minutes": 60,
+                    "kind": "rest",
+                    "protected": True,
+                },
+            ],
+        },
+    )
     assert overloaded["baseline"]["fit"] == "overload"
-    explanation = app.dispatch("copilot.explain", {
-        "session_id": "session-cell-e2e",
-        "option_id": option["option_id"],
-        "as_of": "2026-07-16",
-        "available_minutes": 240,
-    })
+    explanation = app.dispatch(
+        "copilot.explain",
+        {
+            "session_id": "session-cell-e2e",
+            "option_id": option["option_id"],
+            "as_of": "2026-07-16",
+            "available_minutes": 240,
+        },
+    )
     assert explanation["option_id"] == option["option_id"]
 
-    proposal = app.dispatch("copilot.proposal.create", {
-        "session_id": "session-cell-e2e",
-        "option_id": option["option_id"],
-        "as_of": "2026-07-16",
-        "expected_revision": session["session"]["source_revision"],
-        "plan_id": "plan-cell-foundation",
-        "plan_path": "plans/cell-foundation.md",
-        "plan_title": "Cell biology foundation",
-        "desired_outcome": "Explain the first six chapters with synthesis notes.",
-        "included_milestone_ids": [item["milestone_id"] for item in option["milestones"]],
-        "included_action_ids": [item["task_id"] for item in decomposition["actions"]],
-        "goal_updates": {"review_cadence": "monthly"},
-    })
+    proposal = app.dispatch(
+        "copilot.proposal.create",
+        {
+            "session_id": "session-cell-e2e",
+            "option_id": option["option_id"],
+            "as_of": "2026-07-16",
+            "expected_revision": session["session"]["source_revision"],
+            "plan_id": "plan-cell-foundation",
+            "plan_path": "plans/cell-foundation.md",
+            "plan_title": "Cell biology foundation",
+            "desired_outcome": "Explain the first six chapters with synthesis notes.",
+            "included_milestone_ids": [item["milestone_id"] for item in option["milestones"]],
+            "included_action_ids": [item["task_id"] for item in decomposition["actions"]],
+            "goal_updates": {"review_cadence": "monthly"},
+        },
+    )
     assert not (tmp_path / "plans" / "cell-foundation.md").exists()
     desktop = DesktopProposalService(vault_root=tmp_path, actor_id="tester")
     for action in ("submit", "approve", "apply"):
@@ -141,43 +189,59 @@ def test_full_goal_to_applied_plan_and_later_replanning(tmp_path: Path) -> None:
     assert (tmp_path / "plans" / "cell-foundation.md").exists()
     assert "plan-cell-foundation" in (tmp_path / "goals" / "cell.md").read_text(encoding="utf-8")
 
-    linked_session = app.dispatch("copilot.session.start", {
-        "goal_path": "goals/cell.md",
-        "session_id": "session-cell-existing-plan",
-    })
+    linked_session = app.dispatch(
+        "copilot.session.start",
+        {
+            "goal_path": "goals/cell.md",
+            "session_id": "session-cell-existing-plan",
+        },
+    )
     assert linked_session["readiness"]["path"] == "link-existing-plan"
-    linked_options = app.dispatch("copilot.options.generate", {
-        "session_id": "session-cell-existing-plan",
-        "as_of": "2026-07-17",
-    })
+    linked_options = app.dispatch(
+        "copilot.options.generate",
+        {
+            "session_id": "session-cell-existing-plan",
+            "as_of": "2026-07-17",
+        },
+    )
     assert linked_options["outcome"] == "link-existing-plan"
     assert linked_options["duplicate_findings"][0]["plan_id"] == "plan-cell-foundation"
 
-    review = app.dispatch("copilot.replanning.review", {
-        "target_path": "plans/cell-foundation.md",
-        "as_of": "2026-08-16",
-        "corrections": [{
-            "evidence_id": "correction-capacity",
-            "kind": "correction",
-            "statement": "Available capacity changed from four hours to two hours weekly.",
-            "observed_at": "2026-08-16",
-        }],
-        "recent_answers": [{
-            "evidence_id": "answer-prerequisite",
-            "kind": "review-answer",
-            "statement": "A prerequisite chapter now blocks the next wave.",
-        }],
-    })
+    review = app.dispatch(
+        "copilot.replanning.review",
+        {
+            "target_path": "plans/cell-foundation.md",
+            "as_of": "2026-08-16",
+            "corrections": [
+                {
+                    "evidence_id": "correction-capacity",
+                    "kind": "correction",
+                    "statement": "Available capacity changed from four hours to two hours weekly.",
+                    "observed_at": "2026-08-16",
+                }
+            ],
+            "recent_answers": [
+                {
+                    "evidence_id": "answer-prerequisite",
+                    "kind": "review-answer",
+                    "statement": "A prerequisite chapter now blocks the next wave.",
+                }
+            ],
+        },
+    )
     assert "revise-scope" in review["recommended_outcomes"]
-    replanning = app.dispatch("copilot.replanning.proposal.create", {
-        "review_id": review["review_id"],
-        "target_path": review["target_path"],
-        "expected_hash": review["target_hash"],
-        "outcome": "pause",
-        "rationale": "Protect the goal while capacity and prerequisites are clarified.",
-        "evidence_fingerprint": review["triggers"][0]["evidence_fingerprint"],
-        "changes": {},
-    })
+    replanning = app.dispatch(
+        "copilot.replanning.proposal.create",
+        {
+            "review_id": review["review_id"],
+            "target_path": review["target_path"],
+            "expected_hash": review["target_hash"],
+            "outcome": "pause",
+            "rationale": "Protect the goal while capacity and prerequisites are clarified.",
+            "evidence_fingerprint": review["triggers"][0]["evidence_fingerprint"],
+            "changes": {},
+        },
+    )
     assert desktop.inspect(replanning["proposal_id"]).status == "draft"
     assert "status: seed" in (tmp_path / "plans" / "cell-foundation.md").read_text(encoding="utf-8")
 
@@ -185,7 +249,9 @@ def test_full_goal_to_applied_plan_and_later_replanning(tmp_path: Path) -> None:
 def test_experiment_park_abandon_and_no_plan_outcomes_are_durable(tmp_path: Path) -> None:
     _ready_vault(tmp_path)
     for suffix, outcome in (("experiment", "experiment"), ("park", "park"), ("abandon", "abandon")):
-        service = PlanningSessionService(vault_root=tmp_path, runtime_dir=tmp_path / f".lifeos-{suffix}")
+        service = PlanningSessionService(
+            vault_root=tmp_path, runtime_dir=tmp_path / f".lifeos-{suffix}"
+        )
         snapshot = service.start(goal_path="goals/cell.md", session_id=f"session-{suffix}")
         closed = service.close(
             session_id=f"session-{suffix}",
@@ -210,7 +276,9 @@ def test_experiment_park_abandon_and_no_plan_outcomes_are_durable(tmp_path: Path
 
 class FixtureAdapter:
     def synthesize(self, request):
-        source = next(item.path for item in request.context.items if item.path == "wiki/cell-reading.md")
+        source = next(
+            item.path for item in request.context.items if item.path == "wiki/cell-reading.md"
+        )
         return (
             {
                 "schema_version": 1,
@@ -219,22 +287,26 @@ class FixtureAdapter:
                 "strategy": "Study two chapters, then review comprehension.",
                 "desired_outcome": "Explain two chapters from memory.",
                 "boundaries": ["Protect exercise", "No full-book backlog"],
-                "assumptions": [{
-                    "assumption_id": "assumption-fixture-capacity",
-                    "statement": "Four hours remain available.",
-                    "source_kind": "canonical-note",
-                    "source_ref": request.goal.path,
-                    "confidence": "medium",
-                }],
+                "assumptions": [
+                    {
+                        "assumption_id": "assumption-fixture-capacity",
+                        "statement": "Four hours remain available.",
+                        "source_kind": "canonical-note",
+                        "source_ref": request.goal.path,
+                        "confidence": "medium",
+                    }
+                ],
                 "success_evidence": ["Two synthesis notes"],
                 "risks": ["The pace may still be dense"],
                 "review_date": "2026-08-01",
-                "milestones": [{
-                    "milestone_id": "milestone-fixture-first",
-                    "title": "Build foundation",
-                    "outcome": "Explain two chapters",
-                    "wave": "current",
-                }],
+                "milestones": [
+                    {
+                        "milestone_id": "milestone-fixture-first",
+                        "title": "Build foundation",
+                        "outcome": "Explain two chapters",
+                        "wave": "current",
+                    }
+                ],
                 "tradeoffs": ["Less breadth for faster feedback"],
                 "unresolved_questions": [],
                 "source_refs": [request.goal.path, source],
@@ -253,12 +325,14 @@ class FixtureAdapter:
                 "success_evidence": ["One self-test and review note"],
                 "risks": ["Produces less immediate breadth"],
                 "review_date": "2026-07-23",
-                "milestones": [{
-                    "milestone_id": "milestone-fixture-test",
-                    "title": "Run prerequisite test",
-                    "outcome": "Resolve prerequisite uncertainty",
-                    "wave": "current",
-                }],
+                "milestones": [
+                    {
+                        "milestone_id": "milestone-fixture-test",
+                        "title": "Run prerequisite test",
+                        "outcome": "Resolve prerequisite uncertainty",
+                        "wave": "current",
+                    }
+                ],
                 "tradeoffs": ["Delays broader planning for better evidence"],
                 "unresolved_questions": [],
                 "source_refs": [request.goal.path],

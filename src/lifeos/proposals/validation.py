@@ -488,7 +488,7 @@ def _evaluate_operation(
         if str(parent) != ".":
             p_exists, p_reg = _check_target_status(str(parent), vault_root, root_fd)
             if not p_exists and not str(parent) == ".":
-                pass # Parent might not exist, which is fine normally, but wait, criteria says "missing parent is invalid"
+                pass  # Parent might not exist, which is fine normally, but wait, criteria says "missing parent is invalid"
                 # Actually, check parent properly: if parent does not exist, or parent is a symlink, invalid
 
                 # Check entire parent chain simply
@@ -937,7 +937,9 @@ def _evaluate_operation(
                     findings=(
                         PreflightFinding(
                             severity="error",
-                            code="managed_block_not_found" if not matches else "ambiguous_managed_block",
+                            code="managed_block_not_found"
+                            if not matches
+                            else "ambiguous_managed_block",
                             operation_id=op.id,
                             target_path=target_path,
                             field_path=None,

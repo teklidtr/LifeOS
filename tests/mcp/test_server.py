@@ -40,7 +40,9 @@ from lifeos.facade.registry_tools import RegistryRefreshResult
 def test_server_registers_only_approved_tools(tmp_path: Path) -> None:
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer
+    )
 
     expected_tools = {
         "registry_refresh",
@@ -65,7 +67,9 @@ def test_server_registers_only_approved_tools(tmp_path: Path) -> None:
 def test_mcp_names_are_unique(tmp_path: Path) -> None:
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer
+    )
     tools = list(server._tool_manager.list_tools())
     names = [t.name for t in tools]
     assert len(names) == len(set(names))
@@ -105,15 +109,18 @@ def test_tools_advertise_workflow_specific_descriptions(tmp_path: Path) -> None:
     assert "routing/activity metadata" in tools["runtime_activity"].description
     assert "1..12 distinct" in tools["ingestion_evolve_wiki_proposal"].description
     assert "compatibility single-create tool" in tools["ingestion_create_wiki_proposal"].description
-    assert "both the registered source and existing target" in tools[
-        "ingestion_update_wiki_section_proposal"
-    ].description
-    assert "base-hash-bound, ownership-aware draft" in tools[
-        "ingestion_update_wiki_section_proposal"
-    ].description
-    assert "atomic two-operation draft" in tools[
-        "ingestion_create_wiki_and_update_section_proposal"
-    ].description
+    assert (
+        "both the registered source and existing target"
+        in tools["ingestion_update_wiki_section_proposal"].description
+    )
+    assert (
+        "base-hash-bound, ownership-aware draft"
+        in tools["ingestion_update_wiki_section_proposal"].description
+    )
+    assert (
+        "atomic two-operation draft"
+        in tools["ingestion_create_wiki_and_update_section_proposal"].description
+    )
     assert "explicitly requests" in tools["proposal_submit"].description
     assert "explicitly requests" in tools["proposal_approve"].description
     assert "changes canonical vault content" in tools["proposal_apply"].description
@@ -148,12 +155,14 @@ def test_tools_advertise_accurate_safety_annotations(tmp_path: Path) -> None:
     assert tools["ingestion_create_wiki_proposal"].annotations.idempotentHint is False
     assert tools["ingestion_update_wiki_section_proposal"].annotations.destructiveHint is False
     assert tools["ingestion_update_wiki_section_proposal"].annotations.idempotentHint is False
-    assert tools[
-        "ingestion_create_wiki_and_update_section_proposal"
-    ].annotations.destructiveHint is False
-    assert tools[
-        "ingestion_create_wiki_and_update_section_proposal"
-    ].annotations.idempotentHint is False
+    assert (
+        tools["ingestion_create_wiki_and_update_section_proposal"].annotations.destructiveHint
+        is False
+    )
+    assert (
+        tools["ingestion_create_wiki_and_update_section_proposal"].annotations.idempotentHint
+        is False
+    )
     assert tools["proposal_submit"].annotations.destructiveHint is False
     assert tools["proposal_approve"].annotations.destructiveHint is False
     assert tools["proposal_apply"].annotations.destructiveHint is True
@@ -163,7 +172,9 @@ def test_tools_advertise_accurate_safety_annotations(tmp_path: Path) -> None:
 def test_tools_map_to_expected_facade_descriptors(tmp_path: Path) -> None:
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer
+    )
 
     tool = server._tool_manager.get_tool("vault_read_markdown")
     assert "vault_path" in tool.parameters["properties"]
@@ -209,9 +220,7 @@ def test_compound_ingestion_schema_exposes_only_bounded_fields(tmp_path: Path) -
     server = create_mcp_server(
         vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
-    tool = server._tool_manager.get_tool(
-        "ingestion_create_wiki_and_update_section_proposal"
-    )
+    tool = server._tool_manager.get_tool("ingestion_create_wiki_and_update_section_proposal")
 
     assert set(tool.parameters["properties"]) == {
         "source_path",
@@ -274,7 +283,9 @@ def test_read_markdown_delegates_to_facade(mock_facade, tmp_path: Path) -> None:
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer
+    )
 
     tool = server._tool_manager.get_tool("vault_read_markdown")
     res = tool.fn(vault_path="test.md")
@@ -308,9 +319,7 @@ def test_wiki_search_delegates_to_scoped_facade(mock_facade: MagicMock, tmp_path
         vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock()
     )
 
-    result = server._tool_manager.get_tool("wiki_search").fn(
-        query="retrieval", limit=5
-    )
+    result = server._tool_manager.get_tool("wiki_search").fn(query="retrieval", limit=5)
 
     mock_facade.assert_called_once_with(
         vault_root=tmp_path / "vault", request=WikiSearchRequest(query="retrieval", limit=5)
@@ -323,20 +332,33 @@ def test_vault_context_delegates_and_records_routing_metadata(
     mock_facade: MagicMock, tmp_path: Path
 ) -> None:
     instruction = MagicMock(
-        id="driving-exam", text="Prioritize exam distinctions.", authority="system",
-        scope="path", priority=100, applicable_sources=("study/driving.md",),
+        id="driving-exam",
+        text="Prioritize exam distinctions.",
+        authority="system",
+        scope="path",
+        priority=100,
+        applicable_sources=("study/driving.md",),
         applicability=("path:study/driving.md",),
     )
     source = MagicMock(
-        path="study/driving.md", title="Driving", description="Exam notes",
-        excerpt="right of way", score=0,
+        path="study/driving.md",
+        title="Driving",
+        description="Exam notes",
+        excerpt="right of way",
+        score=0,
     )
     mock_facade.return_value = MagicMock(
-        question="What matters?", instructions=(instruction,), sources=(source,),
-        evidence_gaps=(), omissions=(), diagnostics=(),
+        question="What matters?",
+        instructions=(instruction,),
+        sources=(source,),
+        evidence_gaps=(),
+        omissions=(),
+        diagnostics=(),
     )
     server = create_mcp_server(
-        vault_root=tmp_path / "vault", registry=MagicMock(), authorizer=MagicMock(),
+        vault_root=tmp_path / "vault",
+        registry=MagicMock(),
+        authorizer=MagicMock(),
         runtime_dir=tmp_path / ".lifeos",
     )
 
@@ -356,7 +378,6 @@ def test_vault_context_delegates_and_records_routing_metadata(
     assert activity["records"][-1]["tool"] == "vault_context"
     assert activity["records"][-1]["focus_paths"] == ["study/driving.md"]
     assert activity["records"][-1]["instruction_ids"] == ["driving-exam"]
-
 
 
 @patch("lifeos.mcp.server.evolve_wiki_proposal")
@@ -426,9 +447,12 @@ def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock, tmp_pa
 
 
 @patch("lifeos.mcp.server.evolve_study_learning_proposal")
-def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock, tmp_path: Path) -> None:
+def test_study_learning_proposal_delegates_to_facade(
+    mock_facade: MagicMock, tmp_path: Path
+) -> None:
     mock_facade.return_value = MagicMock(
-        proposal_id="prop-study", proposal_path="proposals/prop-study",
+        proposal_id="prop-study",
+        proposal_path="proposals/prop-study",
         target_paths=("wiki/traffic.md", "flashcards/driving/right-of-way.md"),
         operation_count=2,
     )
@@ -440,18 +464,23 @@ def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock, tmp
         source_path="study/driving.md",
         wiki_creates=[
             EvolveWikiCreateMCPInput(
-                target_path="wiki/traffic.md", title="Traffic", body="Body",
+                target_path="wiki/traffic.md",
+                title="Traffic",
+                body="Body",
                 rationale="Reusable durable knowledge.",
             )
         ],
         flashcards=[
             StudyFlashcardCreateMCPInput(
                 target_path="flashcards/driving/right-of-way.md",
-                card_id="right-of-way", topic="Driving", question="Who has priority?",
+                card_id="right-of-way",
+                topic="Driving",
+                question="Who has priority?",
                 answer="Apply the relevant right-of-way rule.",
                 rationale="Exam-relevant and easy to confuse.",
                 learning_context="Turkish driving licence exam",
-                knowledge_refs=["wiki/traffic.md"], estimated_seconds=30,
+                knowledge_refs=["wiki/traffic.md"],
+                estimated_seconds=30,
             )
         ],
     )
@@ -463,29 +492,35 @@ def test_study_learning_proposal_delegates_to_facade(mock_facade: MagicMock, tmp
             source_path="study/driving.md",
             wiki_creates=(
                 EvolveWikiCreateRequest(
-                    target_path="wiki/traffic.md", title="Traffic", body="Body",
+                    target_path="wiki/traffic.md",
+                    title="Traffic",
+                    body="Body",
                     rationale="Reusable durable knowledge.",
                 ),
             ),
             flashcards=(
                 StudyFlashcardCreateRequest(
                     target_path="flashcards/driving/right-of-way.md",
-                    card_id="right-of-way", topic="Driving", question="Who has priority?",
+                    card_id="right-of-way",
+                    topic="Driving",
+                    question="Who has priority?",
                     answer="Apply the relevant right-of-way rule.",
                     rationale="Exam-relevant and easy to confuse.",
                     learning_context="Turkish driving licence exam",
-                    knowledge_refs=("wiki/traffic.md",), estimated_seconds=30,
+                    knowledge_refs=("wiki/traffic.md",),
+                    estimated_seconds=30,
                 ),
             ),
         ),
         runtime_dir=tmp_path / "vault" / ".lifeos",
     )
     assert result == {
-        "proposal_id": "prop-study", "proposal_path": "proposals/prop-study",
+        "proposal_id": "prop-study",
+        "proposal_path": "proposals/prop-study",
         "target_paths": ["wiki/traffic.md", "flashcards/driving/right-of-way.md"],
-        "operation_count": 2, "status": "draft",
+        "operation_count": 2,
+        "status": "draft",
     }
-
 
 
 @patch("lifeos.mcp.server.create_wiki_proposal")
@@ -496,7 +531,9 @@ def test_create_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path) -
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer
+    )
 
     tool = server._tool_manager.get_tool("ingestion_create_wiki_proposal")
     res = tool.fn(source_path="s", target_path="wiki/t.md", title="title", body="b")
@@ -608,9 +645,7 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path)
         vault_root=tmp_path / "vault", registry=registry, authorizer=MagicMock()
     )
 
-    result = server._tool_manager.get_tool(
-        "ingestion_create_wiki_and_update_section_proposal"
-    ).fn(
+    result = server._tool_manager.get_tool("ingestion_create_wiki_and_update_section_proposal").fn(
         source_path="study/source.md",
         create_target_path="wiki/detail.md",
         create_title="Detail",
@@ -650,7 +685,9 @@ def test_submit_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer
+    )
 
     tool = server._tool_manager.get_tool("proposal_submit")
     res = tool.fn(proposal_id="prop1")
@@ -671,7 +708,9 @@ def test_approve_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer
+    )
 
     tool = server._tool_manager.get_tool("proposal_approve")
     res = tool.fn(proposal_id="prop1")
@@ -692,7 +731,9 @@ def test_apply_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
 
     registry = MagicMock()
     authorizer = MagicMock()
-    server = create_mcp_server(vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer)
+    server = create_mcp_server(
+        vault_root=tmp_path / "vault", registry=registry, authorizer=authorizer
+    )
 
     tool = server._tool_manager.get_tool("proposal_apply")
     res = tool.fn(proposal_id="prop1")
@@ -934,7 +975,10 @@ def test_study_learning_schema_exposes_only_bounded_mutation_lists(tmp_path: Pat
     )
     tool = server._tool_manager.get_tool("study_evolve_learning_proposal")
     assert set(tool.parameters["properties"]) == {
-        "source_path", "wiki_creates", "wiki_updates", "flashcards"
+        "source_path",
+        "wiki_creates",
+        "wiki_updates",
+        "flashcards",
     }
     assert tool.annotations.destructiveHint is False
     assert tool.parameters["additionalProperties"] is False

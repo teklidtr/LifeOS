@@ -88,9 +88,7 @@ def _validate_research_source(
         ) from error
 
     if artifact.content_hash != f"sha256:{raw_hash}":
-        raise ModifiedSourceError(
-            f"Research source changed while being verified: {source_path}"
-        )
+        raise ModifiedSourceError(f"Research source changed while being verified: {source_path}")
 
     if not any(
         acquisition.acquisition_id == acquisition_id
@@ -128,9 +126,7 @@ def load_registered_source(
                 raise UnregisteredSourceError(
                     f"Source missing and unregistered: {source_path}"
                 ) from error
-            raise OrchestrationError(
-                f"Unexpected missing state: {comparison.state}"
-            ) from error
+            raise OrchestrationError(f"Unexpected missing state: {comparison.state}") from error
         raise SourceReadError(f"Could not read {source_path}") from error
 
     raw_hash = hash_file_content(source_bytes)

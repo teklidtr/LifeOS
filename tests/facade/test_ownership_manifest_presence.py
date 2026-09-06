@@ -30,7 +30,9 @@ def test_facade_dangling_manifest_symlink_is_invalid_not_missing(tmp_path: Path)
     manifest_path = system_dir / "generated-ownership.json"
     _symlink(manifest_path, "missing.json")
 
-    with pytest.raises(ToolValidationError, match="Generated ownership manifest is invalid") as exc_info:
+    with pytest.raises(
+        ToolValidationError, match="Generated ownership manifest is invalid"
+    ) as exc_info:
         _load_generated_ownership(vault_root=vault_root)
 
     assert isinstance(exc_info.value.__cause__, PathSafetyError)

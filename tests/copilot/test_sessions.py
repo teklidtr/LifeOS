@@ -58,9 +58,7 @@ class InvalidAdapter:
 
 def test_deterministic_session_asks_one_focused_question_at_a_time(tmp_path: Path) -> None:
     _write_goal(tmp_path / "goals" / "cell.md")
-    service = PlanningSessionService(
-        vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos"
-    )
+    service = PlanningSessionService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
     first = service.start(goal_path="goals/cell.md", session_id="session-cell")
     assert first.envelope.current_question.question_id == "purpose"
     assert first.envelope.current_question.required is True
@@ -182,7 +180,9 @@ def test_unsupported_session_schema_fails_closed(tmp_path: Path) -> None:
 
 def test_bridge_session_flow_and_typed_stale_error(tmp_path: Path) -> None:
     _write_goal(tmp_path / "goals" / "cell.md")
-    app = BridgeApplication(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos", actor_id="tester")
+    app = BridgeApplication(
+        vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos", actor_id="tester"
+    )
     started = app.dispatch(
         "copilot.session.start", {"goal_path": "goals/cell.md", "session_id": "session-cell"}
     )

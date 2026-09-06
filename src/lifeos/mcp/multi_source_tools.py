@@ -119,9 +119,7 @@ def build_multi_source_ingestion_tools(
             try:
                 if runtime_excluded(path):
                     return False
-                return scope_decision(
-                    path, scope=scope, policy=policy, mode="external"
-                ).allowed
+                return scope_decision(path, scope=scope, policy=policy, mode="external").allowed
             except (CoherenceError, RetrievalError) as error:
                 raise ToolExecutionError("Could not verify external ingestion path") from error
 
@@ -141,7 +139,11 @@ def build_multi_source_ingestion_tools(
             tool="ingestion_registry_preflight",
             source_paths=list(source_paths),
             changed_paths=[
-                *[path for path in (*result.new, *result.modified, *result.deleted) if allowed(path)],
+                *[
+                    path
+                    for path in (*result.new, *result.modified, *result.deleted)
+                    if allowed(path)
+                ],
                 *[path for pair in renamed for path in pair],
             ],
         )

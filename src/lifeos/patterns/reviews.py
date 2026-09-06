@@ -74,7 +74,9 @@ def _review_allow_path(vault_root: Path) -> Callable[[str], bool]:
     try:
         policy = load_retrieval_policy(vault_root)
     except RetrievalError as exc:
-        raise PersonalModelError(f"Could not load retrieval policy for pattern review: {exc}") from exc
+        raise PersonalModelError(
+            f"Could not load retrieval policy for pattern review: {exc}"
+        ) from exc
     scope = RetrievalScope()
 
     def allowed(path: str) -> bool:
@@ -294,9 +296,7 @@ def weekly_pattern_review_section(
         return _unavailable(_WEEKLY_SECTION_ID, "Personal patterns", exc)
 
     candidates = [
-        item
-        for item in document.items
-        if item.status != "archived" and _weekly_labels(item)
+        item for item in document.items if item.status != "archived" and _weekly_labels(item)
     ]
     candidates.sort(key=_weekly_priority)
     bounded = candidates if limit is None else candidates[:limit]

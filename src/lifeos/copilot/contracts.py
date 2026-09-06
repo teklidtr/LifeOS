@@ -230,8 +230,7 @@ class PlanRecord:
         ):
             _validate_text_list(values, name)
         if self.rolling_wave_depth is not None and (
-            type(self.rolling_wave_depth) is not int
-            or not 1 <= self.rolling_wave_depth <= 4
+            type(self.rolling_wave_depth) is not int or not 1 <= self.rolling_wave_depth <= 4
         ):
             raise CopilotContractError("rolling_wave_depth must be from 1 to 4")
         _ensure_unique((item.milestone_id for item in self.milestones), "milestone IDs")
@@ -494,9 +493,7 @@ def parse_goal_note(*, path: str, content: str) -> GoalRecord:
         constraints=_frontmatter_string_tuple(fm, "constraints", path),
         non_goals=_frontmatter_string_tuple(fm, "non_goals", path),
         review_cadence=_optional_frontmatter_string(fm, "review_cadence", path),
-        readiness=cast(
-            GoalReadiness | None, _optional_frontmatter_string(fm, "readiness", path)
-        ),
+        readiness=cast(GoalReadiness | None, _optional_frontmatter_string(fm, "readiness", path)),
         active_plan_refs=_frontmatter_string_tuple(fm, "active_plans", path),
     )
 
@@ -509,8 +506,7 @@ def parse_plan_note(*, path: str, content: str) -> PlanRecord:
         raise CopilotContractError(f"{path}: type must be plan")
     version = _note_schema_version(fm)
     milestones = tuple(
-        _parse_milestone(item, path)
-        for item in _frontmatter_mapping_list(fm, "milestones", path)
+        _parse_milestone(item, path) for item in _frontmatter_mapping_list(fm, "milestones", path)
     )
     tasks = tuple(
         _parse_action(item, path) for item in _frontmatter_mapping_list(fm, "tasks", path)
@@ -546,9 +542,15 @@ def inspect_copilot_note(vault_root: Path, vault_path: str) -> dict[str, Any]:
     parsed = parse_markdown_note(source.path, content=source.content)
     note_type = parsed.frontmatter.get("type")
     if note_type == "goal":
-        return {"kind": "goal", "record": parse_goal_note(path=vault_path, content=source.content).to_dict()}
+        return {
+            "kind": "goal",
+            "record": parse_goal_note(path=vault_path, content=source.content).to_dict(),
+        }
     if note_type == "plan":
-        return {"kind": "plan", "record": parse_plan_note(path=vault_path, content=source.content).to_dict()}
+        return {
+            "kind": "plan",
+            "record": parse_plan_note(path=vault_path, content=source.content).to_dict(),
+        }
     raise CopilotContractError("copilot note must have type goal or plan")
 
 
@@ -577,7 +579,9 @@ def build_copilot_index(vault_root: Path) -> CopilotIndex:
                 )
             except CopilotContractError as exc:
                 diagnostics.append(
-                    ContractDiagnostic("contract-invalid", "error", relative, "frontmatter", str(exc))
+                    ContractDiagnostic(
+                        "contract-invalid", "error", relative, "frontmatter", str(exc)
+                    )
                 )
                 continue
             if isinstance(record, GoalRecord):
@@ -621,7 +625,9 @@ def build_copilot_index(vault_root: Path) -> CopilotIndex:
     )
 
 
-def compatibility_diagnostics(*, schema_version: object, path: str) -> tuple[ContractDiagnostic, ...]:
+def compatibility_diagnostics(
+    *, schema_version: object, path: str
+) -> tuple[ContractDiagnostic, ...]:
     if type(schema_version) is not int:
         return (
             ContractDiagnostic(
@@ -724,7 +730,7 @@ def _duplicate_diagnostics(
 
 def _reference_id(value: str) -> str:
     cleaned = value.strip()
-    if cleaned.startswith("[[") and cleaned.endswith("]]" ):
+    if cleaned.startswith("[[") and cleaned.endswith("]]"):
         cleaned = cleaned[2:-2].split("|", 1)[0]
     return Path(cleaned).stem
 
@@ -752,13 +758,13 @@ def _validate_text(value: str, name: str) -> None:
         raise CopilotContractError(f"{name} must be a non-empty trimmed string")
 
 
-
 def _validate_proposal_ids(values: Iterable[str]) -> None:
     materialized = tuple(values)
     for value in materialized:
         if not isinstance(value, str) or not re.fullmatch(r"prop-\d{8}T\d{6}Z-[a-f0-9]{8}", value):
             raise CopilotContractError("proposal_ids must contain valid durable proposal IDs")
     _ensure_unique(materialized, "proposal_ids")
+
 
 def _validate_text_list(values: Iterable[str], name: str) -> None:
     materialized = tuple(values)
@@ -785,9 +791,7 @@ def _required_frontmatter_string(data: Mapping[str, Any], key: str, path: str) -
     return _string(data[key], f"{path}: {key}")
 
 
-def _optional_frontmatter_string(
-    data: Mapping[str, Any], key: str, path: str
-) -> str | None:
+def _optional_frontmatter_string(data: Mapping[str, Any], key: str, path: str) -> str | None:
     return _optional_string(data.get(key), f"{path}: {key}")
 
 

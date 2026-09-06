@@ -71,8 +71,7 @@ def test_context_build_uses_configured_retrieval_runtime(
     assert payload["sources"][0]["path"] == "wiki/energy.md"
     assert payload["sources"][0]["retrieval_mode"] == "hybrid"
     assert any(
-        "Semantic retrieval was not configured" in omission
-        for omission in payload["omissions"]
+        "Semantic retrieval was not configured" in omission for omission in payload["omissions"]
     )
 
 

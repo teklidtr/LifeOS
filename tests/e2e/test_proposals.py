@@ -78,9 +78,7 @@ def _create_vault(tmp_path: Path) -> tuple[Path, Path, Registry]:
     (vault_root / ".lifeos").mkdir()
     system_dir = vault_root / "system"
     system_dir.mkdir()
-    (system_dir / "generated-ownership.json").write_bytes(
-        serialize_generated_ownership_bytes({})
-    )
+    (system_dir / "generated-ownership.json").write_bytes(serialize_generated_ownership_bytes({}))
 
     registry = Registry(vault_root / ".lifeos" / "registry.db")
     registry.initialize()
@@ -99,9 +97,7 @@ def _write_proposal(
     (proposal_dir / "proposal.md").write_bytes(
         serialize_proposal_markdown(metadata, "End-to-end test proposal body.")
     )
-    (proposal_dir / "patches.json").write_bytes(
-        serialize_patch_json_bytes(patch_document)
-    )
+    (proposal_dir / "patches.json").write_bytes(serialize_patch_json_bytes(patch_document))
     subprocess.run(
         [
             "git",
@@ -123,9 +119,7 @@ def _load(proposal_dir: Path, proposals_root: Path) -> LoadedProposal:
     return result.proposal
 
 
-def _indexed_status(
-    registry: Registry, *, vault_root: Path, proposal_id: str
-) -> ProposalStatus:
+def _indexed_status(registry: Registry, *, vault_root: Path, proposal_id: str) -> ProposalStatus:
     register_proposals_scan(registry, vault_root=vault_root)
     with registry.connect() as connection:
         summaries = list_proposals(connection)
@@ -134,9 +128,7 @@ def _indexed_status(
     return summaries[0].status
 
 
-def _submit_and_approve(
-    proposal_dir: Path, proposals_root: Path
-) -> LoadedProposal:
+def _submit_and_approve(proposal_dir: Path, proposals_root: Path) -> LoadedProposal:
     draft = _load(proposal_dir, proposals_root)
     submit_proposal_for_review(
         draft,
@@ -196,9 +188,10 @@ def test_managed_block_happy_path_through_index_and_application(
         submitted_by="reviewer",
         submitted_at="2026-07-15T12:01:00Z",
     )
-    assert _indexed_status(
-        registry, vault_root=vault_root, proposal_id=metadata.id
-    ) is ProposalStatus.PENDING
+    assert (
+        _indexed_status(registry, vault_root=vault_root, proposal_id=metadata.id)
+        is ProposalStatus.PENDING
+    )
 
     pending = _load(proposal_dir, proposals_root)
     approve_proposal(
@@ -207,9 +200,10 @@ def test_managed_block_happy_path_through_index_and_application(
         approved_by="approver",
         approved_at="2026-07-15T12:02:00Z",
     )
-    assert _indexed_status(
-        registry, vault_root=vault_root, proposal_id=metadata.id
-    ) is ProposalStatus.APPROVED
+    assert (
+        _indexed_status(registry, vault_root=vault_root, proposal_id=metadata.id)
+        is ProposalStatus.APPROVED
+    )
 
     approved = _load(proposal_dir, proposals_root)
     result = apply_proposal(
@@ -228,9 +222,10 @@ def test_managed_block_happy_path_through_index_and_application(
         "<!-- lifeos:managed:end summary -->\n"
     )
     assert _load(proposal_dir, proposals_root).metadata.status is ProposalStatus.APPLIED
-    assert _indexed_status(
-        registry, vault_root=vault_root, proposal_id=metadata.id
-    ) is ProposalStatus.APPLIED
+    assert (
+        _indexed_status(registry, vault_root=vault_root, proposal_id=metadata.id)
+        is ProposalStatus.APPLIED
+    )
 
 
 def test_stale_target_blocks_approved_proposal_without_touching_target(
@@ -239,9 +234,7 @@ def test_stale_target_blocks_approved_proposal_without_touching_target(
     vault_root, proposals_root, registry = _create_vault(tmp_path)
     target_path = vault_root / "wiki.md"
     original = (
-        "<!-- lifeos:managed:start summary -->\n"
-        "Original.\n"
-        "<!-- lifeos:managed:end summary -->\n"
+        "<!-- lifeos:managed:start summary -->\nOriginal.\n<!-- lifeos:managed:end summary -->\n"
     )
     target_path.write_text(original)
 
@@ -280,9 +273,10 @@ def test_stale_target_blocks_approved_proposal_without_touching_target(
     assert captured.value.code is ApplicationErrorCode.PREFLIGHT_FAILED
     assert target_path.read_bytes() == before_apply
     assert _load(proposal_dir, proposals_root).metadata.status is ProposalStatus.APPROVED
-    assert _indexed_status(
-        registry, vault_root=vault_root, proposal_id=metadata.id
-    ) is ProposalStatus.APPROVED
+    assert (
+        _indexed_status(registry, vault_root=vault_root, proposal_id=metadata.id)
+        is ProposalStatus.APPROVED
+    )
 
 
 def test_second_creation_failure_rolls_back_first_creation(
@@ -304,16 +298,12 @@ def test_second_creation_failure_rolls_back_first_creation(
 
     original_publish_creation = application_module.publish_creation
 
-    def fail_second_creation(
-        target_name: str, staging: StagingFile
-    ) -> DirectorySyncResult:
+    def fail_second_creation(target_name: str, staging: StagingFile) -> DirectorySyncResult:
         if target_name == "second.txt":
             raise OSError("simulated second-target publication failure")
         return original_publish_creation(target_name, staging)
 
-    monkeypatch.setattr(
-        application_module, "publish_creation", fail_second_creation
-    )
+    monkeypatch.setattr(application_module, "publish_creation", fail_second_creation)
 
     with pytest.raises(ApplicationError) as captured:
         apply_proposal(
@@ -333,6 +323,7 @@ def test_second_creation_failure_rolls_back_first_creation(
     assert not (vault_root / "first.txt").exists()
     assert not (vault_root / "second.txt").exists()
     assert _load(proposal_dir, proposals_root).metadata.status is ProposalStatus.APPROVED
-    assert _indexed_status(
-        registry, vault_root=vault_root, proposal_id=metadata.id
-    ) is ProposalStatus.APPROVED
+    assert (
+        _indexed_status(registry, vault_root=vault_root, proposal_id=metadata.id)
+        is ProposalStatus.APPROVED
+    )

@@ -82,9 +82,7 @@ def register_scan(
             )
         prefix = relative_runtime.parts
         canonical_entries = [
-            entry
-            for entry in entries
-            if entry.path.parts[: len(prefix)] != prefix
+            entry for entry in entries if entry.path.parts[: len(prefix)] != prefix
         ]
     return _coherent_register_scan(
         registry,

@@ -33,9 +33,14 @@ class DeterministicEmbeddingProvider:
         model_key: str = "hash-vector-v1",
     ) -> None:
         self._dimensions = dimensions
-        self._phrases = {key.casefold(): tuple(float(value) for value in vector) for key, vector in (phrase_vectors or {}).items()}
+        self._phrases = {
+            key.casefold(): tuple(float(value) for value in vector)
+            for key, vector in (phrase_vectors or {}).items()
+        }
         if dimensions <= 0 or any(len(vector) != dimensions for vector in self._phrases.values()):
-            raise ProviderError("invalid_provider", "Fixture vectors must match configured dimensions.")
+            raise ProviderError(
+                "invalid_provider", "Fixture vectors must match configured dimensions."
+            )
         self._capabilities = ProviderCapabilities(
             "embedding", adapter_key, model_key, True, 128, vector_dimensions=dimensions
         )
@@ -93,7 +98,12 @@ class DeterministicReranker:
         results: list[RerankResult] = []
         for candidate in candidates:
             cancellation.checkpoint()
-            results.append(RerankResult(candidate.evidence_id, self._scores.get(candidate.evidence_id, candidate.base_score)))
+            results.append(
+                RerankResult(
+                    candidate.evidence_id,
+                    self._scores.get(candidate.evidence_id, candidate.base_score),
+                )
+            )
         return tuple(sorted(results, key=lambda item: (-item.score, item.evidence_id)))
 
 
@@ -124,12 +134,15 @@ def _normalize(vector: Sequence[float]) -> tuple[float, ...]:
         return tuple(0.0 for _ in vector)
     return tuple(value / norm for value in vector)
 
+
 class DeterministicAnswerProvider:
     """Configurable local answer adapter for deterministic fixtures and demos."""
 
     def __init__(self, answer: GeneratedAnswer, *, local_only: bool = True) -> None:
         if not isinstance(answer, GeneratedAnswer):
-            raise ProviderError("invalid_provider", "Deterministic answer must use GeneratedAnswer.")
+            raise ProviderError(
+                "invalid_provider", "Deterministic answer must use GeneratedAnswer."
+            )
         self._answer = answer
         self._capabilities = ProviderCapabilities(
             "generation", "deterministic-fixture", "answer-map-v1", local_only, 64

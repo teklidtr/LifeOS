@@ -67,13 +67,20 @@ class MemoryNotificationAdapter:
 
 class MacOSNotificationAdapter:
     def send(self, notification: Notification) -> None:
-        script = "display notification " + json.dumps(notification.body) + " with title " + json.dumps(notification.title)
+        script = (
+            "display notification "
+            + json.dumps(notification.body)
+            + " with title "
+            + json.dumps(notification.title)
+        )
         subprocess.run(["osascript", "-e", script], check=True, capture_output=True)
 
 
 class LinuxNotificationAdapter:
     def send(self, notification: Notification) -> None:
-        subprocess.run(["notify-send", notification.title, notification.body], check=True, capture_output=True)
+        subprocess.run(
+            ["notify-send", notification.title, notification.body], check=True, capture_output=True
+        )
 
 
 def default_adapter() -> NotificationAdapter:
@@ -114,24 +121,50 @@ def load_schedule(vault_root: Path) -> ScheduleConfig:
             "Repair system/attention-schedule.yml.",
         ) from exc
     if not isinstance(raw, dict):
-        raise DailyInteractionError("invalid_schedule", "Attention schedule must be a mapping.", "Repair the schedule file.")
-    allowed = {"enabled", "timezone", "morning", "evening", "weekly_day", "weekly", "quiet_start", "quiet_end", "privacy", "grace_hours"}
+        raise DailyInteractionError(
+            "invalid_schedule", "Attention schedule must be a mapping.", "Repair the schedule file."
+        )
+    allowed = {
+        "enabled",
+        "timezone",
+        "morning",
+        "evening",
+        "weekly_day",
+        "weekly",
+        "quiet_start",
+        "quiet_end",
+        "privacy",
+        "grace_hours",
+    }
     unknown = set(raw) - allowed
     if unknown:
-        raise DailyInteractionError("invalid_schedule", "Attention schedule has unknown fields.", "Remove unsupported fields.", {"fields": sorted(unknown)})
+        raise DailyInteractionError(
+            "invalid_schedule",
+            "Attention schedule has unknown fields.",
+            "Remove unsupported fields.",
+            {"fields": sorted(unknown)},
+        )
     config = ScheduleConfig(**raw)
     if type(config.enabled) is not bool or config.privacy not in {"generic", "titles"}:
-        raise DailyInteractionError("invalid_schedule", "Schedule values are invalid.", "Repair the schedule file.")
+        raise DailyInteractionError(
+            "invalid_schedule", "Schedule values are invalid.", "Repair the schedule file."
+        )
     if type(config.weekly_day) is not int or not 0 <= config.weekly_day <= 6:
-        raise DailyInteractionError("invalid_schedule", "weekly_day must be 0 through 6.", "Correct the weekday.")
+        raise DailyInteractionError(
+            "invalid_schedule", "weekly_day must be 0 through 6.", "Correct the weekday."
+        )
     if type(config.grace_hours) is not int or not 0 <= config.grace_hours <= 24:
-        raise DailyInteractionError("invalid_schedule", "grace_hours must be 0 through 24.", "Correct the grace period.")
+        raise DailyInteractionError(
+            "invalid_schedule", "grace_hours must be 0 through 24.", "Correct the grace period."
+        )
     for field in ("morning", "evening", "weekly", "quiet_start", "quiet_end"):
         _parse_clock(getattr(config, field), field)
     try:
         ZoneInfo(config.timezone)
     except ZoneInfoNotFoundError as exc:
-        raise DailyInteractionError("invalid_schedule", "Schedule timezone is unknown.", "Use an IANA timezone name.") from exc
+        raise DailyInteractionError(
+            "invalid_schedule", "Schedule timezone is unknown.", "Use an IANA timezone name."
+        ) from exc
     return config
 
 
@@ -177,19 +210,30 @@ class AttentionScheduler:
     def run(self, now: datetime) -> SchedulerRun:
         config = load_schedule(self.vault_root)
         if not config.enabled:
-            return SchedulerRun(now.isoformat(), (), ("scheduler-disabled",), "Enable the schedule in Obsidian settings.")
+            return SchedulerRun(
+                now.isoformat(),
+                (),
+                ("scheduler-disabled",),
+                "Enable the schedule in Obsidian settings.",
+            )
         zone = ZoneInfo(config.timezone)
         local = now.astimezone(zone)
         if _in_quiet_hours(local, config):
-            return SchedulerRun(now.isoformat(), (), ("quiet-hours",), f"Quiet hours end at {config.quiet_end}.")
+            return SchedulerRun(
+                now.isoformat(), (), ("quiet-hours",), f"Quiet hours end at {config.quiet_end}."
+            )
         due_routines: list[str] = []
         if _window_due(local, config.morning, config.grace_hours):
             due_routines.append("morning")
         if _window_due(local, config.evening, config.grace_hours):
             due_routines.append("evening")
-        if local.weekday() == config.weekly_day and _window_due(local, config.weekly, config.grace_hours):
+        if local.weekday() == config.weekly_day and _window_due(
+            local, config.weekly, config.grace_hours
+        ):
             due_routines.append("weekly")
-        attention = evaluate_attention(vault_root=self.vault_root, runtime_dir=self.runtime_dir, as_of=local)
+        attention = evaluate_attention(
+            vault_root=self.vault_root, runtime_dir=self.runtime_dir, as_of=local
+        )
         if attention.items:
             due_routines.append("condition")
         state = self._load_state()
@@ -215,19 +259,33 @@ class AttentionScheduler:
             )
             context = item.kind if item else routine
             uri = f"obsidian://open?vault={quote(self.vault_name)}&file={quote('LifeOS Today')}&context={quote(context)}"
-            notification = Notification(notification_id, title, body, uri, item.item_id if item else None)
+            notification = Notification(
+                notification_id, title, body, uri, item.item_id if item else None
+            )
             self.adapter.send(notification)
             delivered.append(notification)
             state["delivered"].append(notification_id)
         state["last_run"] = local.isoformat()
         self._save_state(state)
-        return SchedulerRun(now.isoformat(), tuple(delivered), tuple(suppressed), "Run again at the next configured window or hourly condition check.")
+        return SchedulerRun(
+            now.isoformat(),
+            tuple(delivered),
+            tuple(suppressed),
+            "Run again at the next configured window or hourly condition check.",
+        )
 
     def _pick_item(self, items: tuple[AttentionItem, ...], routine: str) -> AttentionItem | None:
         if routine == "morning":
             return next((item for item in items if item.title.startswith("Morning")), None)
         if routine == "evening":
-            return next((item for item in items if item.title.startswith("Evening") or item.kind == "unaccounted_task"), None)
+            return next(
+                (
+                    item
+                    for item in items
+                    if item.title.startswith("Evening") or item.kind == "unaccounted_task"
+                ),
+                None,
+            )
         return items[0] if items else None
 
     def _load_state(self) -> dict[str, Any]:
@@ -239,7 +297,11 @@ class AttentionScheduler:
                 raise ValueError
             return raw
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            raise DailyInteractionError("scheduler_state_corrupt", "Scheduler delivery state is corrupt.", "Reset disposable scheduler state.") from exc
+            raise DailyInteractionError(
+                "scheduler_state_corrupt",
+                "Scheduler delivery state is corrupt.",
+                "Reset disposable scheduler state.",
+            ) from exc
 
     def _save_state(self, state: dict[str, Any]) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,7 +319,9 @@ class BackgroundServiceInstaller:
     def install(self, *, command: tuple[str, ...], platform_name: str | None = None) -> Path:
         system = platform_name or platform.system()
         self.root.mkdir(parents=True, exist_ok=True)
-        path = self.root / ("com.lifeos.attention.plist" if system == "Darwin" else "lifeos-attention.service")
+        path = self.root / (
+            "com.lifeos.attention.plist" if system == "Darwin" else "lifeos-attention.service"
+        )
         document = {"platform": system, "command": list(command), "installed": True}
         path.write_text(json.dumps(document, sort_keys=True, indent=2) + "\n", encoding="utf-8")
         return path

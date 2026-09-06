@@ -29,9 +29,7 @@ def test_registry_refresh_exposes_pure_rename_and_activity_paths(
 
     assert payload["new"] == []
     assert payload["deleted"] == []
-    assert payload["renamed"] == [
-        {"from_path": "wiki/old.md", "to_path": "wiki/new.md"}
-    ]
+    assert payload["renamed"] == [{"from_path": "wiki/old.md", "to_path": "wiki/new.md"}]
     activity = server._tool_manager.get_tool("runtime_activity").fn(limit=5)
     assert activity["records"][-1]["changed_paths"] == [
         "wiki/old.md",
@@ -39,9 +37,7 @@ def test_registry_refresh_exposes_pure_rename_and_activity_paths(
     ]
 
 
-def test_registry_refresh_omits_empty_rename_extension(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_registry_refresh_omits_empty_rename_extension(tmp_path: Path, monkeypatch) -> None:
     result = RegistryRefreshResult(
         new=("study/new.md",),
         modified=(),

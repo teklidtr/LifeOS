@@ -347,7 +347,9 @@ def test_vault_links_resolves_nested_markdown_links_relative_to_source(tmp_path:
     assert [item.source_path for item in backlinks.links] == ["wiki/source.md"]
 
 
-def test_markdown_link_stays_source_relative_when_root_candidate_also_exists(tmp_path: Path) -> None:
+def test_markdown_link_stays_source_relative_when_root_candidate_also_exists(
+    tmp_path: Path,
+) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
     _write(vault, "wiki/source.md", "See [Topic](concepts/topic.md).\n")

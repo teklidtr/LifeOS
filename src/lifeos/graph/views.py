@@ -25,15 +25,15 @@ from lifeos.publication import (
 )
 from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown
 
-GraphStatus = Literal[
-    "missing", "clean", "dirty", "failed", "unavailable", "unsupported"
-]
+GraphStatus = Literal["missing", "clean", "dirty", "failed", "unavailable", "unsupported"]
 _ALLOWED_VIEWS = frozenset({"knowledge", "provenance", "personal-patterns", "system"})
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
 _VIEW_ROOTS: dict[str, frozenset[str]] = {
     "knowledge": frozenset({"wiki", "study", "flashcards"}),
     "provenance": frozenset({"raw", "study", "wiki", "flashcards"}),
-    "personal-patterns": frozenset({"journal", "patterns", "metrics", "goals", "plans", "experiments"}),
+    "personal-patterns": frozenset(
+        {"journal", "patterns", "metrics", "goals", "plans", "experiments"}
+    ),
     "system": frozenset({"system", "proposals"}),
 }
 
@@ -173,9 +173,7 @@ def build_graph_document(*, vault_root: Path, view_name: str) -> GraphDocument:
         node_id = _node_id(path, vault_root, data)
         previous_path = id_to_path.get(node_id)
         if previous_path is not None:
-            raise GraphError(
-                f"duplicate graph node id {node_id!r}: {previous_path} and {relative}"
-            )
+            raise GraphError(f"duplicate graph node id {node_id!r}: {previous_path} and {relative}")
         id_to_path[node_id] = relative
         path_to_id[path.with_suffix("").relative_to(vault_root).as_posix()] = node_id
         stem_targets.setdefault(path.stem, set()).add(node_id)
@@ -387,9 +385,7 @@ def graph_view_status(
             or not isinstance(message, str)
         ):
             return GraphViewState(view_name, "failed", None, 0, 0)
-        diagnostics.append(
-            DomainDiagnostic(code, severity, source_path, line, message)
-        )
+        diagnostics.append(DomainDiagnostic(code, severity, source_path, line, message))
     current_hash = _hash_sources(_selected_files(vault_root, view_name))
     status: GraphStatus = "clean" if recorded_hash == current_hash else "dirty"
     return GraphViewState(
