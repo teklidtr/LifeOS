@@ -20,7 +20,7 @@ from lifeos.proposals.publication import (
     publish_proposal_documents,
 )
 
-PROPOSAL_ID = "proposal-20260906T070000Z-deadbeef"
+PROPOSAL_ID = "prop-20260906T070000Z-deadbeef"
 DOCUMENTS = ProposalDocuments(b"proposal-bytes", b"patch-bytes", b"review-bytes")
 
 
