@@ -255,25 +255,34 @@ def _create_staging_directory(proposals_fd: int) -> tuple[str, int, FileIdentity
             os.mkdir(directory_name, mode=0o700, dir_fd=proposals_fd)
         except FileExistsError:
             continue
+        created_identity: FileIdentity | None = None
         try:
             created_info = os.stat(
                 directory_name,
                 dir_fd=proposals_fd,
                 follow_symlinks=False,
             )
-        except OSError as exc:
-            raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
-        created_identity = (created_info.st_dev, created_info.st_ino)
+        except OSError:
+            # A transient path-stat failure must not strand a directory that can still
+            # be rebound safely through a no-follow descriptor. Do not delete by name
+            # when the pre-open identity could not be established.
+            pass
+        else:
+            created_identity = (created_info.st_dev, created_info.st_ino)
         try:
             proposal_fd = open_directory_secure(Path(directory_name), dir_fd=proposals_fd)
         except SecureIOError as exc:
-            _remove_owned_empty_directory(
-                parent_fd=proposals_fd,
-                name=directory_name,
-                identity=created_identity,
-            )
+            if created_identity is not None:
+                _remove_owned_empty_directory(
+                    parent_fd=proposals_fd,
+                    name=directory_name,
+                    identity=created_identity,
+                )
             raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
-        if _fd_identity(proposal_fd) != created_identity or not _directory_entry_matches(
+        opened_identity = _fd_identity(proposal_fd)
+        if created_identity is None:
+            created_identity = opened_identity
+        if opened_identity != created_identity or not _directory_entry_matches(
             proposals_fd, directory_name, proposal_fd
         ):
             os.close(proposal_fd)
