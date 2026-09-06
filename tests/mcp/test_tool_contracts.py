@@ -7,7 +7,11 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import ValidationError
 
-from lifeos.facade.exploration import VaultListResult, VaultPathEntry
+from lifeos.facade.exploration import (
+    VaultListResult,
+    VaultPathEntry,
+    VaultReadManyResult,
+)
 from lifeos.mcp.runtime_server import create_mcp_server
 from lifeos.mcp.tool_contracts import build_mcp_tool, serialize_authoritative_output
 
@@ -165,6 +169,25 @@ def test_authoritative_output_revalidates_invalid_nested_literals() -> None:
 
     with pytest.raises(ValidationError):
         serialize_authoritative_output(malformed, output_type=VaultListResult)
+
+
+def test_authoritative_output_rejects_coercible_scalar_values() -> None:
+    malformed_bool = VaultListResult(
+        prefix=None,
+        entries=(),
+        truncated="false",  # type: ignore[arg-type]
+        next_after=None,
+    )
+    malformed_int = VaultReadManyResult(
+        items=(),
+        total_characters=True,
+        truncated=False,
+    )
+
+    with pytest.raises(ValidationError):
+        serialize_authoritative_output(malformed_bool, output_type=VaultListResult)
+    with pytest.raises(ValidationError):
+        serialize_authoritative_output(malformed_int, output_type=VaultReadManyResult)
 
 
 def test_runtime_sanitizes_invalid_authoritative_output(tmp_path: Path) -> None:
