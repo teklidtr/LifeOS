@@ -10,7 +10,12 @@ from lifeos.bridge import BridgeApplication, ProtocolError, ReferenceBridgeClien
 def app(tmp_path: Path, notifications: list[dict] | None = None) -> BridgeApplication:
     vault = tmp_path / "vault"
     vault.mkdir()
-    return BridgeApplication(vault_root=vault, runtime_dir=tmp_path / "runtime", actor_id="oguzhan", notify=None if notifications is None else notifications.append)
+    return BridgeApplication(
+        vault_root=vault,
+        runtime_dir=tmp_path / "runtime",
+        actor_id="oguzhan",
+        notify=None if notifications is None else notifications.append,
+    )
 
 
 def test_handshake_and_version_mismatch(tmp_path: Path) -> None:
@@ -200,7 +205,10 @@ def test_feedback_release_methods_are_strict_and_read_only(tmp_path: Path) -> No
 
     before = tuple(
         sorted(
-            (path.relative_to(bridge.daily.vault_root), path.read_bytes() if path.is_file() else b"")
+            (
+                path.relative_to(bridge.daily.vault_root),
+                path.read_bytes() if path.is_file() else b"",
+            )
             for path in bridge.daily.vault_root.rglob("*")
         )
     )
@@ -218,7 +226,10 @@ def test_feedback_release_methods_are_strict_and_read_only(tmp_path: Path) -> No
     )
     after = tuple(
         sorted(
-            (path.relative_to(bridge.daily.vault_root), path.read_bytes() if path.is_file() else b"")
+            (
+                path.relative_to(bridge.daily.vault_root),
+                path.read_bytes() if path.is_file() else b"",
+            )
             for path in bridge.daily.vault_root.rglob("*")
         )
     )

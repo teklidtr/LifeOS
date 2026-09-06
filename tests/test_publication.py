@@ -33,7 +33,6 @@ def _active_file(root: Path, relative: str) -> bytes:
     return (active / relative).read_bytes()
 
 
-
 def test_graph_fault_between_payload_and_state_never_becomes_active(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     runtime = vault / ".lifeos"
@@ -60,6 +59,7 @@ def test_graph_fault_between_payload_and_state_never_becomes_active(tmp_path: Pa
     assert _active_file(root, "graph.json") == prior_graph
     assert _active_file(root, "state.json") == prior_state
     assert inspect_publication(root).recovery_state == "none"
+
 
 def test_graph_fault_after_generation_install_leaves_previous_generation_active(
     tmp_path: Path,
@@ -132,7 +132,10 @@ def test_export_fault_after_publication_keeps_new_generation_live(tmp_path: Path
 
     final = build_export(vault_root=vault, runtime_dir=runtime, kind="study-bundle")
     assert Path(final.output_dir).name == status.active_generation
-    assert export_status(vault_root=vault, runtime_dir=runtime, kind="study-bundle").recovery_state == "none"
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="study-bundle").recovery_state
+        == "none"
+    )
 
 
 def test_corrupt_staging_is_rejected_before_publication(tmp_path: Path) -> None:

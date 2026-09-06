@@ -62,6 +62,10 @@ jobs:
             mypy-v2-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-${{ github.event.pull_request.number }}-
             mypy-v2-${{ runner.os }}-${{ hashFiles('.python-version', 'uv.lock', 'pyproject.toml') }}-
 
+      - name: Ruff formatter repository gate
+        if: steps.scope.outputs.docs_only != 'true'
+        run: uv run ruff format --check .
+
       - name: Ruff repository gate
         if: steps.scope.outputs.docs_only != 'true'
         run: uv run ruff check .

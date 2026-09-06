@@ -14,7 +14,12 @@ import yaml
 from lifeos.daily.service import _atomic_write, content_hash
 from lifeos.markdown.parser import parse_markdown_note, replace_managed_block, splice_managed_block
 from lifeos.retrieval import RetrievalScope
-from lifeos.vault import VaultAccessError, VaultMarkdownFile, iter_vault_markdown, read_vault_markdown
+from lifeos.vault import (
+    VaultAccessError,
+    VaultMarkdownFile,
+    iter_vault_markdown,
+    read_vault_markdown,
+)
 
 from .contracts import (
     CONVERSATION_SCHEMA_VERSION,
@@ -34,7 +39,9 @@ _ID_RE = re.compile(r"^conv-(\d{8}T\d{6}Z)-[a-f0-9]{8}$")
 def _now(value: datetime | None = None) -> datetime:
     moment = value or datetime.now(timezone.utc)
     if moment.tzinfo is None:
-        raise ConversationError("invalid_timestamp", "Conversation timestamps must be timezone-aware.")
+        raise ConversationError(
+            "invalid_timestamp", "Conversation timestamps must be timezone-aware."
+        )
     return moment.astimezone(timezone.utc)
 
 
@@ -56,7 +63,13 @@ def _path(metadata: ConversationMetadata) -> str:
 
 
 def _render_turn(turn: ConversationTurn) -> str:
-    lines = [f"## Turn {turn.turn_id}", "", f"**Question:** {turn.query}", "", f"**State:** `{turn.state}`"]
+    lines = [
+        f"## Turn {turn.turn_id}",
+        "",
+        f"**Question:** {turn.query}",
+        "",
+        f"**State:** `{turn.state}`",
+    ]
     if turn.evidence:
         lines.extend(["", "### Evidence"])
         for item in turn.evidence:
@@ -72,18 +85,31 @@ def _render_turn(turn: ConversationTurn) -> str:
         lines.extend(["", "### Answer"])
         for paragraph in turn.answer:
             citations = " ".join(f"[{citation}]" for citation in paragraph.citations)
-            lines.extend(["", f"{paragraph.text} {citations}".rstrip(), "", f"_Support: {paragraph.support}_"])
+            lines.extend(
+                [
+                    "",
+                    f"{paragraph.text} {citations}".rstrip(),
+                    "",
+                    f"_Support: {paragraph.support}_",
+                ]
+            )
     if turn.explanation:
         lines.extend(["", f"_Explanation: {turn.explanation}_"])
     return "\n".join(lines).rstrip()
 
 
 def _managed_body(turns: tuple[ConversationTurn, ...]) -> str:
-    content = "\n\n".join(_render_turn(turn) for turn in turns) if turns else "No questions have been asked yet."
+    content = (
+        "\n\n".join(_render_turn(turn) for turn in turns)
+        if turns
+        else "No questions have been asked yet."
+    )
     return f"{_MANAGED_START}\n# Knowledge conversation\n\n{content}\n{_MANAGED_END}"
 
 
-def _document(metadata: ConversationMetadata, turns: tuple[ConversationTurn, ...], human_body: str) -> str:
+def _document(
+    metadata: ConversationMetadata, turns: tuple[ConversationTurn, ...], human_body: str
+) -> str:
     frontmatter = metadata.to_frontmatter(turns)
     dumped = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).rstrip()
     annotations = human_body.strip("\n") or "## Annotations\n\n"
@@ -113,7 +139,9 @@ def _parse(source_path: Path, relative_path: str, content: str) -> ConversationA
         raise ConversationError("unsupported_schema", "Conversation schema version is unsupported.")
     matches = [block for block in parsed.managed_blocks if block.name == "knowledge-conversation"]
     if len(matches) != 1 or len(parsed.managed_blocks) != 1:
-        raise ConversationError("malformed_artifact", "The managed conversation block must appear exactly once.")
+        raise ConversationError(
+            "malformed_artifact", "The managed conversation block must appear exactly once."
+        )
     human_body = splice_managed_block(parsed.body, matches[0], "").strip("\n") + "\n"
     raw_turns = fm.get("turns", [])
     if not isinstance(raw_turns, list):
@@ -126,18 +154,28 @@ def _parse(source_path: Path, relative_path: str, content: str) -> ConversationA
             created_at=str(fm["created_at"]),
             updated_at=str(fm["updated_at"]),
             status=str(fm["status"]),  # type: ignore[arg-type]
-            scope=scope_from_dict(fm.get("retrieval_scope") if isinstance(fm.get("retrieval_scope"), Mapping) else {}),
+            scope=scope_from_dict(
+                fm.get("retrieval_scope") if isinstance(fm.get("retrieval_scope"), Mapping) else {}
+            ),
             pinned_sources=tuple(str(item) for item in fm.get("pinned_sources", ())),
             excluded_sources=tuple(str(item) for item in fm.get("excluded_sources", ())),
-            parent_conversation_id=str(fm["parent_conversation_id"]) if fm.get("parent_conversation_id") else None,
-            branch_from_turn_id=str(fm["branch_from_turn_id"]) if fm.get("branch_from_turn_id") else None,
+            parent_conversation_id=str(fm["parent_conversation_id"])
+            if fm.get("parent_conversation_id")
+            else None,
+            branch_from_turn_id=str(fm["branch_from_turn_id"])
+            if fm.get("branch_from_turn_id")
+            else None,
             schema_version=schema,
         )
     except (KeyError, TypeError, ValueError) as exc:
         if isinstance(exc, ConversationError):
             raise
-        raise ConversationError("malformed_artifact", "Conversation metadata is malformed.") from exc
-    return ConversationArtifact(relative_path, f"sha256:{content_hash(content)}", metadata, turns, human_body)
+        raise ConversationError(
+            "malformed_artifact", "Conversation metadata is malformed."
+        ) from exc
+    return ConversationArtifact(
+        relative_path, f"sha256:{content_hash(content)}", metadata, turns, human_body
+    )
 
 
 class ConversationArtifactService:
@@ -157,8 +195,16 @@ class ConversationArtifactService:
     ) -> ConversationArtifact:
         moment = _now(now)
         metadata = ConversationMetadata(
-            _conversation_id(moment), title.strip(), moment.isoformat(), moment.isoformat(), "active",
-            scope or RetrievalScope(), (), (), parent_conversation_id, branch_from_turn_id,
+            _conversation_id(moment),
+            title.strip(),
+            moment.isoformat(),
+            moment.isoformat(),
+            "active",
+            scope or RetrievalScope(),
+            (),
+            (),
+            parent_conversation_id,
+            branch_from_turn_id,
         )
         relative_path = _path(metadata)
         document = _document(metadata, turns, "## Annotations\n\n")
@@ -178,7 +224,11 @@ class ConversationArtifactService:
         artifacts = tuple(_parse(item.path, item.relative_path, item.content) for item in sources)
         return tuple(
             sorted(
-                (item for item in artifacts if include_archived or item.metadata.status != "archived"),
+                (
+                    item
+                    for item in artifacts
+                    if include_archived or item.metadata.status != "archived"
+                ),
                 key=lambda item: (item.metadata.updated_at, item.metadata.conversation_id),
                 reverse=True,
             )
@@ -217,8 +267,12 @@ class ConversationArtifactService:
             title=(title.strip() if title is not None else current.metadata.title),
             status=(status if status is not None else current.metadata.status),  # type: ignore[arg-type]
             scope=scope or current.metadata.scope,
-            pinned_sources=pinned_sources if pinned_sources is not None else current.metadata.pinned_sources,
-            excluded_sources=excluded_sources if excluded_sources is not None else current.metadata.excluded_sources,
+            pinned_sources=pinned_sources
+            if pinned_sources is not None
+            else current.metadata.pinned_sources,
+            excluded_sources=excluded_sources
+            if excluded_sources is not None
+            else current.metadata.excluded_sources,
             updated_at=moment.isoformat(),
         )
         selected_turns = turns if turns is not None else current.turns
@@ -229,7 +283,9 @@ class ConversationArtifactService:
             )
         except ValueError as error:
             raise ConversationError("malformed_artifact", str(error)) from error
-        dumped = yaml.safe_dump(metadata.to_frontmatter(selected_turns), sort_keys=False, allow_unicode=True).rstrip()
+        dumped = yaml.safe_dump(
+            metadata.to_frontmatter(selected_turns), sort_keys=False, allow_unicode=True
+        ).rstrip()
         output = f"---\n{dumped}\n---\n{body}"
         _parse(self.vault_root / relative_path, relative_path, output)
         _atomic_write(
@@ -242,7 +298,12 @@ class ConversationArtifactService:
         return self.load(relative_path)
 
     def append_turn(
-        self, relative_path: str, turn: ConversationTurn, *, expected_hash: str, now: datetime | None = None
+        self,
+        relative_path: str,
+        turn: ConversationTurn,
+        *,
+        expected_hash: str,
+        now: datetime | None = None,
     ) -> ConversationArtifact:
         current = self.load(relative_path)
         if any(item.turn_id == turn.turn_id for item in current.turns):
@@ -251,10 +312,14 @@ class ConversationArtifactService:
             relative_path, expected_hash=expected_hash, turns=(*current.turns, turn), now=now
         )
 
-    def rename(self, relative_path: str, title: str, *, expected_hash: str, now: datetime | None = None) -> ConversationArtifact:
+    def rename(
+        self, relative_path: str, title: str, *, expected_hash: str, now: datetime | None = None
+    ) -> ConversationArtifact:
         return self.update(relative_path, expected_hash=expected_hash, title=title, now=now)
 
-    def archive(self, relative_path: str, *, expected_hash: str, now: datetime | None = None) -> ConversationArtifact:
+    def archive(
+        self, relative_path: str, *, expected_hash: str, now: datetime | None = None
+    ) -> ConversationArtifact:
         return self.update(relative_path, expected_hash=expected_hash, status="archived", now=now)
 
     def branch(
@@ -266,7 +331,9 @@ class ConversationArtifactService:
         now: datetime | None = None,
     ) -> ConversationArtifact:
         current = self.load(relative_path)
-        index = next((i for i, turn in enumerate(current.turns) if turn.turn_id == from_turn_id), None)
+        index = next(
+            (i for i, turn in enumerate(current.turns) if turn.turn_id == from_turn_id), None
+        )
         if index is None:
             raise ConversationError("turn_not_found", "Branch source turn was not found.")
         return self.create(

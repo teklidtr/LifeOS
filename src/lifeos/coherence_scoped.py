@@ -236,5 +236,7 @@ def collect_scoped_identity_snapshot(
         )
 
     notes.sort(key=lambda item: item.path)
-    diagnostics.sort(key=lambda item: (item.severity, item.code, item.path or "", item.stable_id or ""))
+    diagnostics.sort(
+        key=lambda item: (item.severity, item.code, item.path or "", item.stable_id or "")
+    )
     return IdentitySnapshot(tuple(notes), tuple(diagnostics))

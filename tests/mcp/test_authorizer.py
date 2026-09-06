@@ -17,6 +17,7 @@ from lifeos.proposals.patches import PatchDocument
 
 VALID_ID = "prop-20240101T000000Z-12345678"
 
+
 def _make_meta() -> ProposalMetadata:
     return ProposalMetadata(
         id=VALID_ID,
@@ -41,8 +42,9 @@ def _make_meta() -> ProposalMetadata:
         applied_by=None,
         related_goals=[],
         related_sources=[],
-        extensions={}
+        extensions={},
     )
+
 
 def _make_proposal() -> LoadedProposal:
     return LoadedProposal(
@@ -53,8 +55,9 @@ def _make_proposal() -> LoadedProposal:
         patches_source_hash="efgh",
         metadata=_make_meta(),
         patch_document=PatchDocument(schema_version=1, proposal_id=VALID_ID, operations=()),
-        body="body"
+        body="body",
     )
+
 
 @pytest.fixture
 def authorizer():
@@ -67,7 +70,9 @@ def test_authorizer_validates_proposal_id_before_filesystem_access(authorizer) -
         proposal_id="invalid/id",
         review_digest=None,
     )
-    with pytest.raises(AuthorizationUnavailableError, match="Proposal could not be loaded for authorization"):
+    with pytest.raises(
+        AuthorizationUnavailableError, match="Proposal could not be loaded for authorization"
+    ):
         authorizer.authorize(request)
 
 
@@ -79,20 +84,24 @@ def test_authorizer_rejects_loader_findings(mock_load, authorizer) -> None:
         proposal_id=VALID_ID,
         review_digest=None,
     )
-    with pytest.raises(AuthorizationUnavailableError, match="Proposal could not be loaded for authorization"):
+    with pytest.raises(
+        AuthorizationUnavailableError, match="Proposal could not be loaded for authorization"
+    ):
         authorizer.authorize(request)
 
 
 @patch("lifeos.mcp.authorizer.load_proposal_directory")
 @patch("builtins.open")
-def test_authorizer_uses_metadata_body_and_patch_document_for_digest(mock_open, mock_load, authorizer) -> None:
+def test_authorizer_uses_metadata_body_and_patch_document_for_digest(
+    mock_open, mock_load, authorizer
+) -> None:
     mock_file = MagicMock()
     mock_file.__enter__.return_value = mock_file
     mock_file.readline.return_value = "y\n"
     mock_open.return_value = mock_file
 
     mock_load.return_value = ProposalLoadResult(findings=[], proposal=_make_proposal())
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.SUBMIT,
         proposal_id=VALID_ID,
@@ -104,17 +113,21 @@ def test_authorizer_uses_metadata_body_and_patch_document_for_digest(mock_open, 
 
 @patch("lifeos.mcp.authorizer.load_proposal_directory")
 @patch("builtins.open")
-def test_authorizer_raises_authorization_unavailable_error(mock_open, mock_load, authorizer) -> None:
+def test_authorizer_raises_authorization_unavailable_error(
+    mock_open, mock_load, authorizer
+) -> None:
     mock_open.side_effect = OSError("No tty")
-    
+
     mock_load.return_value = ProposalLoadResult(findings=[], proposal=_make_proposal())
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.SUBMIT,
         proposal_id=VALID_ID,
         review_digest=None,
     )
-    with pytest.raises(AuthorizationUnavailableError, match="Interactive authorization is unavailable"):
+    with pytest.raises(
+        AuthorizationUnavailableError, match="Interactive authorization is unavailable"
+    ):
         authorizer.authorize(request)
 
 
@@ -127,20 +140,22 @@ def test_authorizer_raises_authorization_denied_error(mock_open, mock_load, auth
     mock_open.return_value = mock_file
 
     mock_load.return_value = ProposalLoadResult(findings=[], proposal=_make_proposal())
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.SUBMIT,
         proposal_id=VALID_ID,
         review_digest=None,
     )
-    with pytest.raises(AuthorizationDeniedError, match="Consequential operation was not authorized"):
+    with pytest.raises(
+        AuthorizationDeniedError, match="Consequential operation was not authorized"
+    ):
         authorizer.authorize(request)
 
 
 @patch("lifeos.mcp.authorizer.load_proposal_directory")
 def test_submit_authorization_requires_absent_digest(mock_load, authorizer) -> None:
     mock_load.return_value = ProposalLoadResult(findings=[], proposal=_make_proposal())
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.SUBMIT,
         proposal_id=VALID_ID,
@@ -153,7 +168,7 @@ def test_submit_authorization_requires_absent_digest(mock_load, authorizer) -> N
 @patch("lifeos.mcp.authorizer.load_proposal_directory")
 def test_approve_authorization_requires_matching_digest(mock_load, authorizer) -> None:
     mock_load.return_value = ProposalLoadResult(findings=[], proposal=_make_proposal())
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.APPROVE,
         proposal_id=VALID_ID,
@@ -166,7 +181,7 @@ def test_approve_authorization_requires_matching_digest(mock_load, authorizer) -
 @patch("lifeos.mcp.authorizer.load_proposal_directory")
 def test_apply_authorization_requires_matching_digest(mock_load, authorizer) -> None:
     mock_load.return_value = ProposalLoadResult(findings=[], proposal=_make_proposal())
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.APPLY,
         proposal_id=VALID_ID,
@@ -185,7 +200,7 @@ def test_tty_authorizer_never_reads_protocol_stdin(mock_open, mock_load, authori
     mock_open.return_value = mock_file
 
     mock_load.return_value = ProposalLoadResult(findings=[], proposal=_make_proposal())
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.SUBMIT,
         proposal_id=VALID_ID,
@@ -199,33 +214,39 @@ def test_tty_authorizer_never_reads_protocol_stdin(mock_open, mock_load, authori
 
 @patch("lifeos.mcp.authorizer.load_proposal_directory")
 @patch("builtins.open")
-def test_tty_authorizer_writes_only_to_controlling_terminal(mock_open, mock_load, authorizer) -> None:
+def test_tty_authorizer_writes_only_to_controlling_terminal(
+    mock_open, mock_load, authorizer
+) -> None:
     mock_file = MagicMock()
     mock_file.__enter__.return_value = mock_file
     mock_file.readline.return_value = "y\n"
     mock_open.return_value = mock_file
 
     mock_load.return_value = ProposalLoadResult(findings=[], proposal=_make_proposal())
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.SUBMIT,
         proposal_id=VALID_ID,
         review_digest=None,
     )
     authorizer.authorize(request)
-    
+
     assert mock_file.write.call_count > 0
+
 
 @patch("lifeos.mcp.authorizer.load_proposal_directory")
 @patch("builtins.open")
 @patch("lifeos.mcp.authorizer.compute_review_digest")
-def test_tty_authorizer_renders_exact_patch_content(mock_digest, mock_open, mock_load, authorizer) -> None:
+def test_tty_authorizer_renders_exact_patch_content(
+    mock_digest, mock_open, mock_load, authorizer
+) -> None:
     mock_digest.return_value = "fake-digest"
     mock_load.return_value.findings = []
     mock_load.return_value.proposal.metadata.title = "Test"
     mock_load.return_value.proposal.metadata.description = "Test"
     mock_load.return_value.proposal.body = "Body"
     from lifeos.proposals.patches import ReplaceManagedBlock
+
     mock_load.return_value.proposal.patch_document.operations = [
         ReplaceManagedBlock(
             id="op-1",
@@ -239,21 +260,20 @@ def test_tty_authorizer_renders_exact_patch_content(mock_digest, mock_open, mock
     mock_file = mock_open.return_value.__enter__.return_value
     mock_file.readline.return_value = "y\n"
 
-
     # mock_load.return_value.proposal can just be a mock, but compute_review_digest needs serializable metadata.
     # Actually, we can just mock compute_review_digest!
-    
+
     request = ConsequentialAuthorizationRequest(
         action=ConsequentialAction.SUBMIT,
         proposal_id="prop-20260714T000000Z-abcdef12",
         review_digest=None,
     )
     authorizer.authorize(request)
-    
+
     written_content = ""
     for call in mock_open.return_value.__enter__.return_value.write.call_args_list:
         written_content += call.args[0]
-        
+
     assert "Operation ID: op-1" in written_content
     assert "Type:         replace_managed_block" in written_content
     assert "Target Path:  some/file.md" in written_content

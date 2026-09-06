@@ -129,9 +129,7 @@ def test_completed_uninventoried_legacy_dependency_mapping_is_rejected(
         "001-legacy.md",
         "LIFEOS-001",
         dependency_frontmatter=(
-            "depends_on:\n"
-            "  legacy_phase: LIFEOS-DOES-NOT-EXIST\n"
-            "  historical_alias: LIFEOS-300\n"
+            "depends_on:\n  legacy_phase: LIFEOS-DOES-NOT-EXIST\n  historical_alias: LIFEOS-300\n"
         ),
     )
 
@@ -168,10 +166,7 @@ def test_historical_exemption_is_form_specific(tmp_path: Path) -> None:
         "completed",
         "300-context-packs.md",
         "LIFEOS-300",
-        dependency_frontmatter=(
-            "depends_on:\n"
-            "  typo: LIFEOS-DOES-NOT-EXIST\n"
-        ),
+        dependency_frontmatter=("depends_on:\n  typo: LIFEOS-DOES-NOT-EXIST\n"),
     )
 
     assert validate_task_tree(task_root) == (
@@ -218,9 +213,7 @@ def test_indented_empty_list_and_multiline_dependencies_resolve(tmp_path: Path) 
         "1602-follow-up.md",
         "LIFEOS-1602",
         dependency_frontmatter=(
-            "depends_on:\n"
-            "  - LIFEOS-1600\n"
-            "  - LIFEOS-1601 # shipped foundation\n"
+            "depends_on:\n  - LIFEOS-1600\n  - LIFEOS-1601 # shipped foundation\n"
         ),
     )
 
@@ -301,11 +294,7 @@ def test_missing_id_is_rejected(tmp_path: Path) -> None:
     task_root = _task_root(tmp_path)
     path = task_root / "backlog" / "001-invalid.md"
     path.write_text(
-        "---\n"
-        "title: Invalid task\n"
-        "status: backlog\n"
-        "depends_on: []\n"
-        "---\n",
+        "---\ntitle: Invalid task\nstatus: backlog\ndepends_on: []\n---\n",
         encoding="utf-8",
     )
 

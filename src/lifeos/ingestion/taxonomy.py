@@ -76,7 +76,9 @@ def validate_proposed_tags(tags: Sequence[str] | None) -> tuple[str, ...]:
         if tag != unicodedata.normalize("NFC", tag):
             raise TagValidationError(f"tags[{index}] must use NFC Unicode normalization")
         if not tag or tag != tag.strip():
-            raise TagValidationError(f"tags[{index}] must be non-empty without surrounding whitespace")
+            raise TagValidationError(
+                f"tags[{index}] must be non-empty without surrounding whitespace"
+            )
         if len(tag) > MAX_TAG_LENGTH:
             raise TagValidationError(f"tags[{index}] exceeds {MAX_TAG_LENGTH} characters")
         if tag != tag.casefold():
@@ -101,9 +103,7 @@ def validate_tag_rationale(rationale: str | None) -> str | None:
     if not isinstance(rationale, str):
         raise TagValidationError("tag_rationale must be a string")
     if not rationale or rationale != rationale.strip():
-        raise TagValidationError(
-            "tag_rationale must be non-empty without surrounding whitespace"
-        )
+        raise TagValidationError("tag_rationale must be non-empty without surrounding whitespace")
     if "\n" in rationale or "\r" in rationale:
         raise TagValidationError("tag_rationale must be one line")
     if len(rationale) > 500:

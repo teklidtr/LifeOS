@@ -140,17 +140,21 @@ def test_vague_oversized_duplicate_blocked_and_circular_actions_are_rejected() -
             option=_option(), horizon="months", adapter=Adapter((_suggestion("Work on it"),))
         )
     oversized = _suggestion()
-    oversized = ActionSuggestion(**{**oversized.__dict__, "duration": 240}) if hasattr(oversized, "__dict__") else ActionSuggestion(
-        title=oversized.title,
-        milestone_id=oversized.milestone_id,
-        duration=240,
-        energy=oversized.energy,
-        motivation=oversized.motivation,
-        mode=oversized.mode,
-        rationale=oversized.rationale,
-        verification=oversized.verification,
-        kind=oversized.kind,
-        source_refs=oversized.source_refs,
+    oversized = (
+        ActionSuggestion(**{**oversized.__dict__, "duration": 240})
+        if hasattr(oversized, "__dict__")
+        else ActionSuggestion(
+            title=oversized.title,
+            milestone_id=oversized.milestone_id,
+            duration=240,
+            energy=oversized.energy,
+            motivation=oversized.motivation,
+            mode=oversized.mode,
+            rationale=oversized.rationale,
+            verification=oversized.verification,
+            kind=oversized.kind,
+            source_refs=oversized.source_refs,
+        )
     )
     with pytest.raises(DecompositionError, match="action-oversized"):
         decompose_plan_option(option=_option(), horizon="months", adapter=Adapter((oversized,)))
@@ -167,7 +171,9 @@ def test_vague_oversized_duplicate_blocked_and_circular_actions_are_rejected() -
             adapter=Adapter((_suggestion(blocked_by=("task-missing",)),)),
         )
     a = _suggestion(task_id="task-a", blocked_by=("task-b",))
-    b = _suggestion(title="Write chapter one synthesis note", task_id="task-b", blocked_by=("task-a",))
+    b = _suggestion(
+        title="Write chapter one synthesis note", task_id="task-b", blocked_by=("task-a",)
+    )
     with pytest.raises(DecompositionError, match="blocker-cycle"):
         decompose_plan_option(option=_option(), horizon="months", adapter=Adapter((a, b)))
 
@@ -191,9 +197,7 @@ def test_task_id_collision_is_rejected() -> None:
     result = decompose_plan_option(option=_option(), horizon="year")
     task_id = result.actions[0].action.task_id
     with pytest.raises(DecompositionError, match="collides"):
-        decompose_plan_option(
-            option=_option(), horizon="year", existing_task_ids=(task_id,)
-        )
+        decompose_plan_option(option=_option(), horizon="year", existing_task_ids=(task_id,))
 
 
 def test_bridge_decomposes_generated_option(tmp_path: Path) -> None:
@@ -205,9 +209,15 @@ def test_bridge_decomposes_generated_option(tmp_path: Path) -> None:
         "desired_change: Explain six chapters.\nconstraints: [Four hours weekly]\n---\n",
         encoding="utf-8",
     )
-    app = BridgeApplication(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos", actor_id="tester")
-    app.dispatch("copilot.session.start", {"goal_path": "goals/cell.md", "session_id": "session-cell"})
-    options = app.dispatch("copilot.options.generate", {"session_id": "session-cell", "as_of": "2026-07-16"})
+    app = BridgeApplication(
+        vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos", actor_id="tester"
+    )
+    app.dispatch(
+        "copilot.session.start", {"goal_path": "goals/cell.md", "session_id": "session-cell"}
+    )
+    options = app.dispatch(
+        "copilot.options.generate", {"session_id": "session-cell", "as_of": "2026-07-16"}
+    )
     option_id = options["options"][0]["option_id"]
     result = app.dispatch(
         "copilot.option.decompose",

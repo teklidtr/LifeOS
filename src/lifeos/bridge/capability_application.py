@@ -19,8 +19,7 @@ class BridgeApplication(_BaseBridgeApplication):
             return {
                 "semantic_capability_schema": SEMANTIC_CAPABILITY_SCHEMA_VERSION,
                 "capabilities": [
-                    capability.to_dict()
-                    for capability in CAPABILITY_REGISTRY.list_capabilities()
+                    capability.to_dict() for capability in CAPABILITY_REGISTRY.list_capabilities()
                 ],
             }
         if method == "capability.get":

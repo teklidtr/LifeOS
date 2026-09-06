@@ -189,9 +189,7 @@ def test_existing_review_treats_reordered_evidence_as_no_change(tmp_path: Path) 
         pattern_id="pattern-focus-after-walk",
         evidence=(first, second),
     )
-    current = PatternArtifactService(vault_root=vault).load(
-        "patterns/focus-after-walk.md"
-    )
+    current = PatternArtifactService(vault_root=vault).load("patterns/focus-after-walk.md")
 
     result = review_agent_pattern(
         vault_root=vault,

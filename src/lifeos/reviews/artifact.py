@@ -165,7 +165,8 @@ def replace_managed_blocks(body: str, updates: Mapping[str, str]) -> str:
             result = replace_managed_block(result, block, replacement)
         except ValueError as error:
             raise DailyInteractionError(
-                "invalid_review_artifact", str(error),
+                "invalid_review_artifact",
+                str(error),
                 "Restore the managed boundary before refreshing or updating the review.",
             ) from error
     validate_managed_blocks(result)

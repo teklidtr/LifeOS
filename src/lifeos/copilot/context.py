@@ -142,6 +142,7 @@ def build_planning_context(
         )
         if value
     )
+
     def pattern_context_path_filter(path: str) -> bool:
         if path in excludes:
             return False
@@ -188,7 +189,9 @@ def build_planning_context(
     pack_truncated = False
     for path, reason, explicit in ordered:
         if path in excludes:
-            omissions.append(ContextOmission(path, "explicitly-excluded", "Excluded by user control."))
+            omissions.append(
+                ContextOmission(path, "explicitly-excluded", "Excluded by user control.")
+            )
             continue
         root = path.split("/", 1)[0]
         if root in policy.sensitive_roots:
@@ -232,14 +235,18 @@ def build_planning_context(
         allowance = min(max_item_bytes, remaining)
         if allowance <= 0:
             omissions.append(
-                ContextOmission(path, "context-budget-exhausted", "The total context byte limit was reached.")
+                ContextOmission(
+                    path, "context-budget-exhausted", "The total context byte limit was reached."
+                )
             )
             pack_truncated = True
             continue
         excerpt, included_bytes, truncated = _truncate_utf8(redacted, allowance)
         if truncated:
             pack_truncated = True
-        source_id = parsed.durable_fields.id or f"path-{hashlib.sha256(path.encode()).hexdigest()[:16]}"
+        source_id = (
+            parsed.durable_fields.id or f"path-{hashlib.sha256(path.encode()).hexdigest()[:16]}"
+        )
         items.append(
             PlanningContextItem(
                 source_id=source_id,
@@ -307,7 +314,7 @@ def _safe_paths(values: Iterable[str], name: str) -> tuple[str, ...]:
 
 def _reference_id(value: str) -> str:
     cleaned = value.strip()
-    if cleaned.startswith("[[") and cleaned.endswith("]]" ):
+    if cleaned.startswith("[[") and cleaned.endswith("]]"):
         cleaned = cleaned[2:-2].split("|", 1)[0]
     return Path(cleaned).stem
 
@@ -317,7 +324,9 @@ def _visible_text(body: str, full_content: str) -> str:
     return text if text else full_content.strip()
 
 
-def _apply_redactions(text: str, terms: tuple[str, ...]) -> tuple[str, tuple[ContextRedaction, ...]]:
+def _apply_redactions(
+    text: str, terms: tuple[str, ...]
+) -> tuple[str, tuple[ContextRedaction, ...]]:
     result = text
     applied: list[ContextRedaction] = []
     for index, term in enumerate(terms, start=1):

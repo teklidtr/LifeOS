@@ -50,12 +50,8 @@ class ParsedNote:
     findings: tuple[ParseFinding, ...]
 
 
-START_MARKER_RE = re.compile(
-    r"^<!--[ \t]*lifeos:managed:start[ \t]+([^ \t>]+)[ \t]*-->[ \t]*$"
-)
-END_MARKER_RE = re.compile(
-    r"^<!--[ \t]*lifeos:managed:end[ \t]+([^ \t>]+)[ \t]*-->[ \t]*$"
-)
+START_MARKER_RE = re.compile(r"^<!--[ \t]*lifeos:managed:start[ \t]+([^ \t>]+)[ \t]*-->[ \t]*$")
+END_MARKER_RE = re.compile(r"^<!--[ \t]*lifeos:managed:end[ \t]+([^ \t>]+)[ \t]*-->[ \t]*$")
 FENCED_CODE_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})([^\r\n]*)$")
 FenceState = tuple[str, int] | None
 
@@ -88,8 +84,12 @@ def advance_fenced_code_state(line: str, state: FenceState) -> FenceState:
 def splice_managed_block(body: str, block: ManagedBlock, replacement: str) -> str:
     """Replace one parser-issued full managed-block span in a Markdown body."""
     if not (
-        0 <= block.start_offset <= block.content_start_offset
-        <= block.content_end_offset <= block.end_offset <= len(body)
+        0
+        <= block.start_offset
+        <= block.content_start_offset
+        <= block.content_end_offset
+        <= block.end_offset
+        <= len(body)
     ):
         raise ValueError("Managed block offsets do not belong to this Markdown body")
     return body[: block.start_offset] + replacement + body[block.end_offset :]
@@ -125,11 +125,11 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
             content = path.read_text(encoding="utf-8")
         except Exception as e:
             return ParsedNote(
-            path=path,
-            durable_fields=DurableFields(),
-            frontmatter=MappingProxyType({}),
-            body="",
-            managed_blocks=(),
+                path=path,
+                durable_fields=DurableFields(),
+                frontmatter=MappingProxyType({}),
+                body="",
+                managed_blocks=(),
                 findings=(ParseFinding("file-read-error", "error", path, 1, str(e)),),
             )
 
@@ -169,11 +169,15 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
 
     frontmatter_dict: dict[str, Any] = {}
     if yaml_str is not None:
+
         class StrictSafeLoader(yaml.SafeLoader):
             def construct_yaml_map(self, node: yaml.Node) -> Any:
                 if not isinstance(node, yaml.MappingNode):
                     raise yaml.constructor.ConstructorError(
-                        None, None, f"expected a mapping node, but found {type(node).__name__}", node.start_mark
+                        None,
+                        None,
+                        f"expected a mapping node, but found {type(node).__name__}",
+                        node.start_mark,
                     )
                 mapping = {}
                 for key_node, value_node in node.value:
@@ -296,7 +300,7 @@ def parse_markdown_note(path: Path, *, content: str | None = None) -> ParsedNote
         line_offset = body_line_offsets[body_line_index]
 
         # Fenced code and markers must be checked against line without \r
-        clean_line = line.rstrip('\r')
+        clean_line = line.rstrip("\r")
 
         previous_fence = fenced_code
         fenced_code = advance_fenced_code_state(clean_line, fenced_code)

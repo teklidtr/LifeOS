@@ -72,7 +72,9 @@ def _validate_path(path: Any) -> str:
     if ".." in parts:
         raise ProvenanceValidationError("Source path cannot contain parent traversal (..)")
     if "." in parts:
-        raise ProvenanceValidationError("Source path cannot contain current directory traversal (.)")
+        raise ProvenanceValidationError(
+            "Source path cannot contain current directory traversal (.)"
+        )
     if "\\" in path:
         raise ProvenanceValidationError("Source path cannot contain backslashes")
     if "\0" in path:
@@ -107,7 +109,9 @@ def _validate_timestamp(ts: Any) -> str:
     if not isinstance(ts, str):
         raise ProvenanceValidationError("Timestamp must be a string")
     if not TIMESTAMP_REGEX.match(ts):
-        raise ProvenanceValidationError("Timestamp must be strictly formatted as YYYY-MM-DDTHH:MM:SSZ")
+        raise ProvenanceValidationError(
+            "Timestamp must be strictly formatted as YYYY-MM-DDTHH:MM:SSZ"
+        )
 
     try:
         datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
@@ -144,7 +148,9 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
     if not isinstance(raw_sources, list):
         raise ProvenanceValidationError("sources must be a list")
     if not raw_sources:
-        raise ProvenanceValidationError("sources must contain at least one source for schema_version 1")
+        raise ProvenanceValidationError(
+            "sources must contain at least one source for schema_version 1"
+        )
 
     source_objs = []
     for raw_source in raw_sources:
@@ -167,9 +173,7 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
                 path=_validate_path(path),
                 content_hash=_validate_hash(content_hash),
                 acquisition_id=(
-                    _validate_acquisition_id(acquisition_id)
-                    if acquisition_id is not None
-                    else None
+                    _validate_acquisition_id(acquisition_id) if acquisition_id is not None else None
                 ),
             )
         )
@@ -187,7 +191,9 @@ def extract_provenance(frontmatter: Mapping[str, object]) -> LifeOSProvenance | 
         or "version" not in raw_generator
         or "prompt_schema_version" not in raw_generator
     ):
-        raise ProvenanceValidationError("generator must contain id, version, and prompt_schema_version")
+        raise ProvenanceValidationError(
+            "generator must contain id, version, and prompt_schema_version"
+        )
 
     gen_id = _validate_string_nonempty(raw_generator["id"], "generator id")
     gen_version = _validate_string_nonempty(raw_generator["version"], "generator version")

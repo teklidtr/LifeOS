@@ -24,6 +24,7 @@ def test_fast_pr_workflow_keeps_expensive_gates_out_of_synchronize_path() -> Non
 
     assert "types: [opened, synchronize, reopened]" in workflow
     assert "name: fast-checks" in workflow
+    assert "uv run ruff format --check ." in workflow
     assert "uv run pytest --collect-only -q" in workflow
     assert "uv run pytest -q tests/project" in workflow
     assert "run: uv run pytest -q\n" not in workflow
@@ -33,10 +34,10 @@ def test_fast_pr_workflow_keeps_expensive_gates_out_of_synchronize_path() -> Non
 def test_fast_pr_workflow_has_safe_documentation_only_path() -> None:
     workflow = _read(FAST_WORKFLOW)
 
-    assert "--ci-scope-output \"$GITHUB_OUTPUT\"" in workflow
+    assert '--ci-scope-output "$GITHUB_OUTPUT"' in workflow
     assert "--scope-only" in workflow
     assert "*.md) ;;" not in workflow
-    assert 'python scripts/check_documentation_impact.py --base-ref' in workflow
+    assert "python scripts/check_documentation_impact.py --base-ref" in workflow
     assert "python scripts/validate_manual_links.py" in workflow
     assert "if: steps.scope.outputs.docs_only != 'true'" in workflow
 
@@ -100,14 +101,10 @@ def test_arm64_build_uses_disposable_bounded_gha_layers_and_cold_fallback() -> N
     assert "docker/build-push-action@" in workflow
     assert "platforms: linux/arm64" in workflow
     assert "outputs: type=cacheonly" in workflow
-    assert (
-        "cache-from: type=gha,scope=lifeos-home-node-arm64,timeout=1m"
-        in workflow
-    )
+    assert "cache-from: type=gha,scope=lifeos-home-node-arm64,timeout=1m" in workflow
     assert (
         "cache-to: type=gha,mode=max,scope=lifeos-home-node-arm64,"
-        "ignore-error=true,timeout=1m"
-        in workflow
+        "ignore-error=true,timeout=1m" in workflow
     )
     assert "continue-on-error: true" in workflow
     assert "if: steps.arm64-build.outcome == 'failure'" in workflow
@@ -187,7 +184,6 @@ def test_mypy_cache_rotates_primary_key_and_restores_compatible_state() -> None:
     assert "${{ github.event.pull_request.number }}-${{ github.sha }}" in fast
     assert "${{ github.event.pull_request.number }}-\n" in _restore_keys_block(fast)
     assert "${{ github.event.pull_request.number || github.ref_name }}-${{ github.sha }}" in full
-    assert (
-        "${{ github.event.pull_request.number || github.ref_name }}-\n"
-        in _restore_keys_block(full)
+    assert "${{ github.event.pull_request.number || github.ref_name }}-\n" in _restore_keys_block(
+        full
     )

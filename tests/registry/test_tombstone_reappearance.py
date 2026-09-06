@@ -39,7 +39,9 @@ def test_delayed_reappearance_reports_last_canonical_path_not_tombstone(tmp_path
     result = register_scan(registry, vault, scan_vault(vault))
 
     assert result.renamed == [("wiki/note.md", "wiki/restored-a.md")]
-    assert all(".lifeos/registry-tombstones/" not in path for pair in result.renamed for path in pair)
+    assert all(
+        ".lifeos/registry-tombstones/" not in path for pair in result.renamed for path in pair
+    )
     restored = resolve_registered_stable_id(registry, "note-a")
     assert restored is not None
     assert restored.path == "wiki/restored-a.md"

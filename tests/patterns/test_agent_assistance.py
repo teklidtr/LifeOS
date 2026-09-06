@@ -47,7 +47,9 @@ def _observed(path: str, content_hash: str, role: str = "supporting") -> Observe
     return ObservedPatternEvidence(path=path, content_hash=content_hash, role=role)  # type: ignore[arg-type]
 
 
-def _semantic(hypothesis: str = "Walking before study may improve focus.") -> AgentPatternSemanticInput:
+def _semantic(
+    hypothesis: str = "Walking before study may improve focus.",
+) -> AgentPatternSemanticInput:
     return AgentPatternSemanticInput(
         hypothesis=hypothesis,
         rationale="The selected journal entries repeatedly place walking before focused sessions.",
@@ -99,7 +101,9 @@ def _provider_evidence(text: str = "Walked, then completed a focused study block
     )
 
 
-def test_new_agent_pattern_is_exact_evidence_bound_draft_with_counter_evidence(tmp_path: Path) -> None:
+def test_new_agent_pattern_is_exact_evidence_bound_draft_with_counter_evidence(
+    tmp_path: Path,
+) -> None:
     vault = tmp_path / "vault"
     support_hash = _write_source(
         vault,
@@ -147,7 +151,9 @@ def test_new_agent_pattern_is_exact_evidence_bound_draft_with_counter_evidence(t
     assert "No hidden chain-of-thought is stored" in proposal.body
 
 
-def test_changed_missing_and_protected_evidence_fail_before_draft_publication(tmp_path: Path) -> None:
+def test_changed_missing_and_protected_evidence_fail_before_draft_publication(
+    tmp_path: Path,
+) -> None:
     vault = tmp_path / "vault"
     observed_hash = _write_source(vault, "journal/source.md", "First version.\n")
     (vault / "journal" / "source.md").write_text("Changed version.\n", encoding="utf-8")
@@ -189,7 +195,9 @@ def test_changed_missing_and_protected_evidence_fail_before_draft_publication(tm
     assert not (vault / "proposals").exists()
 
 
-def test_existing_pattern_review_can_return_zero_change_or_a_hash_bound_revision(tmp_path: Path) -> None:
+def test_existing_pattern_review_can_return_zero_change_or_a_hash_bound_revision(
+    tmp_path: Path,
+) -> None:
     vault = tmp_path / "vault"
     support_hash = _write_source(
         vault,

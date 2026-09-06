@@ -223,9 +223,7 @@ def test_source_change_after_identity_binding_aborts_before_publication(
         kwargs["before_publish"] = mutate_then_verify
         return original_persist(**kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(
-        batch_module, "persist_compounding_wiki_proposal", mutate_at_before_publish
-    )
+    monkeypatch.setattr(batch_module, "persist_compounding_wiki_proposal", mutate_at_before_publish)
 
     with pytest.raises(ToolConflictError, match="Registered source has changed"):
         evolve_wiki_batch_proposal(
@@ -308,8 +306,7 @@ def test_stable_identity_binding_stale_target_maps_to_conflict(
 
     def mutate_before_identity_binding(**kwargs: object):
         target.write_text(
-            "---\nid: topic-stable\ntitle: Topic\n---\n"
-            "# Topic\n\n## Evidence\nchanged elsewhere\n",
+            "---\nid: topic-stable\ntitle: Topic\n---\n# Topic\n\n## Evidence\nchanged elsewhere\n",
             encoding="utf-8",
         )
         return original_persist(**kwargs)  # type: ignore[arg-type]

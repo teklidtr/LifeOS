@@ -47,8 +47,6 @@ def test_source_taxonomy_ignores_multiline_values_and_caps_exposure() -> None:
         (tuple(f"tag-{index}" for index in range(MAX_PROPOSED_TAGS + 1)), "more than"),
     ],
 )
-def test_invalid_proposed_tags_fail_deterministically(
-    tags: tuple[str, ...], message: str
-) -> None:
+def test_invalid_proposed_tags_fail_deterministically(tags: tuple[str, ...], message: str) -> None:
     with pytest.raises(TagValidationError, match=message):
         validate_proposed_tags(tags)

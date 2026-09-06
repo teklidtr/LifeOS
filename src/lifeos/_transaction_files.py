@@ -111,8 +111,7 @@ def _recovery_mutation_artifact_name(
     normalized_hash = content_hash.removeprefix("sha256:")
     digest = hashlib.sha256(
         (
-            f"{selected_token}\0{target_name}\0{normalized_hash}\0"
-            f"{stat.S_IMODE(mode)}\0{role}"
+            f"{selected_token}\0{target_name}\0{normalized_hash}\0{stat.S_IMODE(mode)}\0{role}"
         ).encode("utf-8")
     ).hexdigest()[:32]
     return f".{target_name}.{digest}.{role}"
@@ -222,7 +221,9 @@ def _open_relative_directory_chain(root_fd: int, relative_path: str) -> int:
             try:
                 next_fd = os.open(component, _DIRECTORY_FLAGS, dir_fd=current_fd)
             except OSError as error:
-                raise TransactionError("Canonical parent directory moved before mutation") from error
+                raise TransactionError(
+                    "Canonical parent directory moved before mutation"
+                ) from error
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -454,7 +455,9 @@ def _quarantine_verified_target(
         raise TransactionError(
             "Canonical target changed during guarded mutation; foreign quarantine retained"
         ) from verification_error
-    raise TransactionError("Canonical target changed during guarded mutation") from verification_error
+    raise TransactionError(
+        "Canonical target changed during guarded mutation"
+    ) from verification_error
 
 
 def _best_effort_remove(name: str | None, dir_fd: int) -> None:
@@ -544,7 +547,9 @@ def _remove_created_artifact(name: str, parent_fd: int) -> None:
     except FileNotFoundError:
         return
     except OSError as error:
-        raise TransactionError(f"Failed to clean up transaction artifact {name}: {error}") from error
+        raise TransactionError(
+            f"Failed to clean up transaction artifact {name}: {error}"
+        ) from error
 
 
 def _transaction_artifact_token(value: str | None) -> str | None:
@@ -873,12 +878,15 @@ def publish_replacement(
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     live_parent_fd = open_live_parent_for_mutation(staging.parent)
-    guard_name = _recovery_guard_name(
-        target_name,
-        content_hash=original_identity.content_hash,
-        mode=original_identity.mode,
-        suffix="replace",
-    ) or f".{target_name}.{secrets.token_hex(8)}.replace-guard"
+    guard_name = (
+        _recovery_guard_name(
+            target_name,
+            content_hash=original_identity.content_hash,
+            mode=original_identity.mode,
+            suffix="replace",
+        )
+        or f".{target_name}.{secrets.token_hex(8)}.replace-guard"
+    )
     quarantine_name: str | None = None
     guard_created = False
     try:
@@ -1000,12 +1008,15 @@ def remove_verified_target(
         return _legacy_remove_verified_target(target_name, parent, expected_identity)
 
     live_parent_fd = open_live_parent_for_mutation(parent)
-    guard_name = _recovery_guard_name(
-        target_name,
-        content_hash=expected_identity.content_hash,
-        mode=expected_identity.mode,
-        suffix="unlink",
-    ) or f".{target_name}.{secrets.token_hex(8)}.unlink-guard"
+    guard_name = (
+        _recovery_guard_name(
+            target_name,
+            content_hash=expected_identity.content_hash,
+            mode=expected_identity.mode,
+            suffix="unlink",
+        )
+        or f".{target_name}.{secrets.token_hex(8)}.unlink-guard"
+    )
     quarantine_name: str | None = None
     guard_created = False
     try:
@@ -1152,12 +1163,15 @@ def rollback_replacement(
     require_directory_binding(staging.parent.fd, staging.parent_binding)
 
     live_parent_fd = open_live_parent_for_mutation(staging.parent)
-    guard_name = _recovery_guard_name(
-        target_name,
-        content_hash=staging.candidate_hash,
-        mode=staging.intended_mode,
-        suffix="rollback",
-    ) or f".{target_name}.{secrets.token_hex(8)}.rollback-guard"
+    guard_name = (
+        _recovery_guard_name(
+            target_name,
+            content_hash=staging.candidate_hash,
+            mode=staging.intended_mode,
+            suffix="rollback",
+        )
+        or f".{target_name}.{secrets.token_hex(8)}.rollback-guard"
+    )
     quarantine_name: str | None = None
     guard_created = False
     try:

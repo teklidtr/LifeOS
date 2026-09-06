@@ -200,7 +200,9 @@ def _source_matches(
     for source in sources:
         root = source.path.split("/", 1)[0]
         domain_matches = [domain for domain in instruction.domains if root == domain]
-        path_matches = [pattern for pattern in instruction.paths if _glob_matches(source.path, pattern)]
+        path_matches = [
+            pattern for pattern in instruction.paths if _glob_matches(source.path, pattern)
+        ]
         if domain_matches or path_matches:
             matched_sources.append(source.path)
             reasons.update(f"domain:{domain}" for domain in domain_matches)
@@ -274,9 +276,7 @@ def load_instruction_report(
     path_filter: PathFilter | None = None,
 ) -> InstructionReport:
     """Load validated instructions from the one authoritative source."""
-    diagnostics = list(
-        _unauthorized_source_diagnostics(vault_root, path_filter=path_filter)
-    )
+    diagnostics = list(_unauthorized_source_diagnostics(vault_root, path_filter=path_filter))
     if path_filter is not None and not path_filter(_ALLOWED_SOURCE):
         return InstructionReport((), tuple(diagnostics), False)
     try:
@@ -366,11 +366,13 @@ def load_instruction_report(
     applicable = tuple(
         item
         for instruction in parsed
-        if (item := _apply_instruction(
-            instruction,
-            question_terms=question_terms,
-            sources=sources,
-        ))
+        if (
+            item := _apply_instruction(
+                instruction,
+                question_terms=question_terms,
+                sources=sources,
+            )
+        )
         is not None
     )
     ordered = tuple(

@@ -62,11 +62,7 @@ class _PrefixChunks:
 def _participates_in_stable_note_identity(entry: VaultFile) -> bool:
     first_root = entry.path.parts[0] if entry.path.parts else ""
     relative_path = entry.path.as_posix()
-    return (
-        entry.file_type == ".md"
-        and first_root != "proposals"
-        and relative_path != "AGENTS.md"
-    )
+    return entry.file_type == ".md" and first_root != "proposals" and relative_path != "AGENTS.md"
 
 
 def _capture_for(entry: VaultFile) -> tuple[_base._HashCapture, _PrefixChunks | None]:
@@ -233,7 +229,8 @@ def _prepare_scan_entries(
             for stable_id, paths in sorted(duplicates.items())
         )
         raise _base.FileTrackingError(
-            "Ambiguous stable note id(s) in canonical Markdown; registry refresh aborted: " + details
+            "Ambiguous stable note id(s) in canonical Markdown; registry refresh aborted: "
+            + details
         )
     return prepared
 
@@ -295,9 +292,7 @@ def register_scan(
     for entry in entries:
         path_str = entry.path.as_posix()
         if path_str in seen:
-            raise _base.FileTrackingError(
-                f"Duplicate normalized path in scan entries: {path_str}"
-            )
+            raise _base.FileTrackingError(f"Duplicate normalized path in scan entries: {path_str}")
         seen.add(path_str)
 
     prepared = _prepare_scan_entries(
@@ -315,9 +310,7 @@ def register_scan(
         try:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute("DROP TABLE IF EXISTS temp.seen_paths")
-            conn.execute(
-                "CREATE TEMP TABLE seen_paths (vault_path TEXT PRIMARY KEY NOT NULL)"
-            )
+            conn.execute("CREATE TEMP TABLE seen_paths (vault_path TEXT PRIMARY KEY NOT NULL)")
             for path_str in sorted(seen):
                 conn.execute("INSERT INTO seen_paths (vault_path) VALUES (?)", (path_str,))
 

@@ -39,7 +39,11 @@ def test_daily_and_weekly_identity_paths_cover_year_boundary() -> None:
     assert review_identity("daily", date(2026, 7, 16))[0] == "daily-2026-07-16"
     assert review_path("daily", date(2026, 7, 16)) == "reviews/daily/2026-07-16.md"
     review_id, start, end = review_identity("weekly", date(2026, 1, 1))
-    assert (review_id, start.isoformat(), end.isoformat()) == ("weekly-2026-W01", "2025-12-29", "2026-01-04")
+    assert (review_id, start.isoformat(), end.isoformat()) == (
+        "weekly-2026-W01",
+        "2025-12-29",
+        "2026-01-04",
+    )
     assert review_path("weekly", date(2026, 1, 1)) == "reviews/weekly/2026-W01.md"
 
 

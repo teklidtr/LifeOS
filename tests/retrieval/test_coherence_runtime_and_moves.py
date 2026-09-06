@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 import lifeos.retrieval.coherence_service as coherence_service
-from lifeos.retrieval import HybridRetriever, RetrievalIndex, RetrievalIndexService, RetrievalRequest
+from lifeos.retrieval import (
+    HybridRetriever,
+    RetrievalIndex,
+    RetrievalIndexService,
+    RetrievalRequest,
+)
 
 
 def _note(stable_id: str, title: str, body: str) -> str:

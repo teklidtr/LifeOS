@@ -43,8 +43,10 @@ def test_custom_in_vault_runtime_markdown_cannot_ambiguous_canonical_identity(
         return real_parser(note_path, content=content)
 
     monkeypatch.setattr(coherence_scoped, "parse_markdown_note", reject_runtime_read)
-    result = _server(vault, runtime_dir)._tool_manager.get_tool("vault_note_identity").fn(
-        vault_path="wiki/note.md"
+    result = (
+        _server(vault, runtime_dir)
+        ._tool_manager.get_tool("vault_note_identity")
+        .fn(vault_path="wiki/note.md")
     )
 
     assert result["stable_id"] == "shared-id"
@@ -95,10 +97,7 @@ def test_custom_runtime_is_excluded_from_all_composed_mcp_exploration(
     server = _server(vault, runtime_dir)
 
     listing = server._tool_manager.get_tool("vault_list").fn(prefix="wiki")
-    assert all(
-        not entry["path"].startswith("wiki/runtime-node")
-        for entry in listing["entries"]
-    )
+    assert all(not entry["path"].startswith("wiki/runtime-node") for entry in listing["entries"])
 
     search = server._tool_manager.get_tool("vault_search").fn(query=derived_probe)
     assert search["hits"] == []
@@ -107,19 +106,13 @@ def test_custom_runtime_is_excluded_from_all_composed_mcp_exploration(
     assert wiki_search["hits"] == []
 
     context = server._tool_manager.get_tool("vault_context").fn(question=derived_probe)
-    assert all(
-        not source["path"].startswith("wiki/runtime-node")
-        for source in context["sources"]
-    )
+    assert all(not source["path"].startswith("wiki/runtime-node") for source in context["sources"])
 
     links = server._tool_manager.get_tool("vault_links").fn(
         path="wiki/target.md",
         direction="backlinks",
     )
-    assert all(
-        not link["source_path"].startswith("wiki/runtime-node")
-        for link in links["links"]
-    )
+    assert all(not link["source_path"].startswith("wiki/runtime-node") for link in links["links"])
 
     with pytest.raises(ToolError):
         server._tool_manager.get_tool("vault_read_markdown").fn(

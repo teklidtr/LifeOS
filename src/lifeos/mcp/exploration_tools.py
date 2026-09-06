@@ -255,9 +255,7 @@ def build_policy_read_tools(
 
             def visible(paths: tuple[str, ...]) -> list[str]:
                 return [
-                    path
-                    for path in paths
-                    if _activity_path_allowed(path, vault_root=vault_root)
+                    path for path in paths if _activity_path_allowed(path, vault_root=vault_root)
                 ]
 
             return {

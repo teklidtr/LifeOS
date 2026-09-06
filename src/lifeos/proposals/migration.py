@@ -19,9 +19,7 @@ from .schema import (
 )
 
 SYNTHETIC_LIFECYCLE_ACTOR = "legacy"
-SYNTHETIC_REJECTION_REASON = (
-    "Migrated legacy proposal without a recorded rejection reason."
-)
+SYNTHETIC_REJECTION_REASON = "Migrated legacy proposal without a recorded rejection reason."
 _REVIEW_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -128,17 +126,13 @@ def migrate_legacy_metadata(
             )
         elif metadata.status is ProposalStatus.REJECTED:
             data["rejected_by"] = metadata.rejected_by or SYNTHETIC_LIFECYCLE_ACTOR
-            data["rejection_reason"] = (
-                metadata.rejection_reason or SYNTHETIC_REJECTION_REASON
-            )
+            data["rejection_reason"] = metadata.rejection_reason or SYNTHETIC_REJECTION_REASON
             data["applied_at"] = None
             data["applied_by"] = None
             if metadata.approved_at is None:
                 data["approved_by"] = None
             else:
-                data["approved_by"] = (
-                    metadata.approved_by or SYNTHETIC_LIFECYCLE_ACTOR
-                )
+                data["approved_by"] = metadata.approved_by or SYNTHETIC_LIFECYCLE_ACTOR
         elif metadata.status is ProposalStatus.APPLIED:
             data["approved_by"] = metadata.approved_by or SYNTHETIC_LIFECYCLE_ACTOR
             data["applied_by"] = metadata.applied_by or SYNTHETIC_LIFECYCLE_ACTOR
@@ -158,7 +152,6 @@ def migrate_legacy_metadata(
         ) from exc
 
 
-
 def _partition_proposals(
     proposals_root: Path,
 ) -> tuple[
@@ -167,9 +160,7 @@ def _partition_proposals(
     tuple[ProposalLoadFinding, ...],
 ]:
     collection = load_proposals(proposals_root)
-    errors = tuple(
-        finding for finding in collection.findings if finding.severity == "error"
-    )
+    errors = tuple(finding for finding in collection.findings if finding.severity == "error")
     if errors:
         first = errors[0]
         raise LegacyLifecycleMigrationError(
@@ -187,10 +178,9 @@ def _partition_proposals(
         for proposal in collection.proposals
         if proposal.metadata.lifecycle_schema_version is not None
     )
-    warnings = tuple(
-        finding for finding in collection.findings if finding.severity == "warning"
-    )
+    warnings = tuple(finding for finding in collection.findings if finding.severity == "warning")
     return legacy, skipped, warnings
+
 
 def plan_legacy_lifecycle_migration(
     proposals_root: Path,
@@ -249,9 +239,7 @@ def migrate_legacy_lifecycle(
                 exc.code,
                 exc.message,
                 proposal_id=exc.proposal_id,
-                migrated_proposal_ids=tuple(
-                    transition.proposal_id for transition in transitions
-                ),
+                migrated_proposal_ids=tuple(transition.proposal_id for transition in transitions),
             ) from exc
         transitions.append(transition)
 

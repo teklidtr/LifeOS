@@ -29,9 +29,7 @@ def test_runtime_replaces_legacy_reads_with_policy_aware_inputs(tmp_path: Path) 
 
 def test_exploration_request_value_errors_are_mapped_to_argument_errors() -> None:
     with pytest.raises(ToolError, match="Invalid LifeOS tool arguments"):
-        _invoke_mcp_tool(
-            lambda: _validated_request(lambda: VaultListRequest(limit=201))
-        )
+        _invoke_mcp_tool(lambda: _validated_request(lambda: VaultListRequest(limit=201)))
 
 
 def test_runtime_exploration_inputs_are_type_strict(tmp_path: Path) -> None:
@@ -106,9 +104,7 @@ def test_runtime_activity_refilters_protected_paths_after_explicit_read(tmp_path
 
     assert any(record["source_paths"] == ["wiki/public.md"] for record in read_records)
     assert any(record["source_paths"] == [] for record in read_records)
-    assert all(
-        "journal/private/secret.md" not in record["source_paths"] for record in read_records
-    )
+    assert all("journal/private/secret.md" not in record["source_paths"] for record in read_records)
 
 
 def test_runtime_activity_redacts_historical_instruction_ids(tmp_path: Path) -> None:

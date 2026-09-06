@@ -47,11 +47,17 @@ def test_schema_protocol_plugin_and_provider_neutral_contracts_align() -> None:
         "copilot.replanning.proposal.create",
     } <= set(CAPABILITIES)
     ts = Path("packages/obsidian-plugin/src/goal-plan.ts").read_text(encoding="utf-8").casefold()
-    workspace = Path("packages/obsidian-plugin/src/goal-plan-workspace.ts").read_text(encoding="utf-8").casefold()
+    workspace = (
+        Path("packages/obsidian-plugin/src/goal-plan-workspace.ts")
+        .read_text(encoding="utf-8")
+        .casefold()
+    )
     repository_contract = ts + workspace
     for provider in ("claude", "anthropic", "openai", "gemini"):
         assert provider not in repository_contract
-    assert compatibility_diagnostics(schema_version=99, path="goals/future.md")[0].severity == "error"
+    assert (
+        compatibility_diagnostics(schema_version=99, path="goals/future.md")[0].severity == "error"
+    )
 
 
 def test_large_vault_index_and_context_stay_within_release_budgets(tmp_path: Path) -> None:
@@ -90,10 +96,19 @@ def test_removing_disposable_copilot_state_preserves_canonical_markdown(tmp_path
     _write(goal_path, _goal(1).replace("goal-1", "goal-cell").replace("Goal 1", "Learn cells"))
     _write(
         plan_path,
-        _plan(1).replace("plan-1", "plan-cell").replace("goal-1", "goal-cell").replace("Plan 1", "Cell plan")
-        .replace("tasks: []", "decision_lineage:\n  - decision_id: decision-visible\n    outcome: continue-unchanged\n    rationale: Still fits\ntasks: []"),
+        _plan(1)
+        .replace("plan-1", "plan-cell")
+        .replace("goal-1", "goal-cell")
+        .replace("Plan 1", "Cell plan")
+        .replace(
+            "tasks: []",
+            "decision_lineage:\n  - decision_id: decision-visible\n    outcome: continue-unchanged\n    rationale: Still fits\ntasks: []",
+        ),
     )
-    _write(tmp_path / "proposals" / "prop-example" / "proposal.md", "---\nid: prop-example\ntitle: Example\nstatus: rejected\n---\n")
+    _write(
+        tmp_path / "proposals" / "prop-example" / "proposal.md",
+        "---\nid: prop-example\ntitle: Example\nstatus: rejected\n---\n",
+    )
     service = PlanningSessionService(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos")
     service.start(goal_path="goals/cell.md", session_id="session-removal")
     before_goal = goal_path.read_bytes()
@@ -104,8 +119,12 @@ def test_removing_disposable_copilot_state_preserves_canonical_markdown(tmp_path
     assert goal_path.read_bytes() == before_goal
     assert plan_path.read_bytes() == before_plan
     assert (tmp_path / "proposals" / "prop-example" / "proposal.md").read_bytes() == before_proposal
-    assert parse_goal_note(path="goals/cell.md", content=goal_path.read_text()).goal_id == "goal-cell"
-    assert parse_plan_note(path="plans/cell.md", content=plan_path.read_text()).plan_id == "plan-cell"
+    assert (
+        parse_goal_note(path="goals/cell.md", content=goal_path.read_text()).goal_id == "goal-cell"
+    )
+    assert (
+        parse_plan_note(path="plans/cell.md", content=plan_path.read_text()).plan_id == "plan-cell"
+    )
     rebuilt = build_copilot_index(tmp_path)
     assert rebuilt.goals[0].goal_id == "goal-cell" and rebuilt.plans[0].plan_id == "plan-cell"
     assert "decision-visible" in plan_path.read_text(encoding="utf-8")

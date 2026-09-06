@@ -3,13 +3,29 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Iterable
+from typing import Iterable, Literal
 
-from lifeos.feedback.models import CapacityDimension, CapacityFitSummary, FeedbackObservation
+from lifeos.feedback.models import (
+    CapacityDimension,
+    CapacityFitSummary,
+    Confidence,
+    FeedbackObservation,
+)
 
 CAPACITY_POLICY_VERSION = 1
 _LEVELS = {"low": 1, "medium": 2, "high": 3}
-_DIMENSIONS = ("energy", "motivation", "mode", "duration_band", "time_window", "blocker")
+_CapacityDimensionName = Literal[
+    "energy", "motivation", "mode", "duration_band", "time_window", "blocker"
+]
+_CapacityDirection = Literal["better_fit", "worse_fit", "neutral"]
+_DIMENSIONS: tuple[_CapacityDimensionName, ...] = (
+    "energy",
+    "motivation",
+    "mode",
+    "duration_band",
+    "time_window",
+    "blocker",
+)
 
 
 def _score(item: FeedbackObservation) -> float | None:
@@ -44,7 +60,7 @@ def _time_window(item: FeedbackObservation) -> str | None:
     return "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
 
 
-def _confidence(count: int, effect: float, *, minimum: int) -> str:
+def _confidence(count: int, effect: float, *, minimum: int) -> Confidence:
     if count < minimum:
         return "insufficient"
     if count >= minimum * 2 and abs(effect) >= 0.15:
@@ -56,7 +72,7 @@ def _confidence(count: int, effect: float, *, minimum: int) -> str:
 
 def _dimension(
     *,
-    name: str,
+    name: _CapacityDimensionName,
     observations: tuple[FeedbackObservation, ...],
     baseline: float,
     current_value: object,
@@ -66,9 +82,33 @@ def _dimension(
     stale_after_days: int,
 ) -> CapacityDimension:
     if name in disabled:
-        return CapacityDimension(name, "disabled", 0, 0, None, baseline, 0.0, "unknown", "insufficient", (), f"{name} feedback is disabled.")  # type: ignore[arg-type]
+        return CapacityDimension(
+            name,
+            "disabled",
+            0,
+            0,
+            None,
+            baseline,
+            0.0,
+            "unknown",
+            "insufficient",
+            (),
+            f"{name} feedback is disabled.",
+        )
     if current_value is None or current_value == "":
-        return CapacityDimension(name, "missing", 0, len(observations), None, baseline, 0.0, "unknown", "insufficient", (), f"No current {name} value was supplied.")  # type: ignore[arg-type]
+        return CapacityDimension(
+            name,
+            "missing",
+            0,
+            len(observations),
+            None,
+            baseline,
+            0.0,
+            "unknown",
+            "insufficient",
+            (),
+            f"No current {name} value was supplied.",
+        )
     usable: list[tuple[FeedbackObservation, float]] = []
     missing = 0
     for item in observations:
@@ -95,16 +135,54 @@ def _dimension(
         elif value == current_value:
             usable.append((item, score))
     if len(usable) < minimum:
-        return CapacityDimension(name, "insufficient", len(usable), missing, None, baseline, 0.0, "unknown", "insufficient", tuple(sorted(item.event_id for item, _ in usable)), f"Only {len(usable)} comparable {name} observations are available; no adjustment is applied.")  # type: ignore[arg-type]
+        return CapacityDimension(
+            name,
+            "insufficient",
+            len(usable),
+            missing,
+            None,
+            baseline,
+            0.0,
+            "unknown",
+            "insufficient",
+            tuple(sorted(item.event_id for item, _ in usable)),
+            f"Only {len(usable)} comparable {name} observations are available; no adjustment is applied.",
+        )
     rate = sum(score for _, score in usable) / len(usable)
     raw_effect = rate - baseline
     contradictory = 0.35 < rate < 0.65 and len(usable) >= minimum * 2
     if contradictory:
-        return CapacityDimension(name, "contradictory", len(usable), missing, round(rate, 4), round(baseline, 4), 0.0, "neutral", "low", tuple(sorted(item.event_id for item, _ in usable)), f"Comparable {name} outcomes are mixed; this association is not used.")  # type: ignore[arg-type]
+        return CapacityDimension(
+            name,
+            "contradictory",
+            len(usable),
+            missing,
+            round(rate, 4),
+            round(baseline, 4),
+            0.0,
+            "neutral",
+            "low",
+            tuple(sorted(item.event_id for item, _ in usable)),
+            f"Comparable {name} outcomes are mixed; this association is not used.",
+        )
     adjustment = max(-0.15, min(0.15, raw_effect * 0.3))
-    direction = "better_fit" if adjustment >= 0.03 else "worse_fit" if adjustment <= -0.03 else "neutral"
+    direction: _CapacityDirection = (
+        "better_fit" if adjustment >= 0.03 else "worse_fit" if adjustment <= -0.03 else "neutral"
+    )
     confidence = _confidence(len(usable), raw_effect, minimum=minimum)
-    return CapacityDimension(name, "used", len(usable), missing, round(rate, 4), round(baseline, 4), round(adjustment, 4), direction, confidence, tuple(sorted(item.event_id for item, _ in usable)), f"Recorded {name} is associated with a {direction.replace('_', ' ')} in this history; this is tentative and noncausal.")  # type: ignore[arg-type]
+    return CapacityDimension(
+        name,
+        "used",
+        len(usable),
+        missing,
+        round(rate, 4),
+        round(baseline, 4),
+        round(adjustment, 4),
+        direction,
+        confidence,
+        tuple(sorted(item.event_id for item, _ in usable)),
+        f"Recorded {name} is associated with a {direction.replace('_', ' ')} in this history; this is tentative and noncausal.",
+    )
 
 
 def summarize_capacity_fit(
@@ -123,7 +201,13 @@ def summarize_capacity_fit(
     stale_after_days: int = 180,
 ) -> CapacityFitSummary:
     items = tuple(sorted(observations, key=lambda item: (item.day, item.event_id)))
-    scored = [score for item in items if (score := _score(item)) is not None and item.day <= as_of and (as_of - item.day).days <= stale_after_days]
+    scored = [
+        score
+        for item in items
+        if (score := _score(item)) is not None
+        and item.day <= as_of
+        and (as_of - item.day).days <= stale_after_days
+    ]
     baseline = sum(scored) / len(scored) if scored else 0.5
     values: dict[str, object] = {
         "energy": current_energy,
@@ -135,12 +219,21 @@ def summarize_capacity_fit(
     }
     disabled = set(disabled_dimensions)
     dimensions = tuple(
-        _dimension(name=name, observations=items, baseline=baseline, current_value=values[name], disabled=disabled, minimum=minimum_samples, as_of=as_of, stale_after_days=stale_after_days)
+        _dimension(
+            name=name,
+            observations=items,
+            baseline=baseline,
+            current_value=values[name],
+            disabled=disabled,
+            minimum=minimum_samples,
+            as_of=as_of,
+            stale_after_days=stale_after_days,
+        )
         for name in _DIMENSIONS
     )
     used = [item for item in dimensions if item.status == "used"]
     total = max(-0.25, min(0.25, sum(item.adjustment for item in used)))
-    confidence = "insufficient"
+    confidence: Confidence = "insufficient"
     if used:
         ranks = {"insufficient": 0, "low": 1, "moderate": 2, "high": 3}
         confidence = min((item.confidence for item in used), key=lambda value: ranks[value])
@@ -148,7 +241,7 @@ def summarize_capacity_fit(
         CAPACITY_POLICY_VERSION,
         task_id,
         round(total, 4),
-        confidence,  # type: ignore[arg-type]
+        confidence,
         dimensions,
         tuple(sorted(disabled)),
         "These are tentative associations from explicit outcomes. They do not establish causation, health effects, discipline, or personal worth.",

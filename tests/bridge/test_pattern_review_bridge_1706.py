@@ -5,7 +5,12 @@ from pathlib import Path
 
 from lifeos.bridge import BridgeApplication
 from lifeos.ownership.manifest import serialize_generated_ownership_bytes
-from lifeos.patterns import PatternMetadata, PatternOrigin, compute_evidence_fingerprint, serialize_pattern
+from lifeos.patterns import (
+    PatternMetadata,
+    PatternOrigin,
+    compute_evidence_fingerprint,
+    serialize_pattern,
+)
 
 NOW = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
 

@@ -11,8 +11,23 @@ from typing import Any, Literal
 
 from lifeos.coherence import CoherenceError
 from lifeos.coherence_scoped import runtime_exclusion_prefix
-from lifeos.facade.authorization import AuthorizedPrincipal, ConsequentialAction, ConsequentialAuthorizationRequest, ConsequentialAuthorizer, AuthorizationDeniedError
-from lifeos.facade.consequential_tools import AcceptProposalRequest, ApplyProposalRequest, ApproveProposalRequest, SubmitProposalRequest, accept_proposal_tool, apply_proposal_tool, approve_proposal_tool, submit_proposal_tool
+from lifeos.facade.authorization import (
+    AuthorizedPrincipal,
+    ConsequentialAction,
+    ConsequentialAuthorizationRequest,
+    ConsequentialAuthorizer,
+    AuthorizationDeniedError,
+)
+from lifeos.facade.consequential_tools import (
+    AcceptProposalRequest,
+    ApplyProposalRequest,
+    ApproveProposalRequest,
+    SubmitProposalRequest,
+    accept_proposal_tool,
+    apply_proposal_tool,
+    approve_proposal_tool,
+    submit_proposal_tool,
+)
 from lifeos.facade.errors import ToolFacadeError
 from lifeos.proposals.lifecycle import compute_review_digest, reject_proposal
 from lifeos.proposals.loader import load_proposal_directory
@@ -71,7 +86,9 @@ class OneUseUiAuthorizer(ConsequentialAuthorizer):
         self._grants: dict[str, tuple[ConsequentialAction, str, str | None]] = {}
         self._active_token: str | None = None
 
-    def issue(self, *, action: ConsequentialAction, proposal_id: str, review_digest: str | None) -> str:
+    def issue(
+        self, *, action: ConsequentialAction, proposal_id: str, review_digest: str | None
+    ) -> str:
         token = secrets.token_urlsafe(24)
         self._grants[token] = (action, proposal_id, review_digest)
         return token
@@ -120,8 +137,7 @@ class DesktopProposalService:
 
     def list_orphaned_ownership(self) -> tuple[dict[str, Any], ...]:
         return tuple(
-            orphan.to_dict()
-            for orphan in list_orphaned_generated_ownership(self.vault_root)
+            orphan.to_dict() for orphan in list_orphaned_generated_ownership(self.vault_root)
         )
 
     def create_ownership_release_proposal(self, target_path: str) -> dict[str, str]:
@@ -156,9 +172,7 @@ class DesktopProposalService:
                 strict=True,
             )
         )
-        findings = [
-            f"{finding.code}: {finding.message}" for finding in loaded.findings
-        ]
+        findings = [f"{finding.code}: {finding.message}" for finding in loaded.findings]
         if proposal.review_snapshot is None:
             findings.append(
                 "legacy_review_snapshot_missing: diff preview is reconstructed from current vault state"
@@ -249,10 +263,20 @@ class DesktopProposalService:
             "reject": ConsequentialAction.APPROVE,
         }[action]
         digest = None if action == "submit" else inspection.review_digest
-        token = self.authorizer.issue(action=action_enum, proposal_id=proposal_id, review_digest=digest)
-        return ConfirmationChallenge(token, proposal_id, action, inspection.review_digest, datetime.now(timezone.utc).isoformat())
+        token = self.authorizer.issue(
+            action=action_enum, proposal_id=proposal_id, review_digest=digest
+        )
+        return ConfirmationChallenge(
+            token,
+            proposal_id,
+            action,
+            inspection.review_digest,
+            datetime.now(timezone.utc).isoformat(),
+        )
 
-    def execute(self, *, proposal_id: str, action: ProposalAction, token: str, reason: str | None = None) -> dict[str, Any]:
+    def execute(
+        self, *, proposal_id: str, action: ProposalAction, token: str, reason: str | None = None
+    ) -> dict[str, Any]:
         self.authorizer.activate(token)
         try:
             if action == "accept":
@@ -265,9 +289,21 @@ class DesktopProposalService:
                     )
                 )
             if action == "submit":
-                return asdict(submit_proposal_tool(vault_root=self.vault_root, request=SubmitProposalRequest(proposal_id), authorizer=self.authorizer))
+                return asdict(
+                    submit_proposal_tool(
+                        vault_root=self.vault_root,
+                        request=SubmitProposalRequest(proposal_id),
+                        authorizer=self.authorizer,
+                    )
+                )
             if action == "approve":
-                return asdict(approve_proposal_tool(vault_root=self.vault_root, request=ApproveProposalRequest(proposal_id), authorizer=self.authorizer))
+                return asdict(
+                    approve_proposal_tool(
+                        vault_root=self.vault_root,
+                        request=ApproveProposalRequest(proposal_id),
+                        authorizer=self.authorizer,
+                    )
+                )
             if action == "apply":
                 return asdict(
                     apply_proposal_tool(
@@ -279,9 +315,14 @@ class DesktopProposalService:
                 )
             if action == "reject":
                 inspection = self.inspect(proposal_id)
-                request = ConsequentialAuthorizationRequest(ConsequentialAction.APPROVE, proposal_id, inspection.review_digest)
+                request = ConsequentialAuthorizationRequest(
+                    ConsequentialAction.APPROVE, proposal_id, inspection.review_digest
+                )
                 grant = self.authorizer.authorize(request)
-                loaded = load_proposal_directory(self.vault_root / "proposals" / proposal_id, proposals_root=self.vault_root / "proposals")
+                loaded = load_proposal_directory(
+                    self.vault_root / "proposals" / proposal_id,
+                    proposals_root=self.vault_root / "proposals",
+                )
                 if loaded.proposal is None:
                     raise ValueError("Proposal is missing")
                 result = reject_proposal(

@@ -36,11 +36,7 @@ def test_compare_registered_unchanged(tmp_path: Path) -> None:
 
     register_scan(registry, vault, [VaultFile(Path("test.md"), "markdown", len(b"content"))])
 
-    result = compare_registered_file(
-        registry,
-        "test.md",
-        hash_file_content(b"content")
-    )
+    result = compare_registered_file(registry, "test.md", hash_file_content(b"content"))
     assert result.state == FileRegistrationState.REGISTERED_UNCHANGED
     assert result.path == "test.md"
     assert result.working_tree_hash == hash_file_content(b"content")
@@ -61,11 +57,7 @@ def test_compare_registered_modified(tmp_path: Path) -> None:
     register_scan(registry, vault, [VaultFile(Path("test.md"), "markdown", len(b"content"))])
 
     new_hash = hash_file_content(b"new content")
-    result = compare_registered_file(
-        registry,
-        "test.md",
-        new_hash
-    )
+    result = compare_registered_file(registry, "test.md", new_hash)
     assert result.state == FileRegistrationState.REGISTERED_MODIFIED
     assert result.registry_hash == hash_file_content(b"content")
     assert result.working_tree_hash == new_hash
@@ -84,11 +76,7 @@ def test_compare_registered_missing(tmp_path: Path) -> None:
 
     register_scan(registry, vault, [VaultFile(Path("test.md"), "markdown", len(b"content"))])
 
-    result = compare_registered_file(
-        registry,
-        "test.md",
-        None
-    )
+    result = compare_registered_file(registry, "test.md", None)
     assert result.state == FileRegistrationState.REGISTERED_MISSING
     assert result.registry_hash == hash_file_content(b"content")
     assert result.working_tree_hash is None
@@ -101,11 +89,7 @@ def test_compare_unregistered_present(tmp_path: Path) -> None:
     registry.initialize()
 
     content_hash = hash_file_content(b"content")
-    result = compare_registered_file(
-        registry,
-        "test.md",
-        content_hash
-    )
+    result = compare_registered_file(registry, "test.md", content_hash)
     assert result.state == FileRegistrationState.UNREGISTERED_PRESENT
     assert result.registry_hash is None
     assert result.working_tree_hash == content_hash
@@ -117,11 +101,7 @@ def test_compare_unregistered_missing(tmp_path: Path) -> None:
     registry = Registry(db_path)
     registry.initialize()
 
-    result = compare_registered_file(
-        registry,
-        "test.md",
-        None
-    )
+    result = compare_registered_file(registry, "test.md", None)
     assert result.state == FileRegistrationState.UNREGISTERED_MISSING
     assert result.registry_hash is None
     assert result.working_tree_hash is None
@@ -188,10 +168,14 @@ def test_hash_validation_rejects_invalid_hashes(tmp_path: Path) -> None:
     db_path = tmp_path / "registry.db"
     registry = Registry(db_path)
 
-    with pytest.raises(FileTrackingError, match="must be exactly 64 lowercase hexadecimal characters"):
+    with pytest.raises(
+        FileTrackingError, match="must be exactly 64 lowercase hexadecimal characters"
+    ):
         compare_registered_file(registry, "test.md", "short")
 
-    with pytest.raises(FileTrackingError, match="must be exactly 64 lowercase hexadecimal characters"):
+    with pytest.raises(
+        FileTrackingError, match="must be exactly 64 lowercase hexadecimal characters"
+    ):
         compare_registered_file(registry, "test.md", "A" * 64)
 
 
@@ -210,6 +194,7 @@ def test_unsupported_old_schema_raises_exception(tmp_path: Path) -> None:
     """Old or unavailable registry is not migrated and raises."""
     db_path = tmp_path / "registry.db"
     import sqlite3
+
     with sqlite3.connect(db_path) as conn:
         conn.execute("CREATE TABLE schema_migrations (version INTEGER, name TEXT, applied_at TEXT)")
         # Insert a very old version, skipping intermediate migrations so it fails history check
@@ -228,6 +213,7 @@ def test_unsupported_new_schema_raises_exception(tmp_path: Path) -> None:
     registry.initialize()
 
     import sqlite3
+
     with sqlite3.connect(db_path) as conn:
         conn.execute("INSERT INTO schema_migrations VALUES (9999, 'future', '2026')")
 
@@ -261,6 +247,7 @@ def test_comparison_performs_no_writes(tmp_path: Path) -> None:
 
     # Verify rows haven't changed using a direct connection
     import sqlite3
+
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT content_hash FROM files WHERE vault_path = 'test.md'").fetchone()

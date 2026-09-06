@@ -104,11 +104,7 @@ def transaction_artifacts(vault: Path) -> tuple[Path, ...]:
         ".unlink-quarantine",
         ".cleanup-quarantine",
     )
-    return tuple(
-        path
-        for path in vault.rglob("*")
-        if path.name.endswith(suffixes)
-    )
+    return tuple(path for path in vault.rglob("*") if path.name.endswith(suffixes))
 
 
 def recovery_entries(runtime: Path) -> tuple[Path, ...]:
@@ -128,9 +124,7 @@ def test_merge_preview_is_bound_and_duplicate_sources_are_rejected(tmp_path: Pat
         processing.apply_merge(replace(preview, title="Unreviewed title"), now=NOW)
     assert fingerprint_tamper.value.code == "invalid_merge_preview"
     with pytest.raises(CaptureError) as legacy_tamper:
-        processing.apply_merge(
-            replace(preview, title="Unreviewed title", fingerprint=""), now=NOW
-        )
+        processing.apply_merge(replace(preview, title="Unreviewed title", fingerprint=""), now=NOW)
     assert legacy_tamper.value.code == "invalid_merge_preview"
 
 
@@ -176,7 +170,9 @@ def test_merge_and_split_preserve_policy_lineage_and_human_authority(tmp_path: P
     )
     first_path = vault / first.path
     second_path = vault / second.path
-    first_path.write_text(first_path.read_text().replace("## User annotations", "## User annotations\n\nAlpha"))
+    first_path.write_text(
+        first_path.read_text().replace("## User annotations", "## User annotations\n\nAlpha")
+    )
     second_path.write_text(
         second_path.read_text().replace("## User annotations", "## User annotations\n\nBeta")
     )
@@ -247,10 +243,7 @@ def test_split_rejects_lossy_or_ambiguous_groups_before_writing(
         now=NOW,
     )
     normalized = tuple(
-        tuple(
-            first_ref.attachment_id if item == "first" else item
-            for item in group
-        )
+        tuple(first_ref.attachment_id if item == "first" else item for item in group)
         for group in groups
     )
 
@@ -273,9 +266,7 @@ def test_unarchivable_sources_fail_before_merge_or_split_outputs(tmp_path: Path)
     first = captures.create(
         title="Processing", capture_type="mixed", attachments=(first_ref, second_ref), now=NOW
     )
-    first = captures.transition(
-        first.path, "processing", expected_hash=first.content_hash, now=NOW
-    )
+    first = captures.transition(first.path, "processing", expected_hash=first.content_hash, now=NOW)
     second = captures.create(title="Other", capture_type="attachment", now=NOW)
     preview = processing.merge_preview((first.path, second.path))
     with pytest.raises(CaptureError) as merge_error:
@@ -344,12 +335,8 @@ def test_interrupted_merge_recovers_then_retries_idempotently(
     monkeypatch.setattr(
         "lifeos.captures.transaction._capture_transaction_checkpoint", lambda _name: None
     )
-    merged = processing.apply_merge(
-        preview, idempotency_key="recoverable-merge", now=NOW
-    )
-    retried = processing.apply_merge(
-        preview, idempotency_key="recoverable-merge", now=NOW
-    )
+    merged = processing.apply_merge(preview, idempotency_key="recoverable-merge", now=NOW)
+    retried = processing.apply_merge(preview, idempotency_key="recoverable-merge", now=NOW)
     assert retried.path == merged.path
     assert len(captures.list()) == 3
     assert captures.load(first.path).metadata.state == "archived"
@@ -369,9 +356,7 @@ def test_source_edit_after_preparation_is_preserved_and_no_output_survives(
         if name == "after_prepared":
             atomic_edit(vault / first.path, edited)
 
-    monkeypatch.setattr(
-        "lifeos.captures.transaction._capture_transaction_checkpoint", edit_source
-    )
+    monkeypatch.setattr("lifeos.captures.transaction._capture_transaction_checkpoint", edit_source)
     with pytest.raises(CaptureError) as stale:
         processing.apply_merge(preview, idempotency_key="racing-edit", now=NOW)
 
@@ -393,9 +378,7 @@ def test_split_source_edit_after_preparation_is_preserved(
         if name == "after_prepared":
             atomic_edit(vault / source.path, edited)
 
-    monkeypatch.setattr(
-        "lifeos.captures.transaction._capture_transaction_checkpoint", edit_source
-    )
+    monkeypatch.setattr("lifeos.captures.transaction._capture_transaction_checkpoint", edit_source)
     with pytest.raises(CaptureError) as stale:
         processing.split(
             source.path,
@@ -520,9 +503,7 @@ def test_idempotency_survives_disposable_result_cache_and_conflicts_fail_closed(
     fourth = captures.create(title="Fourth", capture_type="attachment", now=NOW)
     conflicting_preview = processing.merge_preview((third.path, fourth.path))
     with pytest.raises(CaptureError) as conflict:
-        processing.apply_merge(
-            conflicting_preview, idempotency_key="stable-key", now=NOW
-        )
+        processing.apply_merge(conflicting_preview, idempotency_key="stable-key", now=NOW)
     assert conflict.value.code == "idempotency_conflict"
     assert captures.load(third.path).metadata.state == "captured"
     assert captures.load(fourth.path).metadata.state == "captured"
@@ -729,8 +710,7 @@ def test_forged_merge_marker_requires_complete_canonical_lineage(tmp_path: Path)
         title="Forged merge result",
         capture_type="attachment",
         source_entry_point=(
-            "capture-mutation:merge:"
-            f"{key_hash}:{preview.fingerprint.removeprefix('sha256:')}:1:1"
+            f"capture-mutation:merge:{key_hash}:{preview.fingerprint.removeprefix('sha256:')}:1:1"
         ),
         now=NOW,
     )
@@ -753,17 +733,16 @@ def test_forged_split_markers_require_complete_canonical_lineage(tmp_path: Path)
         "source_hash": source.content_hash,
         "groups": [list(group) for group in groups],
     }
-    payload = json.dumps(
-        request, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+    payload = json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     request_fingerprint = hashlib.sha256(payload).hexdigest()
     for index in (1, 2):
         forged = captures.prepare_create(
             title=f"Forged split result {index}",
             capture_type="attachment",
             source_entry_point=(
-                "capture-mutation:split:"
-                f"{key_hash}:{request_fingerprint}:{index}:2"
+                f"capture-mutation:split:{key_hash}:{request_fingerprint}:{index}:2"
             ),
             now=NOW,
         )
@@ -834,11 +813,7 @@ def test_missing_staging_proof_blocks_committed_recovery_and_retains_journal(
     journal = json.loads((transaction_dir / "journal.json").read_text())
     operation = journal["operations"][0]
     target = Path(operation["path"])
-    staging = (
-        vault
-        / target.parent
-        / f".{target.name}.{operation['artifact_token']}.staged"
-    )
+    staging = vault / target.parent / f".{target.name}.{operation['artifact_token']}.staged"
     staging.unlink()
 
     with pytest.raises(CaptureTransactionError) as blocked:
@@ -864,9 +839,7 @@ def test_unexpected_reserved_mutation_artifact_blocks_recovery(
         "lifeos.captures.transaction._capture_transaction_checkpoint", crash_after_prepare
     )
     with pytest.raises(SystemExit):
-        processing.apply_merge(
-            preview, idempotency_key=f"unexpected-{suffix}", now=NOW
-        )
+        processing.apply_merge(preview, idempotency_key=f"unexpected-{suffix}", now=NOW)
 
     transaction_dir = recovery_entries(runtime)[0]
     journal = json.loads((transaction_dir / "journal.json").read_text())
@@ -950,9 +923,9 @@ def test_recomputed_three_source_omission_cannot_rebind_canonical_artifacts(
             for operation in journal["operations"]
         ],
     }
-    serialized = (
-        json.dumps(intent_payload, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
+    serialized = (json.dumps(intent_payload, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "utf-8"
+    )
     intent_hash = hashlib.sha256(serialized).hexdigest()
     journal["intent_hash"] = intent_hash
     journal["transaction_id"] = f"ctx-{intent_hash[:32]}"
@@ -1016,9 +989,7 @@ def test_malformed_journal_json_limits_fail_as_recovery_required(
         "lifeos.captures.transaction._capture_transaction_checkpoint", crash_after_prepare
     )
     with pytest.raises(SystemExit):
-        processing.apply_merge(
-            preview, idempotency_key=f"journal-{malformed_kind}", now=NOW
-        )
+        processing.apply_merge(preview, idempotency_key=f"journal-{malformed_kind}", now=NOW)
 
     transaction_dir = recovery_entries(runtime)[0]
     journal_path = transaction_dir / "journal.json"

@@ -13,11 +13,14 @@ from lifeos.proposals.schema import ProposalMetadata, ProposalStatus
 from lifeos.registry._registry import Registry, RegistryError
 from lifeos.scanner.git import git_tracked_proposal_paths
 
+
 class ProposalScanError(RuntimeError):
     """Raised when proposal scanning or indexing fails."""
 
+
 class ProposalQueryError(RegistryError):
     """Raised when proposal registry querying or row conversion fails."""
+
 
 @dataclass(frozen=True)
 class ProposalSummary:
@@ -26,6 +29,7 @@ class ProposalSummary:
     title: str
     created_at: str
     updated_at: str
+
 
 def list_proposals(
     connection: sqlite3.Connection,
@@ -56,13 +60,15 @@ def list_proposals(
         except ValueError as e:
             raise ProposalQueryError("Invalid status value in database") from e
 
-        summaries.append(ProposalSummary(
-            id=row_id,
-            status=parsed_status,
-            title=row_title,
-            created_at=row_created,
-            updated_at=row_updated,
-        ))
+        summaries.append(
+            ProposalSummary(
+                id=row_id,
+                status=parsed_status,
+                title=row_title,
+                created_at=row_created,
+                updated_at=row_updated,
+            )
+        )
 
     return tuple(summaries)
 
@@ -142,13 +148,15 @@ def register_proposals_scan(registry: Registry, *, vault_root: Path) -> None:
 
         meta = res.proposal.metadata
         updated_at = derive_proposal_updated_at(meta)
-        rows.append((
-            meta.id,
-            meta.status.value,
-            meta.title,
-            meta.created_at,
-            updated_at,
-        ))
+        rows.append(
+            (
+                meta.id,
+                meta.status.value,
+                meta.title,
+                meta.created_at,
+                updated_at,
+            )
+        )
 
     # Deterministic order by ID (already ordered by path which implies ordered by ID)
     rows.sort(key=lambda r: r[0])

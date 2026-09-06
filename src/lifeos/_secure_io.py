@@ -46,7 +46,9 @@ def open_directory_secure(dir_path: Path, dir_fd: int | None = None) -> int:
         else:
             fd = os.open(str(dir_path), flags)
     except OSError as e:
-        raise SecureIOError(code="dir_open_failed", message=f"Failed to open directory: {e.strerror}")
+        raise SecureIOError(
+            code="dir_open_failed", message=f"Failed to open directory: {e.strerror}"
+        )
 
     return fd
 

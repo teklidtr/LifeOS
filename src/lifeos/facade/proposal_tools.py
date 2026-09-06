@@ -236,7 +236,10 @@ class CompoundWikiProposalRequest:
             heading=self.update_heading,
             body=self.update_body,
         )
-        if self.create_target_path is not None and self.create_target_path == self.update_target_path:
+        if (
+            self.create_target_path is not None
+            and self.create_target_path == self.update_target_path
+        ):
             raise ValueError("create and update targets must be different")
         try:
             object.__setattr__(self, "create_tags", validate_proposed_tags(self.create_tags))
@@ -560,7 +563,9 @@ def create_wiki_proposal(
         slug=request.slug,
     )
     ownership = _load_generated_ownership(vault_root=vault_root)
-    _check_create_target_ownership(vault_root=vault_root, target_path=target_path, ownership=ownership)
+    _check_create_target_ownership(
+        vault_root=vault_root, target_path=target_path, ownership=ownership
+    )
     generator = ProvenanceGenerator(
         id=GENERATOR_ID,
         version=GENERATOR_VERSION,
@@ -644,9 +649,10 @@ def update_wiki_section_proposal(
     )
     if request.tags is not None and ownership_entry is None:
         raise ToolValidationError("Ingestion cannot change tags on a human-owned wiki target")
-    if ownership_entry is None and parse_markdown_note(
-        Path(target_path), content=target.content
-    ).managed_blocks:
+    if (
+        ownership_entry is None
+        and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
+    ):
         raise ToolValidationError(
             "Wiki update target contains managed blocks and cannot use a human patch"
         )
@@ -746,9 +752,12 @@ def create_wiki_and_update_section_proposal(
         target_content=update_target.content_bytes,
         ownership=ownership,
     )
-    if update_ownership_entry is None and parse_markdown_note(
-        Path(update_target_path), content=update_target.content
-    ).managed_blocks:
+    if (
+        update_ownership_entry is None
+        and parse_markdown_note(
+            Path(update_target_path), content=update_target.content
+        ).managed_blocks
+    ):
         raise ToolValidationError(
             "Wiki update target contains managed blocks and cannot use a human patch"
         )
@@ -883,9 +892,10 @@ def evolve_wiki_proposal(
         )
         if update_item.tags is not None and ownership_entry is None:
             raise ToolValidationError("Ingestion cannot change tags on a human-owned wiki target")
-        if ownership_entry is None and parse_markdown_note(
-            Path(target_path), content=target.content
-        ).managed_blocks:
+        if (
+            ownership_entry is None
+            and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
+        ):
             raise ToolValidationError(
                 "Wiki update target contains managed blocks and cannot use a human patch"
             )
@@ -1008,9 +1018,10 @@ def evolve_study_learning_proposal(
             raise ToolValidationError(
                 "Study ingestion cannot change tags on a human-owned wiki target"
             )
-        if ownership_entry is None and parse_markdown_note(
-            Path(target_path), content=target.content
-        ).managed_blocks:
+        if (
+            ownership_entry is None
+            and parse_markdown_note(Path(target_path), content=target.content).managed_blocks
+        ):
             raise ToolValidationError(
                 "Wiki update target contains managed blocks and cannot use a human patch"
             )

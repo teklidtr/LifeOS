@@ -26,9 +26,7 @@ _ALLOWED_BACKING_KINDS = frozenset({"bridge_method", "workflow", "data_source"})
 _ALLOWED_ENTRY_POINT_KINDS = frozenset(
     {"obsidian_command", "obsidian_view", "cli", "mcp_tool", "workflow"}
 )
-_CAPABILITY_ID = re.compile(
-    r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$"
-)
+_CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$")
 _BRIDGE_METHOD = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$")
 
 
@@ -131,13 +129,10 @@ class CapabilityRegistry:
             raise CapabilityDefinitionError(
                 "Capability registry entries must be SemanticCapability instances"
             )
-        if (
-            not isinstance(capability.capability_id, str)
-            or not _CAPABILITY_ID.fullmatch(capability.capability_id)
+        if not isinstance(capability.capability_id, str) or not _CAPABILITY_ID.fullmatch(
+            capability.capability_id
         ):
-            raise CapabilityDefinitionError(
-                f"Invalid capability ID: {capability.capability_id!r}"
-            )
+            raise CapabilityDefinitionError(f"Invalid capability ID: {capability.capability_id!r}")
         cls._require_text(capability.name, "name", capability.capability_id)
         cls._require_text(capability.description, "description", capability.capability_id)
         cls._require_text(capability.category, "category", capability.capability_id)
@@ -148,10 +143,7 @@ class CapabilityRegistry:
             raise CapabilityDefinitionError(
                 f"Invalid visibility for {capability.capability_id}: {capability.visibility!r}"
             )
-        if (
-            not isinstance(capability.maturity, str)
-            or capability.maturity not in _ALLOWED_MATURITY
-        ):
+        if not isinstance(capability.maturity, str) or capability.maturity not in _ALLOWED_MATURITY:
             raise CapabilityDefinitionError(
                 f"Invalid maturity for {capability.capability_id}: {capability.maturity!r}"
             )
@@ -180,9 +172,7 @@ class CapabilityRegistry:
                 f"Capability {capability.capability_id} must declare implementation backing"
             )
 
-        cls._validate_string_items(
-            capability.requirements, "requirement", capability.capability_id
-        )
+        cls._validate_string_items(capability.requirements, "requirement", capability.capability_id)
         cls._validate_string_items(
             capability.example_prompts, "example prompt", capability.capability_id
         )
@@ -229,9 +219,7 @@ class CapabilityRegistry:
     @staticmethod
     def _require_text(value: object, field: str, capability_id: str) -> None:
         if not isinstance(value, str) or not value.strip():
-            raise CapabilityDefinitionError(
-                f"Capability {capability_id} has an empty {field}"
-            )
+            raise CapabilityDefinitionError(f"Capability {capability_id} has an empty {field}")
 
     @staticmethod
     def _require_identifier(value: object, field: str, capability_id: str) -> None:
@@ -280,7 +268,9 @@ def _capability(
         CapabilityBackingReference("bridge_method", reference) for reference in bridge_methods
     )
     backing += tuple(CapabilityBackingReference("workflow", reference) for reference in workflows)
-    backing += tuple(CapabilityBackingReference("data_source", reference) for reference in data_sources)
+    backing += tuple(
+        CapabilityBackingReference("data_source", reference) for reference in data_sources
+    )
     return SemanticCapability(
         capability_id=capability_id,
         name=name,
@@ -380,7 +370,9 @@ CAPABILITY_REGISTRY = CapabilityRegistry(
                 "copilot.replanning.proposal.create",
             ),
             entry_points=(
-                CapabilityEntryPoint("obsidian_view", "lifeos-goal-plan", "Open Goal-to-Plan Copilot"),
+                CapabilityEntryPoint(
+                    "obsidian_view", "lifeos-goal-plan", "Open Goal-to-Plan Copilot"
+                ),
                 CapabilityEntryPoint(
                     "obsidian_command", "lifeos-open-goal-plan", "Open Goal-to-Plan Copilot"
                 ),
@@ -432,7 +424,9 @@ CAPABILITY_REGISTRY = CapabilityRegistry(
             ),
             workflows=("cli.study-review",),
             data_sources=("flashcards.canonical",),
-            entry_points=(CapabilityEntryPoint("cli", "lifeos.study.review", "lifeos study review"),),
+            entry_points=(
+                CapabilityEntryPoint("cli", "lifeos.study.review", "lifeos study review"),
+            ),
         ),
         _capability(
             "reflection.reviews",
@@ -616,7 +610,9 @@ CAPABILITY_REGISTRY = CapabilityRegistry(
             workflows=("mcp.personal-pattern-proposal",),
             data_sources=("patterns.canonical-hypotheses",),
             entry_points=(
-                CapabilityEntryPoint("obsidian_view", "lifeos-personal-model", "Open Personal Model"),
+                CapabilityEntryPoint(
+                    "obsidian_view", "lifeos-personal-model", "Open Personal Model"
+                ),
                 CapabilityEntryPoint(
                     "obsidian_command", "lifeos-open-personal-model", "Open Personal Model"
                 ),
@@ -650,9 +646,7 @@ CAPABILITY_REGISTRY = CapabilityRegistry(
             workflows=("mcp.proposal-lifecycle",),
             entry_points=(
                 CapabilityEntryPoint("obsidian_view", "lifeos-proposals", "Open Proposals"),
-                CapabilityEntryPoint(
-                    "obsidian_command", "lifeos-open-proposals", "Open Proposals"
-                ),
+                CapabilityEntryPoint("obsidian_command", "lifeos-open-proposals", "Open Proposals"),
                 CapabilityEntryPoint("mcp_tool", "proposal_submit", "Submit a proposal"),
                 CapabilityEntryPoint("mcp_tool", "proposal_approve", "Approve a proposal"),
                 CapabilityEntryPoint("mcp_tool", "proposal_apply", "Apply an approved proposal"),

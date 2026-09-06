@@ -28,9 +28,7 @@ def test_doctor_accepts_fresh_vault_from_outside_working_directory(
     assert exit_code == 0
     assert payload["ready"] is True
     assert payload["application"]["vault_root"] == str(vault.resolve())
-    assert any(
-        finding["code"] == "vault-bootstrap-valid" for finding in payload["findings"]
-    )
+    assert any(finding["code"] == "vault-bootstrap-valid" for finding in payload["findings"])
     assert captured.err == ""
 
 
@@ -92,9 +90,7 @@ def test_doctor_reports_unsupported_python_as_blocking(
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 1
     assert payload["ready"] is False
-    assert any(
-        finding["code"] == "python-unsupported" for finding in payload["findings"]
-    )
+    assert any(finding["code"] == "python-unsupported" for finding in payload["findings"])
 
 
 def test_doctor_reports_missing_mcp_as_non_blocking(

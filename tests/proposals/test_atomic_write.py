@@ -4,6 +4,7 @@ import pytest
 
 from lifeos._atomic_write import atomic_write_file_secure, AtomicWriteError
 
+
 def test_atomic_write_success(tmp_path: Path) -> None:
     target = "test.txt"
     dir_fd = os.open(tmp_path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
@@ -24,6 +25,7 @@ def test_atomic_write_success(tmp_path: Path) -> None:
     finally:
         os.close(dir_fd)
 
+
 def test_atomic_write_replaces_existing(tmp_path: Path) -> None:
     target = "test.txt"
     (tmp_path / target).write_bytes(b"old content")
@@ -37,6 +39,7 @@ def test_atomic_write_replaces_existing(tmp_path: Path) -> None:
             assert f.read() == content
     finally:
         os.close(dir_fd)
+
 
 def test_atomic_write_bad_dir_fd() -> None:
     with pytest.raises(AtomicWriteError) as exc:

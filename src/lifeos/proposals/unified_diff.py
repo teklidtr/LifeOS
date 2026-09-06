@@ -121,10 +121,7 @@ def apply_diff(target_text: str, diff_text: str) -> str:
     if has_bare_cr:
         raise DiffError("Mixed line endings in target text")
     diff_preserves_crlf = any(
-        line.endswith("\r")
-        for hunk in hunks
-        for line in hunk.lines
-        if line.startswith((" ", "-"))
+        line.endswith("\r") for hunk in hunks for line in hunk.lines if line.startswith((" ", "-"))
     )
     target_has_mixed_line_endings = has_mixed_lf_crlf
     if target_has_mixed_line_endings or diff_preserves_crlf:

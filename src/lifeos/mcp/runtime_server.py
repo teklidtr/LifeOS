@@ -202,9 +202,7 @@ def create_mcp_server(
         ]
         relocated_paths = [path for pair in visible_renamed for path in pair]
         changed_paths = [
-            path
-            for path in (*result.new, *result.modified, *result.deleted)
-            if allowed(path)
+            path for path in (*result.new, *result.modified, *result.deleted) if allowed(path)
         ]
         activity.append(
             tool="ingestion_registry_preflight",

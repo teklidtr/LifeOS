@@ -45,7 +45,9 @@ def test_unlisted_instruction_source_is_ignored_and_diagnosed(tmp_path: Path) ->
     pack = build_context_pack(vault_root=tmp_path, question="sleep")
 
     assert [item.id for item in pack.instructions] == ["allowed"]
-    diagnostic = next(item for item in pack.diagnostics if item.code == "instruction-source-not-allowed")
+    diagnostic = next(
+        item for item in pack.diagnostics if item.code == "instruction-source-not-allowed"
+    )
     assert diagnostic.source_path == "wiki/instructions.yml"
 
 

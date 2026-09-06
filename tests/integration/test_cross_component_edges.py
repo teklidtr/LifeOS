@@ -78,9 +78,7 @@ def _create_applied_wiki_note(vault_root: Path) -> str:
     (vault_root / "wiki").mkdir()
     system_root = vault_root / "system"
     system_root.mkdir()
-    (system_root / "generated-ownership.json").write_bytes(
-        serialize_generated_ownership_bytes({})
-    )
+    (system_root / "generated-ownership.json").write_bytes(serialize_generated_ownership_bytes({}))
 
     proposal_id = "prop-20260716T000000Z-a1b2c3d4"
     content = (
@@ -283,12 +281,7 @@ def test_domain_loaders_are_isolated_to_their_canonical_roots(tmp_path: Path) ->
     )
     _write(
         tmp_path / "journal" / "2026-07-16.md",
-        "---\n"
-        "date: 2026-07-16\n"
-        "metrics:\n"
-        "  energy: 4\n"
-        "activities: [walking]\n"
-        "---\n",
+        "---\ndate: 2026-07-16\nmetrics:\n  energy: 4\nactivities: [walking]\n---\n",
     )
     _write(tmp_path / "wiki" / "broken.md", "---\ntitle: [\n---\n")
 
@@ -301,7 +294,6 @@ def test_domain_loaders_are_isolated_to_their_canonical_roots(tmp_path: Path) ->
     assert [record.observed_on for record in observations] == [date(2026, 7, 16)]
 
 
-
 def test_private_wikilink_stays_internal_but_is_redacted_from_public_export(
     tmp_path: Path,
 ) -> None:
@@ -309,13 +301,11 @@ def test_private_wikilink_stays_internal_but_is_redacted_from_public_export(
     runtime_dir = tmp_path / "runtime"
     _write(
         vault_root / "wiki" / "public.md",
-        "---\nid: public\ntitle: Public\nvisibility: public\n---\n"
-        "See [[secret|Hidden details]].\n",
+        "---\nid: public\ntitle: Public\nvisibility: public\n---\nSee [[secret|Hidden details]].\n",
     )
     _write(
         vault_root / "wiki" / "secret.md",
-        "---\nid: secret\ntitle: Secret\nvisibility: private\n---\n"
-        "Private evidence.\n",
+        "---\nid: secret\ntitle: Secret\nvisibility: private\n---\nPrivate evidence.\n",
     )
 
     pack = build_context_pack(vault_root=vault_root, question="private evidence hidden")
@@ -343,6 +333,7 @@ def test_private_wikilink_stays_internal_but_is_redacted_from_public_export(
     assert "Hidden details" in rendered
     assert "secret" not in rendered.casefold()
     assert not (active / "wiki" / "secret.md").exists()
+
 
 def test_graph_publication_failure_does_not_change_existing_export_generation(
     tmp_path: Path,
@@ -387,10 +378,6 @@ def test_graph_publication_failure_does_not_change_existing_export_generation(
     active_export = active_generation_path(runtime_dir / "exports" / "public-wiki")
     assert active_export is not None
     assert (active_export / "wiki" / "note.md").read_text(encoding="utf-8").endswith("old\n")
-
-
-
-
 
 
 def test_status_combines_graph_staleness_and_export_corruption(tmp_path: Path) -> None:

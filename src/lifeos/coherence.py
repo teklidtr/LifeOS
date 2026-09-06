@@ -222,7 +222,9 @@ def collect_identity_snapshot(vault_root: Path) -> IdentitySnapshot:
         )
 
     notes.sort(key=lambda item: item.path)
-    diagnostics.sort(key=lambda item: (item.severity, item.code, item.path or "", item.stable_id or ""))
+    diagnostics.sort(
+        key=lambda item: (item.severity, item.code, item.path or "", item.stable_id or "")
+    )
     return IdentitySnapshot(tuple(notes), tuple(diagnostics))
 
 

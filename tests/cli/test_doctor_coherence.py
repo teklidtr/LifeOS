@@ -35,8 +35,7 @@ def test_doctor_exposes_single_writer_and_node_local_state_contract(
     assert topology["runtime_location"] == "inside-canonical-vault"
     assert ".lifeos/" in topology["required_sync_exclusions"]
     assert any(
-        finding["code"] == "runtime-state-sync-exclusion-required"
-        and finding["state"] == "warning"
+        finding["code"] == "runtime-state-sync-exclusion-required" and finding["state"] == "warning"
         for finding in payload["findings"]
     )
 
@@ -97,6 +96,4 @@ def test_doctor_excludes_custom_in_vault_runtime_from_identity_diagnostics(
     assert exit_code == 0
     assert payload["coherence"]["identity_note_count"] == 1
     assert payload["coherence"]["relocation_safe_note_count"] == 1
-    assert not any(
-        finding["code"] == "stable-id-ambiguous" for finding in payload["findings"]
-    )
+    assert not any(finding["code"] == "stable-id-ambiguous" for finding in payload["findings"])

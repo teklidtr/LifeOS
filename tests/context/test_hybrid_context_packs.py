@@ -180,7 +180,9 @@ def test_build_context_pack_uses_default_lifeos_retrieval_runtime(tmp_path: Path
     assert any("Semantic retrieval was not configured" in omission for omission in pack.omissions)
 
 
-def test_context_pack_duplicate_evidence_does_not_create_false_budget_omission(tmp_path: Path) -> None:
+def test_context_pack_duplicate_evidence_does_not_create_false_budget_omission(
+    tmp_path: Path,
+) -> None:
     vault, runtime, provider = _indexed_vault(tmp_path)
 
     pack = build_context_pack(
@@ -274,7 +276,10 @@ def test_lexical_fallback_keeps_protected_scope_default_deny(tmp_path: Path) -> 
 
     assert [source.path for source in pack.sources] == ["wiki/public.md"]
     assert pack.sources[0].retrieval_mode == "lexical-fallback"
-    assert "Protected scopes were excluded from candidate selection by retrieval policy." in pack.omissions
+    assert (
+        "Protected scopes were excluded from candidate selection by retrieval policy."
+        in pack.omissions
+    )
 
 
 def test_local_protected_scope_uses_canonical_lexical_fallback(tmp_path: Path) -> None:
@@ -339,7 +344,10 @@ def test_context_pack_hybrid_retrieval_respects_protected_scope(tmp_path: Path) 
     )
 
     assert "private/secret.md" not in {source.path for source in pack.sources}
-    assert "Protected scopes were excluded from candidate selection by retrieval policy." in pack.omissions
+    assert (
+        "Protected scopes were excluded from candidate selection by retrieval policy."
+        in pack.omissions
+    )
 
 
 def test_external_protected_scope_uses_policy_allowlisted_lexical_fallback(

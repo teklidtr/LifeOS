@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 import lifeos.retrieval.coherence_search as coherence_search
-from lifeos.retrieval import HybridRetriever, RetrievalIndex, RetrievalIndexService, RetrievalRequest
+from lifeos.retrieval import (
+    HybridRetriever,
+    RetrievalIndex,
+    RetrievalIndexService,
+    RetrievalRequest,
+)
 
 
 def test_retrieval_exposes_stable_id_beside_current_path(tmp_path: Path) -> None:

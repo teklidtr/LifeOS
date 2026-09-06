@@ -7,9 +7,17 @@ from lifeos.feedback.dataset import (
 )
 from lifeos.feedback.avoidance import AVOIDANCE_POLICY_VERSION, diagnose_repeated_avoidance
 from lifeos.feedback.capacity import CAPACITY_POLICY_VERSION, summarize_capacity_fit
-from lifeos.feedback.duration import DURATION_POLICY_VERSION, DurationCalibrationConfig, calibrate_duration
+from lifeos.feedback.duration import (
+    DURATION_POLICY_VERSION,
+    DurationCalibrationConfig,
+    calibrate_duration,
+)
 from lifeos.feedback.explanations import EXPLANATION_SCHEMA_VERSION, explain_adaptive_result
-from lifeos.feedback.planner import ADAPTIVE_POLICY_VERSION, AdaptivePolicyConfig, build_adaptive_menu
+from lifeos.feedback.planner import (
+    ADAPTIVE_POLICY_VERSION,
+    AdaptivePolicyConfig,
+    build_adaptive_menu,
+)
 from lifeos.feedback.preferences import (
     AdaptivePreferences,
     FeedbackControlService,
@@ -27,7 +35,13 @@ from lifeos.feedback.replay import (
     ReplayMenuMetrics,
     replay_history,
 )
-from lifeos.feedback.proposals import DuplicateFeedbackProposal, FeedbackProposalError, FeedbackProposalRequest, FeedbackProposalResult, create_feedback_proposal
+from lifeos.feedback.proposals import (
+    DuplicateFeedbackProposal,
+    FeedbackProposalError,
+    FeedbackProposalRequest,
+    FeedbackProposalResult,
+    create_feedback_proposal,
+)
 from lifeos.feedback.models import (
     AdaptiveMode,
     Confidence,

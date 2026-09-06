@@ -12,6 +12,7 @@ main = mcp_main.main
 def test_mcp_package_imports_without_sdk(monkeypatch) -> None:
     # Importing lifeos.mcp should not require `mcp` extra
     import builtins
+
     original_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -22,6 +23,7 @@ def test_mcp_package_imports_without_sdk(monkeypatch) -> None:
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     import sys
+
     if "lifeos.mcp" in sys.modules:
         del sys.modules["lifeos.mcp"]
 
@@ -30,9 +32,12 @@ def test_mcp_package_imports_without_sdk(monkeypatch) -> None:
 
 def test_entrypoint_missing_extra_writes_only_to_stderr(capsys, monkeypatch, tmp_path) -> None:
     config_file = tmp_path / "lifeos.yml"
-    config_file.write_text("vault_root: .\nruntime_dir: .\nfeatures:\n  graphify: true\n  exports: false\n")
+    config_file.write_text(
+        "vault_root: .\nruntime_dir: .\nfeatures:\n  graphify: true\n  exports: false\n"
+    )
 
     import builtins
+
     original_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -53,9 +58,12 @@ def test_entrypoint_missing_extra_writes_only_to_stderr(capsys, monkeypatch, tmp
 
 def test_entrypoint_unrelated_missing_module_propagates(capsys, monkeypatch, tmp_path) -> None:
     config_file = tmp_path / "lifeos.yml"
-    config_file.write_text("vault_root: .\nruntime_dir: .\nfeatures:\n  graphify: true\n  exports: false\n")
+    config_file.write_text(
+        "vault_root: .\nruntime_dir: .\nfeatures:\n  graphify: true\n  exports: false\n"
+    )
 
     import builtins
+
     original_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):

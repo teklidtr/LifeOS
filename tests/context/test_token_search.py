@@ -16,11 +16,7 @@ def _note(
     path = vault / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        "---\n"
-        f"title: {title}\n"
-        f"description: {description}\n"
-        "---\n"
-        f"{body}\n",
+        f"---\ntitle: {title}\ndescription: {description}\n---\n{body}\n",
         encoding="utf-8",
     )
 

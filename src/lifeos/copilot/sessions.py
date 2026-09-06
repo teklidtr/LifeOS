@@ -86,7 +86,9 @@ class ClarificationQuestion:
     reason: str
 
     def __post_init__(self) -> None:
-        if not self.question_id or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,127}", self.question_id):
+        if not self.question_id or not re.fullmatch(
+            r"[a-z0-9][a-z0-9._-]{1,127}", self.question_id
+        ):
             raise PlanningSessionError("question_id is invalid")
         if self.category not in {
             "purpose",
@@ -101,7 +103,9 @@ class ClarificationQuestion:
         }:
             raise PlanningSessionError("question category is invalid")
         if not self.prompt.strip() or self.prompt != self.prompt.strip() or len(self.prompt) > 240:
-            raise PlanningSessionError("question prompt must be a trimmed string up to 240 characters")
+            raise PlanningSessionError(
+                "question prompt must be a trimmed string up to 240 characters"
+            )
         if _UNSAFE_QUESTION_RE.search(self.prompt):
             raise PlanningSessionError("question prompt crosses the coaching safety boundary")
         if not self.reason.strip():
@@ -243,7 +247,9 @@ class PlanningSessionService:
         if question is None or question.question_id != question_id:
             raise PlanningSessionError("question is not the current visible question")
         answer = PlanningAnswer(question_id=question_id, response_kind=response_kind, value=value)
-        answers = tuple(item for item in session.answers if item.question_id != question_id) + (answer,)
+        answers = tuple(item for item in session.answers if item.question_id != question_id) + (
+            answer,
+        )
         source = self._read_goal(session.goal_ref)
         goal = parse_goal_note(path=session.goal_ref, content=source)
         readiness = evaluate_goal_readiness(goal, index=build_copilot_index(self.vault_root))
@@ -427,7 +433,9 @@ class PlanningSessionService:
                     if question.question_id in seen or question.question_id in answered:
                         raise PlanningSessionError("adapter repeated a previous question")
                     if question.category not in unresolved and unresolved:
-                        raise PlanningSessionError("adapter question is not relevant to unresolved scope")
+                        raise PlanningSessionError(
+                            "adapter question is not relevant to unresolved scope"
+                        )
                     return question, ()
             except Exception as exc:
                 diagnostics.append(f"adapter-fallback: {exc}")
@@ -501,7 +509,9 @@ class PlanningSessionService:
             raise PlanningSessionError("planning session payload is missing")
         session = PlanningSession.from_dict(session_data)
         readiness = _readiness_from_dict(data.get("readiness"))
-        history = tuple(_question_from_dict(item) for item in _dict_list(data.get("question_history")))
+        history = tuple(
+            _question_from_dict(item) for item in _dict_list(data.get("question_history"))
+        )
         current_raw = data.get("current_question")
         current = _question_from_dict(current_raw) if isinstance(current_raw, dict) else None
         diagnostics_raw = data.get("adapter_diagnostics", [])
@@ -598,7 +608,9 @@ def _required_questions_answered(goal: Any, answers: tuple[PlanningAnswer, ...])
 def _answers_support_plan(envelope: SessionEnvelope) -> bool:
     if envelope.readiness.path in {"plan", "link-existing-plan"}:
         return True
-    answered = {item.question_id for item in envelope.session.answers if item.response_kind == "answered"}
+    answered = {
+        item.question_id for item in envelope.session.answers if item.response_kind == "answered"
+    }
     return set(_REQUIRED_QUESTION_IDS) <= answered
 
 

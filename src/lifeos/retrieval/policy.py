@@ -38,7 +38,9 @@ def load_retrieval_policy(vault_root: Path) -> RetrievalPolicy:
         raise RetrievalError("invalid_policy", "Retrieval policy must be a YAML mapping.")
     unknown = sorted(set(raw) - _ALLOWED)
     if unknown:
-        raise RetrievalError("invalid_policy", f"Unknown retrieval policy fields: {', '.join(unknown)}")
+        raise RetrievalError(
+            "invalid_policy", f"Unknown retrieval policy fields: {', '.join(unknown)}"
+        )
 
     def strings(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
         value = raw.get(key, list(default))

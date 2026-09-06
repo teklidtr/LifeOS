@@ -19,10 +19,7 @@ from lifeos.scanner import scan_vault
 
 
 def _note(stable_id: str, title: str = "Example", body: str = "Body") -> str:
-    return (
-        f"---\nid: {stable_id}\ntype: concept\ntitle: {title}\n---\n"
-        f"{body}\n"
-    )
+    return f"---\nid: {stable_id}\ntype: concept\ntitle: {title}\n---\n{body}\n"
 
 
 def _registry(tmp_path: Path) -> Registry:
@@ -73,9 +70,7 @@ def test_root_agents_id_is_not_a_canonical_note_identity(tmp_path: Path) -> None
     register_scan(registry, vault, scan_vault(vault))
 
     identities = list_registered_stable_identities(registry)
-    assert [(item.stable_id, item.path) for item in identities] == [
-        ("shared-id", "wiki/note.md")
-    ]
+    assert [(item.stable_id, item.path) for item in identities] == [("shared-id", "wiki/note.md")]
     with registry.connect_read_only() as connection:
         agents_row = connection.execute(
             "SELECT stable_id, content_hash FROM files WHERE vault_path = 'AGENTS.md'"

@@ -20,12 +20,15 @@ from lifeos.bridge import BridgeApplication
 
 
 def _goal(*, extra: str = "") -> str:
-    return """---
+    return (
+        """---
 copilot_schema_version: 1
 id: goal-learn-cell
  type: invalid
 ---
-""".replace(" type: invalid", "type: goal") + extra
+""".replace(" type: invalid", "type: goal")
+        + extra
+    )
 
 
 def test_minimal_legacy_goal_preserves_unknown_values() -> None:

@@ -39,7 +39,10 @@ def test_valid_one_source_mapping_parses() -> None:
     assert prov.schema_version == 1
     assert len(prov.sources) == 1
     assert prov.sources[0].path == "study/example.md"
-    assert prov.sources[0].content_hash == "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+    assert (
+        prov.sources[0].content_hash
+        == "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+    )
     assert prov.generator.id == "lifeos.ingestion.wiki"
     assert prov.generator.version == "1.0"
     assert prov.generator.prompt_schema_version == "v1"
@@ -54,10 +57,12 @@ def test_absent_block_returns_none() -> None:
 def test_typed_model_converts_to_deterministic_mapping() -> None:
     prov = LifeOSProvenance(
         schema_version=1,
-        sources=(ProvenanceSource(
-            path="study/example.md",
-            content_hash="sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-        ),),
+        sources=(
+            ProvenanceSource(
+                path="study/example.md",
+                content_hash="sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            ),
+        ),
         generator=ProvenanceGenerator(
             id="lifeos.ingestion.wiki",
             version="1.0",
@@ -74,10 +79,12 @@ def test_typed_model_converts_to_deterministic_mapping() -> None:
 def test_mapping_key_order_is_deterministic() -> None:
     prov = LifeOSProvenance(
         schema_version=1,
-        sources=(ProvenanceSource(
-            path="study/example.md",
-            content_hash="sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-        ),),
+        sources=(
+            ProvenanceSource(
+                path="study/example.md",
+                content_hash="sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            ),
+        ),
         generator=ProvenanceGenerator(
             id="lifeos.ingestion.wiki",
             version="1.0",
@@ -88,7 +95,10 @@ def test_mapping_key_order_is_deterministic() -> None:
     )
     mapping = provenance_to_frontmatter_value(prov)
     assert list(mapping["generator"].keys()) == [  # type: ignore[union-attr]
-        "id", "version", "prompt_schema_version", "model_id"
+        "id",
+        "version",
+        "prompt_schema_version",
+        "model_id",
     ]
 
 
@@ -101,10 +111,12 @@ def test_parse_and_mapping_round_trip() -> None:
 
 def test_multiple_sources_parse_and_round_trip_in_version_1() -> None:
     raw = valid_raw_mapping()
-    raw["sources"].append({
-        "path": "journal/example.md",
-        "content_hash": "sha256:" + "a" * 64,
-    })
+    raw["sources"].append(
+        {
+            "path": "journal/example.md",
+            "content_hash": "sha256:" + "a" * 64,
+        }
+    )
     prov = extract_provenance({"lifeos_provenance": raw})
     assert prov is not None
     assert [source.path for source in prov.sources] == ["study/example.md", "journal/example.md"]
@@ -177,7 +189,9 @@ def test_malformed_sha256_rejected() -> None:
 
 def test_uppercase_sha256_rejected() -> None:
     raw = valid_raw_mapping()
-    raw["sources"][0]["content_hash"] = "sha256:1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF"
+    raw["sources"][0]["content_hash"] = (
+        "sha256:1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF"
+    )
     with pytest.raises(ProvenanceValidationError, match="lowercase hexadecimal"):
         extract_provenance({"lifeos_provenance": raw})
 
@@ -199,7 +213,9 @@ def test_empty_generator_version_rejected() -> None:
 def test_empty_prompt_schema_version_rejected() -> None:
     raw = valid_raw_mapping()
     raw["generator"]["prompt_schema_version"] = ""
-    with pytest.raises(ProvenanceValidationError, match="generator prompt_schema_version must be non-empty"):
+    with pytest.raises(
+        ProvenanceValidationError, match="generator prompt_schema_version must be non-empty"
+    ):
         extract_provenance({"lifeos_provenance": raw})
 
 
@@ -221,14 +237,18 @@ def test_model_id_absence_follows_rule() -> None:
 def test_noncanonical_timestamp_rejected() -> None:
     raw = valid_raw_mapping()
     raw["created_at"] = "2026-07-13 17:00:00"
-    with pytest.raises(ProvenanceValidationError, match="strictly formatted as YYYY-MM-DDTHH:MM:SSZ"):
+    with pytest.raises(
+        ProvenanceValidationError, match="strictly formatted as YYYY-MM-DDTHH:MM:SSZ"
+    ):
         extract_provenance({"lifeos_provenance": raw})
 
 
 def test_fractional_timestamp_rejected() -> None:
     raw = valid_raw_mapping()
     raw["created_at"] = "2026-07-13T17:00:00.123Z"
-    with pytest.raises(ProvenanceValidationError, match="strictly formatted as YYYY-MM-DDTHH:MM:SSZ"):
+    with pytest.raises(
+        ProvenanceValidationError, match="strictly formatted as YYYY-MM-DDTHH:MM:SSZ"
+    ):
         extract_provenance({"lifeos_provenance": raw})
 
 
@@ -242,7 +262,9 @@ def test_valid_timestamp_preserved_exactly() -> None:
 def test_unknown_fields_rejected() -> None:
     raw = valid_raw_mapping()
     raw["some_extra"] = 123
-    with pytest.raises(ProvenanceValidationError, match="Unknown field in lifeos_provenance: some_extra"):
+    with pytest.raises(
+        ProvenanceValidationError, match="Unknown field in lifeos_provenance: some_extra"
+    ):
         extract_provenance({"lifeos_provenance": raw})
 
 

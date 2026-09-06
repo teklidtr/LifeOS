@@ -144,9 +144,7 @@ def reidentify_note(note: ChunkedNote, document_id: str) -> ChunkedNote:
             separators=(",", ":"),
             ensure_ascii=False,
         )
-        chunks.append(
-            replace(chunk, document_id=document_id, chunk_id=f"chunk:{_digest(payload)}")
-        )
+        chunks.append(replace(chunk, document_id=document_id, chunk_id=f"chunk:{_digest(payload)}"))
     return ChunkedNote(document, tuple(chunks), note.diagnostics)
 
 
@@ -174,11 +172,7 @@ def _sections(
         line_no = body_start_line + offset
         previous_fence = fence
         fence = advance_fenced_code_state(line, fence)
-        match = (
-            _HEADING_RE.match(line)
-            if previous_fence is None and fence is None
-            else None
-        )
+        match = _HEADING_RE.match(line) if previous_fence is None and fence is None else None
         if match:
             flush()
             level = len(match.group(1))
@@ -260,9 +254,7 @@ def _bounded_structural_parts(
     return tuple(combined)
 
 
-def _split_oversized(
-    text: str, start: int, end: int, maximum: int
-) -> list[tuple[int, int, str]]:
+def _split_oversized(text: str, start: int, end: int, maximum: int) -> list[tuple[int, int, str]]:
     if len(text) <= maximum:
         return [(start, end, text)]
     sentences = _SENTENCE_SPLIT_RE.split(text)
@@ -305,9 +297,7 @@ def _links(text: str, source_path: str) -> tuple[tuple[str, str | None], ...]:
 
 
 def _resolve_link(target: str, source_path: str) -> str:
-    if target.startswith("/") or (
-        "/" in target and not target.startswith(("./", "../"))
-    ):
+    if target.startswith("/") or ("/" in target and not target.startswith(("./", "../"))):
         return target.strip("/")
     parent = PurePosixPath(source_path).parent
     parts: list[str] = []
@@ -333,17 +323,11 @@ def _body_start_line(content: str) -> int:
 def _tags(value: object) -> tuple[str, ...]:
     if isinstance(value, str):
         return tuple(
-            dict.fromkeys(
-                item.strip().lstrip("#") for item in value.split() if item.strip()
-            )
+            dict.fromkeys(item.strip().lstrip("#") for item in value.split() if item.strip())
         )
     if isinstance(value, (list, tuple)):
         return tuple(
-            dict.fromkeys(
-                str(item).strip().lstrip("#")
-                for item in value
-                if str(item).strip()
-            )
+            dict.fromkeys(str(item).strip().lstrip("#") for item in value if str(item).strip())
         )
     return ()
 

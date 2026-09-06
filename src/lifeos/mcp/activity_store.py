@@ -15,7 +15,4 @@ class MCPActivityStore(ActivityStore):
         return _ACTIVITY_ACTOR.get()
 
     def read(self, *, limit: int = 20) -> tuple[ActivityRecord, ...]:
-        return tuple(
-            replace(record, instruction_ids=())
-            for record in super().read(limit=limit)
-        )
+        return tuple(replace(record, instruction_ids=()) for record in super().read(limit=limit))

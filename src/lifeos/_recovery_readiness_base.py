@@ -658,9 +658,7 @@ def _authorized_git_pathspecs(
     config: LifeOSConfig,
 ) -> tuple[str, ...]:
     pathspecs = [
-        _literal_pathspec(PurePosixPath(*context.prefix).as_posix())
-        if context.prefix
-        else "."
+        _literal_pathspec(PurePosixPath(*context.prefix).as_posix()) if context.prefix else "."
     ]
     denied = (*_policy_denied_prefixes(scope), *_runtime_prefixes(config))
     for relative in dict.fromkeys(denied):
@@ -682,11 +680,7 @@ def _pathspec_command(
     command: str, arguments: Sequence[str], pathspec: Pathspec
 ) -> tuple[str, ...]:
     pathspecs = (pathspec,) if isinstance(pathspec, str) else tuple(pathspec)
-    prefix = (
-        ("--no-literal-pathspecs",)
-        if _uses_magic(pathspecs)
-        else ("--literal-pathspecs",)
-    )
+    prefix = ("--no-literal-pathspecs",) if _uses_magic(pathspecs) else ("--literal-pathspecs",)
     return (*prefix, command, *arguments, "--", *pathspecs)
 
 

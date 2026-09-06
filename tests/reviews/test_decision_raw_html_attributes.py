@@ -31,7 +31,7 @@ def test_quoted_angle_brackets_keep_following_lines_inside_raw_html(tmp_path: Pa
         (
             "## Review items",
             "",
-            '<review-example title=\">\" other=\'<\'>',
+            "<review-example title=\">\" other='<'>",
             f"- [ ] Fake item {marker('fake', FP_A)}",
             "</review-example>",
             "",

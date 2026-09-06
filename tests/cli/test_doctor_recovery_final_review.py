@@ -209,7 +209,9 @@ def test_deleted_protected_history_marks_latest_commit_evidence_incomplete(
 
     assert "secrets/private.md" not in rendered
     assert diagnostics["recovery.git.last_canonical_commit"].status == "unknown"
-    assert "protected or policy-excluded" in diagnostics["recovery.git.last_canonical_commit"].summary
+    assert (
+        "protected or policy-excluded" in diagnostics["recovery.git.last_canonical_commit"].summary
+    )
 
 
 def test_runtime_scope_preserves_configured_whitespace_component(tmp_path: Path) -> None:
@@ -235,7 +237,7 @@ def test_config_snapshot_ignores_core_subsection_and_preserves_ignorecase(
         "[core]\n"
         "\tfilemode = false\n"
         "\tignorecase = true\n"
-        "[core \"doctor\"]\n"
+        '[core "doctor"]\n'
         "\tfilemode = true\n"
         "\trepositoryformatversion = 1\n",
         encoding="utf-8",

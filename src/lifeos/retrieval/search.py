@@ -151,9 +151,7 @@ class HybridRetriever:
 
     def _authorize_candidates(
         self,
-        candidates: list[
-            tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]
-        ],
+        candidates: list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]],
         request: RetrievalRequest,
     ) -> list[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]]:
         """Apply final local authorization before candidate text can reach a provider."""
@@ -237,9 +235,7 @@ class HybridRetriever:
                         for item in index.embeddings(embedding_provider.capabilities)
                     }
                     semantic_scores = {
-                        chunk.chunk_id: max(
-                            0.0, _cosine(query_vector, embeddings[chunk.chunk_id])
-                        )
+                        chunk.chunk_id: max(0.0, _cosine(query_vector, embeddings[chunk.chunk_id]))
                         for chunk in chunks
                         if chunk.chunk_id in embeddings
                     }
@@ -320,17 +316,14 @@ class HybridRetriever:
                         reranked = reranker.rerank(
                             request.query,
                             [
-                                RerankCandidate(
-                                    chunk.chunk_id, chunk.text, components.total
-                                )
+                                RerankCandidate(chunk.chunk_id, chunk.text, components.total)
                                 for chunk, _, components, _ in preliminary
                             ],
                             timeout_seconds=request.timeout_seconds,
                             cancellation=token,
                         )
                         by_id = {
-                            item.evidence_id: max(0.0, min(1.0, item.score))
-                            for item in reranked
+                            item.evidence_id: max(0.0, min(1.0, item.score)) for item in reranked
                         }
                         candidates = [
                             (
@@ -437,9 +430,7 @@ class HybridRetriever:
     def _in_scope(
         self, chunk: IndexedChunk, document: IndexedDocument, request: RetrievalRequest
     ) -> bool:
-        decision = scope_decision(
-            chunk.path, scope=request.scope, policy=self.policy, mode="local"
-        )
+        decision = scope_decision(chunk.path, scope=request.scope, policy=self.policy, mode="local")
         if not decision.allowed:
             return False
         scope = request.scope
@@ -481,12 +472,7 @@ def _lexical_scores(
     title_tokens = token_sequence(document.title + " " + (chunk.heading or ""))
     title_stems = {_lexical_stem(token) for token in title_tokens}
     title_coverage = len(set(term_stems) & title_stems) / len(terms)
-    lexical = (
-        coverage * 0.50
-        + stem_coverage * 0.20
-        + frequency * 0.15
-        + title_coverage * 0.15
-    )
+    lexical = coverage * 0.50 + stem_coverage * 0.20 + frequency * 0.15 + title_coverage * 0.15
     return exact, min(1.0, lexical), tuple(dict.fromkeys((*matched, *stem_matched)))
 
 
@@ -501,9 +487,7 @@ def _metadata_score(
         score += 1.0
     searchable = set(
         token_sequence(
-            " ".join(
-                (*document.tags, document.note_type or "", document.source or "", chunk.path)
-            )
+            " ".join((*document.tags, document.note_type or "", document.source or "", chunk.path))
         )
     )
     if terms:
@@ -526,9 +510,7 @@ def _link_scores(chunks: Sequence[IndexedChunk], selected: set[str]) -> dict[str
     second: set[str] = set()
     for path in direct:
         second |= outgoing.get(path, set()) | incoming.get(path, set())
-    return {path: 1.0 for path in direct} | {
-        path: 0.5 for path in second - direct - selected
-    }
+    return {path: 1.0 for path in direct} | {path: 0.5 for path in second - direct - selected}
 
 
 def _lexical_stem(token: str) -> str:
@@ -583,9 +565,7 @@ DedupedCandidate = tuple[
 
 
 def _deduplicate(
-    candidates: Sequence[
-        tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]
-    ],
+    candidates: Sequence[tuple[IndexedChunk, IndexedDocument, RankingComponents, tuple[str, ...]]],
 ) -> tuple[DedupedCandidate, ...]:
     groups: dict[
         str,
@@ -616,13 +596,7 @@ def _deduplicate(
         )[0]
         matched = tuple(dict.fromkeys(term for item in group for term in item[3]))
         duplicates = tuple(
-            sorted(
-                {
-                    item[0].path
-                    for item in group
-                    if item[0].path != representative[0].path
-                }
-            )
+            sorted({item[0].path for item in group if item[0].path != representative[0].path})
         )
         values.append(
             (

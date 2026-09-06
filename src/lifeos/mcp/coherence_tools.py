@@ -76,12 +76,14 @@ def build_coherence_tools(
             try:
                 snapshot = collect_scoped_identity_snapshot(
                     vault_root,
-                    allow_path=lambda path: scope_decision(
-                        path,
-                        scope=scope,
-                        policy=policy,
-                        mode="external",
-                    ).allowed,
+                    allow_path=lambda path: (
+                        scope_decision(
+                            path,
+                            scope=scope,
+                            policy=policy,
+                            mode="external",
+                        ).allowed
+                    ),
                     runtime_dir=runtime_dir,
                 )
             except (CoherenceError, RetrievalError) as exc:

@@ -14,6 +14,7 @@ from lifeos.proposals import (
 
 VALID_PROP_ID = "prop-20260713T000000Z-abcdef12"
 
+
 def _make_dummy_v2_proposal(operations: list) -> LoadedProposal:
     return LoadedProposal(
         proposal_dir=VALID_PROP_ID,
@@ -50,6 +51,7 @@ def _make_dummy_v2_proposal(operations: list) -> LoadedProposal:
         body="",
     )
 
+
 def test_v2_preflight_integration(tmp_path: Path) -> None:
     manifest_path = tmp_path / DEFAULT_OWNERSHIP_MANIFEST_PATH
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,9 +79,9 @@ def test_v2_preflight_integration(tmp_path: Path) -> None:
                 "generator_version": "1.0",
                 "content_hash": "0" * 64,
                 "created_at": "2026-07-13T00:00:00+00:00",
-                "updated_at": "2026-07-13T00:00:00+00:00"
+                "updated_at": "2026-07-13T00:00:00+00:00",
             }
-        }
+        },
     }
     manifest_path.write_text(json.dumps(manifest_json))
     op3 = CreateGeneratedFileV2("op-3", "owned.txt", "absent", "gen-1", "v1.0.0", "data")
@@ -95,7 +97,9 @@ def test_v2_preflight_integration(tmp_path: Path) -> None:
     manifest_json["owned_files"]["owned.txt"]["content_hash"] = raw_digest
     manifest_path.write_text(json.dumps(manifest_json))
 
-    op4 = ReplaceGeneratedFileV2("op-4", "owned.txt", "sha256:" + raw_digest, "wrong-gen", "v2.0.0", "newdata")
+    op4 = ReplaceGeneratedFileV2(
+        "op-4", "owned.txt", "sha256:" + raw_digest, "wrong-gen", "v2.0.0", "newdata"
+    )
     prop4 = _make_dummy_v2_proposal([op4])
     res4 = preflight_proposal(prop4, vault_root=tmp_path)
     assert res4.operations[0].state == "invalid"
@@ -103,14 +107,18 @@ def test_v2_preflight_integration(tmp_path: Path) -> None:
 
     # replacement checks ownership content hash
     # (validation.py enforces hash_mismatch correctly)
-    op5 = ReplaceGeneratedFileV2("op-5", "owned.txt", "sha256:" + "f"*64, "gen2", "v2.0.0", "newdata")
+    op5 = ReplaceGeneratedFileV2(
+        "op-5", "owned.txt", "sha256:" + "f" * 64, "gen2", "v2.0.0", "newdata"
+    )
     prop5 = _make_dummy_v2_proposal([op5])
     res5 = preflight_proposal(prop5, vault_root=tmp_path)
     assert res5.operations[0].state == "stale"
     assert res5.operations[0].findings[0].code == "stale_base_hash"
 
     # valid replacement
-    op6 = ReplaceGeneratedFileV2("op-6", "owned.txt", "sha256:" + raw_digest, "gen2", "v2.0.0", "newdata")
+    op6 = ReplaceGeneratedFileV2(
+        "op-6", "owned.txt", "sha256:" + raw_digest, "gen2", "v2.0.0", "newdata"
+    )
     prop6 = _make_dummy_v2_proposal([op6])
     res6 = preflight_proposal(prop6, vault_root=tmp_path)
     assert res6.operations[0].state == "valid"

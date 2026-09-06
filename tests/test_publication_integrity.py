@@ -67,24 +67,21 @@ def test_valid_publications_have_verifiable_integrity(tmp_path: Path) -> None:
 
     assert inspect_generation_integrity(graph).state == "valid"
     assert inspect_generation_integrity(export).state == "valid"
-    assert graph_view_status(
-        vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-    ).status == "clean"
-    assert export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    ).status == "ready"
+    assert (
+        graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge").status
+        == "clean"
+    )
+    assert (
+        export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status == "ready"
+    )
 
 
 @pytest.mark.parametrize("relative_path", ["graph.json", "state.json"])
-def test_missing_graph_payload_or_state_fails_status(
-    tmp_path: Path, relative_path: str
-) -> None:
+def test_missing_graph_payload_or_state_fails_status(tmp_path: Path, relative_path: str) -> None:
     vault, runtime, graph, _export = _build_graph_and_export(tmp_path)
     (graph / relative_path).unlink()
 
-    state = graph_view_status(
-        vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-    )
+    state = graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
 
     assert state.status == "failed"
     assert state.integrity_state == "corrupt"
@@ -97,9 +94,7 @@ def test_missing_export_manifest_or_payload_fails_status(
     vault, runtime, _graph, export = _build_graph_and_export(tmp_path)
     (export / relative_path).unlink()
 
-    state = export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    )
+    state = export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki")
 
     assert state.status == "failed"
     assert state.integrity_state == "corrupt"
@@ -110,12 +105,8 @@ def test_modified_graph_and_export_payloads_fail_closed(tmp_path: Path) -> None:
     (graph / "graph.json").write_text("{}", encoding="utf-8")
     (export / "wiki" / "note.md").write_text("tampered\n", encoding="utf-8")
 
-    graph_state = graph_view_status(
-        vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-    )
-    export_state = export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    )
+    graph_state = graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
+    export_state = export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki")
 
     assert graph_state.status == "failed"
     assert graph_state.integrity_state == "corrupt"
@@ -134,9 +125,7 @@ def test_unexpected_extra_file_fails_product_status(tmp_path: Path, product: str
             vault_root=vault, runtime_dir=runtime, view_name="knowledge"
         ).status
     else:
-        status = export_status(
-            vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-        ).status
+        status = export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki").status
 
     assert status == "failed"
 
@@ -152,13 +141,9 @@ def test_symlinked_payload_is_never_followed(tmp_path: Path, product: str) -> No
     target_path.symlink_to(external)
 
     if product == "graph":
-        state = graph_view_status(
-            vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-        )
+        state = graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
     else:
-        state = export_status(
-            vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-        )
+        state = export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki")
 
     assert state.status == "failed"
     assert state.integrity_state == "corrupt"
@@ -249,12 +234,8 @@ def test_product_status_marks_pre_inventory_generations_unsupported(tmp_path: Pa
     (graph / "integrity.json").unlink()
     (export / "integrity.json").unlink()
 
-    graph_state = graph_view_status(
-        vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-    )
-    export_state = export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    )
+    graph_state = graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
+    export_state = export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki")
 
     assert graph_state.status == "unsupported"
     assert graph_state.integrity_code == "integrity-inventory-missing"
@@ -311,18 +292,10 @@ def test_integrity_status_is_read_only_and_deterministic(tmp_path: Path) -> None
     graph_pointer = (graph_root / "active.json").read_bytes()
     export_pointer = (export_root / "active.json").read_bytes()
 
-    first_graph = graph_view_status(
-        vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-    )
-    first_export = export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    )
-    second_graph = graph_view_status(
-        vault_root=vault, runtime_dir=runtime, view_name="knowledge"
-    )
-    second_export = export_status(
-        vault_root=vault, runtime_dir=runtime, kind="public-wiki"
-    )
+    first_graph = graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
+    first_export = export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki")
+    second_graph = graph_view_status(vault_root=vault, runtime_dir=runtime, view_name="knowledge")
+    second_export = export_status(vault_root=vault, runtime_dir=runtime, kind="public-wiki")
 
     assert first_graph == second_graph
     assert first_export == second_export

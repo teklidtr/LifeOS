@@ -120,7 +120,9 @@ def capture_research_evidence(
             "snapshot_mismatch",
             "stale_artifact",
         }:
-            raise ToolConflictError("Research evidence conflicts with canonical capture state") from exc
+            raise ToolConflictError(
+                "Research evidence conflicts with canonical capture state"
+            ) from exc
         raise ToolExecutionError("Research evidence capture failed") from exc
     artifact = result.artifact
     return ResearchEvidenceCaptureResult(

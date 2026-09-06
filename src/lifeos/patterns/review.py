@@ -47,9 +47,7 @@ SupportedEvaluationKind = Literal[
     "activity-outcome-comparison",
 ]
 
-_SUPPORTED_EVALUATIONS = frozenset(
-    {"numeric-metric-association", "activity-outcome-comparison"}
-)
+_SUPPORTED_EVALUATIONS = frozenset({"numeric-metric-association", "activity-outcome-comparison"})
 _STRENGTH_RANK = {"low": 0, "medium": 1, "high": 2}
 
 

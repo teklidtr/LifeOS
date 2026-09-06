@@ -91,9 +91,7 @@ def _git_finding() -> DoctorFinding:
             "Git is not available on PATH.",
             "Install Git and make it available on PATH.",
         )
-    return DoctorFinding(
-        "git", "healthy", "git-ready", f"Git is available at {executable}."
-    )
+    return DoctorFinding("git", "healthy", "git-ready", f"Git is available at {executable}.")
 
 
 def _bootstrap_finding(config: LifeOSConfig) -> DoctorFinding:

@@ -23,7 +23,11 @@ _REASON_TEXT = {
 
 def _items(menu: dict[str, object]) -> tuple[dict[str, object], ...]:
     raw = menu.get("items", ())
-    return tuple(item for item in raw if isinstance(item, dict)) if isinstance(raw, (tuple, list)) else ()
+    return (
+        tuple(item for item in raw if isinstance(item, dict))
+        if isinstance(raw, (tuple, list))
+        else ()
+    )
 
 
 def _rank(menu: dict[str, object], task_id: str) -> int | None:
@@ -79,9 +83,21 @@ def explain_adaptive_result(
     counterfactuals: list[PlannerCounterfactual] = []
     available = result.returned.get("available_minutes")
     if adaptive_rank is None:
-        counterfactuals.append(PlannerCounterfactual("available-time", "Available minutes needed for this task alone", adjustment.effective_minutes))
+        counterfactuals.append(
+            PlannerCounterfactual(
+                "available-time",
+                "Available minutes needed for this task alone",
+                adjustment.effective_minutes,
+            )
+        )
     if isinstance(available, int) and adjustment.effective_minutes > available:
-        counterfactuals.append(PlannerCounterfactual("time-shortfall", "Additional minutes required", adjustment.effective_minutes - available))
+        counterfactuals.append(
+            PlannerCounterfactual(
+                "time-shortfall",
+                "Additional minutes required",
+                adjustment.effective_minutes - available,
+            )
+        )
     energy = result.returned.get("energy")
     levels = {"low": 1, "medium": 2, "high": 3}
     if isinstance(energy, str) and levels.get(action.energy, 0) > levels.get(energy, 0):
@@ -89,7 +105,9 @@ def explain_adaptive_result(
     if action.mode:
         counterfactuals.append(PlannerCounterfactual("mode", "Compatible mode", action.mode))
     if adjustment.duration_forecast.confidence == "insufficient":
-        counterfactuals.append(PlannerCounterfactual("evidence", "More comparable explicit outcomes needed", None))
+        counterfactuals.append(
+            PlannerCounterfactual("evidence", "More comparable explicit outcomes needed", None)
+        )
     return PlannerExplanation(
         EXPLANATION_SCHEMA_VERSION,
         result.policy_version,

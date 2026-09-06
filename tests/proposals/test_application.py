@@ -4,7 +4,12 @@ import json
 
 import hashlib
 import lifeos.proposals.application as application_module
-from lifeos.proposals.application import apply_proposal, ApplicationError, OperationState, ApplicationErrorCode
+from lifeos.proposals.application import (
+    apply_proposal,
+    ApplicationError,
+    OperationState,
+    ApplicationErrorCode,
+)
 from lifeos.proposals.recovery import (
     RecoveryPhase,
     discover_recovery_state,
@@ -1031,12 +1036,8 @@ def _load_two_target_application(tmp_path):
     meta = _make_meta()
     old_hash = f"sha256:{hashlib.sha256(b'old_content').hexdigest()}"
     operations = (
-        ReplaceGeneratedFileV2(
-            "op-1", "test1.txt", old_hash, "gen-1", "v1", "new_content1"
-        ),
-        CreateGeneratedFileV2(
-            "op-2", "test2.txt", "absent", "gen-1", "v1", "new_content2"
-        ),
+        ReplaceGeneratedFileV2("op-1", "test1.txt", old_hash, "gen-1", "v1", "new_content1"),
+        CreateGeneratedFileV2("op-2", "test2.txt", "absent", "gen-1", "v1", "new_content2"),
     )
     doc = PatchDocumentV2(2, meta.id, operations)
     vault_root, proposals_root, prop_dir = _setup_proposal(tmp_path, meta, doc)
@@ -1152,9 +1153,7 @@ def test_fault_after_all_targets_preserves_recoverable_state(tmp_path, monkeypat
     assert (vault_root / "test1.txt").read_bytes() == b"new_content1"
     assert (vault_root / "test2.txt").read_bytes() == b"new_content2"
     assert (vault_root / "system/generated-ownership.json").read_bytes() == original_ownership
-    assert "status: applied" not in (
-        vault_root / "proposals" / meta.id / "proposal.md"
-    ).read_text()
+    assert "status: applied" not in (vault_root / "proposals" / meta.id / "proposal.md").read_text()
 
 
 def test_fault_after_ownership_install_preserves_recoverable_state(tmp_path, monkeypatch):
@@ -1172,15 +1171,15 @@ def test_fault_after_ownership_install_preserves_recoverable_state(tmp_path, mon
     journal = _single_recovery_journal(vault_root)
     assert journal.phase is RecoveryPhase.TARGETS_INSTALLED
     ownership = json.loads((vault_root / "system/generated-ownership.json").read_text())
-    assert ownership["owned_files"]["test1.txt"]["content_hash"] == hashlib.sha256(
-        b"new_content1"
-    ).hexdigest()
-    assert ownership["owned_files"]["test2.txt"]["content_hash"] == hashlib.sha256(
-        b"new_content2"
-    ).hexdigest()
-    assert "status: applied" not in (
-        vault_root / "proposals" / meta.id / "proposal.md"
-    ).read_text()
+    assert (
+        ownership["owned_files"]["test1.txt"]["content_hash"]
+        == hashlib.sha256(b"new_content1").hexdigest()
+    )
+    assert (
+        ownership["owned_files"]["test2.txt"]["content_hash"]
+        == hashlib.sha256(b"new_content2").hexdigest()
+    )
+    assert "status: applied" not in (vault_root / "proposals" / meta.id / "proposal.md").read_text()
 
 
 def test_fault_before_proposal_commit_preserves_recoverable_state(tmp_path, monkeypatch):
@@ -1199,9 +1198,7 @@ def test_fault_before_proposal_commit_preserves_recoverable_state(tmp_path, monk
     assert journal.phase is RecoveryPhase.OWNERSHIP_INSTALLED
     assert (vault_root / "test1.txt").read_bytes() == b"new_content1"
     assert (vault_root / "test2.txt").read_bytes() == b"new_content2"
-    assert "status: applied" not in (
-        vault_root / "proposals" / meta.id / "proposal.md"
-    ).read_text()
+    assert "status: applied" not in (vault_root / "proposals" / meta.id / "proposal.md").read_text()
 
 
 def test_ordinary_exception_restores_original_state(tmp_path, monkeypatch):
@@ -1267,12 +1264,8 @@ def test_retained_complete_transaction_does_not_block_new_apply(tmp_path):
     proposals_root = vault_root / "proposals"
     second_dir = proposals_root / second_meta.id
     second_dir.mkdir()
-    (second_dir / "proposal.md").write_bytes(
-        serialize_proposal_markdown(second_meta, "body")
-    )
-    (second_dir / "patches.json").write_bytes(
-        serialize_patch_json_bytes(second_document)
-    )
+    (second_dir / "proposal.md").write_bytes(serialize_proposal_markdown(second_meta, "body"))
+    (second_dir / "patches.json").write_bytes(serialize_patch_json_bytes(second_document))
     loaded = load_proposal_directory(second_dir, proposals_root=proposals_root)
     assert loaded.proposal is not None
 
@@ -1304,9 +1297,7 @@ def test_failed_generated_create_removes_new_empty_wiki_parents(
         "hello",
     )
     document = PatchDocumentV2(2, meta.id, (operation,))
-    vault_root, proposals_root, proposal_dir = _setup_proposal(
-        tmp_path, meta, document
-    )
+    vault_root, proposals_root, proposal_dir = _setup_proposal(tmp_path, meta, document)
     (vault_root / "wiki").mkdir()
     loaded = load_proposal_directory(proposal_dir, proposals_root=proposals_root)
     assert loaded.proposal is not None
@@ -1314,9 +1305,7 @@ def test_failed_generated_create_removes_new_empty_wiki_parents(
     def fail_preparation(**kwargs: object) -> object:
         raise ValueError("forced preparation failure")
 
-    monkeypatch.setattr(
-        "lifeos.proposals.application._candidate_for_operation", fail_preparation
-    )
+    monkeypatch.setattr("lifeos.proposals.application._candidate_for_operation", fail_preparation)
 
     with pytest.raises(ApplicationError):
         apply_proposal(

@@ -350,8 +350,7 @@ def test_evidence_to_obsidian_release_flow_keeps_semantic_changes_proposal_gated
         serialize_generated_ownership_bytes({}).decode("utf-8"),
     )
     source_before = (
-        "---\nid: journal-focus\ntype: journal\n---\n"
-        "Walking preceded a focused block.\n"
+        "---\nid: journal-focus\ntype: journal\n---\nWalking preceded a focused block.\n"
     )
     source = _write(vault, "journal/focus.md", source_before)
     bridge = PersonalModelWorkspaceBridge(

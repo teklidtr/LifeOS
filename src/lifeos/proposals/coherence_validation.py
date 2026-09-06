@@ -126,7 +126,10 @@ def preflight_proposal(
         invalid = resolution.state in {"ambiguous", "identity-changed"}
         state = "invalid" if invalid else "stale"
         message = resolution.detail
-        if resolution.current_path is not None and resolution.current_path != resolution.reviewed_path:
+        if (
+            resolution.current_path is not None
+            and resolution.current_path != resolution.reviewed_path
+        ):
             message = (
                 f"{message} Current stable-id location: {resolution.current_path}. "
                 f"Reviewed location: {resolution.reviewed_path}."

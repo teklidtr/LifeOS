@@ -112,8 +112,7 @@ def _run_scan(argv: Sequence[str]) -> int:
     }
     if result.renamed:
         payload["renamed"] = [
-            {"from_path": old_path, "to_path": new_path}
-            for old_path, new_path in result.renamed
+            {"from_path": old_path, "to_path": new_path} for old_path, new_path in result.renamed
         ]
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))

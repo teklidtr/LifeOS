@@ -113,17 +113,11 @@ def _frontmatter_tags(value: object) -> tuple[str, ...]:
     """Normalize tags with the same semantics as the retrieval index."""
     if isinstance(value, str):
         return tuple(
-            dict.fromkeys(
-                item.strip().lstrip("#") for item in value.split() if item.strip()
-            )
+            dict.fromkeys(item.strip().lstrip("#") for item in value.split() if item.strip())
         )
     if isinstance(value, (list, tuple)):
         return tuple(
-            dict.fromkeys(
-                str(item).strip().lstrip("#")
-                for item in value
-                if str(item).strip()
-            )
+            dict.fromkeys(str(item).strip().lstrip("#") for item in value if str(item).strip())
         )
     return ()
 
@@ -155,11 +149,7 @@ def _canonical_note_info(
     parsed = parse_markdown_note(source.path, content=source.content)
     frontmatter = parsed.frontmatter
     raw_source = frontmatter.get("source")
-    note_source = (
-        raw_source.strip()
-        if isinstance(raw_source, str) and raw_source.strip()
-        else None
-    )
+    note_source = raw_source.strip() if isinstance(raw_source, str) and raw_source.strip() else None
     info = _CanonicalNoteInfo(
         title=parsed.durable_fields.title or source.path.stem.replace("-", " "),
         description=parsed.durable_fields.description or "",
@@ -507,9 +497,7 @@ def build_context_pack(
     if archived_patterns:
         scope = replace(
             scope,
-            excluded_paths=tuple(
-                dict.fromkeys((*scope.excluded_paths, *archived_patterns))
-            ),
+            excluded_paths=tuple(dict.fromkeys((*scope.excluded_paths, *archived_patterns))),
         )
     candidate_filter = _retrieval_filter(
         vault_root=vault_root,
@@ -671,8 +659,7 @@ def build_context_pack(
         )
         pattern_context_items = pattern_context.items
         pattern_context_omissions = tuple(
-            f"Personal pattern {item.path}: {item.detail}"
-            for item in pattern_context.omissions
+            f"Personal pattern {item.path}: {item.detail}" for item in pattern_context.omissions
         )
         if pattern_context.truncated:
             pattern_context_omissions = (
@@ -782,9 +769,7 @@ def format_context_pack(pack: ContextPack) -> str:
     if not pack.sources:
         lines.append("  none")
     for source in pack.sources:
-        lines.append(
-            f"  {source.path} (score {source.score}, mode {source.retrieval_mode})"
-        )
+        lines.append(f"  {source.path} (score {source.score}, mode {source.retrieval_mode})")
         if source.retrieval_reasons:
             lines.append(f"    retrieval reasons: {', '.join(source.retrieval_reasons)}")
         if source.score_evidence:

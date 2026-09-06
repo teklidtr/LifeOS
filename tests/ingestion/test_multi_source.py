@@ -124,12 +124,15 @@ def test_generated_update_accumulates_only_target_grounding_sources() -> None:
         generator=GENERATOR,
         created_at="2026-08-01T10:00:00Z",
     )
-    original = _serialize_wiki_frontmatter(
-        {
-            "title": "Generated Topic",
-            "lifeos_provenance": provenance_to_frontmatter_value(provenance),
-        }
-    ) + "# Generated Topic\n\n## Evidence\nold\n"
+    original = (
+        _serialize_wiki_frontmatter(
+            {
+                "title": "Generated Topic",
+                "lifeos_provenance": provenance_to_frontmatter_value(provenance),
+            }
+        )
+        + "# Generated Topic\n\n## Evidence\nold\n"
+    )
     tag_rationale = "Preserve the reviewed taxonomy justification for this generated update."
     mutation = PreparedBatchUpdateMutation(
         target_path="wiki/generated-topic.md",

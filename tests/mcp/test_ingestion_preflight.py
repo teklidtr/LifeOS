@@ -219,9 +219,7 @@ def test_all_mcp_ingestion_draft_entrypoints_share_registry_preflight(tmp_path: 
             heading="Selected",
             body="Replacement",
         )
-        server._tool_manager.get_tool(
-            "ingestion_create_wiki_and_update_section_proposal"
-        ).fn(
+        server._tool_manager.get_tool("ingestion_create_wiki_and_update_section_proposal").fn(
             source_path="raw/source.md",
             create_target_path="wiki/detail.md",
             create_title="Detail",
@@ -232,10 +230,7 @@ def test_all_mcp_ingestion_draft_entrypoints_share_registry_preflight(tmp_path: 
         )
 
     assert refresh.call_count == 5
-    assert all(
-        call.kwargs["vault_root"] == tmp_path / "vault"
-        for call in refresh.call_args_list
-    )
+    assert all(call.kwargs["vault_root"] == tmp_path / "vault" for call in refresh.call_args_list)
 
 
 def test_refresh_failure_stops_before_proposal_facade(tmp_path: Path) -> None:

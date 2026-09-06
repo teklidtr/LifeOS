@@ -57,10 +57,7 @@ def test_runtime_scope_excludes_whitespace_named_descendants(tmp_path: Path) -> 
 def test_config_snapshot_recognizes_commented_include_header(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.write_text(
-        "[core]\n"
-        "\tfilemode = true\n"
-        "[include] # local settings\n"
-        "\tpath = ../unsafe.conf\n",
+        "[core]\n\tfilemode = true\n[include] # local settings\n\tpath = ../unsafe.conf\n",
         encoding="utf-8",
     )
 
@@ -74,10 +71,7 @@ def test_config_snapshot_recognizes_commented_include_header(tmp_path: Path) -> 
 def test_config_snapshot_recognizes_escaped_includeif_subsection(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.write_text(
-        "[core]\n"
-        "\tfilemode = true\n"
-        '[includeIf "gitdir:foo\\\"bar"]\n'
-        "\tpath = ../unsafe.conf\n",
+        '[core]\n\tfilemode = true\n[includeIf "gitdir:foo\\"bar"]\n\tpath = ../unsafe.conf\n',
         encoding="utf-8",
     )
 
@@ -91,10 +85,7 @@ def test_config_snapshot_recognizes_escaped_includeif_subsection(tmp_path: Path)
 def test_config_snapshot_fails_closed_on_unrecognized_section_header(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.write_text(
-        "[core]\n"
-        "\tfilemode = true\n"
-        '[includeIf "unterminated]\n'
-        "\tpath = ../unsafe.conf\n",
+        '[core]\n\tfilemode = true\n[includeIf "unterminated]\n\tpath = ../unsafe.conf\n',
         encoding="utf-8",
     )
 
@@ -222,7 +213,4 @@ def test_committed_tree_query_applies_authorized_exclusions_before_output(
     assert "secrets/private.md" not in entries
     assert seen_outputs
     assert all(b"secrets/private.md" not in output for output in seen_outputs)
-    assert any(
-        ":(top,exclude,literal)secrets" in arguments
-        for arguments in seen_arguments
-    )
+    assert any(":(top,exclude,literal)secrets" in arguments for arguments in seen_arguments)

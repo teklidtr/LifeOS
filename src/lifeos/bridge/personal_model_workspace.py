@@ -204,8 +204,10 @@ def _origin(value: object) -> PatternOrigin:
 def _review_reasons(value: object, fallback: str) -> tuple[str, ...]:
     if value is None:
         return (fallback,)
-    if not isinstance(value, list) or not value or not all(
-        isinstance(item, str) and item.strip() for item in value
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(item, str) and item.strip() for item in value)
     ):
         raise ProtocolError(
             "invalid_params",
@@ -292,16 +294,11 @@ def _workspace_document(
         "source_hash": document.source_hash,
         "runtime_state": "ready",
         "groups": {
-            "active": [
-                _workspace_item(item, artifacts, allow_path) for item in document.active
-            ],
+            "active": [_workspace_item(item, artifacts, allow_path) for item in document.active],
             "needs_review": [
-                _workspace_item(item, artifacts, allow_path)
-                for item in document.needs_review
+                _workspace_item(item, artifacts, allow_path) for item in document.needs_review
             ],
-            "seeds": [
-                _workspace_item(item, artifacts, allow_path) for item in document.seeds
-            ],
+            "seeds": [_workspace_item(item, artifacts, allow_path) for item in document.seeds],
             "archived": [
                 _workspace_item(item, artifacts, allow_path) for item in document.archived
             ],
@@ -609,9 +606,7 @@ class PersonalModelWorkspaceBridge:
                 statement = _optional_string(data, "statement")
                 confidence_value = _optional_string(data, "confidence")
                 evidence_value = data.get("evidence")
-                revised_evidence = (
-                    None if evidence_value is None else _evidence(evidence_value)
-                )
+                revised_evidence = None if evidence_value is None else _evidence(evidence_value)
                 if revised_evidence is not None:
                     _authorize_evidence(allow_path, revised_evidence)
                 request = RevisePatternRequest(

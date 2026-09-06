@@ -307,9 +307,7 @@ def test_existing_target_parent_deleted_during_update_is_not_recreated(
         ownership.write_generated_file("generated/owned.md", b"v2", "gen", "2")
 
     assert not parent.exists()
-    assert ownership.entries["generated/owned.md"].content_hash == hashlib.sha256(
-        b"v1"
-    ).hexdigest()
+    assert ownership.entries["generated/owned.md"].content_hash == hashlib.sha256(b"v1").hexdigest()
 
 
 def test_replacement_publication_failure_preserves_backup_when_target_disappears(

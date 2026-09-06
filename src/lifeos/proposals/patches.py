@@ -264,7 +264,16 @@ class PatchDocument:
         op_ids = set()
         targets = set()
         for op in self.operations:
-            if not isinstance(op, (ReplaceManagedBlock, CreateGeneratedFile, ReplaceGeneratedFile, CreateFile, PatchHumanFile)):
+            if not isinstance(
+                op,
+                (
+                    ReplaceManagedBlock,
+                    CreateGeneratedFile,
+                    ReplaceGeneratedFile,
+                    CreateFile,
+                    PatchHumanFile,
+                ),
+            ):
                 raise ValueError("operation is not a valid v1 operation model")
             if op.id in op_ids:
                 raise ValueError("duplicate operation id")
@@ -294,7 +303,17 @@ class PatchDocumentV2:
         op_ids = set()
         targets = set()
         for op in self.operations:
-            if not isinstance(op, (ReplaceManagedBlock, CreateGeneratedFileV2, ReplaceGeneratedFileV2, ReleaseGeneratedOwnershipV2, CreateFile, PatchHumanFile)):
+            if not isinstance(
+                op,
+                (
+                    ReplaceManagedBlock,
+                    CreateGeneratedFileV2,
+                    ReplaceGeneratedFileV2,
+                    ReleaseGeneratedOwnershipV2,
+                    CreateFile,
+                    PatchHumanFile,
+                ),
+            ):
                 raise ValueError("operation is not a valid v2 operation model")
             if op.id in op_ids:
                 raise ValueError("duplicate operation id")
@@ -390,18 +409,34 @@ def _validate_string(val: Any, field_path: str, errors: list[PatchSchemaError]) 
         errors.append(PatchSchemaError("empty_string", field_path, "must be a non-empty string"))
 
 
-def _validate_generator_version_schema(val: Any, field_path: str, errors: list[PatchSchemaError]) -> None:
+def _validate_generator_version_schema(
+    val: Any, field_path: str, errors: list[PatchSchemaError]
+) -> None:
     if type(val) is not str:
         errors.append(PatchSchemaError("invalid_type", field_path, "must be exactly str"))
         return
     if not (1 <= len(val) <= 64):
-        errors.append(PatchSchemaError("invalid_format", field_path, "length must be between 1 and 64 characters"))
+        errors.append(
+            PatchSchemaError(
+                "invalid_format", field_path, "length must be between 1 and 64 characters"
+            )
+        )
     elif val != val.strip():
-        errors.append(PatchSchemaError("invalid_format", field_path, "must not have leading or trailing whitespace"))
+        errors.append(
+            PatchSchemaError(
+                "invalid_format", field_path, "must not have leading or trailing whitespace"
+            )
+        )
     elif "\0" in val or "\r" in val or "\n" in val:
-        errors.append(PatchSchemaError("invalid_format", field_path, "must not contain NUL, CR, or LF"))
+        errors.append(
+            PatchSchemaError("invalid_format", field_path, "must not contain NUL, CR, or LF")
+        )
     elif any(ord(c) < 0x20 or ord(c) == 0x7F for c in val):
-        errors.append(PatchSchemaError("invalid_format", field_path, "must not contain ASCII control characters"))
+        errors.append(
+            PatchSchemaError(
+                "invalid_format", field_path, "must not contain ASCII control characters"
+            )
+        )
 
 
 def validate_patch_document(data: Mapping[str, object]) -> AnyPatchDocument:
@@ -523,7 +558,9 @@ def validate_patch_document(data: Mapping[str, object]) -> AnyPatchDocument:
                     )
                 _validate_identifier(op_data.get("generator_id"), f"{op_path}.generator_id", errors)
                 if sv == 2:
-                    _validate_generator_version_schema(op_data.get("generator_version"), f"{op_path}.generator_version", errors)
+                    _validate_generator_version_schema(
+                        op_data.get("generator_version"), f"{op_path}.generator_version", errors
+                    )
                 _validate_string(op_data.get("new_content"), f"{op_path}.new_content", errors)
 
             elif op_type == "replace_generated_file":
@@ -551,7 +588,9 @@ def validate_patch_document(data: Mapping[str, object]) -> AnyPatchDocument:
                     op_data.get("expected_generator_id"), f"{op_path}.expected_generator_id", errors
                 )
                 if sv == 2:
-                    _validate_generator_version_schema(op_data.get("generator_version"), f"{op_path}.generator_version", errors)
+                    _validate_generator_version_schema(
+                        op_data.get("generator_version"), f"{op_path}.generator_version", errors
+                    )
                 _validate_string(op_data.get("new_content"), f"{op_path}.new_content", errors)
 
             elif op_type == "create_file":
@@ -714,9 +753,7 @@ def validate_patch_document(data: Mapping[str, object]) -> AnyPatchDocument:
                         target_path=str(target),
                         expected_content_hash=str(op_data["expected_content_hash"]),
                         expected_generator_id=str(op_data["expected_generator_id"]),
-                        expected_generator_version=str(
-                            op_data["expected_generator_version"]
-                        ),
+                        expected_generator_version=str(op_data["expected_generator_version"]),
                         expected_created_at=str(op_data["expected_created_at"]),
                         expected_updated_at=str(op_data["expected_updated_at"]),
                     )
@@ -732,13 +769,13 @@ def validate_patch_document(data: Mapping[str, object]) -> AnyPatchDocument:
         return PatchDocumentV2(
             schema_version=2,
             proposal_id=str(data["proposal_id"]),
-            operations=tuple(validated_ops), # type: ignore
+            operations=tuple(validated_ops),  # type: ignore
         )
 
     return PatchDocument(
         schema_version=1,
         proposal_id=str(data["proposal_id"]),
-        operations=tuple(validated_ops), # type: ignore
+        operations=tuple(validated_ops),  # type: ignore
     )
 
 

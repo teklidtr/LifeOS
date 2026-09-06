@@ -62,11 +62,8 @@ def test_replay_is_deterministic_and_does_not_leak_same_day_outcome() -> None:
         "plans/p.md",
     )
     history = tuple(
-        observation(f"e{index}", date(2026, 7, 10 + index), actual=60)
-        for index in range(1, 5)
-    ) + (
-        observation("e5", date(2026, 7, 16), actual=20),
-    )
+        observation(f"e{index}", date(2026, 7, 10 + index), actual=60) for index in range(1, 5)
+    ) + (observation("e5", date(2026, 7, 16), actual=20),)
     context = ReplayContext(date(2026, 7, 16), 50, "medium", "medium")
 
     first = replay_history(

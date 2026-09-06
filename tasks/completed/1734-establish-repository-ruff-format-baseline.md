@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1734
 title: Establish a repository-wide Ruff formatter baseline and CI gate
-status: backlog
+status: completed
 phase: hardening
 depends_on: []
 risk: low
@@ -37,16 +37,16 @@ During LIFEOS-1730 validation on 2026-09-06, the locked Ruff 0.15.21 command `uv
 
 # Acceptance criteria
 
-- [ ] `uv run ruff format --check .` passes from a clean checkout without changing files.
-- [ ] The repository-wide formatter diff is reviewed as formatting-only; no behavioral changes are bundled into the baseline.
-- [ ] Ordinary CI contains a formatter check using the repository's locked Ruff environment.
-- [ ] `uv run ruff check .`, `uv run mypy src`, and the full pytest suite remain green after the formatting pass.
-- [ ] Documentation impact is resolved and task workflow validation passes.
+- [x] `uv run ruff format --check .` passes from a clean checkout without changing files.
+- [x] The repository-wide formatter diff is reviewed as formatting-only; no behavioral changes are bundled into the final baseline.
+- [x] Ordinary CI contains a formatter check using the repository's locked Ruff environment.
+- [x] `uv run ruff check .`, `uv run mypy src`, and the full pytest suite remain green after the formatting pass.
+- [x] Documentation impact is resolved and task workflow validation passes.
 
 # Documentation impact
 
-Status: none
-Reason: This task aligns source formatting and CI validation only; it must not change LifeOS user behavior, architecture, data contracts, setup, or operational semantics.
+Status: required
+Reason: README maintainer CI documentation must list the new repository-wide Ruff formatter gate; no LifeOS user behavior, architecture, data contracts, setup, or operational semantics change.
 
 # Validation
 
@@ -59,6 +59,15 @@ python scripts/validate_tasks.py
 ```
 
 Follow the root `AGENTS.md` PR review and final-validation workflow before completion.
+
+# Completion evidence
+
+- Locked Ruff 0.15.21 produced the repository-wide baseline; the final ordinary PR head `ee289ed9b0e32cfabfca0b5e4b29b2b60f89e79c` passed the repository formatter gate, Ruff lint, mypy, compileall, pytest collection, project contract smoke tests, task workflow validation, documentation-impact validation, and Obsidian plugin lint/typecheck/test/build.
+- Normal Codex review of the stable implementation identified one valid formatter-induced test-fixture regression: a joined `\0` escape consumed the following octal digit. The fixture was corrected to use unambiguous `\x00`, the focused regression test and repository Ruff checks passed, and the review thread was resolved. The fix changed test data spelling only and restored the pre-format runtime bytes.
+- GitHub full-validation run `34036421201` passed all four full pytest shards, aggregate `full-test`, clean-room setup/MCP validation, home-node service container validation, ARM64 image build, and aggregate `docker-setup-e2e` for head `ee289ed9b0e32cfabfca0b5e4b29b2b60f89e79c`.
+- README maintainer-facing CI documentation records the new formatter gate. No user-manual, architecture, data-contract, setup, or durable design-decision update was required because runtime/user behavior did not change.
+- Security review was skipped by explicit current-user instruction.
+- No independent out-of-scope follow-up work was discovered.
 
 # Relevant design decisions
 

@@ -143,10 +143,7 @@ def _scope_allow_path(
         if decision.reason not in {"outside-selected-paths", "outside-selected-folders"}:
             return False
         candidate = path.rstrip("/")
-        return any(
-            target == candidate or target.startswith(candidate + "/")
-            for target in selected
-        )
+        return any(target == candidate or target.startswith(candidate + "/") for target in selected)
 
     return allowed
 
@@ -171,9 +168,8 @@ def archived_personal_pattern_paths_for_scope(
 
     def allowed_pattern_path(path: str) -> bool:
         candidate = path.rstrip("/")
-        return (
-            (candidate == "patterns" or candidate.startswith("patterns/"))
-            and allow_path(candidate)
+        return (candidate == "patterns" or candidate.startswith("patterns/")) and allow_path(
+            candidate
         )
 
     try:
@@ -197,9 +193,7 @@ def archived_personal_pattern_paths_for_scope(
     return tuple(sorted(archived))
 
 
-def _runtime_scan_filter(
-    vault_root: Path, runtime_dir: Path
-) -> Callable[[str], bool]:
+def _runtime_scan_filter(vault_root: Path, runtime_dir: Path) -> Callable[[str], bool]:
     root = Path(os.path.abspath(os.fspath(vault_root)))
     runtime = Path(os.path.abspath(os.fspath(runtime_dir)))
     try:
@@ -298,10 +292,7 @@ def _merge_redactions(
         for entry in group:
             label = str(entry["label"])
             counts[label] = counts.get(label, 0) + cast(int, entry["occurrences"])
-    return tuple(
-        {"label": label, "occurrences": counts[label]}
-        for label in sorted(counts)
-    )
+    return tuple({"label": label, "occurrences": counts[label]} for label in sorted(counts))
 
 
 def _statement(vault_root: Path, item: PersonalModelItem) -> str:
@@ -383,9 +374,7 @@ def build_personal_pattern_context(
         dict.fromkeys(str(path).strip() for path in explicit_paths if str(path).strip())
     )
     explicit = frozenset(explicit_ordered)
-    redactions = tuple(
-        sorted({str(term).strip() for term in redact_terms if str(term).strip()})
-    )
+    redactions = tuple(sorted({str(term).strip() for term in redact_terms if str(term).strip()}))
     scope = retrieval_scope or RetrievalScope(allow_protected=allow_protected)
     allow_path = _scope_allow_path(
         vault_root=vault_root,
@@ -396,12 +385,11 @@ def build_personal_pattern_context(
     document = _document(vault_root=vault_root, runtime_dir=runtime_dir, allow_path=allow_path)
     by_path = {item.pattern_path: item for item in document.items}
     archived_default_paths = frozenset(
-        item.pattern_path
-        for item in document.archived
-        if item.pattern_path not in explicit
+        item.pattern_path for item in document.archived if item.pattern_path not in explicit
     )
 
     if candidate_paths is None:
+
         def search_allow_path(path: str) -> bool:
             return allow_path(path) and path not in archived_default_paths
 

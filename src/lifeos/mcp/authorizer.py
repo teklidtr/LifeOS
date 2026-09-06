@@ -61,7 +61,9 @@ class InteractiveTtyAuthorizer(ConsequentialAuthorizer):
                 self._render_review(tty, request, proposal, current_digest)
                 response = tty.readline()
         except OSError as error:
-            raise AuthorizationUnavailableError("Interactive authorization is unavailable") from error
+            raise AuthorizationUnavailableError(
+                "Interactive authorization is unavailable"
+            ) from error
 
         if response.strip().lower() != "y":
             raise AuthorizationDeniedError("Consequential operation was not authorized")
@@ -81,18 +83,18 @@ class InteractiveTtyAuthorizer(ConsequentialAuthorizer):
         tty.write(f"Title:       {proposal.metadata.title}\n")
         tty.write(f"Description: {proposal.metadata.description}\n")
         tty.write(f"\n--- Body ---\n{proposal.body}\n")
-        
+
         # Format patches nicely
         tty.write("\n--- Patches ---\n")
         operations = getattr(proposal.patch_document, "operations", [])
         if not operations:
             tty.write("No patch operations.\n")
-            
+
         for patch in operations:
             tty.write(f"\nOperation ID: {patch.id}\n")
             tty.write(f"Type:         {patch.op}\n")
             tty.write(f"Target Path:  {patch.target_path}\n")
-            
+
             if patch.op == "replace_managed_block":
                 tty.write(f"Block Name:   {patch.block_name}\n")
                 tty.write(f"Expected:     {patch.base_hash}\n")
@@ -120,7 +122,6 @@ class InteractiveTtyAuthorizer(ConsequentialAuthorizer):
                     "Proposal could not be rendered for authorization"
                 )
 
-            
         if request.action in {ConsequentialAction.APPROVE, ConsequentialAction.APPLY}:
             tty.write(f"\nVerified Digest: {current_digest}\n")
         else:

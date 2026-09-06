@@ -68,6 +68,8 @@ def test_research_preflight_excludes_internal_artifacts(tmp_path: Path) -> None:
     assert captured_allow_path("conversations/2026/private.md") is False
 
     records = server._tool_manager.get_tool("runtime_activity").fn(limit=10)["records"]
-    preflight = next(record for record in records if record["tool"] == "ingestion_registry_preflight")
+    preflight = next(
+        record for record in records if record["tool"] == "ingestion_registry_preflight"
+    )
     assert preflight["source_paths"] == ["raw/research/source.md"]
     assert preflight["changed_paths"] == ["raw/research/source.md"]

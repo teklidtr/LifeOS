@@ -56,7 +56,10 @@ def evaluate_retrieval(
         expected = set(fixture.expected_paths)
         recall = 1.0 if not expected else len(expected & set(paths)) / len(expected)
         references_valid = all(
-            item.path and item.start_line > 0 and item.end_line >= item.start_line and item.chunk_hash.startswith("sha256:")
+            item.path
+            and item.start_line > 0
+            and item.end_line >= item.start_line
+            and item.chunk_hash.startswith("sha256:")
             for item in first.results
         )
         normalized = [item.chunk_hash for item in first.results]

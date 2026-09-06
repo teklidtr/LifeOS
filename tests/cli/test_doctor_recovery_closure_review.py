@@ -216,9 +216,7 @@ def test_ignored_symlink_is_still_a_structural_recovery_failure(
     link = vault / "wiki" / "link.md"
     link.symlink_to(external)
 
-    report = recovery_readiness.collect_recovery_readiness(
-        load_config(vault / "lifeos.yml")
-    )
+    report = recovery_readiness.collect_recovery_readiness(load_config(vault / "lifeos.yml"))
     diagnostics = _diagnostics(report)
 
     assert "wiki/link.md" in report.ignored_paths

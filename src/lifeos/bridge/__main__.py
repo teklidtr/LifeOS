@@ -14,7 +14,9 @@ def main() -> int:
     parser.add_argument("--actor-id", required=True)
     args = parser.parse_args()
     config = load_config(args.config)
-    app = BridgeApplication(vault_root=config.vault_root, runtime_dir=config.runtime_dir, actor_id=args.actor_id)
+    app = BridgeApplication(
+        vault_root=config.vault_root, runtime_dir=config.runtime_dir, actor_id=args.actor_id
+    )
     return StdioBridgeServer(app, reader=sys.stdin, writer=sys.stdout).serve()
 
 

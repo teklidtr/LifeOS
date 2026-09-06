@@ -1,8 +1,5 @@
 import pytest
-from lifeos.facade.authorization import (
-    AuthorizedPrincipal,
-    ConsequentialAuthorizer
-)
+from lifeos.facade.authorization import AuthorizedPrincipal, ConsequentialAuthorizer
 import dataclasses
 import inspect
 
@@ -33,8 +30,9 @@ def test_authorizer_is_required() -> None:
     from lifeos.facade.consequential_tools import (
         submit_proposal_tool,
         approve_proposal_tool,
-        apply_proposal_tool
+        apply_proposal_tool,
     )
+
     sig_submit = inspect.signature(submit_proposal_tool)
     assert "authorizer" in sig_submit.parameters
     assert sig_submit.parameters["authorizer"].annotation is ConsequentialAuthorizer
@@ -52,10 +50,10 @@ def test_agent_request_models_contain_only_proposal_id() -> None:
     from lifeos.facade.consequential_tools import (
         SubmitProposalRequest,
         ApproveProposalRequest,
-        ApplyProposalRequest
+        ApplyProposalRequest,
     )
+
     for model in (SubmitProposalRequest, ApproveProposalRequest, ApplyProposalRequest):
         fields = dataclasses.fields(model)
         assert len(fields) == 1
         assert fields[0].name == "proposal_id"
-

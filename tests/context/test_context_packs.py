@@ -24,11 +24,7 @@ def _write_note(
     path = vault_root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        "---\n"
-        f"title: {title}\n"
-        f"description: {description}\n"
-        "---\n"
-        f"{body}\n",
+        f"---\ntitle: {title}\ndescription: {description}\n---\n{body}\n",
         encoding="utf-8",
     )
 
@@ -194,6 +190,4 @@ def test_context_pack_focus_path_is_included_without_lexical_match(tmp_path: Pat
     assert pack.sources[0].path == "study/driving-licence/intersections.md"
     assert "goals/pass-driving-licence.md" in {item.path for item in pack.sources}
     assert [item.id for item in pack.instructions] == ["driving-exam"]
-    assert pack.instructions[0].applicable_sources == (
-        "study/driving-licence/intersections.md",
-    )
+    assert pack.instructions[0].applicable_sources == ("study/driving-licence/intersections.md",)

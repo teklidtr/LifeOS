@@ -359,9 +359,7 @@ def accept_proposal_tool(
     proposals_root = vault_root / "proposals"
     proposal = _load_proposal(request.proposal_id, proposals_root)
     if proposal.metadata.status.value not in ("draft", "pending", "approved"):
-        raise ToolConflictError(
-            f"Cannot accept from {proposal.metadata.status.value}"
-        )
+        raise ToolConflictError(f"Cannot accept from {proposal.metadata.status.value}")
 
     accepted_digest = compute_review_digest(
         proposal.metadata,
@@ -371,9 +369,7 @@ def accept_proposal_tool(
     )
     if proposal.metadata.status.value != "draft":
         if proposal.metadata.review_digest != accepted_digest:
-            raise ToolConflictError(
-                "Current proposal content does not match stored review digest"
-            )
+            raise ToolConflictError("Current proposal content does not match stored review digest")
 
     try:
         grant = authorizer.authorize(
@@ -384,13 +380,9 @@ def accept_proposal_tool(
             )
         )
     except AuthorizationDeniedError as exc:
-        raise ToolAuthorizationError(
-            "Consequential operation was not authorized"
-        ) from exc
+        raise ToolAuthorizationError("Consequential operation was not authorized") from exc
     except AuthorizationUnavailableError as exc:
-        raise ToolUnavailableError(
-            "Authorization service is unavailable"
-        ) from exc
+        raise ToolUnavailableError("Authorization service is unavailable") from exc
 
     timestamp = _format_time(clock_fn())
     completed: list[str] = []
@@ -409,9 +401,7 @@ def accept_proposal_tool(
             reloaded.metadata.status.value != "draft"
             and reloaded.metadata.review_digest != accepted_digest
         ):
-            raise ToolConflictError(
-                "Stored review digest changed after acceptance"
-            )
+            raise ToolConflictError("Stored review digest changed after acceptance")
         return reloaded
 
     try:

@@ -658,7 +658,9 @@ def test_status_external_runtime_still_uses_canonical_ownership(tmp_path: Path) 
     )
     config = LifeOSConfig(vault, external, FeatureFlags())
 
-    payload = json.loads(serialize_status_json(collect_status(config, Registry(external / "registry.db"))))
+    payload = json.loads(
+        serialize_status_json(collect_status(config, Registry(external / "registry.db")))
+    )
 
     assert payload["lint"]["errors"] == 1
     assert _check(payload, "lint")["code"] == "lint-errors"

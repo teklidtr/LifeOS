@@ -320,8 +320,10 @@ class ReviewDecisionService(_BaseReviewDecisionService):
         note: str | None = None,
         proposal_id: str | None = None,
     ) -> ReviewArtifact:
-        if decision == "propose_change" and not proposal_id and item_id.startswith(
-            "personal-pattern:"
+        if (
+            decision == "propose_change"
+            and not proposal_id
+            and item_id.startswith("personal-pattern:")
         ):
             artifact = self.artifacts.load_id(review_id)
             existing = next(

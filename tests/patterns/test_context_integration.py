@@ -100,8 +100,7 @@ def test_context_pack_bounds_and_labels_personal_patterns_without_instruction_au
     assert needs.can_authorize_mutation is False
     assert pack.instructions == ()
     assert any(
-        source.path == "patterns/needs.md"
-        and "not an instruction" in source.excerpt
+        source.path == "patterns/needs.md" and "not an instruction" in source.excerpt
         for source in pack.sources
     )
     assert archived not in {source.path for source in pack.sources}
@@ -124,9 +123,7 @@ def test_pattern_context_scopes_evidence_and_redacts_before_external_use(tmp_pat
     _write(
         vault,
         "system/retrieval-policy.yml",
-        "schema_version: 1\n"
-        "protected_prefixes: [private]\n"
-        "external_allowed_prefixes: [private]\n",
+        "schema_version: 1\nprotected_prefixes: [private]\nexternal_allowed_prefixes: [private]\n",
     )
     evidence = (
         PatternEvidence(
@@ -186,7 +183,9 @@ def test_knowledge_conversation_keeps_pattern_evidence_usable_without_provider(
     assert "status=active" in pattern_evidence.excerpt
 
 
-def test_goal_context_adds_relevant_pattern_without_changing_planner_contract(tmp_path: Path) -> None:
+def test_goal_context_adds_relevant_pattern_without_changing_planner_contract(
+    tmp_path: Path,
+) -> None:
     vault = _vault(tmp_path)
     _pattern(vault, "goal", status="active", statement="Sleep consistency helps training.")
     goal_text = "---\nid: goal-sleep\ntype: goal\ntitle: Improve sleep recovery\n---\nGoal\n"

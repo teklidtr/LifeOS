@@ -69,8 +69,7 @@ def test_public_module_is_static_facade_over_explicit_composition() -> None:
         is composition.persist_compounding_wiki_proposal
     )
     assert (
-        public_ingestion._persist_proposal_documents
-        is ingestion_core._persist_proposal_documents
+        public_ingestion._persist_proposal_documents is ingestion_core._persist_proposal_documents
     )
 
 

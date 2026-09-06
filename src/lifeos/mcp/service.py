@@ -50,8 +50,7 @@ class _RequestBodyTooLarge(RuntimeError):
 class ReadinessProbe(Protocol):
     """Minimal readiness contract used by auth and HTTP probes."""
 
-    def ready(self) -> bool:
-        ...
+    def ready(self) -> bool: ...
 
 
 def _nearest_existing_parent(path: Path) -> Path:
@@ -88,7 +87,9 @@ def service_storage_issue(
         if proposals_fd != -1:
             os.close(proposals_fd)
     if not os.access(proposals_root, os.R_OK | os.W_OK | os.X_OK):
-        return f"proposal directory is not readable/writable by the service process: {proposals_root}"
+        return (
+            f"proposal directory is not readable/writable by the service process: {proposals_root}"
+        )
 
     runtime_dir = config.runtime_dir
     if runtime_authority is not None:
@@ -98,7 +99,9 @@ def service_storage_issue(
                 f"{runtime_dir}"
             )
         if not os.access(runtime_dir, os.R_OK | os.W_OK | os.X_OK, follow_symlinks=False):
-            return f"runtime directory is not readable/writable by the service process: {runtime_dir}"
+            return (
+                f"runtime directory is not readable/writable by the service process: {runtime_dir}"
+            )
         return None
 
     try:
@@ -115,7 +118,9 @@ def service_storage_issue(
         if not stat.S_ISDIR(runtime_state.st_mode):
             return f"runtime directory is not a directory: {runtime_dir}"
         if not os.access(runtime_dir, os.R_OK | os.W_OK | os.X_OK, follow_symlinks=False):
-            return f"runtime directory is not readable/writable by the service process: {runtime_dir}"
+            return (
+                f"runtime directory is not readable/writable by the service process: {runtime_dir}"
+            )
     return None
 
 

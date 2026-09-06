@@ -71,8 +71,7 @@ def test_registered_source_exposes_only_tags_and_topics(
 ) -> None:
     source_path = "study/tagged.md"
     content = (
-        b"---\ntags: [existing, '#nested/topic']\ntopics: [new-topic]\n"
-        b"secret: hidden\n---\nBody\n"
+        b"---\ntags: [existing, '#nested/topic']\ntopics: [new-topic]\nsecret: hidden\n---\nBody\n"
     )
     target = vault_root / source_path
     target.parent.mkdir()
@@ -104,9 +103,7 @@ def test_invalid_path_is_rejected_before_filesystem_access(
     read_bytes.assert_not_called()
 
 
-def test_unregistered_present_source_is_rejected(
-    registry: Registry, vault_root: Path
-) -> None:
+def test_unregistered_present_source_is_rejected(registry: Registry, vault_root: Path) -> None:
     (vault_root / "test.md").write_bytes(b"content")
 
     with pytest.raises(UnregisteredSourceError):
@@ -117,9 +114,7 @@ def test_unregistered_present_source_is_rejected(
         )
 
 
-def test_registered_modified_source_is_rejected(
-    registry: Registry, vault_root: Path
-) -> None:
+def test_registered_modified_source_is_rejected(registry: Registry, vault_root: Path) -> None:
     target = vault_root / "test.md"
     target.write_bytes(b"content")
     _register(registry, vault_root, "test.md", b"content")
@@ -133,9 +128,7 @@ def test_registered_modified_source_is_rejected(
         )
 
 
-def test_registered_missing_source_is_rejected(
-    registry: Registry, vault_root: Path
-) -> None:
+def test_registered_missing_source_is_rejected(registry: Registry, vault_root: Path) -> None:
     target = vault_root / "test.md"
     target.write_bytes(b"content")
     _register(registry, vault_root, "test.md", b"content")
@@ -149,9 +142,7 @@ def test_registered_missing_source_is_rejected(
         )
 
 
-def test_unregistered_missing_source_is_rejected(
-    registry: Registry, vault_root: Path
-) -> None:
+def test_unregistered_missing_source_is_rejected(registry: Registry, vault_root: Path) -> None:
     with pytest.raises(UnregisteredSourceError):
         load_registered_source(
             registry=registry,
@@ -160,9 +151,7 @@ def test_unregistered_missing_source_is_rejected(
         )
 
 
-def test_read_failure_maps_to_source_read_error(
-    registry: Registry, vault_root: Path
-) -> None:
+def test_read_failure_maps_to_source_read_error(registry: Registry, vault_root: Path) -> None:
     with patch(
         "lifeos.ingestion.orchestration.read_vault_bytes",
         side_effect=VaultAccessError(

@@ -35,11 +35,7 @@ def _vault_files(vault_root: Path, prefix: str) -> set[str]:
     root = vault_root / prefix
     if not root.exists():
         return set()
-    return {
-        path.relative_to(vault_root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file()
-    }
+    return {path.relative_to(vault_root).as_posix() for path in root.rglob("*") if path.is_file()}
 
 
 def test_research_tool_schemas_preserve_read_write_and_actor_boundaries(tmp_path: Path) -> None:

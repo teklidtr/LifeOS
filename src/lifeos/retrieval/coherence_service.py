@@ -66,9 +66,7 @@ def _identity_plan(
             paths_by_document_id.setdefault(document_id, []).append(source.relative_path)
 
     ambiguous = frozenset(
-        document_id
-        for document_id, paths in paths_by_document_id.items()
-        if len(paths) > 1
+        document_id for document_id, paths in paths_by_document_id.items() if len(paths) > 1
     )
     expected = {
         source.relative_path: (
@@ -195,9 +193,7 @@ def _assert_no_parked_paths(index: RetrievalIndex) -> None:
         if document.path.startswith(_RELOCATION_PARK_PREFIX)
     }
     leaked.update(
-        chunk.path
-        for chunk in index.chunks()
-        if chunk.path.startswith(_RELOCATION_PARK_PREFIX)
+        chunk.path for chunk in index.chunks() if chunk.path.startswith(_RELOCATION_PARK_PREFIX)
     )
     if leaked:
         paths = ", ".join(sorted(leaked))
@@ -209,8 +205,7 @@ def _assert_no_parked_paths(index: RetrievalIndex) -> None:
 
 def _restore_public_paths(result: _service.IndexResult) -> _service.IndexResult:
     renamed = tuple(
-        (_canonical_path_from_parked(old_path), new_path)
-        for old_path, new_path in result.renamed
+        (_canonical_path_from_parked(old_path), new_path) for old_path, new_path in result.renamed
     )
     deleted = tuple(_canonical_path_from_parked(path) for path in result.deleted)
     return replace(result, renamed=renamed, deleted=deleted)
@@ -229,11 +224,7 @@ def _suppress_unproven_relocations(
     for old_path, new_path in result.renamed:
         prior_id = prior_document_ids.get(old_path)
         expected_id = expected.get(new_path)
-        if (
-            prior_id is not None
-            and prior_id.startswith("id:")
-            and expected_id == prior_id
-        ):
+        if prior_id is not None and prior_id.startswith("id:") and expected_id == prior_id:
             retained.append((old_path, new_path))
             continue
         demoted_old.add(old_path)

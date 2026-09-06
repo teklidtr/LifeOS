@@ -189,7 +189,9 @@ def test_experiment_decision_and_existing_plan_are_explicit_outcomes(tmp_path: P
     assert linked.duplicate_findings[0].plan_id == "plan-cell"
 
 
-def test_invalid_excessive_cosmetic_stale_and_hallucinated_output_is_rejected(tmp_path: Path) -> None:
+def test_invalid_excessive_cosmetic_stale_and_hallucinated_output_is_rejected(
+    tmp_path: Path,
+) -> None:
     _goal(tmp_path)
     goal, snapshot, context, index = _inputs(tmp_path)
     refs = [item.path for item in context.items]
@@ -201,7 +203,11 @@ def test_invalid_excessive_cosmetic_stale_and_hallucinated_output_is_rejected(tm
             context=context,
             index=index,
             as_of=date(2026, 7, 16),
-            adapter=OptionsAdapter(tuple(_raw_option(f"option-{n}", f"Strategy {n}", source_refs=refs) for n in range(4))),
+            adapter=OptionsAdapter(
+                tuple(
+                    _raw_option(f"option-{n}", f"Strategy {n}", source_refs=refs) for n in range(4)
+                )
+            ),
         )
     duplicate = _raw_option("option-a", "Same strategy", source_refs=refs)
     duplicate2 = _raw_option("option-b", "Same strategy", source_refs=refs)
@@ -216,7 +222,9 @@ def test_invalid_excessive_cosmetic_stale_and_hallucinated_output_is_rejected(tm
             as_of=date(2026, 7, 16),
             adapter=OptionsAdapter((duplicate, duplicate2)),
         )
-    hallucinated = _raw_option("option-hallucinated", "Distinct strategy", source_refs=["wiki/never-existed.md"])
+    hallucinated = _raw_option(
+        "option-hallucinated", "Distinct strategy", source_refs=["wiki/never-existed.md"]
+    )
     with pytest.raises(PlanOptionError, match="unknown source"):
         generate_plan_options(
             goal=goal,
@@ -263,9 +271,17 @@ def test_near_duplicate_existing_plan_is_reported(tmp_path: Path) -> None:
 
 def test_fixture_replay_and_bridge_are_deterministic(tmp_path: Path) -> None:
     _goal(tmp_path)
-    app = BridgeApplication(vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos", actor_id="tester")
-    app.dispatch("copilot.session.start", {"goal_path": "goals/cell.md", "session_id": "session-cell"})
-    first = app.dispatch("copilot.options.generate", {"session_id": "session-cell", "as_of": "2026-07-16"})
-    second = app.dispatch("copilot.options.generate", {"session_id": "session-cell", "as_of": "2026-07-16"})
+    app = BridgeApplication(
+        vault_root=tmp_path, runtime_dir=tmp_path / ".lifeos", actor_id="tester"
+    )
+    app.dispatch(
+        "copilot.session.start", {"goal_path": "goals/cell.md", "session_id": "session-cell"}
+    )
+    first = app.dispatch(
+        "copilot.options.generate", {"session_id": "session-cell", "as_of": "2026-07-16"}
+    )
+    second = app.dispatch(
+        "copilot.options.generate", {"session_id": "session-cell", "as_of": "2026-07-16"}
+    )
     assert first == second
     assert first["outcome"] == "options"

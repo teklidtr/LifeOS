@@ -241,6 +241,4 @@ def _reject_unknown_keys(
 ) -> None:
     unknown = sorted(str(key) for key in data if key not in allowed)
     if unknown:
-        raise ConfigError(
-            f"Unknown configuration key(s) in {location}: {', '.join(unknown)}."
-        )
+        raise ConfigError(f"Unknown configuration key(s) in {location}: {', '.join(unknown)}.")

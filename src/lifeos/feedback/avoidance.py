@@ -19,13 +19,25 @@ def _hash(*parts: str) -> str:
 
 def _kind(items: tuple[FeedbackObservation, ...]) -> tuple[str, tuple[str, ...]]:
     reasons = " ".join((item.reason or "").casefold() for item in items)
-    if any(word in reasons for word in ("unclear", "vague", "underspecified", "don't know where", "not defined")):
+    if any(
+        word in reasons
+        for word in ("unclear", "vague", "underspecified", "don't know where", "not defined")
+    ):
         return "underspecified", ("clarify", "decompose", "ask_later")
-    if any(word in reasons for word in ("too big", "too long", "no time", "oversized", "larger than")):
+    if any(
+        word in reasons for word in ("too big", "too long", "no time", "oversized", "larger than")
+    ):
         return "oversized", ("decompose", "reduce_duration", "ask_later")
-    if any(word in reasons for word in ("blocked", "waiting", "dependency")) or sum(item.blocked is True for item in items) >= 2:
+    if (
+        any(word in reasons for word in ("blocked", "waiting", "dependency"))
+        or sum(item.blocked is True for item in items) >= 2
+    ):
         return "blocked", ("add_blocker", "review_blocker", "pause")
-    ratios = [item.actual_minutes / item.planned_minutes for item in items if item.actual_minutes and item.planned_minutes and item.outcome in {"done", "partial"}]
+    ratios = [
+        item.actual_minutes / item.planned_minutes
+        for item in items
+        if item.actual_minutes and item.planned_minutes and item.outcome in {"done", "partial"}
+    ]
     if len(ratios) >= 2 and sum(ratio >= 1.3 for ratio in ratios) >= 2:
         return "estimate_error", ("review_estimate", "decompose")
     if sum(item.energy_before == "high" and item.motivation_before == "low" for item in items) >= 2:
@@ -72,7 +84,12 @@ def diagnose_repeated_avoidance(
             missing.append("Energy before the task is unknown.")
         if all(item.motivation_before is None for item in adverse):
             missing.append("Motivation before the task is unknown.")
-        confidence = "moderate" if len(adverse) >= minimum_repetitions + 2 and len({item.outcome for item in adverse}) <= 2 else "low"
+        confidence = (
+            "moderate"
+            if len(adverse) >= minimum_repetitions + 2
+            and len({item.outcome for item in adverse}) <= 2
+            else "low"
+        )
         title = {
             "underspecified": "The next action may be underspecified",
             "oversized": "The task may be larger than available windows",
@@ -93,21 +110,23 @@ def diagnose_repeated_avoidance(
             "External events or missing context may explain the pattern.",
             "The recorded task may not match the work actually performed.",
         )
-        diagnoses.append(AvoidanceDiagnosis(
-            AVOIDANCE_POLICY_VERSION,
-            diagnosis_id,
-            fingerprint,
-            task_id,
-            plan_id,
-            kind,  # type: ignore[arg-type]
-            title,
-            hypothesis,
-            confidence,  # type: ignore[arg-type]
-            evidence_ids,
-            tuple(item.day for item in adverse),
-            competing,
-            tuple(missing),
-            actions,
-            fingerprint in dismissed,
-        ))
+        diagnoses.append(
+            AvoidanceDiagnosis(
+                AVOIDANCE_POLICY_VERSION,
+                diagnosis_id,
+                fingerprint,
+                task_id,
+                plan_id,
+                kind,  # type: ignore[arg-type]
+                title,
+                hypothesis,
+                confidence,  # type: ignore[arg-type]
+                evidence_ids,
+                tuple(item.day for item in adverse),
+                competing,
+                tuple(missing),
+                actions,
+                fingerprint in dismissed,
+            )
+        )
     return tuple(diagnoses)

@@ -5,26 +5,40 @@ from pathlib import Path
 import pytest
 
 from lifeos.desktop import DesktopProposalService
-from lifeos.facade.authorization import AuthorizationDeniedError, ConsequentialAction, ConsequentialAuthorizationRequest
+from lifeos.facade.authorization import (
+    AuthorizationDeniedError,
+    ConsequentialAction,
+    ConsequentialAuthorizationRequest,
+)
 from lifeos.proposals.loader import load_proposal_directory
 
 
 def test_one_use_confirmation_is_bound_to_exact_action(tmp_path: Path) -> None:
-    service=DesktopProposalService(vault_root=tmp_path,actor_id="me")
-    token=service.authorizer.issue(action=ConsequentialAction.SUBMIT,proposal_id="p",review_digest=None)
+    service = DesktopProposalService(vault_root=tmp_path, actor_id="me")
+    token = service.authorizer.issue(
+        action=ConsequentialAction.SUBMIT, proposal_id="p", review_digest=None
+    )
     service.authorizer.activate(token)
-    principal=service.authorizer.authorize(ConsequentialAuthorizationRequest(ConsequentialAction.SUBMIT,"p",None))
-    assert principal.actor_id=="me"
+    principal = service.authorizer.authorize(
+        ConsequentialAuthorizationRequest(ConsequentialAction.SUBMIT, "p", None)
+    )
+    assert principal.actor_id == "me"
     with pytest.raises(AuthorizationDeniedError):
-        service.authorizer.authorize(ConsequentialAuthorizationRequest(ConsequentialAction.SUBMIT,"p",None))
+        service.authorizer.authorize(
+            ConsequentialAuthorizationRequest(ConsequentialAction.SUBMIT, "p", None)
+        )
 
 
 def test_confirmation_cannot_be_reused_for_other_proposal(tmp_path: Path) -> None:
-    service=DesktopProposalService(vault_root=tmp_path,actor_id="me")
-    token=service.authorizer.issue(action=ConsequentialAction.APPLY,proposal_id="p",review_digest="d")
+    service = DesktopProposalService(vault_root=tmp_path, actor_id="me")
+    token = service.authorizer.issue(
+        action=ConsequentialAction.APPLY, proposal_id="p", review_digest="d"
+    )
     service.authorizer.activate(token)
     with pytest.raises(AuthorizationDeniedError):
-        service.authorizer.authorize(ConsequentialAuthorizationRequest(ConsequentialAction.APPLY,"other","d"))
+        service.authorizer.authorize(
+            ConsequentialAuthorizationRequest(ConsequentialAction.APPLY, "other", "d")
+        )
 
 
 def test_inspection_exposes_canonical_created_at(tmp_path: Path) -> None:
@@ -70,9 +84,7 @@ def test_inspection_exposes_canonical_created_at(tmp_path: Path) -> None:
     )
     assert loaded.proposal is not None, loaded.findings
 
-    inspection = DesktopProposalService(vault_root=tmp_path, actor_id="me").inspect(
-        proposal_id
-    )
+    inspection = DesktopProposalService(vault_root=tmp_path, actor_id="me").inspect(proposal_id)
 
     assert inspection.created_at == "2026-08-22T12:23:09Z"
     assert inspection.to_dict()["created_at"] == "2026-08-22T12:23:09Z"
@@ -130,11 +142,7 @@ def test_inspection_exposes_created_file_and_human_patch_diffs(tmp_path: Path) -
                         "op": "patch_human_file",
                         "target_path": target_path,
                         "unified_diff": (
-                            "@@ -3,3 +3,3 @@\n"
-                            " ## Ekipman notları\n"
-                            " \n"
-                            "-Eski not.\n"
-                            "+Yeni not.\n"
+                            "@@ -3,3 +3,3 @@\n ## Ekipman notları\n \n-Eski not.\n+Yeni not.\n"
                         ),
                     },
                 ],
@@ -155,9 +163,7 @@ def test_inspection_exposes_created_file_and_human_patch_diffs(tmp_path: Path) -
     )
     assert loaded.proposal is not None, loaded.findings
 
-    inspection = DesktopProposalService(vault_root=tmp_path, actor_id="me").inspect(
-        proposal_id
-    )
+    inspection = DesktopProposalService(vault_root=tmp_path, actor_id="me").inspect(proposal_id)
 
     assert len(inspection.operations) == 2
     created, patched = inspection.operations
@@ -398,8 +404,7 @@ def test_acceptance_stops_at_approved_when_target_becomes_stale(tmp_path: Path) 
                 "operations": [
                     {
                         "base_hash": (
-                            "sha256:"
-                            f"{hashlib.sha256(original.encode('utf-8')).hexdigest()}"
+                            f"sha256:{hashlib.sha256(original.encode('utf-8')).hexdigest()}"
                         ),
                         "id": "op-update-existing",
                         "op": "patch_human_file",

@@ -108,9 +108,7 @@ def _sort_findings(findings: list[ProposalLoadFinding]) -> tuple[ProposalLoadFin
     return tuple(findings)
 
 
-def load_proposal_directory(
-    proposal_dir: Path, *, proposals_root: Path
-) -> ProposalLoadResult:
+def load_proposal_directory(proposal_dir: Path, *, proposals_root: Path) -> ProposalLoadResult:
     findings: list[ProposalLoadFinding] = []
 
     if proposal_dir.parent != proposals_root:
@@ -404,9 +402,7 @@ def load_proposal_directory(
             return ProposalLoadResult(None, _sort_findings(findings))
         import hashlib
 
-        review_snapshot_source_hash = (
-            f"sha256:{hashlib.sha256(review_bytes).hexdigest()}"
-        )
+        review_snapshot_source_hash = f"sha256:{hashlib.sha256(review_bytes).hexdigest()}"
 
     # Cross-document invariants
     if metadata.id != proposal_dir.name:
@@ -455,6 +451,7 @@ def load_proposal_directory(
             body_str = md_text[end_of_fm:]
 
     import hashlib
+
     proposal_source_hash = f"sha256:{hashlib.sha256(md_bytes).hexdigest()}"
     patches_source_hash = f"sha256:{hashlib.sha256(json_bytes).hexdigest()}"
 

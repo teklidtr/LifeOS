@@ -41,9 +41,7 @@ def test_shared_input_builder_preserves_strictness_aliases_defaults_and_annotati
     assert "field_model_dump" not in coercive.parameters["properties"]
     assert coercive.parameters["properties"]["model_dump"]["default"] == "kept"
     assert coercive.parameters["properties"]["limit"]["default"] == 8
-    parsed = coercive.fn_metadata.arg_model.model_validate(
-        {"model_dump": "changed", "limit": "9"}
-    )
+    parsed = coercive.fn_metadata.arg_model.model_validate({"model_dump": "changed", "limit": "9"})
     assert parsed.model_dump_one_level() == {"model_dump": "changed", "limit": 9}
     with pytest.raises(ValidationError):
         coercive.fn_metadata.arg_model.model_validate({"unexpected": "field"})
@@ -108,9 +106,7 @@ def test_named_read_output_schemas_preserve_legacy_names_and_nested_refs(tmp_pat
     assert wiki_schema is not None
     assert wiki_schema["title"] == "WikiSearchMCPResult"
     assert wiki_schema["required"] == ["query", "hits"]
-    assert wiki_schema["properties"]["hits"]["items"] == {
-        "$ref": "#/$defs/WikiSearchHitMCPResult"
-    }
+    assert wiki_schema["properties"]["hits"]["items"] == {"$ref": "#/$defs/WikiSearchHitMCPResult"}
     assert wiki_schema["$defs"]["WikiSearchHitMCPResult"]["required"] == [
         "path",
         "title",
@@ -120,7 +116,9 @@ def test_named_read_output_schemas_preserve_legacy_names_and_nested_refs(tmp_pat
     ]
 
 
-def test_named_read_outputs_preserve_direct_dicts_and_structured_wire_content(tmp_path: Path) -> None:
+def test_named_read_outputs_preserve_direct_dicts_and_structured_wire_content(
+    tmp_path: Path,
+) -> None:
     vault = tmp_path / "vault"
     note = vault / "wiki" / "topic.md"
     note.parent.mkdir(parents=True)
