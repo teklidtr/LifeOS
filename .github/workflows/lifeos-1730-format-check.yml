@@ -2,7 +2,7 @@ name: LIFEOS-1730 formatter validation
 
 on:
   pull_request:
-    branches: [lifeos-1730-proposal-document-publisher]
+    branches: [master]
 
 permissions:
   contents: read
