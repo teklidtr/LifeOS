@@ -38,15 +38,20 @@ def test_hybrid_retriever_health_uses_coherent_runtime_filtered_service(
     RetrievalIndexService(vault_root=vault, runtime_dir=runtime).rebuild()
     retriever = HybridRetriever(vault_root=vault, runtime_dir=runtime)
 
-    def forbidden_base_traversal(_vault_root: Path):
-        raise AssertionError("base retrieval source traversal must not run")
+    reads: list[str] = []
 
-    monkeypatch.setattr(base_service, "iter_vault_markdown", forbidden_base_traversal)
+    def recording_read(root: Path, relative_path: str):
+        reads.append(relative_path)
+        assert not relative_path.startswith("runtime/node-a/")
+        return read_vault_markdown(root, relative_path)
+
+    monkeypatch.setattr(base_service, "read_vault_markdown", recording_read)
 
     response = retriever.search(RetrievalRequest("canonical-health-marker"))
 
     assert response.results
     assert response.results[0].path == "wiki/canonical.md"
+    assert reads == ["wiki/canonical.md"]
 
 
 def test_hybrid_retriever_filters_stale_runtime_rows_at_query_time(tmp_path: Path) -> None:

@@ -93,6 +93,22 @@ Supported lifecycle operations:
 Malformed Markdown, unsupported files, unsafe paths, and protected scopes are
 reported as diagnostics rather than indexed silently.
 
+`retrieval.service.RetrievalIndexService` owns source filtering, identity planning,
+rebuilds, incremental synchronization, health, and recovery. Package exports and
+the compatibility import in `retrieval.coherence_service` resolve to this same
+class. The hybrid retriever constructs it once through its existing constructor.
+Source discovery checks runtime exclusions and retrieval policy on path metadata
+before opening Markdown. The service passes the identity expected for each
+visible source explicitly to chunking; no import-time replacement or ambient
+identity context changes the chunker.
+
+Incremental stable-ID relocation reserves moving notes and destination occupants
+in a disposable SQLite snapshot. Parking allows swaps and longer cycles without
+changing the identity model or schema. The service publishes the snapshot only
+after synchronization completes and no parked paths remain. Interrupted or failed
+relocations retain the active index, clean staging, and report only published
+changes. Unproven legacy moves keep their conservative delete/create reporting.
+
 ## Provider-neutral contracts
 
 The retrieval package defines independent contracts for embedding, optional
