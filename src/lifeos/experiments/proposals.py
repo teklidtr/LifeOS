@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import os
-import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
 from lifeos.daily.service import content_hash
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import (
@@ -19,6 +16,11 @@ from lifeos.proposals.patches import (
     PatchDocumentV2,
     PatchHumanFile,
     serialize_patch_json_bytes,
+)
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
 )
 from lifeos.proposals.schema import (
     ProposalMetadata,
@@ -255,38 +257,23 @@ class ExperimentProposalService:
         self, request: ExperimentProposalRequest, *, now: datetime | None = None
     ) -> dict[str, object]:
         preview, patch, proposal_markdown = self.preview(request, now=now)
-        root = self.vault_root / "proposals"
-        target = root / preview.proposal_id
         patches_json = serialize_patch_json_bytes(patch)
         review_json = build_review_snapshot_bytes_from_patches(
             vault_root=self.vault_root,
             patches_json=patches_json,
         )
-        root.mkdir(parents=True, exist_ok=True)
-        created = False
-        published = False
-        fd = -1
         try:
-            target.mkdir(exist_ok=False)
-            created = True
-            fd = os.open(
-                target, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            publish_proposal_documents(
+                vault_root=self.vault_root,
+                proposal_id=preview.proposal_id,
+                documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
             )
-            atomic_write_file_secure(fd, "proposal.md", proposal_markdown)
-            atomic_write_file_secure(fd, "patches.json", patches_json)
-            atomic_write_file_secure(fd, "review.json", review_json)
-            published = True
-        except FileExistsError as exc:
-            raise ExperimentError(
-                "proposal_exists", "Equivalent experiment proposal already exists."
-            ) from exc
-        except (OSError, AtomicWriteError) as exc:
+        except ProposalPublicationError as exc:
+            if exc.code == "proposal_exists":
+                raise ExperimentError(
+                    "proposal_exists", "Equivalent experiment proposal already exists."
+                ) from exc
             raise ExperimentError("proposal_publish_failed", str(exc)) from exc
-        finally:
-            if fd >= 0:
-                os.close(fd)
-            if created and not published:
-                shutil.rmtree(target, ignore_errors=True)
         return {
             "proposal_id": preview.proposal_id,
             "proposal_path": f"proposals/{preview.proposal_id}",
