@@ -10,6 +10,29 @@ Rich capture records what happened and what evidence was supplied. It is not a s
 
 The feature is useful without a model. Local capture, hashing, deduplication, deterministic metadata and text extraction, linking, reviews, retrieval, rebuild, and proposals remain available when provider-backed enrichment is unavailable.
 
+## Generic source facade boundary
+
+The provider-independent typed facade exposes `source.import`, `source.inspect`, and
+`source.extract` as a composition over Rich Capture, not as another source store or another
+user-facing capture metaphor. `source.import` accepts one explicitly trusted local absolute path
+as invocation input, creates the ordinary attachment capture and canonical attachment artifacts,
+and returns stable capture/attachment references plus bounded metadata. The host path is never
+canonical and ordinary facade results do not expose attachment-manifest or original-byte storage
+paths.
+
+`source.inspect` is content-free: it reports canonical identity, media/content metadata, attachment
+integrity, capture/processing state, and privacy state. `source.extract` reuses
+`LocalExtractionService`; extraction remains derived and rebuildable, unsupported formats remain
+explicitly unavailable, and changed source bytes invalidate prior extraction. Local content access
+obeys the canonical retrieval policy. External disclosure mode reuses the Rich Capture context
+preview so protected content still requires both explicit request scope and policy permission
+before original or extracted content can cross that boundary.
+
+This facade is an adapter-facing composition point. It does not classify a résumé, salary history,
+property document, or other source semantically, and it does not create downstream wiki/profile or
+proposal changes. MCP exposure and local-versus-network path-ingress narrowing are separate adapter
+work owned by LIFEOS-1737.
+
 ## Canonical layout
 
 ```text

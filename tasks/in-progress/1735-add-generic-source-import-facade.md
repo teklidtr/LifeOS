@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1735
 title: Add generic source import and extraction facade
-status: backlog
+status: in-progress
 phase: hardening
 depends_on:
   - LIFEOS-113
