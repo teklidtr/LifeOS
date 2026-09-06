@@ -12,18 +12,6 @@ class ReadMarkdownMCPResult(TypedDict):
     source_topics: list[str]
 
 
-class VaultPathEntryMCPResult(TypedDict):
-    path: str
-    kind: Literal["file", "folder"]
-
-
-class VaultListMCPResult(TypedDict):
-    prefix: str | None
-    entries: list[VaultPathEntryMCPResult]
-    truncated: bool
-    next_after: str | None
-
-
 class VaultSearchHitMCPResult(TypedDict):
     path: str
     title: str
@@ -45,20 +33,6 @@ class VaultSearchMCPResult(TypedDict):
     query: str
     hits: list[VaultSearchHitMCPResult]
     diagnostics: list[VaultDiagnosticMCPResult]
-
-
-class VaultReadItemMCPResult(TypedDict):
-    path: str
-    markdown_body: str
-    title: str
-    content_hash: str
-    truncated: bool
-
-
-class VaultReadManyMCPResult(TypedDict):
-    items: list[VaultReadItemMCPResult]
-    total_characters: int
-    truncated: bool
 
 
 class VaultLinkMCPResult(TypedDict):
@@ -157,19 +131,6 @@ class ApplyProposalMCPResult(TypedDict):
     proposal_id: str
     status: Literal["applied"]
     changed_paths: list[str]
-
-
-class WikiSearchHitMCPResult(TypedDict):
-    path: str
-    title: str
-    description: str
-    excerpt: str
-    score: int
-
-
-class WikiSearchMCPResult(TypedDict):
-    query: str
-    hits: list[WikiSearchHitMCPResult]
 
 
 class EvolveWikiProposalMCPResult(TypedDict):
