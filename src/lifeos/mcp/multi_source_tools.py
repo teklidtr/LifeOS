@@ -25,6 +25,7 @@ from lifeos.facade.multi_source_ingestion import (
 from lifeos.facade.registry_tools import refresh_registry
 from lifeos.mcp.activity_store import MCPActivityStore
 from lifeos.mcp.models import EvolveWikiProposalMCPResult
+from lifeos.mcp.tool_contracts import build_mcp_tool
 from lifeos.registry import Registry
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
@@ -78,7 +79,7 @@ EVOLVE_WIKI_BATCH_MCP_DESCRIPTION = (
 
 
 def _proposal_tool(fn: Callable[..., object]) -> Tool:
-    tool = Tool.from_function(
+    return build_mcp_tool(
         fn,
         name="ingestion_evolve_wiki_batch_proposal",
         description=EVOLVE_WIKI_BATCH_MCP_DESCRIPTION,
@@ -89,29 +90,7 @@ def _proposal_tool(fn: Callable[..., object]) -> Tool:
             idempotentHint=False,
             openWorldHint=False,
         ),
-    )
-    base_model = tool.fn_metadata.arg_model
-    strict_model = cast(
-        type[BaseModel],
-        type(
-            f"Strict{base_model.__name__}",
-            (base_model,),
-            {
-                "model_config": ConfigDict(
-                    arbitrary_types_allowed=True,
-                    extra="forbid",
-                    strict=True,
-                )
-            },
-        ),
-    )
-    strict_model.model_rebuild()
-    strict_metadata = tool.fn_metadata.model_copy(update={"arg_model": strict_model})
-    return tool.model_copy(
-        update={
-            "fn_metadata": strict_metadata,
-            "parameters": strict_model.model_json_schema(by_alias=True),
-        }
+        strict_inputs=True,
     )
 
 

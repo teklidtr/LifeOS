@@ -166,6 +166,17 @@ async def test_subprocess_stdio_protocol(tmp_path: Path) -> None:
             assert "study/driving-licence/intersections.md" in search_paths
             assert "wiki/right-of-way.md" in search_paths
 
+            wiki_search = await session.call_tool(
+                "wiki_search",
+                arguments={"query": "right way", "limit": 10},
+            )
+            assert wiki_search.isError is False
+            assert wiki_search.structuredContent is not None
+            assert any(
+                item["path"] == "wiki/right-of-way.md"
+                for item in wiki_search.structuredContent["hits"]
+            )
+
             comparison = await session.call_tool(
                 "vault_read_many",
                 arguments={

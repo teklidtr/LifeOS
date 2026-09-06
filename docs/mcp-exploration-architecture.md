@@ -39,6 +39,33 @@ This composition keeps future transports independent from the business rules. A 
 network or home-node transport can expose the same Python capabilities without reimplementing
 vault access, privacy, or mutation semantics.
 
+## MCP transport contract ownership
+
+FastMCP/Pydantic transport construction is owned inside `lifeos.mcp`, not by facade or domain
+models. `lifeos.mcp.tool_contracts` is the single input-model construction boundary for the core,
+exploration, and multi-source tool families. It starts from FastMCP's generated argument model,
+then applies the LifeOS family policy without changing the public signature: core tools retain
+Pydantic's normal coercion while forbidding unknown fields, and exploration/multi-source tools
+retain strict type validation plus unknown-field rejection. FastMCP-generated aliases, field
+descriptions, defaults, annotations, and the published parameter schema remain intact.
+
+For read results whose MCP representation is only a JSON-shaped copy of an authoritative facade
+dataclass, the same boundary derives the Pydantic output model recursively from the facade type.
+`VaultListResult`, `VaultReadManyResult`, and `WikiSearchResult` therefore own their field lists;
+the MCP adapter preserves the historical `*MCPResult` schema titles/nested references, deeply
+validates even already-constructed dataclass instances, and serializes to the same JSON mapping
+that direct `tool.fn()` callers received before the consolidation. The adapter supplies that
+validated model/schema to FastMCP so normal MCP calls still emit both text content and structured
+content. Pydantic remains an optional MCP-layer dependency and is not introduced into the
+otherwise dependency-free facade/domain contracts.
+
+Transport-specific DTOs remain when the MCP shape is intentionally not equivalent to one facade
+result. Examples include registry-refresh optional rename omission, vault-context
+ranking/provenance projection, note-identity field selection/renaming, read-markdown requiredness,
+runtime-activity optional fields, and research-query aggregation. Those representations encode a
+real disclosure, requiredness, omission, or aggregation contract and are not candidates for this
+authoritative-dataclass shortcut merely because their fields overlap a domain type.
+
 ## Exploration primitives
 
 The runtime adds four composable read-only operations:
@@ -231,6 +258,10 @@ Deterministic tests cover both halves of the boundary:
 - a real STDIO MCP client performs a multi-step list → search → multi-read → link crawl without
   direct vault filesystem access;
 - MCP inputs are type-strict and cannot coerce strings into protected-read intent or limits;
+- the shared MCP input builder preserves each tool family's strictness, unknown-field behavior,
+  aliases, defaults, annotations, and published parameter schemas;
+- authoritative read-output adapters preserve legacy schema names/nested references and direct
+  dictionary returns while deeply revalidating malformed nested domain instances;
 - MCP reads use external disclosure policy, including `external_allowed_prefixes` for protected
   content;
 - research query composition preserves external-disclosure mode and the configured runtime
