@@ -11,7 +11,7 @@ from mcp.server.fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-_OUTPUT_MODELS: dict[type[Any], type[BaseModel]] = {}
+_OUTPUT_MODELS: dict[tuple[type[Any], str | None], type[BaseModel]] = {}
 
 
 def build_mcp_tool(
@@ -22,8 +22,12 @@ def build_mcp_tool(
     annotations: ToolAnnotations,
     strict_inputs: bool,
     output_type: type[object] | None = None,
+    output_model_name: str | None = None,
 ) -> Tool:
     """Build one LifeOS MCP tool while preserving family-specific input behavior."""
+    if output_type is None and output_model_name is not None:
+        raise ValueError("output_model_name requires output_type")
+
     tool = Tool.from_function(
         fn,
         name=name,
@@ -49,7 +53,7 @@ def build_mcp_tool(
 
     metadata_updates: dict[str, object] = {"arg_model": input_model}
     if output_type is not None:
-        output_model = _mcp_output_model(output_type)
+        output_model = _mcp_output_model(output_type, model_name=output_model_name)
         metadata_updates.update(
             output_model=output_model,
             output_schema=output_model.model_json_schema(),
@@ -69,14 +73,22 @@ def serialize_authoritative_output(
     result: object,
     *,
     output_type: type[object],
+    output_model_name: str | None = None,
 ) -> dict[str, Any]:
     """Strictly validate a facade result and return its direct-call-compatible JSON mapping."""
-    validated = _mcp_output_model(output_type).model_validate(result, strict=True)
+    validated = _mcp_output_model(output_type, model_name=output_model_name).model_validate(
+        result, strict=True
+    )
     return validated.model_dump(mode="json")
 
 
-def _mcp_output_model(result_type: type[Any]) -> type[BaseModel]:
-    cached = _OUTPUT_MODELS.get(result_type)
+def _mcp_output_model(
+    result_type: type[Any],
+    *,
+    model_name: str | None = None,
+) -> type[BaseModel]:
+    cache_key = (result_type, model_name)
+    cached = _OUTPUT_MODELS.get(cache_key)
     if cached is not None:
         return cached
     if not is_dataclass(result_type):
@@ -96,18 +108,21 @@ def _mcp_output_model(result_type: type[Any]) -> type[BaseModel]:
         else:
             model_fields[item.name] = annotation
 
-    name = result_type.__name__
-    if name.endswith("Result"):
-        name = name[: -len("Result")]
+    resolved_name = model_name
+    if resolved_name is None:
+        resolved_name = result_type.__name__
+        if resolved_name.endswith("Result"):
+            resolved_name = resolved_name[: -len("Result")]
+        resolved_name = f"{resolved_name}MCPResult"
     model = cast(
         type[BaseModel],
         create_model(
-            f"{name}MCPResult",
+            resolved_name,
             __config__=ConfigDict(from_attributes=True),
             **model_fields,
         ),
     )
-    _OUTPUT_MODELS[result_type] = model
+    _OUTPUT_MODELS[cache_key] = model
     return model
 
 
