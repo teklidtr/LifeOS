@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-import lifeos.retrieval.coherence_service as coherence_service
+import lifeos.retrieval.service as retrieval_service
+import lifeos.retrieval.coherence_service as legacy_service
+import lifeos.retrieval.search as retrieval_search
 from lifeos.retrieval import (
     HybridRetriever,
     RetrievalIndex,
@@ -19,6 +21,76 @@ def _note(stable_id: str, title: str, body: str) -> str:
 
 def _legacy_note(title: str, body: str) -> str:
     return f"---\ntype: concept\ntitle: {title}\n---\n{body}\n"
+
+
+def test_public_imports_construct_one_identity_aware_index_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert RetrievalIndexService is retrieval_service.RetrievalIndexService
+    assert legacy_service.RetrievalIndexService is RetrievalIndexService
+    assert retrieval_search.RetrievalIndexService is RetrievalIndexService
+    assert RetrievalIndexService.__module__ == "lifeos.retrieval.service"
+
+    constructed: list[RetrievalIndexService] = []
+    original_init = RetrievalIndexService.__init__
+
+    def recording_init(self, **kwargs):
+        constructed.append(self)
+        original_init(self, **kwargs)
+
+    monkeypatch.setattr(RetrievalIndexService, "__init__", recording_init)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    retriever = HybridRetriever(vault_root=vault, runtime_dir=vault / ".lifeos")
+    assert constructed == [retriever.index_service]
+    assert type(retriever.index_service) is RetrievalIndexService
+
+
+@pytest.mark.parametrize(
+    "service_type",
+    [
+        RetrievalIndexService,
+        retrieval_service.RetrievalIndexService,
+        legacy_service.RetrievalIndexService,
+    ],
+    ids=["package", "service", "legacy"],
+)
+def test_incremental_retrieval_reconciles_three_note_cycle(
+    tmp_path: Path, service_type: type[RetrievalIndexService]
+) -> None:
+    vault = tmp_path / "vault"
+    wiki = vault / "wiki"
+    wiki.mkdir(parents=True)
+    paths = [wiki / f"{name}.md" for name in ("a", "b", "c")]
+    contents = [_note(f"note-{name}", name, f"{name} cycle evidence") for name in ("a", "b", "c")]
+    for path, content in zip(paths, contents, strict=True):
+        path.write_text(content, encoding="utf-8")
+    service = service_type(vault_root=vault, runtime_dir=vault / ".lifeos")
+    service.rebuild()
+    with RetrievalIndex(service.active_path, create=False) as index:
+        prior_chunk_ids = {chunk.document_id: chunk.chunk_id for chunk in index.chunks()}
+
+    for path, content in zip(paths, [contents[2], contents[0], contents[1]], strict=True):
+        path.write_text(content, encoding="utf-8")
+    result = service.incremental_sync()
+
+    assert result.status == "complete"
+    assert set(result.renamed) == {
+        ("wiki/a.md", "wiki/b.md"),
+        ("wiki/b.md", "wiki/c.md"),
+        ("wiki/c.md", "wiki/a.md"),
+    }
+    assert result.created == result.deleted == result.skipped == ()
+    assert result.index_path == str(service.active_path)
+    with RetrievalIndex(service.active_path, create=False) as index:
+        assert {document.path: document.document_id for document in index.documents()} == {
+            "wiki/a.md": "id:note-c",
+            "wiki/b.md": "id:note-a",
+            "wiki/c.md": "id:note-b",
+        }
+        assert {chunk.document_id: chunk.chunk_id for chunk in index.chunks()} == prior_chunk_ids
+    assert service.health().state == "healthy"
+    assert not (service.root / "index.sqlite3.relocation-sync").exists()
 
 
 def test_custom_in_vault_runtime_is_filtered_before_retrieval_content_reads(
@@ -41,7 +113,7 @@ def test_custom_in_vault_runtime_is_filtered_before_retrieval_content_reads(
         encoding="utf-8",
     )
 
-    real_read = coherence_service.read_vault_markdown
+    real_read = retrieval_service.read_vault_markdown
     reads: list[str] = []
 
     def recording_read(root: Path, relative_path: str):
@@ -49,7 +121,7 @@ def test_custom_in_vault_runtime_is_filtered_before_retrieval_content_reads(
         assert not relative_path.startswith("runtime/node-a/")
         return real_read(root, relative_path)
 
-    monkeypatch.setattr(coherence_service, "read_vault_markdown", recording_read)
+    monkeypatch.setattr(retrieval_service, "read_vault_markdown", recording_read)
     service = RetrievalIndexService(vault_root=vault, runtime_dir=runtime)
     result = service.rebuild()
 

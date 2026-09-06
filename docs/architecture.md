@@ -423,6 +423,14 @@ handles creates, edits, stable-ID moves, content-preserving renames, and deletes
 Missing, stale, interrupted, corrupt, and incompatible states expose explicit
 recovery plans.
 
+The single `retrieval.service.RetrievalIndexService` owns policy-filtered source
+discovery, identity-aware chunking, and relocation staging and recovery. Public
+imports resolve to that implementation, including the compatibility alias in
+`retrieval.coherence_service`; the hybrid retriever constructs the service once.
+Identity expectations flow through explicit chunking arguments. Relocation
+reservations and atomic publication remain ordinary service implementation
+details, preserving the existing schema, identities, and recovery behavior.
+
 Hybrid ranking keeps exact, lexical, semantic, metadata, link, optional graph,
 pin, and optional reranking signals separate and inspectable. Filters and
 protected-scope policy run before ranking. Results preserve note path, heading,

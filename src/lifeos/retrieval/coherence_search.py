@@ -73,13 +73,6 @@ class HybridRetriever(_BaseHybridRetriever):
         policy: RetrievalPolicy | None = None,
     ) -> None:
         super().__init__(vault_root=vault_root, runtime_dir=runtime_dir, policy=policy)
-        from lifeos.retrieval.coherence_service import (
-            RetrievalIndexService as CoherentRetrievalIndexService,
-        )
-
-        self.index_service = CoherentRetrievalIndexService(
-            vault_root=vault_root, runtime_dir=runtime_dir, policy=self.policy
-        )
         try:
             self._runtime_prefix = runtime_exclusion_prefix(vault_root, runtime_dir=runtime_dir)
         except CoherenceError as exc:

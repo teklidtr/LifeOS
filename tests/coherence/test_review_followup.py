@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-import lifeos.retrieval.coherence_service as coherence_service
+import lifeos.retrieval.service as retrieval_service
 from lifeos.coherence import collect_identity_snapshot
 from lifeos.entrypoint import main
 from lifeos.registry import (
@@ -115,14 +115,14 @@ def test_failed_relocation_sync_never_publishes_parked_paths(
         _note("note-a", body="edited relocation marker"),
         encoding="utf-8",
     )
-    real_chunker = coherence_service._base_chunk_markdown_file
+    real_chunker = retrieval_service.chunk_markdown_file
 
     def fail_new_path(source, **kwargs):
         if source.relative_path == "wiki/new.md":
             raise RetrievalError("forced_failure", "forced relocation chunk failure")
         return real_chunker(source, **kwargs)
 
-    monkeypatch.setattr(coherence_service, "_base_chunk_markdown_file", fail_new_path)
+    monkeypatch.setattr(retrieval_service, "chunk_markdown_file", fail_new_path)
 
     with pytest.raises(RetrievalError, match="forced relocation chunk failure"):
         service.incremental_sync()

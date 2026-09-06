@@ -28,7 +28,12 @@ def chunk_markdown_file(
     *,
     indexed_at: datetime | None = None,
     max_chunk_characters: int = 1_800,
+    expected_document_id: str | None = None,
 ) -> ChunkedNote:
+    """Chunk a note, optionally applying an identity from the service's visible-source plan.
+
+    Re-identification retains the existing chunk keys used by reconciled indexes.
+    """
     if not source.relative_path.lower().endswith(".md"):
         raise RetrievalError("unsupported_file", "Only Markdown files can be indexed.")
     if max_chunk_characters < 256:
@@ -129,7 +134,10 @@ def chunk_markdown_file(
                     },
                 )
             )
-    return ChunkedNote(document, tuple(chunks), tuple(diagnostics))
+    note = ChunkedNote(document, tuple(chunks), tuple(diagnostics))
+    if expected_document_id is not None and document.document_id != expected_document_id:
+        return reidentify_note(note, expected_document_id)
+    return note
 
 
 def reidentify_note(note: ChunkedNote, document_id: str) -> ChunkedNote:
