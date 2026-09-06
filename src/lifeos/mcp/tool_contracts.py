@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import MISSING, fields, is_dataclass
-from functools import lru_cache
+from types import GenericAlias
 from typing import Any, cast, get_args, get_origin, get_type_hints
 
 from mcp.server.fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, create_model
+
+_OUTPUT_MODELS: dict[type[Any], type[BaseModel]] = {}
 
 
 def build_mcp_tool(
@@ -70,11 +72,13 @@ def serialize_authoritative_output(
 ) -> dict[str, Any]:
     """Validate a facade result deeply and return its direct-call-compatible JSON mapping."""
     validated = _mcp_output_model(output_type).model_validate(result)
-    return cast(dict[str, Any], validated.model_dump(mode="json"))
+    return validated.model_dump(mode="json")
 
 
-@lru_cache(maxsize=None)
-def _mcp_output_model(result_type: type[object]) -> type[BaseModel]:
+def _mcp_output_model(result_type: type[Any]) -> type[BaseModel]:
+    cached = _OUTPUT_MODELS.get(result_type)
+    if cached is not None:
+        return cached
     if not is_dataclass(result_type):
         raise TypeError("authoritative MCP output types must be dataclasses")
 
@@ -85,10 +89,9 @@ def _mcp_output_model(result_type: type[object]) -> type[BaseModel]:
         if item.default is not MISSING:
             model_fields[item.name] = (annotation, item.default)
         elif item.default_factory is not MISSING:
-            default_factory = cast(Callable[[], Any], item.default_factory)
             model_fields[item.name] = (
                 annotation,
-                Field(default_factory=default_factory),
+                Field(default_factory=item.default_factory),
             )
         else:
             model_fields[item.name] = annotation
@@ -96,21 +99,23 @@ def _mcp_output_model(result_type: type[object]) -> type[BaseModel]:
     name = result_type.__name__
     if name.endswith("Result"):
         name = name[: -len("Result")]
-    return create_model(
+    model = create_model(
         f"{name}MCPResult",
         __config__=ConfigDict(from_attributes=True),
         **model_fields,
     )
+    _OUTPUT_MODELS[result_type] = model
+    return model
 
 
 def _mcp_output_annotation(annotation: Any) -> Any:
     if isinstance(annotation, type) and is_dataclass(annotation):
-        return _mcp_output_model(cast(type[object], annotation))
+        return _mcp_output_model(annotation)
 
     origin = get_origin(annotation)
     arguments = get_args(annotation)
     if origin is tuple and len(arguments) == 2 and arguments[1] is Ellipsis:
-        return tuple[_mcp_output_annotation(arguments[0]), ...]
+        return GenericAlias(tuple, (_mcp_output_annotation(arguments[0]), Ellipsis))
     if origin is list and len(arguments) == 1:
-        return list[_mcp_output_annotation(arguments[0])]
+        return GenericAlias(list, (_mcp_output_annotation(arguments[0]),))
     return annotation
