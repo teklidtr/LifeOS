@@ -104,12 +104,13 @@ history, not a substitute for current user or architecture documentation.
 Pull requests targeting `master` use two validation levels:
 
 - `fast-checks` runs on ordinary PR open, reopen, and synchronize events. It keeps the
-  documentation-impact gate, manual-link validation, Ruff, mypy, compileall, pytest
-  collection, and the project contract smoke tests. A documentation-only diff confined to
-  allowlisted Markdown under `docs/` or the task lifecycle, plus `README.md`/`AGENTS.md`, can
-  skip dependency installation and Python application checks. Implementation-owned Markdown
-  such as `packages/`, workflow files, and either endpoint of a code-to-doc rename remains on
-  the full fast-check path. Documentation checks always run with the runner's standard Python.
+  documentation-impact gate, manual-link validation, Ruff formatting and lint, mypy,
+  compileall, pytest collection, and the project contract smoke tests. A documentation-only
+  diff confined to allowlisted Markdown under `docs/` or the task lifecycle, plus
+  `README.md`/`AGENTS.md`, can skip dependency installation and Python application checks.
+  Implementation-owned Markdown such as `packages/`, workflow files, and either endpoint of a
+  code-to-doc rename remains on the full fast-check path. Documentation checks always run with
+  the runner's standard Python.
 - The separate `obsidian-plugin` PR job keeps plugin validation visible independently of the
   Python checks. For every non-documentation-only PR it uses supported Node.js 24 and that
   Node release's bundled npm, restores npm's dependency cache using
