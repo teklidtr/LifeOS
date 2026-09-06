@@ -173,7 +173,17 @@ and directories still owned by the failed attempt, never a pre-existing or repla
 or symlink target. This three-document publication boundary is not an application transaction
 and does not grant submit, approval, or apply authority.
 
-LIFEOS-1731 completes adoption of this boundary for goal-to-plan copilot, replanning, feedback, review-decision, ownership-reconciliation, and ingestion proposal producers, in addition to capture, conversation, experiment, and personal-pattern producers. Each feature still owns evidence, source/target, ownership, identity, and review-snapshot verification before publication. Ingestion still uses its existing public-module/core builder and provenance composition; LIFEOS-1732 owns making that composition explicit, while both ordinary core and runtime persistence now select the same shared publisher.
+LIFEOS-1731 completes adoption of this boundary for goal-to-plan copilot, replanning, feedback,
+review-decision, ownership-reconciliation, and ingestion proposal producers, in addition to
+capture, conversation, experiment, and personal-pattern producers. Each feature still owns
+evidence, source/target, ownership, identity, and review-snapshot verification before
+publication. Ingestion exposes a static `lifeos.ingestion.proposals` facade over ordinary core
+builders plus an explicit composition layer. Single-source generated replacements receive the
+verified `SourceSnapshot` as explicit composition input and merge only that invocation's source
+into cumulative provenance; no ambient context or module rebinding supplies provenance. Stable
+target identity, runtime/privacy filtering, create-target revalidation, and shared publication
+remain explicit persistence steps. Multi-source target grounding remains owned by its
+target-centric builder and enters the same persistence boundary.
 
 ## Registry
 

@@ -24,6 +24,13 @@ lifecycle, and runtime diagnostics. The user-facing runtime replaces the legacy
 `vault_read_markdown` and `vault_context` entries with policy-aware adapters over the same
 facades, then adds the four exploration primitives.
 
+Ingestion MCP callers reach proposal construction through the static
+`lifeos.ingestion.proposals` facade. Single-source provenance is carried as explicit composition
+data from the verified source into generated replacement operations; MCP request context does
+not inject provenance and no import-time module substitution changes which builder runs.
+Multi-source ingestion keeps its target-specific source grounding in the multi-source builder,
+then uses the same explicit identity/prepublication and shared publication boundary.
+
 MCP adapters do not own vault business rules. They map type-strict inputs to facade requests,
 mark MCP reads as external disclosure, record bounded disposable activity metadata, translate
 deterministic validation failures, and map facade results back to structured MCP output.
