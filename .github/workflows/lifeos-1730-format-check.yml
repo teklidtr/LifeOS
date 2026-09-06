@@ -1,0 +1,36 @@
+name: LIFEOS-1730 formatter validation
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  ruff-format-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact validation head
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Check LIFEOS-1730 touched-file Ruff formatting
+        run: >-
+          uv run ruff format --check
+          src/lifeos/_atomic_write.py
+          src/lifeos/captures/proposals.py
+          src/lifeos/conversations/proposals.py
+          src/lifeos/experiments/proposals.py
+          src/lifeos/patterns/proposals.py
+          src/lifeos/proposals/publication.py
+          tests/proposals/test_publication.py
