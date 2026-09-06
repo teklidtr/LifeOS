@@ -110,9 +110,7 @@ class SourceImportRequest:
             or not Path(self.source_path).is_absolute()
         ):
             raise ValueError("source_path must be a non-empty absolute local path")
-        if self.title is not None and (
-            not isinstance(self.title, str) or not self.title.strip()
-        ):
+        if self.title is not None and (not isinstance(self.title, str) or not self.title.strip()):
             raise ValueError("title must be non-empty when provided")
         if not isinstance(self.description, str):
             raise ValueError("description must be a string")
@@ -251,7 +249,9 @@ def inspect_source(
 ) -> SourceDetails:
     """Inspect source facts without returning original or extracted content."""
 
-    resolved = _resolve_source(vault_root=vault_root, runtime_dir=runtime_dir, source=request.source)
+    resolved = _resolve_source(
+        vault_root=vault_root, runtime_dir=runtime_dir, source=request.source
+    )
     return _source_details(
         vault_root=vault_root,
         runtime_dir=runtime_dir,
@@ -284,7 +284,9 @@ def extract_source(
             allow_protected=request.allow_protected,
         )
 
-    resolved = _resolve_source(vault_root=vault_root, runtime_dir=runtime_dir, source=request.source)
+    resolved = _resolve_source(
+        vault_root=vault_root, runtime_dir=runtime_dir, source=request.source
+    )
     if request.mode == "local":
         assert policy is not None
         _require_local_access(resolved, policy=policy, allow_protected=request.allow_protected)
