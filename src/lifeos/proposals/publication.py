@@ -19,6 +19,8 @@ ProposalPublicationErrorCode = Literal[
 ]
 
 _DOCUMENT_NAMES = ("proposal.md", "patches.json", "review.json")
+FileIdentity = tuple[int, int]
+OwnedFile = tuple[str, FileIdentity]
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +57,8 @@ def publish_proposal_documents(
 
     vault_fd = proposals_fd = proposal_fd = -1
     proposal_created = publication_complete = False
-    owned_files: list[str] = []
-    created_identity: tuple[int, int] | None = None
+    owned_files: list[OwnedFile] = []
+    created_identity: FileIdentity | None = None
     try:
         vault_fd, proposals_fd = _open_proposals_root(vault_root)
         try:
@@ -90,8 +92,24 @@ def publish_proposal_documents(
                 proposal_fd=proposal_fd,
                 proposal_id=proposal_id,
             )
-            atomic_write_file_secure(proposal_fd, filename, content)
-            owned_files.append(filename)
+            published_identity: FileIdentity | None = None
+
+            def remember_identity(identity: FileIdentity) -> None:
+                nonlocal published_identity
+                published_identity = identity
+
+            atomic_write_file_secure(
+                proposal_fd,
+                filename,
+                content,
+                published_identity=remember_identity,
+            )
+            if published_identity is None:
+                raise ProposalPublicationError(
+                    "proposal_publish_failed",
+                    f"Published file identity was not recorded: {filename}",
+                )
+            owned_files.append((filename, published_identity))
 
         _require_publication_boundaries(
             vault_fd=vault_fd,
@@ -194,7 +212,7 @@ def _require_publication_boundaries(
         )
 
 
-def _directory_entry_identity(parent_fd: int, name: str) -> tuple[int, int]:
+def _directory_entry_identity(parent_fd: int, name: str) -> FileIdentity:
     try:
         info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     except OSError as exc:
@@ -207,7 +225,7 @@ def _directory_entry_identity(parent_fd: int, name: str) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
-def _fd_identity(fd: int) -> tuple[int, int]:
+def _fd_identity(fd: int) -> FileIdentity:
     info = os.fstat(fd)
     return info.st_dev, info.st_ino
 
@@ -224,20 +242,30 @@ def _directory_entry_matches(parent_fd: int, name: str, child_fd: int) -> bool:
     )
 
 
+def _file_entry_matches(parent_fd: int, name: str, identity: FileIdentity) -> bool:
+    try:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == identity
+
+
 def _cleanup_owned_attempt(
     *,
     proposals_fd: int,
     proposal_fd: int,
     proposal_id: str,
-    owned_files: list[str],
-    created_identity: tuple[int, int] | None,
+    owned_files: list[OwnedFile],
+    created_identity: FileIdentity | None,
 ) -> None:
     if proposal_fd < 0 or created_identity is None:
         return
     if _fd_identity(proposal_fd) != created_identity:
         return
 
-    for filename in reversed(owned_files):
+    for filename, identity in reversed(owned_files):
+        if not _file_entry_matches(proposal_fd, filename, identity):
+            continue
         try:
             os.unlink(filename, dir_fd=proposal_fd)
         except OSError:
