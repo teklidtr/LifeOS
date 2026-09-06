@@ -142,10 +142,7 @@ def test_named_proposal_output_schemas_preserve_legacy_names_and_status_literals
 
     expected = {
         "ingestion_create_wiki_proposal": ("CreateWikiProposalMCPResult", "draft"),
-        "ingestion_update_wiki_section_proposal": (
-            "UpdateWikiSectionProposalMCPResult",
-            "draft",
-        ),
+        "ingestion_update_wiki_section_proposal": ("UpdateWikiSectionProposalMCPResult", "draft"),
         "ingestion_create_wiki_and_update_section_proposal": (
             "CompoundWikiProposalMCPResult",
             "draft",
