@@ -59,6 +59,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- '*.py' '*.pyi' '*.ipynb'
+          git add --all
           git commit -m "LIFEOS-1734 apply Ruff formatter baseline"
           git push origin HEAD:lifeos-1734-ruff-format-baseline
