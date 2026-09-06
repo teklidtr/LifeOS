@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import os
+import secrets
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -19,6 +23,7 @@ ProposalPublicationErrorCode = Literal[
 ]
 
 _DOCUMENT_NAMES = ("proposal.md", "patches.json", "review.json")
+_STAGING_PREFIX = ".lifeos-proposal-stage-"
 FileIdentity = tuple[int, int]
 OwnedFile = tuple[str, FileIdentity]
 
@@ -49,37 +54,22 @@ def publish_proposal_documents(
     """Publish one prepared draft without taking ownership of feature semantics.
 
     The caller owns validation, source/target revalidation, serialization, and review-snapshot
-    construction. This function owns only the stable ``proposals/<id>/`` directory and the exact
-    three document writes. The writes are descriptor-relative and cleanup is limited to entries
-    that still belong to this failed publication attempt.
+    construction. This function owns only the canonical ``proposals/<id>/`` publication step.
+    Prepared bytes are written to a private staging directory, then the completed directory is
+    moved into its stable proposal ID with an operating-system no-replace rename. Cleanup is
+    descriptor-relative and limited to entries whose identity still belongs to this attempt.
     """
     _validate_proposal_id(proposal_id)
 
     vault_fd = proposals_fd = proposal_fd = -1
-    proposal_created = publication_complete = False
+    publication_complete = False
+    directory_name: str | None = None
     owned_files: list[OwnedFile] = []
     created_identity: FileIdentity | None = None
     try:
         vault_fd, proposals_fd = _open_proposals_root(vault_root)
-        try:
-            os.mkdir(proposal_id, mode=0o755, dir_fd=proposals_fd)
-            proposal_created = True
-        except FileExistsError as exc:
-            raise ProposalPublicationError(
-                "proposal_exists",
-                f"Proposal directory already exists: proposals/{proposal_id}",
-            ) from exc
-
-        try:
-            created_identity = _directory_entry_identity(proposals_fd, proposal_id)
-            proposal_fd = open_directory_secure(Path(proposal_id), dir_fd=proposals_fd)
-        except SecureIOError as exc:
-            raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
-        if _fd_identity(proposal_fd) != created_identity:
-            raise ProposalPublicationError(
-                "proposal_publish_failed",
-                "Proposal directory changed during publication.",
-            )
+        _raise_if_proposal_exists(proposals_fd, proposal_id)
+        directory_name, proposal_fd, created_identity = _create_staging_directory(proposals_fd)
 
         for filename, content in zip(
             _DOCUMENT_NAMES,
@@ -90,7 +80,7 @@ def publish_proposal_documents(
                 vault_fd=vault_fd,
                 proposals_fd=proposals_fd,
                 proposal_fd=proposal_fd,
-                proposal_id=proposal_id,
+                directory_name=directory_name,
             )
             published_identity: FileIdentity | None = None
 
@@ -115,7 +105,26 @@ def publish_proposal_documents(
             vault_fd=vault_fd,
             proposals_fd=proposals_fd,
             proposal_fd=proposal_fd,
-            proposal_id=proposal_id,
+            directory_name=directory_name,
+        )
+        try:
+            _rename_directory_noreplace(
+                parent_fd=proposals_fd,
+                source_name=directory_name,
+                target_name=proposal_id,
+            )
+        except FileExistsError as exc:
+            raise ProposalPublicationError(
+                "proposal_exists",
+                f"Proposal directory already exists: proposals/{proposal_id}",
+            ) from exc
+        directory_name = proposal_id
+
+        _require_publication_boundaries(
+            vault_fd=vault_fd,
+            proposals_fd=proposals_fd,
+            proposal_fd=proposal_fd,
+            directory_name=directory_name,
         )
         publication_complete = True
     except ProposalPublicationError:
@@ -123,11 +132,11 @@ def publish_proposal_documents(
     except (AtomicWriteError, OSError) as exc:
         raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
     finally:
-        if proposal_created and not publication_complete:
+        if not publication_complete and directory_name is not None:
             _cleanup_owned_attempt(
                 proposals_fd=proposals_fd,
                 proposal_fd=proposal_fd,
-                proposal_id=proposal_id,
+                directory_name=directory_name,
                 owned_files=owned_files,
                 created_identity=created_identity,
             )
@@ -193,36 +202,107 @@ def _open_proposals_root(vault_root: Path) -> tuple[int, int]:
         raise
 
 
+def _raise_if_proposal_exists(proposals_fd: int, proposal_id: str) -> None:
+    try:
+        os.stat(proposal_id, dir_fd=proposals_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
+    raise ProposalPublicationError(
+        "proposal_exists",
+        f"Proposal directory already exists: proposals/{proposal_id}",
+    )
+
+
+def _create_staging_directory(proposals_fd: int) -> tuple[str, int, FileIdentity]:
+    """Create an unguessable private staging directory for one publication attempt."""
+    for _ in range(16):
+        directory_name = f"{_STAGING_PREFIX}{secrets.token_hex(16)}"
+        try:
+            os.mkdir(directory_name, mode=0o700, dir_fd=proposals_fd)
+        except FileExistsError:
+            continue
+        try:
+            proposal_fd = open_directory_secure(Path(directory_name), dir_fd=proposals_fd)
+        except SecureIOError as exc:
+            raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
+        created_identity = _fd_identity(proposal_fd)
+        if not _directory_entry_matches(proposals_fd, directory_name, proposal_fd):
+            os.close(proposal_fd)
+            raise ProposalPublicationError(
+                "proposal_publish_failed",
+                "Proposal staging directory changed during publication.",
+            )
+        return directory_name, proposal_fd, created_identity
+    raise ProposalPublicationError(
+        "proposal_publish_failed",
+        "Could not allocate a unique proposal staging directory.",
+    )
+
+
+def _rename_directory_noreplace(
+    *,
+    parent_fd: int,
+    source_name: str,
+    target_name: str,
+) -> None:
+    """Atomically publish a staged directory without replacing an existing target."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    source = os.fsencode(source_name)
+    target = os.fsencode(target_name)
+
+    if sys.platform.startswith("linux"):
+        renameat2 = getattr(libc, "renameat2", None)
+        if renameat2 is None:
+            raise OSError(errno.ENOTSUP, "renameat2 is unavailable")
+        renameat2.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renameat2.restype = ctypes.c_int
+        result = renameat2(parent_fd, source, parent_fd, target, 1)
+    elif sys.platform == "darwin":
+        renameatx_np = getattr(libc, "renameatx_np", None)
+        if renameatx_np is None:
+            raise OSError(errno.ENOTSUP, "renameatx_np is unavailable")
+        renameatx_np.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renameatx_np.restype = ctypes.c_int
+        result = renameatx_np(parent_fd, source, parent_fd, target, 0x00000004)
+    else:
+        raise OSError(errno.ENOTSUP, "exclusive directory rename is unsupported on this platform")
+
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), target_name)
+
+
 def _require_publication_boundaries(
     *,
     vault_fd: int,
     proposals_fd: int,
     proposal_fd: int,
-    proposal_id: str,
+    directory_name: str,
 ) -> None:
     if not _directory_entry_matches(vault_fd, "proposals", proposals_fd):
         raise ProposalPublicationError(
             "unsafe_proposals_root",
             "Proposal root changed during publication.",
         )
-    if not _directory_entry_matches(proposals_fd, proposal_id, proposal_fd):
+    if not _directory_entry_matches(proposals_fd, directory_name, proposal_fd):
         raise ProposalPublicationError(
             "proposal_publish_failed",
             "Proposal directory changed during publication.",
         )
-
-
-def _directory_entry_identity(parent_fd: int, name: str) -> FileIdentity:
-    try:
-        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    except OSError as exc:
-        raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
-    if not stat.S_ISDIR(info.st_mode):
-        raise ProposalPublicationError(
-            "proposal_publish_failed",
-            "Proposal path is not a directory.",
-        )
-    return info.st_dev, info.st_ino
 
 
 def _fd_identity(fd: int) -> FileIdentity:
@@ -254,7 +334,7 @@ def _cleanup_owned_attempt(
     *,
     proposals_fd: int,
     proposal_fd: int,
-    proposal_id: str,
+    directory_name: str,
     owned_files: list[OwnedFile],
     created_identity: FileIdentity | None,
 ) -> None:
@@ -271,9 +351,13 @@ def _cleanup_owned_attempt(
         except OSError:
             pass
 
-    if proposals_fd < 0 or not _directory_entry_matches(proposals_fd, proposal_id, proposal_fd):
+    if proposals_fd < 0 or not _directory_entry_matches(
+        proposals_fd,
+        directory_name,
+        proposal_fd,
+    ):
         return
     try:
-        os.rmdir(proposal_id, dir_fd=proposals_fd)
+        os.rmdir(directory_name, dir_fd=proposals_fd)
     except OSError:
         pass
