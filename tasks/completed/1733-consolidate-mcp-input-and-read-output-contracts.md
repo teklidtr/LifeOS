@@ -59,7 +59,7 @@ Status: required
 # Implementation evidence
 
 - Added `lifeos.mcp.tool_contracts.build_mcp_tool` as the single FastMCP argument-model construction seam used by core, exploration, and multi-source tool families. Core tools retain normal Pydantic coercion plus unknown-field rejection; exploration and multi-source tools retain strict type validation plus unknown-field rejection.
-- Added a narrow authoritative-output adapter that recursively derives Pydantic models from facade dataclasses while preserving historical `*MCPResult` titles and nested `$defs` references. Generated output models use `from_attributes=True` and strict validation, so already-constructed dataclass instances are deeply revalidated without coercing malformed domain values into valid-looking wire output.
+- Added a narrow authoritative-output adapter that recursively derives Pydantic models from facade dataclasses while preserving historical `*MCPResult` titles and nested `$defs` references. Authoritative dataclass instances are validated with `model_validate(..., strict=True)` before JSON serialization, so malformed nested or coercible scalar values cannot be normalized into valid-looking output. The generated model itself remains JSON-compatible for FastMCP's second wire-validation pass, which receives lists after tuple fields are serialized.
 - `VaultListResult`, `VaultReadManyResult`, and `WikiSearchResult` now own the compatible field lists. Direct `tool.fn()` callers still receive dictionaries, while FastMCP continues to expose identical text and structured content.
 - Removed `VaultPathEntryMCPResult`, `VaultListMCPResult`, `VaultReadItemMCPResult`, `VaultReadManyMCPResult`, `WikiSearchHitMCPResult`, and `WikiSearchMCPResult` from `mcp/models.py`.
 - Retained MCP DTOs where transport semantics intentionally differ from one authoritative facade result, including registry-refresh omission behavior, vault-context projection, note identity selection/renaming, read-markdown requiredness, runtime activity optional fields, and research aggregation.
@@ -81,26 +81,19 @@ The execution environment could not clone the repository locally because DNS res
 
 Before Codex review, full-validation run `34033297974` completed all four pytest shards successfully; the `full-test` aggregator passed, as did the clean-room setup/MCP gate and home-node service-container gate. The same implementation line had already passed Ruff, mypy, compile, test collection, project contract smoke tests, documentation impact, task workflow, manual links, and Obsidian plugin lint/typecheck/test/build.
 
-Codex review then identified one P2 output-validation gap. After the strict-output fix and coercible-scalar regression, PR-check run `34033989260` on head `dfe0e5a8becd4128186f683f9d186c543a125c31` passed:
+Codex review then identified one P2 output-validation gap. After adding strict authoritative validation and coercible-scalar regressions, PR-check run `34033989260` passed Ruff, mypy, compile, collection, contract smoke tests, task/docs gates, and Obsidian validation.
 
-- `python scripts/validate_tasks.py`;
-- documentation impact gate and user-manual link validation;
-- `uv run ruff check .`;
-- `uv run mypy src`;
-- Python compile validation;
-- full test collection;
-- project contract smoke tests;
-- Obsidian plugin lint, typecheck, tests, and build.
+The first post-review full-validation run `34034138282` exposed an interaction that the fast smoke set did not cover: placing `strict=True` on the generated model configuration made FastMCP's second validation pass reject the already-serialized JSON list for an authoritative tuple field. The failure appeared consistently in the direct/wire contract test, STDIO protocol test, remote home-node MCP test, and clean-room MCP gate. The boundary was corrected so strictness is applied only while validating the authoritative dataclass instance; FastMCP's wire revalidation can then accept the JSON list representation while scalar coercion remains impossible before serialization.
 
 Repository-wide `uv run ruff format --check .` remains a pre-existing repository baseline blocker tracked by LIFEOS-1734. This task did not widen into the unrelated repository-wide formatter migration.
 
-A fresh full-validation run on the final completed-task head is required by root `AGENTS.md` before merge.
+A fresh full-validation run on the corrected final completed-task head is required by root `AGENTS.md` before merge.
 
 # Codex review
 
-Normal Codex review of head `378b38540cdf4e8da20a64a9e65500ca84990355` found one P2 issue: generated authoritative output models used normal Pydantic coercion, so values such as `truncated="false"`, numeric strings, or `True` in an integer field could be silently converted instead of exposing an upstream contract violation.
+Normal Codex review of head `378b38540cdf4e8da20a64a9e65500ca84990355` found one P2 issue: authoritative output validation used normal Pydantic coercion, so values such as `truncated="false"`, numeric strings, or `True` in an integer field could be silently converted instead of exposing an upstream contract violation.
 
-The finding was fixed by enabling strict validation on generated output models and adding regressions for coercible malformed boolean/integer values. The review thread was replied to with the fix commits and green PR-check evidence, then resolved. Security review was intentionally skipped per the user's explicit instruction for this task.
+The finding is addressed by call-time strict validation of the authoritative dataclass plus regressions for coercible malformed boolean/integer values. A full-validation follow-up then refined the implementation so that strict source validation is not accidentally reused as strict validation of the JSON-normalized wire dictionary. The original review thread was replied to with the fix evidence and resolved. Security review was intentionally skipped per the user's explicit instruction for this task.
 
 # Relevant design decisions
 
