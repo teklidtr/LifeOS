@@ -116,7 +116,13 @@ def _utc(value: datetime | None) -> datetime:
 
 def _proposal_id(moment: datetime, request: ConversationProposalRequest) -> str:
     fingerprint = "\0".join(
-        (request.conversation_path, request.turn_id, request.action, request.target_path, request.content)
+        (
+            request.conversation_path,
+            request.turn_id,
+            request.action,
+            request.target_path,
+            request.content,
+        )
     )
     suffix = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:8]
     return generate_proposal_id(lambda: moment, lambda: suffix)
@@ -126,7 +132,9 @@ def _candidate_content(request: ConversationProposalRequest) -> str:
     heading = _ACTION_HEADINGS[request.action]
     body = request.content.strip()
     if not body:
-        raise ConversationError("empty_proposal", "Conversation proposal content must not be blank.")
+        raise ConversationError(
+            "empty_proposal", "Conversation proposal content must not be blank."
+        )
     title = request.title.strip() if request.title else heading
     if request.action in {"create_capture", "draft_note"}:
         note_type = "capture" if request.action == "create_capture" else "note"
@@ -135,7 +143,9 @@ def _candidate_content(request: ConversationProposalRequest) -> str:
 
 
 class ConversationProposalService:
-    def __init__(self, *, vault_root: Path, runtime_dir: Path, actor_id: str = "local-user") -> None:
+    def __init__(
+        self, *, vault_root: Path, runtime_dir: Path, actor_id: str = "local-user"
+    ) -> None:
         self.vault_root = vault_root
         self.runtime_dir = runtime_dir
         self.actor_id = actor_id
@@ -152,9 +162,13 @@ class ConversationProposalService:
         if turn is None:
             raise ConversationError("turn_not_found", "Proposal source turn was not found.")
         if not turn.evidence:
-            raise ConversationError("missing_evidence", "Conversation proposals require cited source evidence.")
+            raise ConversationError(
+                "missing_evidence", "Conversation proposals require cited source evidence."
+            )
         if request.action not in _ACTION_HEADINGS:
-            raise ConversationError("invalid_action", "Conversation proposal action is unsupported.")
+            raise ConversationError(
+                "invalid_action", "Conversation proposal action is unsupported."
+            )
         moment = _utc(now)
         proposal_id = _proposal_id(moment, request)
         candidate = _candidate_content(request)
@@ -165,14 +179,18 @@ class ConversationProposalService:
         if create:
             if (self.vault_root / request.target_path).exists():
                 raise ConversationError("target_exists", "The proposed target already exists.")
-            operation = CreateFile("op-conversation-create", request.target_path, "absent", candidate)
+            operation = CreateFile(
+                "op-conversation-create", request.target_path, "absent", candidate
+            )
             operation_name = "create_file"
             new_content: str | None = candidate
         else:
             try:
                 source = read_vault_markdown(self.vault_root, request.target_path)
             except VaultAccessError as exc:
-                raise ConversationError(exc.code, str(exc), {"target_path": request.target_path}) from exc
+                raise ConversationError(
+                    exc.code, str(exc), {"target_path": request.target_path}
+                ) from exc
             updated = source.content.rstrip() + candidate
             base_hash = f"sha256:{content_hash(source.content)}"
             lines = tuple(
@@ -223,7 +241,9 @@ class ConversationProposalService:
             applied_at=None,
             applied_by=None,
             related_goals=(),
-            related_sources=tuple(dict.fromkeys((request.conversation_path, *(item.path for item in turn.evidence)))),
+            related_sources=tuple(
+                dict.fromkeys((request.conversation_path, *(item.path for item in turn.evidence)))
+            ),
             extensions={
                 "knowledge_conversation": {
                     "conversation_id": artifact.metadata.conversation_id,
@@ -250,7 +270,9 @@ class ConversationProposalService:
             + (f" · `{item['heading']}`" if item["heading"] else "")
             for item in evidence
         )
-        body_lines.extend(["", "## Candidate content", "", "```markdown", request.content.strip(), "```", ""])
+        body_lines.extend(
+            ["", "## Candidate content", "", "```markdown", request.content.strip(), "```", ""]
+        )
         proposal_markdown = serialize_proposal_markdown(metadata, "\n".join(body_lines))
         preview = ConversationProposalPreview(
             proposal_id,
