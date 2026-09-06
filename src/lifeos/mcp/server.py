@@ -703,9 +703,7 @@ def create_mcp_server(
                 target_paths=[res.target_path],
                 operation_count=1,
             )
-            return serialize_authoritative_output(
-                res, output_type=UpdateWikiSectionProposalResult
-            )
+            return serialize_authoritative_output(res, output_type=UpdateWikiSectionProposalResult)
 
         return _invoke_mcp_tool(op)
 
