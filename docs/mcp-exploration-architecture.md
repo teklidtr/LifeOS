@@ -49,22 +49,35 @@ Pydantic's normal coercion while forbidding unknown fields, and exploration/mult
 retain strict type validation plus unknown-field rejection. FastMCP-generated aliases, field
 descriptions, defaults, annotations, and the published parameter schema remain intact.
 
-For read results whose MCP representation is only a JSON-shaped copy of an authoritative facade
+For results whose MCP representation is only a JSON-shaped copy of an authoritative facade
 dataclass, the same boundary derives the Pydantic output model recursively from the facade type.
-`VaultListResult`, `VaultReadManyResult`, and `WikiSearchResult` therefore own their field lists;
-the MCP adapter preserves the historical `*MCPResult` schema titles/nested references, deeply
-validates even already-constructed dataclass instances, and serializes to the same JSON mapping
-that direct `tool.fn()` callers received before the consolidation. The adapter supplies that
-validated model/schema to FastMCP so normal MCP calls still emit both text content and structured
-content. Pydantic remains an optional MCP-layer dependency and is not introduced into the
-otherwise dependency-free facade/domain contracts.
+`VaultListResult`, `VaultReadManyResult`, and `WikiSearchResult` own the compatible read field
+lists. The same rule now covers the compatible single-source wiki proposal results, wiki-evolve
+and study-evolve results, proposal submit/approve/apply lifecycle results, the multi-source batch
+proposal result, and `ResearchEvidenceCaptureResult`. The MCP adapter preserves historical
+`*MCPResult` schema titles when the facade class name differs, deeply validates even
+already-constructed dataclass instances, and serializes tuple-backed facade fields into the same
+JSON lists that direct `tool.fn()` callers received before consolidation. The adapter supplies
+that validated model/schema to FastMCP so normal MCP calls still emit both text content and
+structured content. Pydantic remains an optional MCP-layer dependency and is not introduced into
+the otherwise dependency-free facade/domain contracts.
 
-Transport-specific DTOs remain when the MCP shape is intentionally not equivalent to one facade
-result. Examples include registry-refresh optional rename omission, vault-context
+The authoritative shortcut is deliberately contract-exact rather than shape-based. A compatible
+facade result must supply the same required fields and transport constraints; a broader domain or
+facade type is not allowed to weaken the MCP contract merely to remove a DTO. In particular,
+`research_create_wiki_proposal` retains its `CreateWikiProposalMCPResult` transport DTO because
+`ResearchWikiProposalResult.status` is the broader `str` type while the MCP contract requires the
+literal `draft`. The multi-source batch result remains a distinct facade/domain concept from the
+single-source evolve result even though both publish the historical `EvolveWikiProposalMCPResult`
+wire schema.
+
+Other transport-specific DTOs likewise remain when the MCP shape is intentionally not equivalent
+to one facade result. Examples include registry-refresh optional rename omission, vault-context
 ranking/provenance projection, note-identity field selection/renaming, read-markdown requiredness,
-runtime-activity optional fields, and research-query aggregation. Those representations encode a
-real disclosure, requiredness, omission, or aggregation contract and are not candidates for this
-authoritative-dataclass shortcut merely because their fields overlap a domain type.
+runtime-activity optional fields, research-query aggregation, and the research-synthesis literal
+constraint above. Those representations encode a real disclosure, requiredness, omission,
+selection, aggregation, or validation contract and are not candidates for the
+authoritative-dataclass shortcut merely because their fields overlap another type.
 
 ## Exploration primitives
 
@@ -260,8 +273,14 @@ Deterministic tests cover both halves of the boundary:
 - MCP inputs are type-strict and cannot coerce strings into protected-read intent or limits;
 - the shared MCP input builder preserves each tool family's strictness, unknown-field behavior,
   aliases, defaults, annotations, and published parameter schemas;
-- authoritative read-output adapters preserve legacy schema names/nested references and direct
-  dictionary returns while deeply revalidating malformed nested domain instances;
+- authoritative output adapters preserve legacy schema names, status literals, JSON tuple/list
+  normalization, direct dictionary returns, text/structured wire payloads, and strict rejection
+  of malformed already-constructed facade results; nested read results remain deeply validated;
+- proposal, lifecycle, multi-source, and research-capture families use the same output boundary
+  only when their authoritative facade result exactly matches the MCP contract;
+- retained transport DTO tests protect intentional requiredness, disclosure, omission, selection,
+  aggregation, and narrower-literal behavior rather than treating overlapping fields as proof of
+  equivalence;
 - MCP reads use external disclosure policy, including `external_allowed_prefixes` for protected
   content;
 - research query composition preserves external-disclosure mode and the configured runtime
