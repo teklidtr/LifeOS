@@ -20,12 +20,12 @@ from lifeos.facade.multi_source_ingestion import (
     BatchWikiSectionRequest,
     BatchWikiUpdateRequest,
     EvolveWikiBatchProposalRequest,
+    EvolveWikiBatchProposalResult,
     evolve_wiki_batch_proposal,
 )
 from lifeos.facade.registry_tools import refresh_registry
 from lifeos.mcp.activity_store import MCPActivityStore
-from lifeos.mcp.models import EvolveWikiProposalMCPResult
-from lifeos.mcp.tool_contracts import build_mcp_tool
+from lifeos.mcp.tool_contracts import build_mcp_tool, serialize_authoritative_output
 from lifeos.registry import Registry
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
@@ -91,6 +91,8 @@ def _proposal_tool(fn: Callable[..., object]) -> Tool:
             openWorldHint=False,
         ),
         strict_inputs=True,
+        output_type=EvolveWikiBatchProposalResult,
+        output_model_name="EvolveWikiProposalMCPResult",
     )
 
 
@@ -152,8 +154,8 @@ def build_multi_source_ingestion_tools(
         source_snapshots: list[BatchSourceSnapshotMCPInput],
         creates: list[BatchWikiCreateMCPInput] | None = None,
         updates: list[BatchWikiUpdateMCPInput] | None = None,
-    ) -> EvolveWikiProposalMCPResult:
-        def op() -> EvolveWikiProposalMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             request = EvolveWikiBatchProposalRequest(
                 source_snapshots=tuple(
                     BatchSourceSnapshotRequest(
@@ -213,14 +215,12 @@ def build_multi_source_ingestion_tools(
                 target_paths=list(result.target_paths),
                 operation_count=result.operation_count,
             )
-            return {
-                "proposal_id": result.proposal_id,
-                "proposal_path": result.proposal_path,
-                "target_paths": list(result.target_paths),
-                "operation_count": result.operation_count,
-                "status": "draft",
-            }
+            return serialize_authoritative_output(
+                result,
+                output_type=EvolveWikiBatchProposalResult,
+                output_model_name="EvolveWikiProposalMCPResult",
+            )
 
-        return cast(EvolveWikiProposalMCPResult, invoke(op))
+        return cast(dict[str, object], invoke(op))
 
     return [_proposal_tool(ingestion_evolve_wiki_batch_proposal_tool)]

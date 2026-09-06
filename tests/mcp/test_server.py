@@ -387,6 +387,7 @@ def test_evolve_wiki_proposal_delegates_to_facade(mock_facade: MagicMock, tmp_pa
         proposal_path="proposals/prop1",
         target_paths=("wiki/learning/retrieval.md", "wiki/learning.md"),
         operation_count=2,
+        status="draft",
     )
     registry = MagicMock()
     server = create_mcp_server(
@@ -455,6 +456,7 @@ def test_study_learning_proposal_delegates_to_facade(
         proposal_path="proposals/prop-study",
         target_paths=("wiki/traffic.md", "flashcards/driving/right-of-way.md"),
         operation_count=2,
+        status="draft",
     )
     registry = MagicMock()
     server = create_mcp_server(
@@ -526,7 +528,10 @@ def test_study_learning_proposal_delegates_to_facade(
 @patch("lifeos.mcp.server.create_wiki_proposal")
 def test_create_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path) -> None:
     mock_facade.return_value = MagicMock(
-        proposal_id="prop1", proposal_path="prop/path", target_path="target/path"
+        proposal_id="prop1",
+        proposal_path="prop/path",
+        target_path="target/path",
+        status="draft",
     )
 
     registry = MagicMock()
@@ -562,6 +567,7 @@ def test_create_wiki_proposal_accepts_typed_routing(mock_facade, tmp_path: Path)
         proposal_id="prop1",
         proposal_path="prop/path",
         target_path="wiki/concepts/active-recall.md",
+        status="draft",
     )
     registry = MagicMock()
     server = create_mcp_server(
@@ -598,6 +604,7 @@ def test_update_wiki_section_proposal_delegates_to_facade(mock_facade, tmp_path:
         proposal_path="prop/path",
         target_path="wiki/target.md",
         heading="Selected",
+        status="draft",
     )
     registry = MagicMock()
     server = create_mcp_server(
@@ -639,6 +646,7 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path)
         create_target_path="wiki/detail.md",
         update_target_path="wiki/summary.md",
         heading="Equipment notes",
+        status="draft",
     )
     registry = MagicMock()
     server = create_mcp_server(
@@ -681,7 +689,7 @@ def test_compound_wiki_proposal_delegates_to_facade(mock_facade, tmp_path: Path)
 
 @patch("lifeos.mcp.server.submit_proposal_tool")
 def test_submit_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
-    mock_facade.return_value = MagicMock(proposal_id="prop1", review_digest="dig")
+    mock_facade.return_value = MagicMock(proposal_id="prop1", status="pending", review_digest="dig")
 
     registry = MagicMock()
     authorizer = MagicMock()
@@ -704,7 +712,11 @@ def test_submit_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
 
 @patch("lifeos.mcp.server.approve_proposal_tool")
 def test_approve_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
-    mock_facade.return_value = MagicMock(proposal_id="prop1", review_digest="dig")
+    mock_facade.return_value = MagicMock(
+        proposal_id="prop1",
+        status="approved",
+        review_digest="dig",
+    )
 
     registry = MagicMock()
     authorizer = MagicMock()
@@ -727,7 +739,11 @@ def test_approve_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
 
 @patch("lifeos.mcp.server.apply_proposal_tool")
 def test_apply_passes_trusted_authorizer(mock_facade, tmp_path: Path) -> None:
-    mock_facade.return_value = MagicMock(proposal_id="prop1", changed_paths=["a.md"])
+    mock_facade.return_value = MagicMock(
+        proposal_id="prop1",
+        status="applied",
+        changed_paths=("a.md",),
+    )
 
     registry = MagicMock()
     authorizer = MagicMock()

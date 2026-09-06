@@ -21,6 +21,7 @@ from lifeos.facade.research_tools import (
     RESEARCH_CAPTURE_DESCRIPTOR,
     RESEARCH_CREATE_WIKI_PROPOSAL_DESCRIPTOR,
     ResearchEvidenceCaptureRequest,
+    ResearchEvidenceCaptureResult,
     ResearchWikiProposalRequest,
     capture_research_evidence,
     create_research_wiki_proposal,
@@ -28,10 +29,10 @@ from lifeos.facade.research_tools import (
 from lifeos.mcp.activity_store import MCPActivityStore
 from lifeos.mcp.models import (
     CreateWikiProposalMCPResult,
-    ResearchCaptureMCPResult,
     ResearchQueryContextMCPResult,
 )
 from lifeos.mcp.server import _strict_tool
+from lifeos.mcp.tool_contracts import serialize_authoritative_output
 from lifeos.registry import Registry
 from lifeos.runtime.activity import push_activity_actor, reset_activity_actor
 
@@ -158,8 +159,8 @@ def build_research_tools(
         origin_kind: str = "query",
         origin_ref: str | None = None,
         research_context: str = "",
-    ) -> ResearchCaptureMCPResult:
-        def op() -> ResearchCaptureMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             actor_id = _trusted_actor_id(activity=activity, authorizer=authorizer)
             actor_token = None
             if activity.current_actor_id() is None:
@@ -189,19 +190,16 @@ def build_research_tools(
                     changed_paths=changed_paths,
                     operation_count=1 if changed_paths else 0,
                 )
-                return {
-                    "artifact_id": result.artifact_id,
-                    "source_path": result.source_path,
-                    "snapshot_hash": result.snapshot_hash,
-                    "acquisition_id": result.acquisition_id,
-                    "created": result.created,
-                    "acquisition_added": result.acquisition_added,
-                }
+                return serialize_authoritative_output(
+                    result,
+                    output_type=ResearchEvidenceCaptureResult,
+                    output_model_name="ResearchCaptureMCPResult",
+                )
             finally:
                 if actor_token is not None:
                     reset_activity_actor(actor_token)
 
-        return cast(ResearchCaptureMCPResult, invoke(op))
+        return cast(dict[str, object], invoke(op))
 
     def research_create_wiki_proposal_tool(
         source_path: str,
@@ -267,6 +265,8 @@ def build_research_tools(
                 idempotentHint=True,
                 openWorldHint=False,
             ),
+            output_type=ResearchEvidenceCaptureResult,
+            output_model_name="ResearchCaptureMCPResult",
         ),
         _strict_tool(
             research_create_wiki_proposal_tool,

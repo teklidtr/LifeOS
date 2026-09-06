@@ -20,7 +20,11 @@ def test_mcp_apply_threads_custom_runtime_into_identity_preflight(tmp_path: Path
     registry = MagicMock()
 
     with patch("lifeos.mcp.server.apply_proposal_tool") as apply_tool:
-        apply_tool.return_value = MagicMock(proposal_id="prop-1", changed_paths=())
+        apply_tool.return_value = MagicMock(
+            proposal_id="prop-1",
+            status="applied",
+            changed_paths=(),
+        )
         server = create_mcp_server(
             vault_root=vault,
             registry=registry,
@@ -62,6 +66,7 @@ def test_mcp_update_proposal_threads_configured_runtime_to_publication(
             proposal_path="proposals/prop-runtime/proposal.md",
             target_path="wiki/target.md",
             heading="Target",
+            status="draft",
         )
         server = create_mcp_server(
             vault_root=vault,

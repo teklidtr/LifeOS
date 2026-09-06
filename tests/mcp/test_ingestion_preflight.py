@@ -153,23 +153,27 @@ def test_all_mcp_ingestion_draft_entrypoints_share_registry_preflight(tmp_path: 
             proposal_path="proposals/evolve",
             target_paths=("wiki/evolve.md",),
             operation_count=1,
+            status="draft",
         )
         study.return_value = MagicMock(
             proposal_id="study",
             proposal_path="proposals/study",
             target_paths=("wiki/study.md",),
             operation_count=1,
+            status="draft",
         )
         create.return_value = MagicMock(
             proposal_id="create",
             proposal_path="proposals/create",
             target_path="wiki/create.md",
+            status="draft",
         )
         update.return_value = MagicMock(
             proposal_id="update",
             proposal_path="proposals/update",
             target_path="wiki/update.md",
             heading="Selected",
+            status="draft",
         )
         compound.return_value = MagicMock(
             proposal_id="compound",
@@ -177,6 +181,7 @@ def test_all_mcp_ingestion_draft_entrypoints_share_registry_preflight(tmp_path: 
             create_target_path="wiki/detail.md",
             update_target_path="wiki/summary.md",
             heading="Selected",
+            status="draft",
         )
 
         server = create_mcp_server(
