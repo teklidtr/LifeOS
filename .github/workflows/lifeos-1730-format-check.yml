@@ -26,3 +26,5 @@ jobs:
 
       - name: Check Ruff formatting
         run: uv run ruff format --check .
+
+# Validation-only workflow. This branch and PR are not merged.
