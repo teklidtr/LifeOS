@@ -1,5 +1,5 @@
 ---
-id: LIFEOS-1723
+id: LIFEOS-1733
 title: Consolidate MCP input construction and equivalent read output contracts
 status: backlog
 phase: hardening

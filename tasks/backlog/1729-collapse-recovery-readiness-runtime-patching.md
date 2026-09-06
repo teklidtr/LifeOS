@@ -1,5 +1,5 @@
 ---
-id: LIFEOS-1719
+id: LIFEOS-1729
 title: Collapse recovery-readiness runtime patching into static implementation
 status: backlog
 phase: hardening
