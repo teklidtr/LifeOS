@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import os
 import secrets
-import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
+)
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import (
     PatchDocumentV2,
@@ -200,27 +203,19 @@ def _publish_proposal(
         vault_root=vault_root,
         patches_json=patches_json,
     )
-    proposals_root = vault_root / "proposals"
-    proposals_root.mkdir(parents=True, exist_ok=True)
-    proposal_dir = proposals_root / proposal_id
-    created = False
-    published = False
-    directory_fd = -1
     try:
-        proposal_dir.mkdir(exist_ok=False)
-        created = True
-        directory_fd = os.open(proposal_dir, os.O_RDONLY | os.O_DIRECTORY)
-        atomic_write_file_secure(directory_fd, "proposal.md", proposal_markdown)
-        atomic_write_file_secure(directory_fd, "patches.json", patches_json)
-        atomic_write_file_secure(directory_fd, "review.json", review_json)
-        published = True
-    except (OSError, AtomicWriteError) as error:
+        publish_proposal_documents(
+            vault_root=vault_root,
+            proposal_id=proposal_id,
+            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
+        )
+    except ProposalPublicationError as error:
+        detail = (
+            str(error.__cause__)
+            if error.code == "proposal_exists" and isinstance(error.__cause__, FileExistsError)
+            else str(error)
+        )
         raise OwnershipReconciliationError(
-            f"Could not publish ownership release proposal: {error}"
+            f"Could not publish ownership release proposal: {detail}"
         ) from error
-    finally:
-        if directory_fd >= 0:
-            os.close(directory_fd)
-        if created and not published:
-            shutil.rmtree(proposal_dir, ignore_errors=True)
-    return proposal_dir
+    return vault_root / "proposals" / proposal_id

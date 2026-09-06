@@ -7,19 +7,27 @@ import difflib
 import hashlib
 import json
 import os
-import shutil
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
+)
 from lifeos.daily import load_execution_records
 from lifeos.daily.service import _frontmatter_document, content_hash as raw_content_hash
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.patches import PatchDocumentV2, PatchHumanFile, serialize_patch_json_bytes
-from lifeos.proposals.schema import ProposalMetadata, ProposalRisk, ProposalStatus, generate_proposal_id
+from lifeos.proposals.schema import (
+    ProposalMetadata,
+    ProposalRisk,
+    ProposalStatus,
+    generate_proposal_id,
+)
 from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
@@ -73,7 +81,9 @@ class ReplanningTrigger:
 @dataclass(frozen=True, slots=True)
 class ReviewEvidence:
     evidence_id: str
-    kind: Literal["execution", "correction", "review-answer", "canonical-change", "deterministic-fact"]
+    kind: Literal[
+        "execution", "correction", "review-answer", "canonical-change", "deterministic-fact"
+    ]
     statement: str
     source_ref: str | None = None
     observed_at: date | None = None
@@ -167,7 +177,9 @@ def scan_replanning_triggers(
     index = build_copilot_index(vault_root)
     suppressions = _load_suppressions(runtime_dir)
     candidates: list[ReplanningTrigger] = []
-    active_plans = tuple(plan for plan in index.plans if plan.status in {"active", "seed", "needs-review"})
+    active_plans = tuple(
+        plan for plan in index.plans if plan.status in {"active", "seed", "needs-review"}
+    )
     plan_by_goal: dict[str, list[PlanRecord]] = {}
     for plan in active_plans:
         if plan.goal_ref:
@@ -175,50 +187,93 @@ def scan_replanning_triggers(
 
     for goal in index.goals:
         if goal.status in {"active", "seed", "needs-review"} and not plan_by_goal.get(goal.goal_id):
-            candidates.append(_trigger(
-                "goal-no-active-plan", "attention", "goal", goal.goal_id, goal.path,
-                "Goal has no active plan",
-                "The goal remains active, but no current plan references it. Continuing without a plan is still a valid choice.",
-                (goal.content_hash,),
-                ("continue-unchanged", "reopen-clarification", "return-to-experiment"),
-            ))
+            candidates.append(
+                _trigger(
+                    "goal-no-active-plan",
+                    "attention",
+                    "goal",
+                    goal.goal_id,
+                    goal.path,
+                    "Goal has no active plan",
+                    "The goal remains active, but no current plan references it. Continuing without a plan is still a valid choice.",
+                    (goal.content_hash,),
+                    ("continue-unchanged", "reopen-clarification", "return-to-experiment"),
+                )
+            )
     for plan in active_plans:
-        actionable = [task for task in plan.tasks if task.status in {"todo", "active", "pending"} and not task.blocked_by]
+        actionable = [
+            task
+            for task in plan.tasks
+            if task.status in {"todo", "active", "pending"} and not task.blocked_by
+        ]
         if not actionable:
-            candidates.append(_trigger(
-                "plan-no-feasible-next-action", "important", "plan", plan.plan_id, plan.path,
-                "Plan has no feasible next action",
-                "No visible active task is both incomplete and unblocked. Review prerequisites or the next wave instead of endlessly moving dates.",
-                (plan.content_hash, *tuple(task.task_id for task in plan.tasks)),
-                ("adjust-next-wave", "revise-scope", "pause", "return-to-experiment", "continue-unchanged"),
-            ))
+            candidates.append(
+                _trigger(
+                    "plan-no-feasible-next-action",
+                    "important",
+                    "plan",
+                    plan.plan_id,
+                    plan.path,
+                    "Plan has no feasible next action",
+                    "No visible active task is both incomplete and unblocked. Review prerequisites or the next wave instead of endlessly moving dates.",
+                    (plan.content_hash, *tuple(task.task_id for task in plan.tasks)),
+                    (
+                        "adjust-next-wave",
+                        "revise-scope",
+                        "pause",
+                        "return-to-experiment",
+                        "continue-unchanged",
+                    ),
+                )
+            )
         completed = tuple(m for m in plan.milestones if m.status in {"done", "completed"})
-        remaining = tuple(m for m in plan.milestones if m.status not in {"done", "completed", "cancelled"})
+        remaining = tuple(
+            m for m in plan.milestones if m.status not in {"done", "completed", "cancelled"}
+        )
         if completed and remaining:
-            candidates.append(_trigger(
-                "milestone-completed", "information", "plan", plan.plan_id, plan.path,
-                "A milestone is complete; review the next wave",
-                "Completed evidence exists while later milestones remain intentionally coarse.",
-                (plan.content_hash, *tuple(item.milestone_id for item in completed)),
-                ("adjust-next-wave", "continue-unchanged", "revise-scope", "close"),
-            ))
+            candidates.append(
+                _trigger(
+                    "milestone-completed",
+                    "information",
+                    "plan",
+                    plan.plan_id,
+                    plan.path,
+                    "A milestone is complete; review the next wave",
+                    "Completed evidence exists while later milestones remain intentionally coarse.",
+                    (plan.content_hash, *tuple(item.milestone_id for item in completed)),
+                    ("adjust-next-wave", "continue-unchanged", "revise-scope", "close"),
+                )
+            )
         if plan.review_date is not None and plan.review_date <= as_of + timedelta(days=14):
-            candidates.append(_trigger(
-                "review-date-approaching", "attention" if plan.review_date >= as_of else "important",
-                "plan", plan.plan_id, plan.path,
-                "Plan review date is approaching" if plan.review_date >= as_of else "Plan review date has passed",
-                f"The current review date is {plan.review_date.isoformat()}.",
-                (plan.content_hash, plan.review_date.isoformat()),
-                ("continue-unchanged", "adjust-next-wave", "revise-scope", "pause", "close"),
-            ))
+            candidates.append(
+                _trigger(
+                    "review-date-approaching",
+                    "attention" if plan.review_date >= as_of else "important",
+                    "plan",
+                    plan.plan_id,
+                    plan.path,
+                    "Plan review date is approaching"
+                    if plan.review_date >= as_of
+                    else "Plan review date has passed",
+                    f"The current review date is {plan.review_date.isoformat()}.",
+                    (plan.content_hash, plan.review_date.isoformat()),
+                    ("continue-unchanged", "adjust-next-wave", "revise-scope", "pause", "close"),
+                )
+            )
         if plan.assumptions and plan.review_date is not None and plan.review_date <= as_of:
-            candidates.append(_trigger(
-                "assumptions-stale", "attention", "plan", plan.plan_id, plan.path,
-                "Plan assumptions need reconfirmation",
-                "The review date has arrived while visible assumptions still underpin the plan.",
-                (plan.content_hash, *plan.assumptions),
-                ("continue-unchanged", "revise-scope", "return-to-experiment", "pause"),
-            ))
+            candidates.append(
+                _trigger(
+                    "assumptions-stale",
+                    "attention",
+                    "plan",
+                    plan.plan_id,
+                    plan.path,
+                    "Plan assumptions need reconfirmation",
+                    "The review date has arrived while visible assumptions still underpin the plan.",
+                    (plan.content_hash, *plan.assumptions),
+                    ("continue-unchanged", "revise-scope", "return-to-experiment", "pause"),
+                )
+            )
 
     try:
         records = load_execution_records(vault_root)
@@ -234,19 +289,48 @@ def scan_replanning_triggers(
             continue
         plan = plans_by_path[path]
         reasons = tuple(sorted({item.reason for item in events if item.reason}))
-        detail = (
-            f"{len(events)} incomplete attempts are visible. "
-            + (f"Competing explanations include: {', '.join(reasons)}." if reasons else "The reason remains unknown and should be clarified.")
+        detail = f"{len(events)} incomplete attempts are visible. " + (
+            f"Competing explanations include: {', '.join(reasons)}."
+            if reasons
+            else "The reason remains unknown and should be clarified."
         )
-        candidates.append(_trigger(
-            "repeated-avoidance", "attention", "plan", plan.plan_id, path,
-            f"Repeated friction around {task_id}", detail,
-            tuple(item.event_id for item in events),
-            ("adjust-next-wave", "revise-scope", "pause", "return-to-experiment", "reopen-clarification", "continue-unchanged"),
-        ))
+        candidates.append(
+            _trigger(
+                "repeated-avoidance",
+                "attention",
+                "plan",
+                plan.plan_id,
+                path,
+                f"Repeated friction around {task_id}",
+                detail,
+                tuple(item.event_id for item in events),
+                (
+                    "adjust-next-wave",
+                    "revise-scope",
+                    "pause",
+                    "return-to-experiment",
+                    "reopen-clarification",
+                    "continue-unchanged",
+                ),
+            )
+        )
 
-    visible = [item for item in candidates if suppressions.get(item.trigger_id) != item.evidence_fingerprint]
-    return tuple(sorted(visible, key=lambda item: (_severity_rank(item.severity), item.target_path, item.code, item.trigger_id)))
+    visible = [
+        item
+        for item in candidates
+        if suppressions.get(item.trigger_id) != item.evidence_fingerprint
+    ]
+    return tuple(
+        sorted(
+            visible,
+            key=lambda item: (
+                _severity_rank(item.severity),
+                item.target_path,
+                item.code,
+                item.trigger_id,
+            ),
+        )
+    )
 
 
 def build_replanning_review(
@@ -272,36 +356,70 @@ def build_replanning_review(
     target_kind = fm.get("type")
     if target_kind not in {"goal", "plan"} or not isinstance(fm.get("id"), str):
         raise ReplanningError("target must be a canonical goal or plan")
-    all_triggers = scan_replanning_triggers(vault_root=vault_root, runtime_dir=runtime_dir, as_of=as_of)
+    all_triggers = scan_replanning_triggers(
+        vault_root=vault_root, runtime_dir=runtime_dir, as_of=as_of
+    )
     triggers = tuple(item for item in all_triggers if item.target_path == target_path)
-    evidence = tuple(sorted((*corrections, *recent_answers), key=lambda item: (item.kind, item.evidence_id)))
+    evidence = tuple(
+        sorted((*corrections, *recent_answers), key=lambda item: (item.kind, item.evidence_id))
+    )
     changed_dimensions = _changed_dimensions(evidence)
     if changed_dimensions:
-        triggers = (*triggers, _trigger(
-            "constraints-changed",
-            "attention",
-            target_kind,
-            fm["id"],
-            target_path,
-            "Planning conditions changed",
-            "Explicit review evidence changed: " + ", ".join(changed_dimensions) + ".",
-            tuple(item.evidence_id for item in evidence),
-            ("continue-unchanged", "adjust-next-wave", "revise-scope", "pause", "return-to-experiment"),
-        ))
+        triggers = (
+            *triggers,
+            _trigger(
+                "constraints-changed",
+                "attention",
+                target_kind,
+                fm["id"],
+                target_path,
+                "Planning conditions changed",
+                "Explicit review evidence changed: " + ", ".join(changed_dimensions) + ".",
+                tuple(item.evidence_id for item in evidence),
+                (
+                    "continue-unchanged",
+                    "adjust-next-wave",
+                    "revise-scope",
+                    "pause",
+                    "return-to-experiment",
+                ),
+            ),
+        )
     comparisons = _comparisons(fm, original_option, evidence)
     recommended = _recommended_outcomes(triggers, evidence)
     questions = _review_questions(triggers, evidence)
     lineage_raw = fm.get("decision_lineage", [])
-    lineage = tuple(
-        str(item.get("decision_id"))
-        for item in lineage_raw
-        if isinstance(item, dict) and isinstance(item.get("decision_id"), str)
-    ) if isinstance(lineage_raw, list) else ()
-    review_id = "replan-" + hashlib.sha256(f"{target_path}\0{current_hash}\0{as_of.isoformat()}".encode()).hexdigest()[:20]
+    lineage = (
+        tuple(
+            str(item.get("decision_id"))
+            for item in lineage_raw
+            if isinstance(item, dict) and isinstance(item.get("decision_id"), str)
+        )
+        if isinstance(lineage_raw, list)
+        else ()
+    )
+    review_id = (
+        "replan-"
+        + hashlib.sha256(
+            f"{target_path}\0{current_hash}\0{as_of.isoformat()}".encode()
+        ).hexdigest()[:20]
+    )
     return ReplanningReview(
-        1, review_id, target_kind, fm["id"], target_path, current_hash,
+        1,
+        review_id,
+        target_kind,
+        fm["id"],
+        target_path,
+        current_hash,
         original_option.option_id if original_option else None,
-        triggers, comparisons, evidence, _OUTCOMES, recommended, questions, lineage, as_of,
+        triggers,
+        comparisons,
+        evidence,
+        _OUTCOMES,
+        recommended,
+        questions,
+        lineage,
+        as_of,
     )
 
 
@@ -354,18 +472,23 @@ def create_replanning_proposal(
     if moment.tzinfo is None:
         raise ReplanningError("proposal timestamp must be timezone-aware")
     utc = moment.astimezone(timezone.utc)
-    decision_id = "decision-" + hashlib.sha256(
-        f"{request.review_id}\0{request.outcome}\0{request.evidence_fingerprint}".encode()
-    ).hexdigest()[:16]
-    lineage.append({
-        "decision_id": decision_id,
-        "review_id": request.review_id,
-        "outcome": request.outcome,
-        "rationale": request.rationale.strip(),
-        "evidence_fingerprint": request.evidence_fingerprint,
-        "source_hash": base_hash,
-        "decided_at": utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-    })
+    decision_id = (
+        "decision-"
+        + hashlib.sha256(
+            f"{request.review_id}\0{request.outcome}\0{request.evidence_fingerprint}".encode()
+        ).hexdigest()[:16]
+    )
+    lineage.append(
+        {
+            "decision_id": decision_id,
+            "review_id": request.review_id,
+            "outcome": request.outcome,
+            "rationale": request.rationale.strip(),
+            "evidence_fingerprint": request.evidence_fingerprint,
+            "source_hash": base_hash,
+            "decided_at": utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    )
     fm["decision_lineage"] = lineage
     updated = _frontmatter_document(fm, parsed.body, preserve_body=True)
     if updated == source.content:
@@ -375,7 +498,9 @@ def create_replanning_proposal(
     ).hexdigest()[:8]
     proposal_id = generate_proposal_id(lambda: utc, lambda: suffix)
     patch = PatchHumanFile(
-        "op-replanning-update", request.target_path, base_hash,
+        "op-replanning-update",
+        request.target_path,
+        base_hash,
         _diff(source.content, updated, request.target_path),
     )
     patch_document = PatchDocumentV2(2, proposal_id, (patch,))
@@ -388,7 +513,9 @@ def create_replanning_proposal(
         title=f"Replanning proposal: {request.outcome.replace('-', ' ')}",
         description=request.rationale.strip(),
         status=ProposalStatus.DRAFT,
-        risk=ProposalRisk.HIGH if request.outcome in {"supersede", "split", "merge", "close"} else ProposalRisk.MEDIUM,
+        risk=ProposalRisk.HIGH
+        if request.outcome in {"supersede", "split", "merge", "close"}
+        else ProposalRisk.MEDIUM,
         created_at=timestamp,
         created_by=actor_id,
         submitted_at=None,
@@ -403,12 +530,14 @@ def create_replanning_proposal(
         applied_by=None,
         related_goals=tuple(filter(None, (str(fm.get("goal") or fm.get("id") or ""),))),
         related_sources=(request.target_path,),
-        extensions={"replanning": {
-            "review_id": request.review_id,
-            "outcome": request.outcome,
-            "evidence_fingerprint": request.evidence_fingerprint,
-            "decision_id": decision_id,
-        }},
+        extensions={
+            "replanning": {
+                "review_id": request.review_id,
+                "outcome": request.outcome,
+                "evidence_fingerprint": request.evidence_fingerprint,
+                "decision_id": decision_id,
+            }
+        },
     )
     body = (
         "## Living-plan review\n\n"
@@ -423,7 +552,9 @@ def create_replanning_proposal(
         proposal_markdown=serialize_proposal_markdown(metadata, body),
         patches_json=serialize_patch_json_bytes(patch_document),
     )
-    return ReplanningProposalResult(proposal_id, f"proposals/{proposal_id}", request.target_path, base_hash, request.outcome)
+    return ReplanningProposalResult(
+        proposal_id, f"proposals/{proposal_id}", request.target_path, base_hash, request.outcome
+    )
 
 
 def _apply_outcome(fm: dict[str, Any], request: ReplanningProposalRequest) -> None:
@@ -442,7 +573,11 @@ def _apply_outcome(fm: dict[str, Any], request: ReplanningProposalRequest) -> No
         fm.update(changes)
     elif outcome == "split":
         targets = changes.get("split_into")
-        if not isinstance(targets, list) or not targets or not all(isinstance(item, str) and item.strip() for item in targets):
+        if (
+            not isinstance(targets, list)
+            or not targets
+            or not all(isinstance(item, str) and item.strip() for item in targets)
+        ):
             raise ReplanningError("split requires visible target plan IDs")
         fm["status"] = "superseded"
         fm["split_into"] = targets
@@ -476,29 +611,61 @@ def _apply_outcome(fm: dict[str, Any], request: ReplanningProposalRequest) -> No
         raise ReplanningError("unsupported consequential outcome")
 
 
-def _comparisons(fm: Mapping[str, Any], original: PlanOption | None, evidence: Sequence[ReviewEvidence]) -> tuple[ReplanningComparison, ...]:
+def _comparisons(
+    fm: Mapping[str, Any], original: PlanOption | None, evidence: Sequence[ReviewEvidence]
+) -> tuple[ReplanningComparison, ...]:
     if original is None:
-        return (ReplanningComparison(
-            "historical-option", "Not available", "Current canonical state remains authoritative.",
-            tuple(item.evidence_id for item in evidence),
-        ),)
+        return (
+            ReplanningComparison(
+                "historical-option",
+                "Not available",
+                "Current canonical state remains authoritative.",
+                tuple(item.evidence_id for item in evidence),
+            ),
+        )
     current_outcome = str(fm.get("desired_outcome") or "Unknown")
     current_boundaries = _render_collection(fm.get("boundaries", fm.get("non_goals", [])))
     current_review = str(fm.get("review_date") or "Open")
     return (
-        ReplanningComparison("desired outcome", original.desired_outcome, current_outcome, tuple(original.source_refs)),
-        ReplanningComparison("scope boundaries", "; ".join(original.boundaries) or "None", current_boundaries, tuple(original.source_refs)),
-        ReplanningComparison("review date", original.review_date.isoformat() if original.review_date else "Open", current_review, tuple(item.evidence_id for item in evidence)),
-        ReplanningComparison("execution evidence", "Not part of original intent", f"{len([item for item in evidence if item.kind == 'execution'])} visible records", tuple(item.evidence_id for item in evidence if item.kind == "execution")),
+        ReplanningComparison(
+            "desired outcome",
+            original.desired_outcome,
+            current_outcome,
+            tuple(original.source_refs),
+        ),
+        ReplanningComparison(
+            "scope boundaries",
+            "; ".join(original.boundaries) or "None",
+            current_boundaries,
+            tuple(original.source_refs),
+        ),
+        ReplanningComparison(
+            "review date",
+            original.review_date.isoformat() if original.review_date else "Open",
+            current_review,
+            tuple(item.evidence_id for item in evidence),
+        ),
+        ReplanningComparison(
+            "execution evidence",
+            "Not part of original intent",
+            f"{len([item for item in evidence if item.kind == 'execution'])} visible records",
+            tuple(item.evidence_id for item in evidence if item.kind == "execution"),
+        ),
     )
 
 
-def _recommended_outcomes(triggers: Sequence[ReplanningTrigger], evidence: Sequence[ReviewEvidence]) -> tuple[ReplanningOutcome, ...]:
+def _recommended_outcomes(
+    triggers: Sequence[ReplanningTrigger], evidence: Sequence[ReviewEvidence]
+) -> tuple[ReplanningOutcome, ...]:
     codes = {item.code for item in triggers}
     outcomes: list[ReplanningOutcome] = ["continue-unchanged"]
     if "milestone-completed" in codes or "plan-no-feasible-next-action" in codes:
         outcomes.append("adjust-next-wave")
-    if "repeated-avoidance" in codes or "assumptions-stale" in codes or "constraints-changed" in codes:
+    if (
+        "repeated-avoidance" in codes
+        or "assumptions-stale" in codes
+        or "constraints-changed" in codes
+    ):
         outcomes.extend(("revise-scope", "return-to-experiment"))
     if "goal-no-active-plan" in codes:
         outcomes.append("reopen-clarification")
@@ -507,17 +674,27 @@ def _recommended_outcomes(triggers: Sequence[ReplanningTrigger], evidence: Seque
     return tuple(dict.fromkeys(outcomes))
 
 
-def _review_questions(triggers: Sequence[ReplanningTrigger], evidence: Sequence[ReviewEvidence]) -> tuple[str, ...]:
+def _review_questions(
+    triggers: Sequence[ReplanningTrigger], evidence: Sequence[ReviewEvidence]
+) -> tuple[str, ...]:
     questions: list[str] = []
     codes = {item.code for item in triggers}
     if "repeated-avoidance" in codes:
-        questions.append("Is the friction caused by scope, prerequisite, timing, capacity, or loss of relevance?")
+        questions.append(
+            "Is the friction caused by scope, prerequisite, timing, capacity, or loss of relevance?"
+        )
     if "assumptions-stale" in codes:
-        questions.append("Which assumptions still hold, and which now need an experiment or correction?")
+        questions.append(
+            "Which assumptions still hold, and which now need an experiment or correction?"
+        )
     if "plan-no-feasible-next-action" in codes:
-        questions.append("What is the smallest unblocked action or prerequisite that would create new evidence?")
+        questions.append(
+            "What is the smallest unblocked action or prerequisite that would create new evidence?"
+        )
     if "goal-no-active-plan" in codes:
-        questions.append("Does this goal need a plan now, a bounded experiment, or deliberate non-planning?")
+        questions.append(
+            "Does this goal need a plan now, a bounded experiment, or deliberate non-planning?"
+        )
     if not questions and evidence:
         questions.append("Does the new evidence change intent, only the next wave, or neither?")
     return tuple(questions)
@@ -539,11 +716,35 @@ def _changed_dimensions(evidence: Sequence[ReviewEvidence]) -> tuple[str, ...]:
     return tuple(dimensions)
 
 
-def _trigger(code: TriggerCode, severity: Literal["information", "attention", "important"], target_kind: Literal["goal", "plan"], target_id: str, target_path: str, title: str, detail: str, evidence_refs: Sequence[str], outcomes: Sequence[ReplanningOutcome]) -> ReplanningTrigger:
+def _trigger(
+    code: TriggerCode,
+    severity: Literal["information", "attention", "important"],
+    target_kind: Literal["goal", "plan"],
+    target_id: str,
+    target_path: str,
+    title: str,
+    detail: str,
+    evidence_refs: Sequence[str],
+    outcomes: Sequence[ReplanningOutcome],
+) -> ReplanningTrigger:
     refs = tuple(sorted(str(item) for item in evidence_refs))
-    fingerprint = "sha256:" + hashlib.sha256("\0".join((code, target_path, *refs)).encode()).hexdigest()
+    fingerprint = (
+        "sha256:" + hashlib.sha256("\0".join((code, target_path, *refs)).encode()).hexdigest()
+    )
     trigger_id = "replan:" + hashlib.sha256(f"{code}\0{target_path}".encode()).hexdigest()[:20]
-    return ReplanningTrigger(trigger_id, code, severity, target_kind, target_id, target_path, title, detail, refs, fingerprint, tuple(outcomes))
+    return ReplanningTrigger(
+        trigger_id,
+        code,
+        severity,
+        target_kind,
+        target_id,
+        target_path,
+        title,
+        detail,
+        refs,
+        fingerprint,
+        tuple(outcomes),
+    )
 
 
 def _load_suppressions(runtime_dir: Path) -> dict[str, str]:
@@ -552,7 +753,9 @@ def _load_suppressions(runtime_dir: Path) -> dict[str, str]:
         return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in raw.items()):
+        if not isinstance(raw, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in raw.items()
+        ):
             raise ValueError
         return dict(raw)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -567,7 +770,7 @@ def _render_collection(value: object) -> str:
 
 def _reference_id(value: str) -> str:
     cleaned = value.strip()
-    if cleaned.startswith("[[") and cleaned.endswith("]]" ):
+    if cleaned.startswith("[[") and cleaned.endswith("]]"):
         cleaned = cleaned[2:-2].split("|", 1)[0]
     return Path(cleaned).stem
 
@@ -577,39 +780,40 @@ def _hash(content: str) -> str:
 
 
 def _diff(before: str, after: str, path: str) -> str:
-    lines = tuple(difflib.unified_diff(before.splitlines(keepends=True), after.splitlines(keepends=True), fromfile=path, tofile=path))
+    lines = tuple(
+        difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=path,
+            tofile=path,
+        )
+    )
     result = "".join(lines[2:])
     if not result:
         raise ReplanningError("replanning patch has no effect")
     return result
 
 
-def _publish(*, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes) -> None:
+def _publish(
+    *, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes
+) -> None:
     review_json = build_review_snapshot_bytes_from_patches(
         vault_root=vault_root,
         patches_json=patches_json,
     )
-    root = vault_root / "proposals"
-    root.mkdir(parents=True, exist_ok=True)
-    target = root / proposal_id
-    created = False
-    published = False
-    fd = -1
     try:
-        target.mkdir(exist_ok=False)
-        created = True
-        fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
-        atomic_write_file_secure(fd, "proposal.md", proposal_markdown)
-        atomic_write_file_secure(fd, "patches.json", patches_json)
-        atomic_write_file_secure(fd, "review.json", review_json)
-        published = True
-    except (OSError, AtomicWriteError) as exc:
-        raise ReplanningError(f"could not publish replanning proposal: {exc}") from exc
-    finally:
-        if fd >= 0:
-            os.close(fd)
-        if created and not published:
-            shutil.rmtree(target, ignore_errors=True)
+        publish_proposal_documents(
+            vault_root=vault_root,
+            proposal_id=proposal_id,
+            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
+        )
+    except ProposalPublicationError as exc:
+        detail = (
+            str(exc.__cause__)
+            if exc.code == "proposal_exists" and isinstance(exc.__cause__, FileExistsError)
+            else str(exc)
+        )
+        raise ReplanningError(f"could not publish replanning proposal: {detail}") from exc
 
 
 def _severity_rank(value: str) -> int:

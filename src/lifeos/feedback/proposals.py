@@ -5,20 +5,27 @@ from __future__ import annotations
 import copy
 import difflib
 import hashlib
-import os
-import shutil
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from lifeos._atomic_write import AtomicWriteError, atomic_write_file_secure
+from lifeos.proposals.publication import (
+    ProposalDocuments,
+    ProposalPublicationError,
+    publish_proposal_documents,
+)
 from lifeos.daily.service import _frontmatter_document, content_hash
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.proposals.lifecycle import serialize_proposal_markdown
 from lifeos.proposals.loader import load_proposal_directory
 from lifeos.proposals.patches import PatchDocumentV2, PatchHumanFile, serialize_patch_json_bytes
-from lifeos.proposals.schema import ProposalMetadata, ProposalRisk, ProposalStatus, generate_proposal_id
+from lifeos.proposals.schema import (
+    ProposalMetadata,
+    ProposalRisk,
+    ProposalStatus,
+    generate_proposal_id,
+)
 from lifeos.proposals.review_snapshot import build_review_snapshot_bytes_from_patches
 from lifeos.vault import VaultAccessError, read_vault_markdown
 
@@ -77,7 +84,9 @@ def _find_task(frontmatter: dict[str, Any], task_id: str | None) -> dict[str, An
     tasks = frontmatter.get("tasks")
     if not isinstance(tasks, list):
         raise FeedbackProposalError("Target plan has no valid tasks list.")
-    task = next((item for item in tasks if isinstance(item, dict) and item.get("task_id") == task_id), None)
+    task = next(
+        (item for item in tasks if isinstance(item, dict) and item.get("task_id") == task_id), None
+    )
     if task is None:
         raise FeedbackProposalError(f"Task not found: {task_id}")
     return task
@@ -99,12 +108,16 @@ def _apply_change(frontmatter: dict[str, Any], request: FeedbackProposalRequest)
         task["next_action"] = next_action.strip()
     elif request.kind == "decompose_task":
         task = _find_task(frontmatter, request.task_id)
-        if not request.decomposition_titles or any(not title.strip() for title in request.decomposition_titles):
+        if not request.decomposition_titles or any(
+            not title.strip() for title in request.decomposition_titles
+        ):
             raise FeedbackProposalError("Decomposition requires bounded non-empty titles.")
         if len(request.decomposition_titles) > 8:
             raise FeedbackProposalError("Decomposition is limited to eight immediate actions.")
         if request.agent_requested and not changes.get("user_requested_agent", False):
-            raise FeedbackProposalError("Agent decomposition requires explicit user request evidence.")
+            raise FeedbackProposalError(
+                "Agent decomposition requires explicit user request evidence."
+            )
         tasks = frontmatter["tasks"]
         existing_ids = {item.get("task_id") for item in tasks if isinstance(item, dict)}
         created_ids: list[str] = []
@@ -113,23 +126,30 @@ def _apply_change(frontmatter: dict[str, Any], request: FeedbackProposalRequest)
             if candidate in existing_ids:
                 raise FeedbackProposalError(f"Decomposition task already exists: {candidate}")
             created_ids.append(candidate)
-            tasks.append({
-                "task_id": candidate,
-                "title": title.strip(),
-                "status": "todo",
-                "duration": changes.get("duration", max(5, int(task.get("duration", 30)) // len(request.decomposition_titles))),
-                "energy": task.get("energy", "medium"),
-                "motivation": task.get("motivation", "medium"),
-                "mode": task.get("mode", "general"),
-                "blocked_by": [],
-            })
+            tasks.append(
+                {
+                    "task_id": candidate,
+                    "title": title.strip(),
+                    "status": "todo",
+                    "duration": changes.get(
+                        "duration",
+                        max(5, int(task.get("duration", 30)) // len(request.decomposition_titles)),
+                    ),
+                    "energy": task.get("energy", "medium"),
+                    "motivation": task.get("motivation", "medium"),
+                    "mode": task.get("mode", "general"),
+                    "blocked_by": [],
+                }
+            )
         task["status"] = "paused"
         task["decomposed_into"] = created_ids
     elif request.kind == "change_task_fit":
         task = _find_task(frontmatter, request.task_id)
         allowed = {"mode", "energy", "motivation", "duration"}
         if not changes or not set(changes) <= allowed:
-            raise FeedbackProposalError("Task-fit changes must use mode, energy, motivation, or duration.")
+            raise FeedbackProposalError(
+                "Task-fit changes must use mode, energy, motivation, or duration."
+            )
         if "duration" in changes:
             duration = changes["duration"]
             if type(duration) is not int or not 1 <= duration <= 1440:
@@ -137,7 +157,9 @@ def _apply_change(frontmatter: dict[str, Any], request: FeedbackProposalRequest)
         for key in ("energy", "motivation"):
             if key in changes and changes[key] not in {"low", "medium", "high"}:
                 raise FeedbackProposalError(f"{key} must be low, medium, or high.")
-        if "mode" in changes and (not isinstance(changes["mode"], str) or not changes["mode"].strip()):
+        if "mode" in changes and (
+            not isinstance(changes["mode"], str) or not changes["mode"].strip()
+        ):
             raise FeedbackProposalError("Mode must be a non-empty string.")
         task.update(changes)
     elif request.kind in {"add_blocker", "resolve_blocker"}:
@@ -180,7 +202,10 @@ def _apply_change(frontmatter: dict[str, Any], request: FeedbackProposalRequest)
 
 
 def _proposal_body(request: FeedbackProposalRequest) -> str:
-    evidence = "\n".join(f"- `{event_id}`" for event_id in request.evidence_event_ids) or "- No event IDs supplied"
+    evidence = (
+        "\n".join(f"- `{event_id}`" for event_id in request.evidence_event_ids)
+        or "- No event IDs supplied"
+    )
     alternatives = "\n".join(f"- {item}" for item in request.alternatives) or "- Take no action"
     return (
         "## Feedback basis\n\n"
@@ -206,9 +231,35 @@ def _existing_fingerprint(proposals_root: Path, fingerprint: str) -> str | None:
             continue
         extensions = loaded.proposal.metadata.extensions
         feedback = extensions.get("feedback") if hasattr(extensions, "get") else None
-        if feedback is not None and hasattr(feedback, "get") and feedback.get("evidence_fingerprint") == fingerprint:
+        if (
+            feedback is not None
+            and hasattr(feedback, "get")
+            and feedback.get("evidence_fingerprint") == fingerprint
+        ):
             return loaded.proposal.metadata.id
     return None
+
+
+def _publish_feedback_proposal(
+    *, vault_root: Path, proposal_id: str, proposal_markdown: bytes, patches_json: bytes
+) -> None:
+    review_json = build_review_snapshot_bytes_from_patches(
+        vault_root=vault_root,
+        patches_json=patches_json,
+    )
+    try:
+        publish_proposal_documents(
+            vault_root=vault_root,
+            proposal_id=proposal_id,
+            documents=ProposalDocuments(proposal_markdown, patches_json, review_json),
+        )
+    except ProposalPublicationError as exc:
+        detail = (
+            str(exc.__cause__)
+            if exc.code == "proposal_exists" and isinstance(exc.__cause__, FileExistsError)
+            else str(exc)
+        )
+        raise FeedbackProposalError(f"Could not publish feedback proposal: {detail}") from exc
 
 
 def create_feedback_proposal(
@@ -220,14 +271,18 @@ def create_feedback_proposal(
 ) -> FeedbackProposalResult:
     if not request.evidence_fingerprint.strip():
         raise FeedbackProposalError("Evidence fingerprint is required.")
-    if not request.evidence_event_ids or any(not item.strip() for item in request.evidence_event_ids):
+    if not request.evidence_event_ids or any(
+        not item.strip() for item in request.evidence_event_ids
+    ):
         raise FeedbackProposalError("At least one explicit evidence event is required.")
     if request.confidence not in {"low", "moderate", "high"}:
         raise FeedbackProposalError("Confidence must be low, moderate, or high.")
     if not request.expected_effect.strip():
         raise FeedbackProposalError("Expected effect is required.")
     if not request.alternatives or any(not item.strip() for item in request.alternatives):
-        raise FeedbackProposalError("At least one alternative interpretation or action is required.")
+        raise FeedbackProposalError(
+            "At least one alternative interpretation or action is required."
+        )
     if not actor_id.strip():
         raise FeedbackProposalError("Actor ID is required.")
     proposals_root = vault_root / "proposals"
@@ -288,32 +343,27 @@ def create_feedback_proposal(
         applied_by=None,
         related_goals=tuple(filter(None, (str(parsed.frontmatter.get("goal") or ""),))),
         related_sources=(request.target_path, *request.evidence_event_ids),
-        extensions={"feedback": {"kind": request.kind, "evidence_fingerprint": request.evidence_fingerprint, "confidence": request.confidence}},
+        extensions={
+            "feedback": {
+                "kind": request.kind,
+                "evidence_fingerprint": request.evidence_fingerprint,
+                "confidence": request.confidence,
+            }
+        },
     )
     proposal_markdown = serialize_proposal_markdown(metadata, _proposal_body(request))
     patches_json = serialize_patch_json_bytes(patch_document)
-    review_json = build_review_snapshot_bytes_from_patches(
+    _publish_feedback_proposal(
         vault_root=vault_root,
+        proposal_id=proposal_id,
+        proposal_markdown=proposal_markdown,
         patches_json=patches_json,
     )
-    proposal_dir = proposals_root / proposal_id
-    proposals_root.mkdir(parents=True, exist_ok=True)
-    created = False
-    published = False
-    dir_fd = -1
-    try:
-        proposal_dir.mkdir(exist_ok=False)
-        created = True
-        dir_fd = os.open(proposal_dir, os.O_RDONLY | os.O_DIRECTORY)
-        atomic_write_file_secure(dir_fd, "proposal.md", proposal_markdown)
-        atomic_write_file_secure(dir_fd, "patches.json", patches_json)
-        atomic_write_file_secure(dir_fd, "review.json", review_json)
-        published = True
-    except (OSError, AtomicWriteError) as exc:
-        raise FeedbackProposalError(f"Could not publish feedback proposal: {exc}") from exc
-    finally:
-        if dir_fd >= 0:
-            os.close(dir_fd)
-        if created and not published:
-            shutil.rmtree(proposal_dir, ignore_errors=True)
-    return FeedbackProposalResult(proposal_id, f"proposals/{proposal_id}", request.target_path, base_hash, request.evidence_fingerprint, request.kind)
+    return FeedbackProposalResult(
+        proposal_id,
+        f"proposals/{proposal_id}",
+        request.target_path,
+        base_hash,
+        request.evidence_fingerprint,
+        request.kind,
+    )

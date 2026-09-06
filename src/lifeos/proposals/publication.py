@@ -45,6 +45,24 @@ class ProposalPublicationError(RuntimeError):
         self.code = code
 
 
+def preflight_proposal_publication(*, vault_root: Path, proposal_id: str) -> None:
+    """Validate the canonical publication target without creating a proposal draft."""
+    _validate_proposal_id(proposal_id)
+    vault_fd = proposals_fd = -1
+    try:
+        vault_fd, proposals_fd = _open_proposals_root(vault_root)
+        _raise_if_proposal_exists(
+            proposals_fd,
+            proposal_id,
+            display_path=vault_root / "proposals" / proposal_id,
+        )
+    finally:
+        if proposals_fd >= 0:
+            os.close(proposals_fd)
+        if vault_fd >= 0:
+            os.close(vault_fd)
+
+
 def publish_proposal_documents(
     *,
     vault_root: Path,
@@ -68,7 +86,11 @@ def publish_proposal_documents(
     created_identity: FileIdentity | None = None
     try:
         vault_fd, proposals_fd = _open_proposals_root(vault_root)
-        _raise_if_proposal_exists(proposals_fd, proposal_id)
+        _raise_if_proposal_exists(
+            proposals_fd,
+            proposal_id,
+            display_path=vault_root / "proposals" / proposal_id,
+        )
         directory_name, proposal_fd, created_identity = _create_staging_directory(proposals_fd)
 
         for filename, content in zip(
@@ -114,10 +136,15 @@ def publish_proposal_documents(
                 target_name=proposal_id,
             )
         except FileExistsError as exc:
+            duplicate = FileExistsError(
+                exc.errno or errno.EEXIST,
+                exc.strerror or os.strerror(errno.EEXIST),
+                str(vault_root / "proposals" / proposal_id),
+            )
             raise ProposalPublicationError(
                 "proposal_exists",
                 f"Proposal directory already exists: proposals/{proposal_id}",
-            ) from exc
+            ) from duplicate
         directory_name = proposal_id
 
         _require_publication_boundaries(
@@ -202,17 +229,22 @@ def _open_proposals_root(vault_root: Path) -> tuple[int, int]:
         raise
 
 
-def _raise_if_proposal_exists(proposals_fd: int, proposal_id: str) -> None:
+def _raise_if_proposal_exists(proposals_fd: int, proposal_id: str, *, display_path: Path) -> None:
     try:
         os.stat(proposal_id, dir_fd=proposals_fd, follow_symlinks=False)
     except FileNotFoundError:
         return
     except OSError as exc:
         raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
+    duplicate = FileExistsError(
+        errno.EEXIST,
+        os.strerror(errno.EEXIST),
+        str(display_path),
+    )
     raise ProposalPublicationError(
         "proposal_exists",
         f"Proposal directory already exists: proposals/{proposal_id}",
-    )
+    ) from duplicate
 
 
 def _create_staging_directory(proposals_fd: int) -> tuple[str, int, FileIdentity]:
@@ -223,12 +255,36 @@ def _create_staging_directory(proposals_fd: int) -> tuple[str, int, FileIdentity
             os.mkdir(directory_name, mode=0o700, dir_fd=proposals_fd)
         except FileExistsError:
             continue
+        created_identity: FileIdentity | None = None
+        try:
+            created_info = os.stat(
+                directory_name,
+                dir_fd=proposals_fd,
+                follow_symlinks=False,
+            )
+        except OSError:
+            # A transient path-stat failure must not strand a directory that can still
+            # be rebound safely through a no-follow descriptor. Do not delete by name
+            # when the pre-open identity could not be established.
+            pass
+        else:
+            created_identity = (created_info.st_dev, created_info.st_ino)
         try:
             proposal_fd = open_directory_secure(Path(directory_name), dir_fd=proposals_fd)
         except SecureIOError as exc:
+            if created_identity is not None:
+                _remove_owned_empty_directory(
+                    parent_fd=proposals_fd,
+                    name=directory_name,
+                    identity=created_identity,
+                )
             raise ProposalPublicationError("proposal_publish_failed", str(exc)) from exc
-        created_identity = _fd_identity(proposal_fd)
-        if not _directory_entry_matches(proposals_fd, directory_name, proposal_fd):
+        opened_identity = _fd_identity(proposal_fd)
+        if created_identity is None:
+            created_identity = opened_identity
+        if opened_identity != created_identity or not _directory_entry_matches(
+            proposals_fd, directory_name, proposal_fd
+        ):
             os.close(proposal_fd)
             raise ProposalPublicationError(
                 "proposal_publish_failed",
@@ -328,6 +384,19 @@ def _file_entry_matches(parent_fd: int, name: str, identity: FileIdentity) -> bo
     except OSError:
         return False
     return stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == identity
+
+
+def _remove_owned_empty_directory(*, parent_fd: int, name: str, identity: FileIdentity) -> None:
+    try:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError:
+        return
+    if not stat.S_ISDIR(info.st_mode) or (info.st_dev, info.st_ino) != identity:
+        return
+    try:
+        os.rmdir(name, dir_fd=parent_fd)
+    except OSError:
+        pass
 
 
 def _cleanup_owned_attempt(

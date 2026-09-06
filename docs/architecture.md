@@ -173,6 +173,8 @@ and directories still owned by the failed attempt, never a pre-existing or repla
 or symlink target. This three-document publication boundary is not an application transaction
 and does not grant submit, approval, or apply authority.
 
+LIFEOS-1731 completes adoption of this boundary for goal-to-plan copilot, replanning, feedback, review-decision, ownership-reconciliation, and ingestion proposal producers, in addition to capture, conversation, experiment, and personal-pattern producers. Each feature still owns evidence, source/target, ownership, identity, and review-snapshot verification before publication. Ingestion still uses its existing public-module/core builder and provenance composition; LIFEOS-1732 owns making that composition explicit, while both ordinary core and runtime persistence now select the same shared publisher.
+
 ## Registry
 
 The current SQLite registry stores deterministic file observations and source versions,

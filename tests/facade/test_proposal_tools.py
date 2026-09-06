@@ -96,16 +96,14 @@ def _registered_source(vault_root: Path, tmp_path: Path) -> Registry:
     )
     return registry
 
+
 def test_create_wiki_proposal_descriptor() -> None:
     assert CREATE_WIKI_PROPOSAL_DESCRIPTOR.name == "ingestion.create_wiki_proposal"
     assert CREATE_WIKI_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
 
 
 def test_update_wiki_section_proposal_descriptor() -> None:
-    assert (
-        UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.name
-        == "ingestion.update_wiki_section_proposal"
-    )
+    assert UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.name == "ingestion.update_wiki_section_proposal"
     assert UPDATE_WIKI_SECTION_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
 
 
@@ -116,8 +114,10 @@ def test_compound_wiki_proposal_descriptor() -> None:
     )
     assert COMPOUND_WIKI_PROPOSAL_DESCRIPTOR.effect == ToolEffect.PROPOSAL_PRODUCING
 
+
 def test_request_and_result_are_frozen_and_slotted() -> None:
     from dataclasses import fields
+
     assert {field.name for field in fields(CreateWikiProposalRequest)} == {
         "source_path",
         "target_path",
@@ -128,52 +128,64 @@ def test_request_and_result_are_frozen_and_slotted() -> None:
         "page_kind",
         "slug",
     }
-    
-    req = CreateWikiProposalRequest(source_path="src.md", target_path="wiki/target.md", title="Title", body="body")
+
+    req = CreateWikiProposalRequest(
+        source_path="src.md", target_path="wiki/target.md", title="Title", body="body"
+    )
     with pytest.raises(AttributeError):
         req.title = "New Title"  # type: ignore
-    
-    res = CreateWikiProposalResult(proposal_id="1", proposal_path="proposals/1", target_path="wiki/target.md", status="draft")
+
+    res = CreateWikiProposalResult(
+        proposal_id="1", proposal_path="proposals/1", target_path="wiki/target.md", status="draft"
+    )
     with pytest.raises(AttributeError):
         res.proposal_id = "2"  # type: ignore
 
-@pytest.mark.parametrize("invalid_title", [
-    123, None, ["title"], {"t": "t"}
-])
+
+@pytest.mark.parametrize("invalid_title", [123, None, ["title"], {"t": "t"}])
 def test_request_rejects_non_string_title(invalid_title: any) -> None:
     with pytest.raises(TypeError, match="title must be a string"):
-        CreateWikiProposalRequest(source_path="src", target_path="wiki", title=invalid_title, body="body")
+        CreateWikiProposalRequest(
+            source_path="src", target_path="wiki", title=invalid_title, body="body"
+        )
 
-@pytest.mark.parametrize("empty_title", [
-    "", "   ", "\n", "\t"
-])
+
+@pytest.mark.parametrize("empty_title", ["", "   ", "\n", "\t"])
 def test_request_rejects_empty_or_whitespace_only_title(empty_title: str) -> None:
     with pytest.raises(ValueError, match="title cannot be empty or whitespace-only"):
-        CreateWikiProposalRequest(source_path="src", target_path="wiki", title=empty_title, body="body")
+        CreateWikiProposalRequest(
+            source_path="src", target_path="wiki", title=empty_title, body="body"
+        )
 
-@pytest.mark.parametrize("surrounded_title", [
-    " Title", "Title ", " Title ", "\nTitle", "Title\n"
-])
+
+@pytest.mark.parametrize("surrounded_title", [" Title", "Title ", " Title ", "\nTitle", "Title\n"])
 def test_request_rejects_title_with_surrounding_whitespace(surrounded_title: str) -> None:
     with pytest.raises(ValueError, match="title cannot have surrounding whitespace"):
-        CreateWikiProposalRequest(source_path="src", target_path="wiki", title=surrounded_title, body="body")
+        CreateWikiProposalRequest(
+            source_path="src", target_path="wiki", title=surrounded_title, body="body"
+        )
 
-@pytest.mark.parametrize("invalid_body", [
-    123, None, ["body"], {"b": "b"}
-])
+
+@pytest.mark.parametrize("invalid_body", [123, None, ["body"], {"b": "b"}])
 def test_request_rejects_non_string_body(invalid_body: any) -> None:
     with pytest.raises(TypeError, match="body must be a string"):
-        CreateWikiProposalRequest(source_path="src", target_path="wiki", title="Title", body=invalid_body)
+        CreateWikiProposalRequest(
+            source_path="src", target_path="wiki", title="Title", body=invalid_body
+        )
 
-@pytest.mark.parametrize("empty_body", [
-    "", "   ", "\n", "\t"
-])
+
+@pytest.mark.parametrize("empty_body", ["", "   ", "\n", "\t"])
 def test_request_rejects_empty_or_whitespace_only_body(empty_body: str) -> None:
     with pytest.raises(ValueError, match="body cannot be empty or whitespace-only"):
-        CreateWikiProposalRequest(source_path="src", target_path="wiki", title="Title", body=empty_body)
+        CreateWikiProposalRequest(
+            source_path="src", target_path="wiki", title="Title", body=empty_body
+        )
+
 
 def test_request_preserves_body_exactly() -> None:
-    req = CreateWikiProposalRequest(source_path="src", target_path="wiki", title="Title", body="  \n Body  \n\r")
+    req = CreateWikiProposalRequest(
+        source_path="src", target_path="wiki", title="Title", body="  \n Body  \n\r"
+    )
     assert req.body == "  \n Body  \n\r"
 
 
@@ -281,67 +293,120 @@ def test_compound_request_is_bounded_and_requires_distinct_targets() -> None:
 # Error mappings
 def test_file_tracking_error_maps_to_validation_error(tmp_path: Path) -> None:
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    with patch("lifeos.facade.proposal_tools.load_registered_source", side_effect=FileTrackingError("msg")):
+    with patch(
+        "lifeos.facade.proposal_tools.load_registered_source", side_effect=FileTrackingError("msg")
+    ):
         with pytest.raises(ToolValidationError, match="Invalid source path") as exc_info:
-            create_wiki_proposal(vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req)
+            create_wiki_proposal(
+                vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req
+            )
         assert isinstance(exc_info.value.__cause__, FileTrackingError)
+
 
 def test_unregistered_source_error_maps_to_validation_error(tmp_path: Path) -> None:
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    with patch("lifeos.facade.proposal_tools.load_registered_source", side_effect=UnregisteredSourceError("msg")):
+    with patch(
+        "lifeos.facade.proposal_tools.load_registered_source",
+        side_effect=UnregisteredSourceError("msg"),
+    ):
         with pytest.raises(ToolValidationError, match="Source is not registered") as exc_info:
-            create_wiki_proposal(vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req)
+            create_wiki_proposal(
+                vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req
+            )
         assert isinstance(exc_info.value.__cause__, UnregisteredSourceError)
+
 
 def test_modified_source_error_maps_to_conflict_error(tmp_path: Path) -> None:
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    with patch("lifeos.facade.proposal_tools.load_registered_source", side_effect=ModifiedSourceError("msg")):
+    with patch(
+        "lifeos.facade.proposal_tools.load_registered_source",
+        side_effect=ModifiedSourceError("msg"),
+    ):
         with pytest.raises(ToolConflictError, match="Registered source has changed") as exc_info:
-            create_wiki_proposal(vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req)
+            create_wiki_proposal(
+                vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req
+            )
         assert isinstance(exc_info.value.__cause__, ModifiedSourceError)
+
 
 def test_missing_source_error_maps_to_not_found_error(tmp_path: Path) -> None:
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    with patch("lifeos.facade.proposal_tools.load_registered_source", side_effect=MissingSourceError("msg")):
+    with patch(
+        "lifeos.facade.proposal_tools.load_registered_source", side_effect=MissingSourceError("msg")
+    ):
         with pytest.raises(ToolNotFoundError, match="Registered source is missing") as exc_info:
-            create_wiki_proposal(vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req)
+            create_wiki_proposal(
+                vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req
+            )
         assert isinstance(exc_info.value.__cause__, MissingSourceError)
+
 
 def test_source_read_error_maps_to_execution_error(tmp_path: Path) -> None:
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    with patch("lifeos.facade.proposal_tools.load_registered_source", side_effect=SourceReadError("msg")):
-        with pytest.raises(ToolExecutionError, match="Could not read registered source") as exc_info:
-            create_wiki_proposal(vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req)
+    with patch(
+        "lifeos.facade.proposal_tools.load_registered_source", side_effect=SourceReadError("msg")
+    ):
+        with pytest.raises(
+            ToolExecutionError, match="Could not read registered source"
+        ) as exc_info:
+            create_wiki_proposal(
+                vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req
+            )
         assert isinstance(exc_info.value.__cause__, SourceReadError)
+
 
 def test_invalid_wiki_target_error_maps_to_validation_error(tmp_path: Path) -> None:
     _write_ownership(tmp_path)
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    with patch("lifeos.facade.proposal_tools.load_registered_source"), \
-         patch("lifeos.facade.proposal_tools.build_wiki_proposal", side_effect=InvalidWikiTargetError("msg")):
+    with (
+        patch("lifeos.facade.proposal_tools.load_registered_source"),
+        patch(
+            "lifeos.facade.proposal_tools.build_wiki_proposal",
+            side_effect=InvalidWikiTargetError("msg"),
+        ),
+    ):
         with pytest.raises(ToolValidationError, match="Invalid wiki target path") as exc_info:
-            create_wiki_proposal(vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req)
+            create_wiki_proposal(
+                vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req
+            )
         assert isinstance(exc_info.value.__cause__, InvalidWikiTargetError)
+
 
 def test_wiki_target_exists_error_maps_to_conflict_error(tmp_path: Path) -> None:
     _write_ownership(tmp_path)
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    with patch("lifeos.facade.proposal_tools.load_registered_source"), \
-         patch("lifeos.facade.proposal_tools.build_wiki_proposal"), \
-         patch("lifeos.facade.proposal_tools.persist_wiki_proposal", side_effect=WikiTargetExistsError("msg")):
+    with (
+        patch("lifeos.facade.proposal_tools.load_registered_source"),
+        patch("lifeos.facade.proposal_tools.build_wiki_proposal"),
+        patch(
+            "lifeos.facade.proposal_tools.persist_wiki_proposal",
+            side_effect=WikiTargetExistsError("msg"),
+        ),
+    ):
         with pytest.raises(ToolConflictError, match="Wiki target already exists") as exc_info:
-            create_wiki_proposal(vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req)
+            create_wiki_proposal(
+                vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req
+            )
         assert isinstance(exc_info.value.__cause__, WikiTargetExistsError)
+
 
 def test_proposal_already_exists_error_maps_to_conflict_error(tmp_path: Path) -> None:
     _write_ownership(tmp_path)
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    with patch("lifeos.facade.proposal_tools.load_registered_source"), \
-         patch("lifeos.facade.proposal_tools.build_wiki_proposal"), \
-         patch("lifeos.facade.proposal_tools.persist_wiki_proposal", side_effect=ProposalAlreadyExistsError("msg")):
+    with (
+        patch("lifeos.facade.proposal_tools.load_registered_source"),
+        patch("lifeos.facade.proposal_tools.build_wiki_proposal"),
+        patch(
+            "lifeos.facade.proposal_tools.persist_wiki_proposal",
+            side_effect=ProposalAlreadyExistsError("msg"),
+        ),
+    ):
         with pytest.raises(ToolConflictError, match="Draft proposal already exists") as exc_info:
-            create_wiki_proposal(vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req)
+            create_wiki_proposal(
+                vault_root=tmp_path, registry=Registry(tmp_path / "reg.db"), request=req
+            )
         assert isinstance(exc_info.value.__cause__, ProposalAlreadyExistsError)
+
 
 def test_proposal_publication_error_maps_to_execution_error(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
@@ -357,61 +422,64 @@ def test_proposal_publication_error_maps_to_execution_error(tmp_path: Path) -> N
     from lifeos.registry.file_tracking import register_scan
     from lifeos.scanner import VaultFile
 
-    register_scan(registry, vault_root, [VaultFile(path=Path("src.md"), file_type=".md", size_bytes=len(b"content"))])
-    
+    register_scan(
+        registry,
+        vault_root,
+        [VaultFile(path=Path("src.md"), file_type=".md", size_bytes=len(b"content"))],
+    )
+
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    
+
     def mock_clock() -> datetime:
         return datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-        
+
     def mock_random() -> str:
         return "abcdef12"
-    
-    import os
-    original_open = os.open
-    def mock_open(path, flags, *args, **kwargs):
-        if "prop-20250101T120000Z-abcdef12" in str(path) and getattr(mock_open, "called", False) is False:
-            mock_open.called = True
-            raise PermissionError("denied")
-        return original_open(path, flags, *args, **kwargs)
 
-    with patch("lifeos.ingestion.proposals.os.open", side_effect=mock_open):
-        with pytest.raises(ToolExecutionError, match="Could not publish draft proposal") as exc_info:
+    with patch(
+        "lifeos.proposals.publication._create_staging_directory",
+        side_effect=PermissionError("denied"),
+    ):
+        with pytest.raises(
+            ToolExecutionError, match="Could not publish draft proposal"
+        ) as exc_info:
             create_wiki_proposal(
                 vault_root=vault_root,
                 registry=registry,
                 request=req,
                 clock_fn=mock_clock,
-                random_suffix_fn=mock_random
+                random_suffix_fn=mock_random,
             )
-        
-        # Verify the cause chain
+
         cause1 = exc_info.value.__cause__
         assert isinstance(cause1, ProposalPublicationError)
         cause2 = cause1.__cause__
-        assert isinstance(cause2, PermissionError)
-        
-        # Verify the partial directory is cleaned up
+        assert isinstance(cause2, Exception)
+        assert cause2.__class__.__module__ == "lifeos.proposals.publication"
+        cause3 = cause2.__cause__
+        assert isinstance(cause3, PermissionError)
+
         assert not (vault_root / "proposals" / "prop-20250101T120000Z-abcdef12").exists()
+
 
 def test_facade_uses_verified_source_without_decoding_or_parsing_it(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
     _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    
-    with patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load, \
-         patch("lifeos.facade.proposal_tools.build_wiki_proposal") as mock_build, \
-         patch("lifeos.facade.proposal_tools.persist_wiki_proposal") as mock_persist, \
-         patch("lifeos.facade.proposal_tools.generate_proposal_id", return_value="id"):
-         
+
+    with (
+        patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load,
+        patch("lifeos.facade.proposal_tools.build_wiki_proposal") as mock_build,
+        patch("lifeos.facade.proposal_tools.persist_wiki_proposal") as mock_persist,
+        patch("lifeos.facade.proposal_tools.generate_proposal_id", return_value="id"),
+    ):
         mock_load.return_value = VerifiedRegisteredSource(
-            source=SourceSnapshot("src.md", "hash"),
-            content=b"content"
+            source=SourceSnapshot("src.md", "hash"), content=b"content"
         )
         mock_persist.return_value = vault_root / "proposals" / "id"
         mock_build.return_value = WikiProposalDocuments("id", "wiki/target.md", b"doc", b"patch")
-        
+
         create_wiki_proposal(vault_root=vault_root, registry=registry, request=req)
         assert mock_build.call_args.kwargs["source"] == SourceSnapshot("src.md", "hash")
 
@@ -429,10 +497,12 @@ def test_facade_derives_typed_wiki_target(tmp_path: Path) -> None:
         slug="active-recall",
     )
 
-    with patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load, \
-         patch("lifeos.facade.proposal_tools.build_wiki_proposal") as mock_build, \
-         patch("lifeos.facade.proposal_tools.persist_wiki_proposal") as mock_persist, \
-         patch("lifeos.facade.proposal_tools.generate_proposal_id", return_value="id"):
+    with (
+        patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load,
+        patch("lifeos.facade.proposal_tools.build_wiki_proposal") as mock_build,
+        patch("lifeos.facade.proposal_tools.persist_wiki_proposal") as mock_persist,
+        patch("lifeos.facade.proposal_tools.generate_proposal_id", return_value="id"),
+    ):
         mock_load.return_value = VerifiedRegisteredSource(
             source=SourceSnapshot("src.md", "hash"),
             content=b"content",
@@ -477,6 +547,7 @@ def test_facade_rejects_mismatched_explicit_and_typed_wiki_target(tmp_path: Path
                 request=request,
             )
 
+
 def test_real_happy_path_facade(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
     vault_root.mkdir()
@@ -484,66 +555,71 @@ def test_real_happy_path_facade(tmp_path: Path) -> None:
     _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     registry.initialize()
-    
+
     src_path = vault_root / "src.md"
     src_path.write_bytes(b"content")
-    
+
     from lifeos.registry.file_tracking import hash_file_content, register_scan
     from lifeos.scanner import VaultFile
-    
-    register_scan(registry, vault_root, [VaultFile(path=Path("src.md"), file_type=".md", size_bytes=len(b"content"))])
+
+    register_scan(
+        registry,
+        vault_root,
+        [VaultFile(path=Path("src.md"), file_type=".md", size_bytes=len(b"content"))],
+    )
     content_hash = hash_file_content(b"content")
 
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    
+
     frozen_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
     def mock_clock() -> datetime:
         return frozen_time
 
     def mock_random() -> str:
         return "abcdef12"
-    
+
     # We test that request exposes no internal fields
     assert not hasattr(req, "proposal_id")
     assert not hasattr(req, "timestamp")
     assert not hasattr(req, "hash")
     assert not hasattr(req, "provenance")
     assert not hasattr(req, "model")
-    
+
     result = create_wiki_proposal(
-        vault_root=vault_root, 
-        registry=registry, 
+        vault_root=vault_root,
+        registry=registry,
         request=req,
         clock_fn=mock_clock,
-        random_suffix_fn=mock_random
+        random_suffix_fn=mock_random,
     )
-    
+
     assert result.status == "draft"
     assert result.target_path == "wiki/target.md"
     assert not (vault_root / "wiki/target.md").exists()
     assert result.proposal_path == f"proposals/{result.proposal_id}"
     assert result.proposal_id == "prop-20250101T120000Z-abcdef12"
-    
+
     prop_dir = vault_root / result.proposal_path
     assert (prop_dir / "proposal.md").exists()
     assert (prop_dir / "patches.json").exists()
-    
+
     assert src_path.read_bytes() == b"content"
-    
+
     from lifeos.proposals.loader import load_proposal_directory
     from lifeos.markdown.parser import parse_markdown_note
-    
+
     loaded = load_proposal_directory(prop_dir, proposals_root=vault_root / "proposals")
     assert not loaded.findings
     assert loaded.proposal.metadata.status.value == "draft"
-    
+
     ops = loaded.proposal.patch_document.operations
     assert len(ops) == 1
     create_op = ops[0]
     assert create_op.op == "create_generated_file"
     assert create_op.generator_id == "lifeos.facade.external_agent"
     assert create_op.generator_version == "1"
-    
+
     parsed = parse_markdown_note(
         Path("wiki/target.md"),
         content=create_op.new_content,
@@ -661,9 +737,7 @@ def test_real_happy_path_creates_compound_wiki_draft(tmp_path: Path) -> None:
     registry.initialize()
 
     source_bytes = b"Verified equipment source.\n"
-    update_bytes = (
-        "# First Aid\n\n## Equipment notes\n\nOld.\n\n## Safety\n\nKeep.\n"
-    ).encode()
+    update_bytes = ("# First Aid\n\n## Equipment notes\n\nOld.\n\n## Safety\n\nKeep.\n").encode()
     (vault_root / "study" / "source.md").write_bytes(source_bytes)
     update_path = vault_root / "wiki" / "first-aid.md"
     update_path.write_bytes(update_bytes)
@@ -941,11 +1015,7 @@ def test_generated_update_rejects_unsafe_ownership_without_persisting(
     (vault_root / "wiki" / "generated.md").write_bytes(target_content)
     _write_ownership(
         vault_root,
-        {
-            "wiki/generated.md": _ownership_entry(
-                manifest_content, generator_id=generator_id
-            )
-        },
+        {"wiki/generated.md": _ownership_entry(manifest_content, generator_id=generator_id)},
     )
 
     with pytest.raises(ToolOwnershipConflictError, match=message):
@@ -970,54 +1040,55 @@ def test_missing_ownership_manifest_prevents_draft(tmp_path: Path) -> None:
         create_wiki_proposal(
             vault_root=vault_root,
             registry=registry,
-            request=CreateWikiProposalRequest(
-                "study/source.md", "wiki/new.md", "New", "Body"
-            ),
+            request=CreateWikiProposalRequest("study/source.md", "wiki/new.md", "New", "Body"),
         )
 
     assert list((vault_root / "proposals").iterdir()) == []
+
 
 def test_verify_identity_and_time_generation(tmp_path: Path) -> None:
     vault_root = tmp_path / "vault"
     _write_ownership(vault_root)
     registry = Registry(tmp_path / "registry.db")
     req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")
-    
+
     frozen_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-    
+
     clock_calls = 0
+
     def mock_clock() -> datetime:
         nonlocal clock_calls
         clock_calls += 1
         return frozen_time
-        
+
     random_calls = 0
+
     def mock_random() -> str:
         nonlocal random_calls
         random_calls += 1
         return "abcdef12"
-        
-    with patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load, \
-         patch("lifeos.facade.proposal_tools.build_wiki_proposal") as mock_build, \
-         patch("lifeos.facade.proposal_tools.persist_wiki_proposal") as _:
-         
+
+    with (
+        patch("lifeos.facade.proposal_tools.load_registered_source") as mock_load,
+        patch("lifeos.facade.proposal_tools.build_wiki_proposal") as mock_build,
+        patch("lifeos.facade.proposal_tools.persist_wiki_proposal") as _,
+    ):
         mock_load.return_value = VerifiedRegisteredSource(
-            source=SourceSnapshot("src.md", "hash"),
-            content=b"content"
+            source=SourceSnapshot("src.md", "hash"), content=b"content"
         )
         mock_build.return_value = WikiProposalDocuments("id", "wiki/target.md", b"doc", b"patch")
-        
+
         create_wiki_proposal(
-            vault_root=vault_root, 
-            registry=registry, 
+            vault_root=vault_root,
+            registry=registry,
             request=req,
             clock_fn=mock_clock,
-            random_suffix_fn=mock_random
+            random_suffix_fn=mock_random,
         )
-        
+
         assert clock_calls == 1
         assert random_calls == 1
-        
+
         # Check build_wiki_proposal was called with the generated proposal_id and timestamp
         mock_build.assert_called_once()
         kwargs = mock_build.call_args.kwargs
@@ -1045,9 +1116,7 @@ def test_evolve_wiki_request_rejects_empty_overflow_and_duplicate_targets() -> N
         EvolveWikiProposalRequest(
             source_path="study/source.md",
             creates=(
-                EvolveWikiCreateRequest(
-                    "wiki/shared.md", "Shared", "Body", "Create durable note."
-                ),
+                EvolveWikiCreateRequest("wiki/shared.md", "Shared", "Body", "Create durable note."),
             ),
             updates=(
                 EvolveWikiUpdateRequest(
@@ -1188,22 +1257,26 @@ def test_study_learning_proposal_combines_wiki_and_flashcards(tmp_path: Path) ->
         registry=registry,
         request=EvolveStudyLearningProposalRequest(
             source_path="study/source.md",
-            wiki_creates=(EvolveWikiCreateRequest(
-                target_path="wiki/traffic/right-of-way.md",
-                title="Right of way",
-                body="Durable explanation.",
-                rationale="This concept is reused across the study material.",
-            ),),
-            flashcards=(StudyFlashcardCreateRequest(
-                target_path="flashcards/driving-licence/right-of-way.md",
-                card_id="driving-right-of-way",
-                topic="Driving licence",
-                question="Who yields at an uncontrolled intersection?",
-                answer="Apply the reviewed right-of-way rule.",
-                rationale="This distinction is exam-relevant and easy to confuse.",
-                learning_context="Turkish driving licence exam",
-                knowledge_refs=("wiki/traffic/right-of-way.md",),
-            ),),
+            wiki_creates=(
+                EvolveWikiCreateRequest(
+                    target_path="wiki/traffic/right-of-way.md",
+                    title="Right of way",
+                    body="Durable explanation.",
+                    rationale="This concept is reused across the study material.",
+                ),
+            ),
+            flashcards=(
+                StudyFlashcardCreateRequest(
+                    target_path="flashcards/driving-licence/right-of-way.md",
+                    card_id="driving-right-of-way",
+                    topic="Driving licence",
+                    question="Who yields at an uncontrolled intersection?",
+                    answer="Apply the reviewed right-of-way rule.",
+                    rationale="This distinction is exam-relevant and easy to confuse.",
+                    learning_context="Turkish driving licence exam",
+                    knowledge_refs=("wiki/traffic/right-of-way.md",),
+                ),
+            ),
         ),
         clock_fn=lambda: datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
         random_suffix_fn=lambda: "abcdef12",
@@ -1215,12 +1288,14 @@ def test_study_learning_proposal_combines_wiki_and_flashcards(tmp_path: Path) ->
         "flashcards/driving-licence/right-of-way.md",
     )
     from lifeos.proposals.loader import load_proposal_directory
+
     loaded = load_proposal_directory(
         vault_root / result.proposal_path, proposals_root=vault_root / "proposals"
     ).proposal
     assert loaded is not None
     assert [op.op for op in loaded.patch_document.operations] == [
-        "create_generated_file", "create_generated_file"
+        "create_generated_file",
+        "create_generated_file",
     ]
     card = loaded.patch_document.operations[1].new_content
     assert "type: flashcard" in card
@@ -1241,6 +1316,7 @@ def test_study_learning_proposal_rejects_non_study_source(tmp_path: Path) -> Non
     registry.initialize()
     from lifeos.registry.file_tracking import register_scan
     from lifeos.scanner import VaultFile
+
     register_scan(
         registry,
         vault_root,
@@ -1249,13 +1325,20 @@ def test_study_learning_proposal_rejects_non_study_source(tmp_path: Path) -> Non
 
     with pytest.raises(ToolValidationError, match="requires a registered source under study"):
         evolve_study_learning_proposal(
-            vault_root=vault_root, registry=registry,
+            vault_root=vault_root,
+            registry=registry,
             request=EvolveStudyLearningProposalRequest(
                 source_path="raw/source.md",
-                flashcards=(StudyFlashcardCreateRequest(
-                    target_path="flashcards/raw.md", card_id="raw-card", topic="Raw",
-                    question="Q?", answer="A", rationale="Explicit test rationale.",
-                    learning_context="raw",
-                ),),
+                flashcards=(
+                    StudyFlashcardCreateRequest(
+                        target_path="flashcards/raw.md",
+                        card_id="raw-card",
+                        topic="Raw",
+                        question="Q?",
+                        answer="A",
+                        rationale="Explicit test rationale.",
+                        learning_context="raw",
+                    ),
+                ),
             ),
         )

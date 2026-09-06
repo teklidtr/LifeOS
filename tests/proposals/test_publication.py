@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 
@@ -95,6 +96,64 @@ def test_publisher_rejects_symlinked_proposals_root_without_touching_target(
     assert unsafe.value.code == "unsafe_proposals_root"
     assert marker.read_text(encoding="utf-8") == "keep"
     assert not (outside / PROPOSAL_ID).exists()
+
+
+def test_staging_open_failure_cleans_owned_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = _vault(tmp_path)
+    original = publication_module.open_directory_secure
+
+    def fail_staging_open(path: Path, *, dir_fd: int | None = None) -> int:
+        if path.name.startswith(".lifeos-proposal-stage-"):
+            from lifeos._secure_io import SecureIOError
+
+            raise SecureIOError("open_failed", "injected staging open failure")
+        return original(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(publication_module, "open_directory_secure", fail_staging_open)
+
+    with pytest.raises(ProposalPublicationError) as failed:
+        publish_proposal_documents(
+            vault_root=vault,
+            proposal_id=PROPOSAL_ID,
+            documents=DOCUMENTS,
+        )
+
+    assert failed.value.code == "proposal_publish_failed"
+    assert list((vault / "proposals").iterdir()) == []
+
+
+def test_transient_staging_identity_lookup_failure_rebinds_through_secure_fd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = _vault(tmp_path)
+    original_stat = publication_module.os.stat
+    injected = False
+
+    def fail_first_staging_stat(path: object, *args: object, **kwargs: object):
+        nonlocal injected
+        if not injected and isinstance(path, str) and path.startswith(".lifeos-proposal-stage-"):
+            injected = True
+            raise OSError(errno.EIO, "injected staging identity lookup failure")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(publication_module.os, "stat", fail_first_staging_stat)
+
+    publish_proposal_documents(
+        vault_root=vault,
+        proposal_id=PROPOSAL_ID,
+        documents=DOCUMENTS,
+    )
+
+    assert injected
+    proposal_dir = vault / "proposals" / PROPOSAL_ID
+    assert (proposal_dir / "proposal.md").read_bytes() == DOCUMENTS.proposal_markdown
+    assert (proposal_dir / "patches.json").read_bytes() == DOCUMENTS.patches_json
+    assert (proposal_dir / "review.json").read_bytes() == DOCUMENTS.review_json
+    assert sorted(path.name for path in (vault / "proposals").iterdir()) == [PROPOSAL_ID]
 
 
 def test_partial_write_cleans_owned_staging_directory(

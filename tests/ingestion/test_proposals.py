@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest import mock
 from unittest.mock import patch
 from lifeos.registry.file_tracking import FileTrackingError
-import os
 import pytest
 from dataclasses import replace
 
@@ -28,7 +27,9 @@ from lifeos.ingestion.proposals import (
 )
 from lifeos.markdown.parser import parse_markdown_note
 from lifeos.ingestion.provenance import extract_provenance
+from lifeos.proposals.patches import PatchDocumentV2, serialize_patch_json_bytes
 from lifeos.proposals.unified_diff import apply_diff
+
 
 @pytest.fixture
 def sample_content() -> WikiProposalContent:
@@ -36,40 +37,44 @@ def sample_content() -> WikiProposalContent:
         title="Test Page",
         body="This is a test body.\nIt has multiple lines.",
         generator=ProvenanceGenerator(
-            id="test-gen",
-            version="1.0",
-            prompt_schema_version="v1",
-            model_id="test-model"
-        )
+            id="test-gen", version="1.0", prompt_schema_version="v1", model_id="test-model"
+        ),
     )
+
 
 @pytest.fixture
 def sample_source() -> SourceSnapshot:
     return SourceSnapshot(
         path="journal/2026-07-13.md",
-        content_hash="sha256:" + "a" * 64  # valid 64 char hash
+        content_hash="sha256:" + "a" * 64,  # valid 64 char hash
     )
 
-def test_identical_inputs_produce_identical_bytes(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
+
+def test_identical_inputs_produce_identical_bytes(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot
+) -> None:
     prop_id = "prop-20260713T123000Z-abcdef12"
     doc1 = build_wiki_proposal(
         content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id=prop_id,
-        created_at="2026-07-13T12:00:00Z"
+        created_at="2026-07-13T12:00:00Z",
     )
     doc2 = build_wiki_proposal(
         content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id=prop_id,
-        created_at="2026-07-13T12:00:00Z"
+        created_at="2026-07-13T12:00:00Z",
     )
     assert doc1.proposal_markdown == doc2.proposal_markdown
     assert doc1.patches_json == doc2.patches_json
 
-def test_builder_performs_no_writes_and_injects_metadata(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+
+def test_builder_performs_no_writes_and_injects_metadata(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path
+) -> None:
     before_files = list(tmp_path.rglob("*"))
     prop_id = "prop-20260713T123000Z-abcdef12"
     doc = build_wiki_proposal(
@@ -77,29 +82,35 @@ def test_builder_performs_no_writes_and_injects_metadata(sample_content: WikiPro
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id=prop_id,
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
     after_files = list(tmp_path.rglob("*"))
     assert before_files == after_files
 
     assert doc.proposal_id == prop_id
     assert f"id: {prop_id}".encode() in doc.proposal_markdown
-    assert b"created_at: \"2026-07-13T12:30:00Z\"" in doc.proposal_markdown
+    assert b'created_at: "2026-07-13T12:30:00Z"' in doc.proposal_markdown
 
-def test_proposal_and_provenance_use_same_timestamp(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
+
+def test_proposal_and_provenance_use_same_timestamp(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot
+) -> None:
     doc = build_wiki_proposal(
         content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
-    assert b"created_at: \"2026-07-13T12:30:00Z\"" in doc.proposal_markdown
+    assert b'created_at: "2026-07-13T12:30:00Z"' in doc.proposal_markdown
     patches = json.loads(doc.patches_json)["operations"]
     candidate_md = patches[0]["new_content"]
-    assert "created_at: \"2026-07-13T12:30:00Z\"" in candidate_md
+    assert 'created_at: "2026-07-13T12:30:00Z"' in candidate_md
 
-def test_valid_draft_loads_and_omits_review_digest(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+
+def test_valid_draft_loads_and_omits_review_digest(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path
+) -> None:
     proposals_root = tmp_path / "proposals"
     proposals_root.mkdir(parents=True)
 
@@ -108,7 +119,7 @@ def test_valid_draft_loads_and_omits_review_digest(sample_content: WikiProposalC
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
     prop_dir = persist_wiki_proposal(proposals_root=proposals_root, documents=doc)
 
@@ -116,13 +127,16 @@ def test_valid_draft_loads_and_omits_review_digest(sample_content: WikiProposalC
     assert parsed.frontmatter.get("status") == "draft"
     assert "review_digest" not in parsed.frontmatter
 
-def test_v2_operation_emitted_with_absent_state(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
+
+def test_v2_operation_emitted_with_absent_state(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot
+) -> None:
     doc = build_wiki_proposal(
         content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
     patches = json.loads(doc.patches_json)["operations"]
     assert len(patches) == 1
@@ -133,13 +147,16 @@ def test_v2_operation_emitted_with_absent_state(sample_content: WikiProposalCont
     assert p["generator_id"] == "test-gen"
     assert p["generator_version"] == "1.0"
 
-def test_candidate_markdown_parses_and_preserves_body(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+
+def test_candidate_markdown_parses_and_preserves_body(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path
+) -> None:
     doc = build_wiki_proposal(
         content=sample_content,
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
     patches = json.loads(doc.patches_json)["operations"]
     md_content = patches[0]["new_content"]
@@ -219,9 +236,7 @@ def test_create_proposal_records_reviewed_tags_without_copying_source_taxonomy(
     )
 
     operation = json.loads(documents.patches_json)["operations"][0]
-    candidate = parse_markdown_note(
-        Path("wiki/test.md"), content=operation["new_content"]
-    )
+    candidate = parse_markdown_note(Path("wiki/test.md"), content=operation["new_content"])
     assert candidate.frontmatter["tags"] == [
         "ilk-yardim",
         "ehliyet-sinavi",
@@ -234,7 +249,10 @@ def test_create_proposal_records_reviewed_tags_without_copying_source_taxonomy(
     assert "Proposed canonical wiki `tags`" in proposal
     assert content.tag_rationale in proposal
 
-def test_model_id_omission_remains_canonical(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
+
+def test_model_id_omission_remains_canonical(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot
+) -> None:
     new_gen = replace(sample_content.generator, model_id=None)
     new_content = replace(sample_content, generator=new_gen)
 
@@ -243,7 +261,7 @@ def test_model_id_omission_remains_canonical(sample_content: WikiProposalContent
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
     patches = json.loads(doc.patches_json)["operations"]
     md_content = patches[0]["new_content"]
@@ -299,17 +317,9 @@ def test_replace_wiki_section_ignores_headings_inside_fenced_code() -> None:
 
 def test_replace_wiki_section_ignores_heading_after_false_fence_closer() -> None:
     fenced_example = (
-        "```markdown\n"
-        "```not-a-closing-fence\n"
-        "## Ekipman notları\n"
-        "Human-owned code example.\n"
-        "```"
+        "```markdown\n```not-a-closing-fence\n## Ekipman notları\nHuman-owned code example.\n```"
     )
-    original = (
-        f"# Note\n\n{fenced_example}\n\n"
-        "## Ekipman notları\n\n"
-        "Old.\n"
-    )
+    original = f"# Note\n\n{fenced_example}\n\n## Ekipman notları\n\nOld.\n"
 
     updated = replace_wiki_section(
         target_content=original,
@@ -369,7 +379,9 @@ def test_section_update_builder_emits_base_hash_patch_and_source_metadata(
     parsed = parse_markdown_note(Path("proposal.md"), content=documents.proposal_markdown.decode())
     assert parsed.frontmatter["risk"] == "medium"
     assert parsed.frontmatter["related_sources"] == [sample_source.path]
-    assert parsed.frontmatter["extensions"]["ingestion"]["source_hash"] == sample_source.content_hash
+    assert (
+        parsed.frontmatter["extensions"]["ingestion"]["source_hash"] == sample_source.content_hash
+    )
 
 
 def test_section_update_builder_uses_generated_replacement_when_owned(
@@ -400,12 +412,8 @@ def test_section_update_builder_uses_generated_replacement_when_owned(
         "generator_version": "2",
         "new_content": original.replace("Old.", "New."),
     }
-    parsed = parse_markdown_note(
-        Path("proposal.md"), content=documents.proposal_markdown.decode()
-    )
-    assert parsed.frontmatter["extensions"]["ingestion"]["target_ownership"] == (
-        "generated"
-    )
+    parsed = parse_markdown_note(Path("proposal.md"), content=documents.proposal_markdown.decode())
+    assert parsed.frontmatter["extensions"]["ingestion"]["target_ownership"] == ("generated")
 
 
 def test_generated_section_update_revises_tags_in_same_replacement(
@@ -439,9 +447,7 @@ def test_generated_section_update_revises_tags_in_same_replacement(
     operations = json.loads(documents.patches_json)["operations"]
     assert len(operations) == 1
     assert operations[0]["op"] == "replace_generated_file"
-    candidate = parse_markdown_note(
-        Path("wiki/generated.md"), content=operations[0]["new_content"]
-    )
+    candidate = parse_markdown_note(Path("wiki/generated.md"), content=operations[0]["new_content"])
     assert candidate.frontmatter["tags"] == ["new-tag", "better-topic"]
     assert "## Selected\n\nNew." in candidate.body
     assert "## Keep\n\nSame." in candidate.body
@@ -495,9 +501,7 @@ def test_compound_builder_emits_create_then_hash_bound_section_patch(
     assert operations[1]["base_hash"] == target_hash
     assert "See [[equipment]]" in apply_diff(original, operations[1]["unified_diff"])
 
-    parsed = parse_markdown_note(
-        Path("proposal.md"), content=documents.proposal_markdown.decode()
-    )
+    parsed = parse_markdown_note(Path("proposal.md"), content=documents.proposal_markdown.decode())
     ingestion = parsed.frontmatter["extensions"]["ingestion"]
     assert parsed.frontmatter["risk"] == "medium"
     assert parsed.frontmatter["related_sources"] == [sample_source.path]
@@ -536,9 +540,7 @@ def test_compound_builder_includes_reviewed_tags_in_create_operation(
     )
 
     operations = json.loads(documents.patches_json)["operations"]
-    candidate = parse_markdown_note(
-        Path("wiki/equipment.md"), content=operations[0]["new_content"]
-    )
+    candidate = parse_markdown_note(Path("wiki/equipment.md"), content=operations[0]["new_content"])
     assert candidate.frontmatter["tags"] == ["first-aid", "driving-test"]
     proposal = documents.proposal_markdown.decode()
     assert "Source `tags`: `notes`" in proposal
@@ -566,17 +568,23 @@ def test_compound_persistence_rejects_present_create_target(tmp_path: Path) -> N
         )
     assert not (proposals_root / documents.proposal_id).exists()
 
-def test_invalid_target_path_rejected(sample_content: WikiProposalContent, sample_source: SourceSnapshot) -> None:
+
+def test_invalid_target_path_rejected(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot
+) -> None:
     with pytest.raises(ValueError, match="Target path must be within the canonical wiki area"):
         build_wiki_proposal(
             content=sample_content,
             source=sample_source,
             target_path="journal/test.md",
             proposal_id="prop-20260713T123000Z-abcdef12",
-            created_at="2026-07-13T12:30:00Z"
+            created_at="2026-07-13T12:30:00Z",
         )
 
-def test_existing_proposal_id_rejected(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+
+def test_existing_proposal_id_rejected(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path
+) -> None:
     proposals_root = tmp_path / "proposals"
     proposals_root.mkdir(parents=True)
 
@@ -585,7 +593,7 @@ def test_existing_proposal_id_rejected(sample_content: WikiProposalContent, samp
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
 
     persist_wiki_proposal(proposals_root=proposals_root, documents=doc)
@@ -593,7 +601,10 @@ def test_existing_proposal_id_rejected(sample_content: WikiProposalContent, samp
     with pytest.raises(ProposalPublicationError):
         persist_wiki_proposal(proposals_root=proposals_root, documents=doc)
 
-def test_failure_writing_cleans_up(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+
+def test_failure_writing_cleans_up(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path
+) -> None:
     proposals_root = tmp_path / "proposals"
     proposals_root.mkdir(parents=True)
 
@@ -602,16 +613,21 @@ def test_failure_writing_cleans_up(sample_content: WikiProposalContent, sample_s
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
 
-    with mock.patch("lifeos.ingestion.proposals.atomic_write_file_secure", side_effect=OSError("mock fail")):
+    with mock.patch(
+        "lifeos.proposals.publication.atomic_write_file_secure", side_effect=OSError("mock fail")
+    ):
         with pytest.raises(ProposalPublicationError):
             persist_wiki_proposal(proposals_root=proposals_root, documents=doc)
 
     assert not (proposals_root / "prop-20260713T123000Z-abcdef12").exists()
 
-def test_full_lifecycle_workflow(sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path) -> None:
+
+def test_full_lifecycle_workflow(
+    sample_content: WikiProposalContent, sample_source: SourceSnapshot, tmp_path: Path
+) -> None:
     vault_root = tmp_path
     proposals_root = vault_root / "proposals"
     proposals_root.mkdir(parents=True)
@@ -621,7 +637,7 @@ def test_full_lifecycle_workflow(sample_content: WikiProposalContent, sample_sou
         source=sample_source,
         target_path="wiki/test.md",
         proposal_id="prop-20260713T123000Z-abcdef12",
-        created_at="2026-07-13T12:30:00Z"
+        created_at="2026-07-13T12:30:00Z",
     )
 
     prop_dir = persist_wiki_proposal(proposals_root=proposals_root, documents=doc)
@@ -645,7 +661,7 @@ def test_full_lifecycle_workflow(sample_content: WikiProposalContent, sample_sou
         loaded,
         proposals_root=proposals_root,
         submitted_by="test",
-        submitted_at="2026-07-13T12:35:00Z"
+        submitted_at="2026-07-13T12:35:00Z",
     )
     res = load_proposal_directory(prop_dir, proposals_root=proposals_root)
     loaded = res.proposal
@@ -655,7 +671,7 @@ def test_full_lifecycle_workflow(sample_content: WikiProposalContent, sample_sou
         loaded,
         proposals_root=proposals_root,
         approved_by="test",
-        approved_at="2026-07-13T12:40:00Z"
+        approved_at="2026-07-13T12:40:00Z",
     )
     res = load_proposal_directory(prop_dir, proposals_root=proposals_root)
     loaded = res.proposal
@@ -668,10 +684,7 @@ def test_full_lifecycle_workflow(sample_content: WikiProposalContent, sample_sou
 
     (vault_root / "wiki").mkdir(parents=True, exist_ok=True)
     apply_proposal(
-        loaded,
-        vault_root=vault_root,
-        applied_by="test",
-        applied_at="2026-07-13T12:45:00Z"
+        loaded, vault_root=vault_root, applied_by="test", applied_at="2026-07-13T12:45:00Z"
     )
     assert (vault_root / "wiki" / "test.md").exists()
 
@@ -680,106 +693,128 @@ def test_full_lifecycle_workflow(sample_content: WikiProposalContent, sample_sou
     loaded = res.proposal
     assert loaded.metadata.status.value == "applied"
 
+
 def test_validate_wiki_target_path_accepts_canonical_target():
     assert validate_wiki_target_path("wiki/test.md") == "wiki/test.md"
+
 
 def test_validate_wiki_target_path_rejects_path_outside_wiki():
     with pytest.raises(InvalidWikiTargetError):
         validate_wiki_target_path("other/test.md")
 
+
 def test_validate_wiki_target_path_rejects_absolute_path():
     with pytest.raises(InvalidWikiTargetError):
         validate_wiki_target_path("/wiki/test.md")
+
 
 def test_validate_wiki_target_path_rejects_parent_traversal():
     with pytest.raises(FileTrackingError):
         validate_wiki_target_path("wiki/../test.md")
 
+
 def test_existing_proposal_directory_raises_proposal_already_exists(tmp_path: Path):
     proposals_root = tmp_path / "vault" / "proposals"
     proposals_root.mkdir(parents=True)
     (proposals_root / "existing-id").mkdir()
-    
+
     docs = WikiProposalDocuments(
         proposal_id="existing-id",
         target_path="wiki/target.md",
         proposal_markdown=b"body",
         patches_json=b"{}",
     )
-    
+
     with pytest.raises(ProposalAlreadyExistsError):
         persist_wiki_proposal(proposals_root=proposals_root, documents=docs)
+
+
+def _empty_patch_bytes(proposal_id: str) -> bytes:
+    return serialize_patch_json_bytes(
+        PatchDocumentV2(schema_version=2, proposal_id=proposal_id, operations=())
+    )
+
 
 def test_publication_io_failure_raises_proposal_publication_error(tmp_path: Path):
     proposals_root = tmp_path / "vault" / "proposals"
     proposals_root.mkdir(parents=True)
-    
+    proposal_id = "prop-20260713T123000Z-abcdef12"
     docs = WikiProposalDocuments(
-        proposal_id="new-id",
+        proposal_id=proposal_id,
         target_path="wiki/target.md",
         proposal_markdown=b"body",
-        patches_json=b"{}",
+        patches_json=_empty_patch_bytes(proposal_id),
     )
-    
-    with patch("lifeos.ingestion.proposals.atomic_write_file_secure", side_effect=OSError("Disk full")):
+
+    with patch(
+        "lifeos.proposals.publication.atomic_write_file_secure",
+        side_effect=OSError("Disk full"),
+    ):
         with pytest.raises(ProposalPublicationError) as exc:
             persist_wiki_proposal(proposals_root=proposals_root, documents=docs)
-        assert "Disk full" in str(exc.value.__cause__)
-        assert not (proposals_root / "new-id").exists() # directory should be cleaned up
+        assert "Failed to write proposal files: Disk full" in str(exc.value)
+        assert isinstance(exc.value.__cause__.__cause__, OSError)
+        assert not (proposals_root / proposal_id).exists()
+
 
 def test_unexpected_write_programming_error_propagates(tmp_path: Path):
     proposals_root = tmp_path / "vault" / "proposals"
     proposals_root.mkdir(parents=True)
-    
+    proposal_id = "prop-20260713T123000Z-abcdef12"
     docs = WikiProposalDocuments(
-        proposal_id="new-id",
+        proposal_id=proposal_id,
         target_path="wiki/target.md",
         proposal_markdown=b"body",
-        patches_json=b"{}",
+        patches_json=_empty_patch_bytes(proposal_id),
     )
-    
-    with patch("lifeos.ingestion.proposals.atomic_write_file_secure", side_effect=TypeError("Expected bytes")):
+
+    with patch(
+        "lifeos.proposals.publication.atomic_write_file_secure",
+        side_effect=TypeError("Expected bytes"),
+    ):
         with pytest.raises(TypeError, match="Expected bytes"):
             persist_wiki_proposal(proposals_root=proposals_root, documents=docs)
+
+
 def test_atomic_write_failure_raises_proposal_publication_error(tmp_path: Path):
     proposals_root = tmp_path / "vault" / "proposals"
     proposals_root.mkdir(parents=True)
-    
+    proposal_id = "prop-20260713T123001Z-abcdef13"
     docs = WikiProposalDocuments(
-        proposal_id="new-id-2",
+        proposal_id=proposal_id,
         target_path="wiki/target.md",
         proposal_markdown=b"body",
-        patches_json=b"{}",
+        patches_json=_empty_patch_bytes(proposal_id),
     )
-    
-    with patch("lifeos.ingestion.proposals.atomic_write_file_secure", side_effect=OSError("Cannot open")):
+
+    with patch(
+        "lifeos.proposals.publication.atomic_write_file_secure",
+        side_effect=OSError("Cannot open"),
+    ):
         with pytest.raises(ProposalPublicationError) as exc:
             persist_wiki_proposal(proposals_root=proposals_root, documents=docs)
-        assert isinstance(exc.value.__cause__, OSError)
-        assert not (proposals_root / "new-id-2").exists()
+        assert "Failed to write proposal files: Cannot open" in str(exc.value)
+        assert isinstance(exc.value.__cause__.__cause__, OSError)
+        assert not (proposals_root / proposal_id).exists()
 
-def test_os_open_failure_raises_proposal_publication_error(tmp_path: Path):
+
+def test_staging_open_failure_raises_proposal_publication_error(tmp_path: Path):
     proposals_root = tmp_path / "vault" / "proposals"
     proposals_root.mkdir(parents=True)
-    
+    proposal_id = "prop-20260713T123002Z-abcdef14"
     docs = WikiProposalDocuments(
-        proposal_id="new-id-3",
+        proposal_id=proposal_id,
         target_path="wiki/target.md",
         proposal_markdown=b"body",
-        patches_json=b"{}",
+        patches_json=_empty_patch_bytes(proposal_id),
     )
-    
-    # We patch atomic_write to avoid actual filesystem calls during the failure test
-    with patch("lifeos.ingestion.proposals.atomic_write_file_secure"):
-        original_open = os.open
-        def mock_open(path, flags, *args, **kwargs):
-            if "new-id-3" in str(path) and getattr(mock_open, "called", False) is False:
-                mock_open.called = True
-                raise PermissionError("denied")
-            return original_open(path, flags, *args, **kwargs)
 
-        with patch("lifeos.ingestion.proposals.os.open", side_effect=mock_open):
-            with pytest.raises(ProposalPublicationError) as exc:
-                persist_wiki_proposal(proposals_root=proposals_root, documents=docs)
-            assert isinstance(exc.value.__cause__, PermissionError)
-            assert not (proposals_root / "new-id-3").exists()
+    with patch(
+        "lifeos.proposals.publication._create_staging_directory",
+        side_effect=PermissionError("denied"),
+    ):
+        with pytest.raises(ProposalPublicationError) as exc:
+            persist_wiki_proposal(proposals_root=proposals_root, documents=docs)
+        assert "Failed to write proposal files: denied" in str(exc.value)
+        assert isinstance(exc.value.__cause__.__cause__, PermissionError)
+        assert not (proposals_root / proposal_id).exists()
