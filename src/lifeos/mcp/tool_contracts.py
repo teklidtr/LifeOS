@@ -70,8 +70,8 @@ def serialize_authoritative_output(
     *,
     output_type: type[object],
 ) -> dict[str, Any]:
-    """Validate a facade result deeply and return its direct-call-compatible JSON mapping."""
-    validated = _mcp_output_model(output_type).model_validate(result)
+    """Strictly validate a facade result and return its direct-call-compatible JSON mapping."""
+    validated = _mcp_output_model(output_type).model_validate(result, strict=True)
     return validated.model_dump(mode="json")
 
 
@@ -103,7 +103,7 @@ def _mcp_output_model(result_type: type[Any]) -> type[BaseModel]:
         type[BaseModel],
         create_model(
             f"{name}MCPResult",
-            __config__=ConfigDict(from_attributes=True, strict=True),
+            __config__=ConfigDict(from_attributes=True),
             **model_fields,
         ),
     )
