@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - lifeos-1734-ruff-format-baseline
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
