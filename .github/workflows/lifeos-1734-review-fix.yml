@@ -1,0 +1,57 @@
+name: LIFEOS-1734 review fixture fix
+
+on:
+  push:
+    branches:
+      - lifeos-1734-ruff-format-baseline
+
+permissions:
+  contents: write
+
+jobs:
+  fix-review-fixture:
+    if: github.event.head_commit.message != 'LIFEOS-1734 preserve NUL tree separator'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: lifeos-1734-ruff-format-baseline
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Preserve NUL separator and validate regression
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/cli/test_doctor_recovery_scope_snapshot.py")
+          text = path.read_text(encoding="utf-8")
+          old = 'f"040000 tree {vault_oid}\\tvault\\0040000 tree {\'3\' * 40}\\tunrelated\\0"'
+          new = 'f"040000 tree {vault_oid}\\tvault\\x00040000 tree {\'3\' * 40}\\tunrelated\\x00"'
+          if old not in text:
+              raise SystemExit("expected Ruff-joined tree fixture not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          uv run ruff format tests/cli/test_doctor_recovery_scope_snapshot.py
+          uv run ruff format --check .
+          uv run ruff check .
+          uv run pytest -q tests/cli/test_doctor_recovery_scope_snapshot.py -k test_case_probe_walks_only_ancestor_tree_levels
+
+      - name: Commit review fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/cli/test_doctor_recovery_scope_snapshot.py
+          git commit -m "LIFEOS-1734 preserve NUL tree separator"
+          git push origin HEAD:lifeos-1734-ruff-format-baseline
