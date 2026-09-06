@@ -8,7 +8,6 @@ from typing import Literal, TypeVar, cast
 
 from mcp.server.fastmcp.tools import Tool
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, ConfigDict
 
 from lifeos.facade.errors import ToolExecutionError, ToolValidationError
 from lifeos.facade.exploration import (
@@ -18,7 +17,9 @@ from lifeos.facade.exploration import (
     VAULT_SEARCH_DESCRIPTOR,
     VaultLinksRequest,
     VaultListRequest,
+    VaultListResult,
     VaultReadManyRequest,
+    VaultReadManyResult,
     VaultSearchRequest,
     inspect_links,
     list_vault_paths,
@@ -38,10 +39,9 @@ from lifeos.mcp.models import (
     RuntimeActivityMCPResult,
     VaultContextMCPResult,
     VaultLinksMCPResult,
-    VaultListMCPResult,
-    VaultReadManyMCPResult,
     VaultSearchMCPResult,
 )
+from lifeos.mcp.tool_contracts import build_mcp_tool, serialize_authoritative_output
 from lifeos.retrieval import RetrievalError, RetrievalScope, scope_decision
 from lifeos.retrieval.policy import load_retrieval_policy
 from lifeos.runtime import ActivityStore
@@ -101,8 +101,9 @@ def _strict_tool(
     name: str,
     description: str,
     title: str,
+    output_type: type[object] | None = None,
 ) -> Tool:
-    tool = Tool.from_function(
+    return build_mcp_tool(
         fn,
         name=name,
         description=description,
@@ -113,29 +114,8 @@ def _strict_tool(
             idempotentHint=True,
             openWorldHint=False,
         ),
-    )
-    base_model = tool.fn_metadata.arg_model
-    strict_model = cast(
-        type[BaseModel],
-        type(
-            f"Strict{base_model.__name__}",
-            (base_model,),
-            {
-                "model_config": ConfigDict(
-                    arbitrary_types_allowed=True,
-                    extra="forbid",
-                    strict=True,
-                )
-            },
-        ),
-    )
-    strict_model.model_rebuild()
-    strict_metadata = tool.fn_metadata.model_copy(update={"arg_model": strict_model})
-    return tool.model_copy(
-        update={
-            "fn_metadata": strict_metadata,
-            "parameters": strict_model.model_json_schema(by_alias=True),
-        }
+        strict_inputs=True,
+        output_type=output_type,
     )
 
 
@@ -335,8 +315,8 @@ def build_exploration_tools(
         limit: int = 100,
         allow_protected: bool = False,
         after: str | None = None,
-    ) -> VaultListMCPResult:
-        def op() -> VaultListMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             request = _validated_request(
                 lambda: VaultListRequest(
                     prefix=prefix,
@@ -349,16 +329,9 @@ def build_exploration_tools(
             result = list_vault_paths(vault_root=vault_root, request=request)
             source_paths = [item.path for item in result.entries if item.kind == "file"]
             activity.append(tool="vault_list", source_paths=source_paths)
-            return {
-                "prefix": result.prefix,
-                "entries": [
-                    {"path": item.path, "kind": item.kind} for item in result.entries
-                ],
-                "truncated": result.truncated,
-                "next_after": result.next_after,
-            }
+            return serialize_authoritative_output(result, output_type=VaultListResult)
 
-        return cast(VaultListMCPResult, invoke(op))
+        return cast(dict[str, object], invoke(op))
 
     def vault_search_tool(
         query: str,
@@ -412,8 +385,8 @@ def build_exploration_tools(
         paths: list[str],
         max_characters: int = 40_000,
         allow_protected: bool = False,
-    ) -> VaultReadManyMCPResult:
-        def op() -> VaultReadManyMCPResult:
+    ) -> dict[str, object]:
+        def op() -> dict[str, object]:
             request = _validated_request(
                 lambda: VaultReadManyRequest(
                     paths=tuple(paths),
@@ -427,22 +400,9 @@ def build_exploration_tools(
                 tool="vault_read_many",
                 source_paths=[item.path for item in result.items],
             )
-            return {
-                "items": [
-                    {
-                        "path": item.path,
-                        "markdown_body": item.markdown_body,
-                        "title": item.title,
-                        "content_hash": item.content_hash,
-                        "truncated": item.truncated,
-                    }
-                    for item in result.items
-                ],
-                "total_characters": result.total_characters,
-                "truncated": result.truncated,
-            }
+            return serialize_authoritative_output(result, output_type=VaultReadManyResult)
 
-        return cast(VaultReadManyMCPResult, invoke(op))
+        return cast(dict[str, object], invoke(op))
 
     def vault_links_tool(
         path: str,
@@ -504,6 +464,7 @@ def build_exploration_tools(
             name="vault_list",
             description=VAULT_LIST_MCP_DESCRIPTION,
             title="Discover vault paths",
+            output_type=VaultListResult,
         ),
         _strict_tool(
             vault_search_tool,
@@ -516,6 +477,7 @@ def build_exploration_tools(
             name="vault_read_many",
             description=VAULT_READ_MANY_MCP_DESCRIPTION,
             title="Read multiple vault notes",
+            output_type=VaultReadManyResult,
         ),
         _strict_tool(
             vault_links_tool,
