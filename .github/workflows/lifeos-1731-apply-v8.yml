@@ -1,0 +1,118 @@
+name: LIFEOS-1731 bounded implementation v8
+
+on:
+  push:
+    branches: [lifeos-1731-migrate-proposal-publishers]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[lifeos-1731-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: lifeos-1731-migrate-proposal-publishers
+
+      - name: Apply migration and migrate facade fault seam
+        shell: python
+        run: |
+          from __future__ import annotations
+          import re
+          import textwrap
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/lifeos-1731-apply-v7.yml').read_text(encoding='utf-8')
+          marker = '      - name: Apply migration with serializer-backed fault fixtures\n        shell: python\n        run: |\n'
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index('\n      - name: Install uv', start)
+          exec(textwrap.dedent(workflow[start:end]), {})
+
+          path = Path('tests/facade/test_proposal_tools.py')
+          text = path.read_text(encoding='utf-8')
+          pattern = r'def test_proposal_publication_error_maps_to_execution_error\(tmp_path: Path\) -> None:\n.*?(?=\n\ndef test_facade_uses_verified_source_without_decoding_or_parsing_it)'
+          replacement = '''def test_proposal_publication_error_maps_to_execution_error(tmp_path: Path) -> None:\n    vault_root = tmp_path / "vault"\n    vault_root.mkdir()\n    (vault_root / "proposals").mkdir()\n    _write_ownership(vault_root)\n    registry = Registry(tmp_path / "registry.db")\n    registry.initialize()\n\n    src_path = vault_root / "src.md"\n    src_path.write_bytes(b"content")\n\n    from lifeos.registry.file_tracking import register_scan\n    from lifeos.scanner import VaultFile\n\n    register_scan(\n        registry,\n        vault_root,\n        [VaultFile(path=Path("src.md"), file_type=".md", size_bytes=len(b"content"))],\n    )\n\n    req = CreateWikiProposalRequest("src.md", "wiki/target.md", "Title", "Body")\n\n    def mock_clock() -> datetime:\n        return datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)\n\n    def mock_random() -> str:\n        return "abcdef12"\n\n    with patch(\n        "lifeos.proposals.publication._create_staging_directory",\n        side_effect=PermissionError("denied"),\n    ):\n        with pytest.raises(\n            ToolExecutionError, match="Could not publish draft proposal"\n        ) as exc_info:\n            create_wiki_proposal(\n                vault_root=vault_root,\n                registry=registry,\n                request=req,\n                clock_fn=mock_clock,\n                random_suffix_fn=mock_random,\n            )\n\n        cause1 = exc_info.value.__cause__\n        assert isinstance(cause1, ProposalPublicationError)\n        cause2 = cause1.__cause__\n        assert isinstance(cause2, Exception)\n        assert cause2.__class__.__module__ == "lifeos.proposals.publication"\n        cause3 = cause2.__cause__\n        assert isinstance(cause3, PermissionError)\n\n        assert not (\n            vault_root / "proposals" / "prop-20250101T120000Z-abcdef12"\n        ).exists()'''
+          text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+              raise RuntimeError(f'facade publication test match count={count}')
+          path.write_text(text, encoding='utf-8')
+
+          for temporary in range(1, 9):
+              Path(f'.github/workflows/lifeos-1731-apply-v{temporary}.yml').unlink(missing_ok=True)
+          Path('.github/workflows/lifeos-1731-apply.yml').unlink(missing_ok=True)
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev --extra mcp
+
+      - name: Format touched Python
+        run: >-
+          uv run ruff format
+          src/lifeos/proposals/publication.py
+          src/lifeos/copilot/proposals.py
+          src/lifeos/copilot/replanning.py
+          src/lifeos/feedback/proposals.py
+          src/lifeos/reviews/decisions.py
+          src/lifeos/ownership/reconciliation.py
+          src/lifeos/ingestion/proposals.py
+          src/lifeos/ingestion/_proposals_core.py
+          tests/ingestion/test_proposals.py
+          tests/facade/test_proposal_tools.py
+          tests/proposals/test_remaining_publisher_adoption.py
+
+      - name: Task validation
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -euo pipefail
+          uv run pytest -q tests/proposals/test_remaining_publisher_adoption.py tests/ingestion/test_proposal_root_hardening.py tests/facade/test_proposal_tools.py::test_proposal_publication_error_maps_to_execution_error
+          uv run pytest -q tests/copilot tests/planning_feedback tests/reviews tests/ownership tests/ingestion tests/proposals
+          uv run pytest -q tests/captures tests/conversations tests/experiments tests/patterns tests/facade tests/mcp tests/integration
+          uv run pytest -q
+          uv run ruff check .
+          uv run mypy src
+          python scripts/validate_tasks.py
+          git diff --check
+          uv run ruff format --check \
+            src/lifeos/proposals/publication.py \
+            src/lifeos/copilot/proposals.py \
+            src/lifeos/copilot/replanning.py \
+            src/lifeos/feedback/proposals.py \
+            src/lifeos/reviews/decisions.py \
+            src/lifeos/ownership/reconciliation.py \
+            src/lifeos/ingestion/proposals.py \
+            src/lifeos/ingestion/_proposals_core.py \
+            tests/ingestion/test_proposals.py \
+            tests/facade/test_proposal_tools.py \
+            tests/proposals/test_remaining_publisher_adoption.py
+          set +e
+          uv run ruff format --check . > /tmp/lifeos-ruff-format.log 2>&1
+          FORMAT_STATUS=$?
+          set -e
+          cat /tmp/lifeos-ruff-format.log
+          if [ "$FORMAT_STATUS" -ne 0 ]; then
+            grep -q "267 files would be reformatted" /tmp/lifeos-ruff-format.log || {
+              echo "Repository-wide formatter mismatch differs from LIFEOS-1734 baseline"
+              exit 1
+            }
+            echo "Known LIFEOS-1734 baseline reproduced exactly: 267 files would be reformatted."
+          fi
+          echo '--- remaining direct canonical proposal-document write references ---'
+          git grep -n -E '(atomic_write_file_secure|write_bytes|write_text|os\.write).*proposal\.md|(atomic_write_file_secure|write_bytes|write_text|os\.write).*patches\.json|(atomic_write_file_secure|write_bytes|write_text|os\.write).*review\.json' -- src/lifeos || true
+
+      - name: Commit validated migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "LIFEOS-1731 Migrate remaining proposal publishers [lifeos-1731-applied]"
+          git push origin HEAD:lifeos-1731-migrate-proposal-publishers
