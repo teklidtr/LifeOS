@@ -79,10 +79,7 @@ def test_repository_info_symlink_fails_closed_before_exclude_copy(tmp_path: Path
         original_info.rename(live_info)
 
 
-def test_recovery_snapshot_does_not_require_fd_pseudo_paths(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_recovery_snapshot_does_not_require_fd_pseudo_paths(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
     _git(repository, "init", "-q")
@@ -90,12 +87,6 @@ def test_recovery_snapshot_does_not_require_fd_pseudo_paths(
     (repository / "wiki" / "note.md").write_text("baseline\n", encoding="utf-8")
     _commit_all(repository, "baseline")
 
-    def unavailable_fd_path(_fd: int, _observed: os.stat_result) -> str:
-        raise recovery_readiness.RecoveryGitError(
-            "Platform cannot expose pinned Git object directory safely"
-        )
-
-    monkeypatch.setattr(recovery_readiness, "_pinned_fd_path", unavailable_fd_path)
     sandbox = recovery_readiness._build_sandbox(repository)
     assert sandbox is not None
     assert sandbox.metadata_fd is not None

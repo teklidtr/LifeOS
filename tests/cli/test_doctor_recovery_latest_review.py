@@ -127,8 +127,13 @@ def test_metadata_tree_rejects_symlink_swap_before_descending(
 
     monkeypatch.setattr(recovery_readiness.os, "open", racing_open)
 
-    with pytest.raises(recovery_readiness.RecoveryGitError, match="metadata entry safely"):
-        recovery_readiness._copy_metadata_tree(refs, destination)
+    refs_fd = recovery_readiness._open_metadata_directory(refs)
+    assert refs_fd is not None
+    try:
+        with pytest.raises(recovery_readiness.RecoveryGitError, match="metadata entry safely"):
+            recovery_readiness._copy_metadata_directory(refs_fd, destination)
+    finally:
+        os.close(refs_fd)
 
     assert swapped is True
     assert not (destination / "heads" / "secret.md").exists()

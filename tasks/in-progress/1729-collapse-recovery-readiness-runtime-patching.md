@@ -1,7 +1,7 @@
 ---
 id: LIFEOS-1729
 title: Collapse recovery-readiness runtime patching into static implementation
-status: backlog
+status: in-progress
 phase: hardening
 depends_on: []
 risk: high
@@ -75,3 +75,41 @@ Large relative to this task set, but confined to one intertwined recovery implem
 
 - **Recommended model/configuration:** `gpt-6-astra`, reasoning effort `high`.
 - **Reason for the recommendation:** Resolving the effective implementation across compatibility layers while preserving descriptor races, sanitized Git behavior, and fault-injection compatibility requires substantial semantic reasoning. Astra is justified by recovery/security risk; use Serena symbol/reference navigation to keep the working context focused.
+
+# Implementation record
+
+- Static ownership is consolidated in `src/lifeos/recovery_readiness.py`; the obsolete
+  `_recovery_readiness_base.py` and `_recovery_readiness_impl.py` layers are removed.
+- Removed runtime-composition machinery includes `_base_original`, `_impl_original`,
+  `_PREVIOUS_BUILD_REPORT`, the `_ORIGINAL_*` saved-dispatch aliases, both
+  `_RecoveryModuleProxy` classes, cross-module `setattr` installation, and dynamic export copying.
+- Superseded base-only helpers that the runtime patch layer previously deleted at import time are
+  removed physically: `_committed_coverage`, `_head_exists`, `_index_flags`,
+  `_visible_worktree_paths`, and `_worktree`.
+- Static composition helpers are named for their narrower role: `_load_scope_filter`,
+  `_scan_working_tree_snapshot`, `_classify_worktree_snapshot`, `_assemble_report`, and
+  `_latest_visible_commit`. Existing public-module fault injection remains intact. The two tests
+  that targeted saved-original machinery now target `_scan_working_tree_snapshot` or assert
+  ordinary-module reload behavior while preserving equivalent failure/behavior coverage.
+- Production recovery-readiness code changes from 4,398 lines across three modules to 3,345 lines
+  in one module after review consolidation, a net reduction of 1,053 production lines.
+- `docs/user-manual/04-setup-and-installation.md`,
+  `docs/user-manual/07-troubleshooting.md`, and
+  `docs/user-manual/17-home-node-runtime-safety.md` were reviewed. No user-visible wording changes
+  are required because supported platforms, diagnostic IDs/messages, readiness semantics, and
+  recovery guarantees are unchanged.
+
+# Validation record
+
+Local validation in the provided execution environment:
+
+- `PYTHONPATH=src python -m pytest -q tests/cli -k 'doctor or recovery'`: **106 passed,
+  43 deselected**.
+- `python scripts/validate_tasks.py`: passed.
+- `python scripts/validate_manual_links.py`: passed for 22 chapters.
+- A full `PYTHONPATH=src python -m pytest -q` attempt reached collection but could not collect the
+  MCP suites because the local environment lacks the optional `mcp` dependency. `uv run --frozen`
+  cannot install the locked Python/dependencies because this sandbox has no external DNS.
+- A broader non-MCP full-suite attempt progressed without failures through 46% before the local
+  execution timeout. Required repository-wide lint/type/full-test and clean-room coverage therefore
+  remain CI checkpoints before completion.
