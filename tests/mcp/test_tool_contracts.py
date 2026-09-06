@@ -167,9 +167,10 @@ def test_named_proposal_output_schemas_preserve_legacy_names_and_status_literals
         if status_literal is not None:
             assert schema["properties"]["status"]["const"] == status_literal
 
-    assert tools["ingestion_evolve_wiki_batch_proposal"].output_schema == tools[
-        "ingestion_evolve_wiki_proposal"
-    ].output_schema
+    assert (
+        tools["ingestion_evolve_wiki_batch_proposal"].output_schema
+        == tools["ingestion_evolve_wiki_proposal"].output_schema
+    )
     capture_schema = tools["research_capture_evidence"].output_schema
     assert capture_schema is not None
     assert capture_schema["required"] == [
