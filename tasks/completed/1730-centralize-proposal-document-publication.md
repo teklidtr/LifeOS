@@ -46,7 +46,7 @@ At planning HEAD `2996540ee16f574503b4226baa417bf55fea380c`, Serena inspection f
 
 # Documentation impact
 
-Status: completed
+Status: required
 - `docs/architecture.md` documents the shared proposal-document publication boundary and the feature-owned verification/review responsibilities.
 - The applicable proposal lifecycle, capture, conversation, experiment, and personal-pattern user-manual sections were reviewed. User-visible behavior and lifecycle contracts are unchanged, so no user-manual text change was required.
 
